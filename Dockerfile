@@ -1,0 +1,1 @@
+FROM ubuntu:latest as build_qemu

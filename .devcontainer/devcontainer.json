@@ -1,0 +1,13 @@
+{
+  "name": "comix-devcontainer",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "postCreateCommand": "rustup show",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+      ]
+    }
+  }
+}
