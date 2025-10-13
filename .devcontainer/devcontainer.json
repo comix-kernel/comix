@@ -1,7 +1,7 @@
 {
   "name": "comix-devcontainer",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "../Dockerfile"
   },
   "remoteUser": "vscode",
   "mounts": [
