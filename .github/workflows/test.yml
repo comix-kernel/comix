@@ -4,68 +4,80 @@ on: [push]
 
 env:
   CARGO_TERM_COLOR: always
-  rust_toolchain: nightly-2025-02-18
+  RUST_TOOLCHAIN: nightly-2025-01-13 
+
+  QEMU_VERSION: qemu-9.2.1 
+  QEMU_BUILD_PATH: ${{ github.workspace }}/qemu-build-cache 
 
 jobs:
-  # build-doc:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: ${{ env.rust_toolchain }}
-  #         components: rust-src, llvm-tools-preview
-  #         target: riscv64gc-unknown-none-elf
-  #     - name: Build doc
-  #       run: cd os && cargo doc --no-deps --verbose
-  #     - name: Deploy to Github Pages
-  #       uses: peaceiris/actions-gh-pages@v3
-  #       with:
-  #         github_token: ${{ secrets.GITHUB_TOKEN }}
-  #         publish_dir: ./os/target/riscv64gc-unknown-none-elf/doc
-  #         destination_dir: ${{ github.ref_name }}
-
   run-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      # --- 1. 缓存 Cargo 依赖项 ---
+      - name: 📦 Cache Cargo Dependencies & Build Artifacts
+        uses: actions/cache@v4
         with:
-          profile: minimal
-          toolchain: ${{ env.rust_toolchain }}
-          components: rust-src, llvm-tools-preview
-          target: riscv64gc-unknown-none-elf
-      - uses: actions-rs/install@v0.1
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      # --- 2. 安装 Rust Toolchain 和 Target ---
+      - name: 🛠️ Setup Rust Toolchain and Target
+        uses: dtolnay/rust-toolchain@master
         with:
-          crate: cargo-binutils
-          version: latest
-          use-tool-cache: true
-      - name: Cache QEMU
-        uses: actions/cache@v3
-        with:
-          path: qemu-7.0.0
-          key: qemu-7.0.0-x86_64-riscv64
-      - name: Install QEMU
+          toolchain: ${{ env.RUST_TOOLCHAIN }} 
+          targets: riscv64gc-unknown-none-elf
+          components: rust-src, rustfmt, clippy, llvm-tools-preview
+      
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
+
+      # --- 3. QEMU 编译和缓存 ---
+      - name: 🧱 Install QEMU Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install autoconf automake autotools-dev curl libmpc-dev libmpfr-dev libgmp-dev \
-                               gawk build-essential bison flex texinfo gperf libtool patchutils bc \
-                               zlib1g-dev libexpat-dev pkg-config  libglib2.0-dev libpixman-1-dev libsdl2-dev libslirp-dev \
-                               python3 python3-pip ninja-build -y
-          if [ ! -d qemu-7.0.0 ]; then
-            wget https://download.qemu.org/qemu-7.0.0.tar.xz
-            tar -xf qemu-7.0.0.tar.xz
-            cd qemu-7.0.0
-            ./configure --target-list=riscv64-softmmu
-            make -j
-          else
-            cd qemu-7.0.0
-          fi
-          sudo make install
-          qemu-system-riscv64 --version
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake autotools-dev curl libmpc-dev libmpfr-dev libgmp-dev \
+            gawk build-essential bison flex texinfo gperf libtool patchutils bc \
+            zlib1g-dev libexpat1-dev pkg-config libglib2.0-dev libpixman-1-dev libsdl2-dev libslirp-dev \
+            python3 python3-pip ninja-build
 
-      - name: Run usertests
+      - name: 📥 Cache QEMU Build and Installation
+        uses: actions/cache@v4
+        id: qemu-cache
+        with:
+          path: ${{ env.QEMU_BUILD_PATH }}
+          key: ${{ runner.os }}-qemu-${{ env.QEMU_VERSION }}-riscv64
+          restore-keys: |
+            ${{ runner.os }}-qemu-${{ env.QEMU_VERSION }}-
+
+      - name: ⚙️ Compile and Install QEMU (if cache miss)
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: |
+          wget https://download.qemu.org/${{ env.QEMU_VERSION }}.tar.xz
+          tar -xf ${{ env.QEMU_VERSION }}.tar.xz
+          
+          mkdir -p ${{ env.QEMU_BUILD_PATH }}
+          
+          cd ${{ env.QEMU_VERSION }}
+          # 配置 QEMU 目标列表
+          ./configure --target-list=riscv64-softmmu --prefix=${{ env.QEMU_BUILD_PATH }} --enable-sdl=no
+          make -j$(nproc)
+          make install
+          
+          echo "${{ env.QEMU_BUILD_PATH }}/bin" >> $GITHUB_PATH
+
+      - name: ➕ Add QEMU to PATH
+        if: steps.qemu-cache.outputs.cache-hit == 'true'
+        run: echo "${{ env.QEMU_BUILD_PATH }}/bin" >> $GITHUB_PATH
+
+      - name: 🏃 Run usertests
         run: cd os && make run TEST=1
         timeout-minutes: 10
-      
