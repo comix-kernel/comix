@@ -58,6 +58,8 @@ RUN mkdir -p ${CARGO_HOME} && \
     echo '[source.ustc]' >> ${CARGO_HOME}/config.toml && \
     echo 'registry = "git://mirrors.ustc.edu.cn/crates.io-index"' >> ${CARGO_HOME}/config.toml
 
+RUN cargo install cargo-binutils
+
 # 切回 root 编译 QEMU 与 GDB
 USER root
 WORKDIR /root
