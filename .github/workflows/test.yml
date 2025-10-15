@@ -68,7 +68,7 @@ jobs:
           
           cd ${{ env.QEMU_VERSION }}
           # 配置 QEMU 目标列表
-          ./configure --target-list=riscv64-softmmu --prefix=${{ env.QEMU_BUILD_PATH }} --enable-sdl=no
+          ./configure --target-list=riscv64-softmmu --prefix=${{ env.QEMU_BUILD_PATH }} --disable-sdl
           make -j$(nproc)
           make install
           
