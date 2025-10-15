@@ -61,8 +61,7 @@ RUN mkdir -p ${CARGO_HOME} && \
 
 
 # 配置 cargo binutils
-RUN cargo install cargo-binutils && \
-    cargo binutils install rustfilt --force
+RUN cargo install cargo-binutils 
 
 # 切回 root 编译 QEMU 与 GDB
 USER root
