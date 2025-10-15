@@ -9,7 +9,7 @@
     "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached"
   ],
   "postCreateCommand": "rustup show",
-  "postStartCommand": "git config --global --add safe.directory '*'",
+  "postStartCommand": "git config --global --add safe.directory '*' && sudo chown -R ${remoteUser} ${containerWorkspaceFolder}",
   "customizations": {
     "vscode": {
       "extensions": [
