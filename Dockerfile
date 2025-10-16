@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 安装 Python tomli（QEMU 编译需求）
 RUN pip3 install tomli --break-system-packages
 
+# 删除 初始ubuntu 用户
+RUN userdel -r ubuntu
+
 # 新建非 root 用户 vscode
 RUN useradd -m -s /bin/bash vscode && \
     echo "vscode ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
@@ -61,8 +64,7 @@ RUN mkdir -p ${CARGO_HOME} && \
 
 
 # 配置 cargo binutils
-RUN cargo install cargo-binutils && \
-    cargo binutils install rustfilt --force
+RUN cargo install cargo-binutils 
 
 # 切回 root 编译 QEMU 与 GDB
 USER root
