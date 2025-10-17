@@ -1,8 +1,8 @@
+use crate::config::PAGE_SIZE;
 use core::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Shl, ShlAssign,
     Shr, ShrAssign, Sub, SubAssign,
 };
-use crate::config::PAGE_SIZE;
 
 // convert between usize and the type
 pub trait UsizeConvert: Copy + Clone + PartialEq + PartialOrd + Eq + Ord {
@@ -212,7 +212,10 @@ macro_rules! impl_calc_ops {
 pub trait AlignOps: UsizeConvert {
     // check if the address is aligned to the given alignment
     fn is_aligned(self, alignment: usize) -> bool {
-        debug_assert!(alignment.is_power_of_two(), "alignment must be a power of two");
+        debug_assert!(
+            alignment.is_power_of_two(),
+            "alignment must be a power of two"
+        );
         let mask = alignment - 1;
         self.as_usize() & mask == 0
     }
@@ -221,13 +224,19 @@ pub trait AlignOps: UsizeConvert {
     }
     // align the address up to the given alignment
     fn align_up(self, alignment: usize) -> Self {
-        debug_assert!(alignment.is_power_of_two(), "alignment must be a power of two");
+        debug_assert!(
+            alignment.is_power_of_two(),
+            "alignment must be a power of two"
+        );
         let mask = alignment - 1;
         Self::from_usize((self.as_usize() + mask) & !mask)
     }
     // align the address down to the given alignment
     fn align_down(self, alignment: usize) -> Self {
-        debug_assert!(alignment.is_power_of_two(), "alignment must be a power of two");
+        debug_assert!(
+            alignment.is_power_of_two(),
+            "alignment must be a power of two"
+        );
         let mask = alignment - 1;
         Self::from_usize(self.as_usize() & !mask)
     }
