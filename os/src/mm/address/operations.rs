@@ -205,6 +205,7 @@ macro_rules! impl_calc_ops {
                 )
             }
         }
+        impl $crate::mm::address::operations::CalcOps for $type {}
     };
 }
 
