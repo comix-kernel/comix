@@ -1,7 +1,7 @@
-mod operations;
 mod address;
+mod operations;
 mod page_num;
 
+pub use address::{Address, AddressRange, Paddr, PaddrRange, Vaddr, VaddrRange};
 pub use operations::{AlignOps, CalcOps, UsizeConvert};
-pub use address::{Vaddr, Paddr, Address};
-pub use page_num::{Vpn, Ppn, PageNum};
+pub use page_num::{PageNum, Ppn, Vpn};
