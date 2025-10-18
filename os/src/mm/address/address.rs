@@ -151,7 +151,6 @@ where
     end: T,
 }
 
-// TODO: implement methods for AddressRange
 impl<T> AddressRange<T>
 where
     T: Address,
@@ -242,7 +241,6 @@ where
         Some(Self { start, end })
     }
 
-    // comment out for now
     pub fn iter(&self) -> AddressRangeIterator<T> {
         AddressRangeIterator {
             range: *self,
