@@ -17,7 +17,8 @@
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
         "vadimcn.vscode-lldb",
-        "serayuzgur.crates"
+        "serayuzgur.crates",
+        "Gruntfuggly.todo-tree"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "fish",
