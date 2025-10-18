@@ -2,7 +2,6 @@ use crate::config::PAGE_SIZE;
 use crate::mm::address::address::{Address, Vaddr, Paddr};
 use crate::mm::address::operations::{AlignOps, CalcOps, UsizeConvert};
 
-// TODO: implement the trait
 // trait to represent an page number
 pub trait PageNum:
     CalcOps + UsizeConvert + Copy + Clone + PartialEq + PartialOrd + Eq + Ord
