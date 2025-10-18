@@ -139,3 +139,157 @@ impl Vaddr {
         self.as_usize() as *mut T
     }
 }
+
+// trait to represent an address range
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AddressRange<T>
+where
+    T: Address,
+{
+    start: T,
+    end: T,
+}
+
+// TODO: implement methods for AddressRange
+impl<T> AddressRange<T>
+where
+    T: Address,
+{
+    pub fn new(start: T, end: T) -> Self {
+        Self {
+            start,
+            end,
+        }
+    }
+
+    pub fn from_range(range: Range<T>) -> Self {
+        Self {
+            start: range.start,
+            end: range.end,
+        }
+    }
+
+    pub fn from_start_len(start: T, len: usize) -> Self {
+        Self {
+            start,
+            end: T::from_usize(start.as_usize() + len),
+        }
+    }
+
+    pub fn from_slices(slices: &[T]) -> Option<Self> {
+        if slices.len() < 2 {
+            return None;
+        }
+        Some(Self {
+            start: slices[0],
+            end: slices[slices.len() - 1],
+        })
+    }
+
+    pub fn start(&self) -> T {
+        self.start
+    }
+
+    pub fn end(&self) -> T {
+        self.end
+    }
+
+    pub fn len(&self) -> usize {
+        debug_assert!(self.end.as_usize() >= self.start.as_usize());
+        self.end.as_usize() - self.start.as_usize()
+    }
+
+    pub fn empty(&self) -> bool {
+        self.start == self.end
+    }
+
+    pub fn contains(&self, addr: T) -> bool {
+        addr >= self.start && addr < self.end
+    }
+
+    pub fn contains_range(&self, other: &Self) -> bool {
+        other.start >= self.start && other.end <= self.end
+    }
+
+    pub fn contains_in(&self, other: &Self) -> bool {
+        self.start >= other.start && self.end <= other.end
+    }
+
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.start < other.end && other.start < self.end
+    }
+
+    pub fn adjacent(&self, other: &Self) -> bool {
+        self.end == other.start || other.end == self.start
+    }
+
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        if !self.intersects(other) {
+            return None;
+        }
+        let start = core::cmp::max(self.start, other.start);
+        let end = core::cmp::min(self.end, other.end);
+        Some(Self { start, end })
+    }
+
+    pub fn union(&self, other: &Self) -> Option<Self> {
+        if !self.intersects(other) && !self.adjacent(other) {
+            return None;
+        }
+        let start = core::cmp::min(self.start, other.start);
+        let end = core::cmp::max(self.end, other.end);
+        Some(Self { start, end })
+    }
+
+    // comment out for now
+    pub fn iter(&self) -> AddressRangeIterator<T> {
+        AddressRangeIterator {
+            range: *self,
+            current: self.start,
+        }
+    }
+}
+
+impl<T> IntoIterator for AddressRange<T>
+where
+    T: Address,
+{
+    type Item = T;
+    type IntoIter = AddressRangeIterator<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+// iterator for address range
+pub struct AddressRangeIterator<T>
+where
+    T: Address,
+{
+    range: AddressRange<T>,
+    current: T,
+}
+
+impl<T> Iterator for AddressRangeIterator<T>
+where
+    T: Address,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.range.end {
+            return None;
+        }
+        let addr = self.current;
+        self.current.step();
+        Some(addr)
+    }
+}
+
+// physical address range
+pub type PaddrRange = AddressRange<Paddr>;
+
+// virtual address range
+pub type VaddrRange = AddressRange<Vaddr>;
