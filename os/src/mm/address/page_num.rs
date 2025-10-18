@@ -1,6 +1,7 @@
 use crate::config::PAGE_SIZE;
-use crate::mm::address::address::{Address, Vaddr, Paddr};
+use crate::mm::address::address::{Address, Paddr, Vaddr};
 use crate::mm::address::operations::{AlignOps, CalcOps, UsizeConvert};
+use core::ops::Range;
 
 // trait to represent an page number
 pub trait PageNum:
@@ -77,3 +78,103 @@ impl_page_num!(Ppn, Paddr);
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Vpn(pub usize);
 impl_page_num!(Vpn, Vaddr);
+
+// trait to represent a range of page numbers
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageNumRange<T>
+where
+    T: PageNum,
+{
+    pub start: T,
+    pub end: T,
+}
+
+// TODO: implement methods for PageNumRange
+impl<T> PageNumRange<T>
+where
+    T: PageNum,
+{
+    pub fn new(start: T, end: T) -> Self {
+        Self { start, end }
+    }
+
+    pub fn from_range(range: Range<T>) -> Self {
+        Self {
+            start: range.start,
+            end: range.end,
+        }
+    }
+
+    pub fn from_start_len(start: T, len: usize) -> Self {
+        Self {
+            start,
+            end: T::from_usize(start.as_usize() + len),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        debug_assert!(self.end.as_usize() >= self.start.as_usize());
+        self.end.as_usize() - self.start.as_usize()
+    }
+
+    pub fn empty(&self) -> bool {
+        self.start == self.end
+    }
+
+    pub fn contains(&self, addr: T) -> bool {
+        addr >= self.start && addr < self.end
+    }
+
+    pub fn contains_range(&self, other: &Self) -> bool {
+        other.start >= self.start && other.end <= self.end
+    }
+
+    pub fn contains_in(&self, other: &Self) -> bool {
+        self.start >= other.start && self.end <= other.end
+    }
+
+    pub fn iter(&self) -> PageNumRangeIterator<T> {
+        PageNumRangeIterator {
+            range: *self,
+            current: self.start,
+        }
+    }
+}
+
+impl<T> IntoIterator for PageNumRange<T>
+where
+    T: PageNum,
+{
+    type Item = T;
+    type IntoIter = PageNumRangeIterator<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+// iterator for PageNumRange
+pub struct PageNumRangeIterator<T>
+where
+    T: PageNum,
+{
+    range: PageNumRange<T>,
+    current: T,
+}
+
+impl<T> Iterator for PageNumRangeIterator<T>
+where
+    T: PageNum,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.range.end {
+            return None;
+        }
+        let result = self.current;
+        self.current.step();
+        Some(result)
+    }
+}
