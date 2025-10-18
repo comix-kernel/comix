@@ -4,13 +4,15 @@ use core::ops::{
     Shr, ShrAssign, Sub, SubAssign,
 };
 
-// convert between usize and the type
+/// convert between usize and the type
 pub trait UsizeConvert: Copy + Clone + PartialEq + PartialOrd + Eq + Ord {
+    /// convert the type to usize
     fn as_usize(&self) -> usize;
+    /// convert usize to the type
     fn from_usize(value: usize) -> Self;
 }
 
-// arithmetic and bitwise operations
+/// arithmetic and bitwise operations
 pub trait CalcOps:
     UsizeConvert
     + Add<usize>
@@ -40,7 +42,7 @@ pub trait CalcOps:
 {
 }
 
-// macro to implement arithmetic and bitwise operations
+/// macro to implement arithmetic and bitwise operations
 #[macro_export]
 macro_rules! impl_calc_ops {
     ($type:ty) => {
@@ -209,9 +211,9 @@ macro_rules! impl_calc_ops {
     };
 }
 
-// alignment operations
+/// alignment operations
 pub trait AlignOps: UsizeConvert {
-    // check if the address is aligned to the given alignment
+    /// check if the address is aligned to the given alignment
     fn is_aligned(self, alignment: usize) -> bool {
         debug_assert!(
             alignment.is_power_of_two(),
@@ -220,10 +222,11 @@ pub trait AlignOps: UsizeConvert {
         let mask = alignment - 1;
         self.as_usize() & mask == 0
     }
+    /// check if the address is page aligned
     fn is_page_aligned(self) -> bool {
         self.is_aligned(PAGE_SIZE)
     }
-    // align the address up to the given alignment
+    /// align the address up to the given alignment
     fn align_up(self, alignment: usize) -> Self {
         debug_assert!(
             alignment.is_power_of_two(),
@@ -232,7 +235,7 @@ pub trait AlignOps: UsizeConvert {
         let mask = alignment - 1;
         Self::from_usize((self.as_usize() + mask) & !mask)
     }
-    // align the address down to the given alignment
+    /// align the address down to the given alignment
     fn align_down(self, alignment: usize) -> Self {
         debug_assert!(
             alignment.is_power_of_two(),
@@ -241,11 +244,11 @@ pub trait AlignOps: UsizeConvert {
         let mask = alignment - 1;
         Self::from_usize(self.as_usize() & !mask)
     }
-    // align the address up to the page size
+    /// align the address up to the page size
     fn align_up_to_page(self) -> Self {
         self.align_up(PAGE_SIZE)
     }
-    // align the address down to the page size
+    /// align the address down to the page size
     fn align_down_to_page(self) -> Self {
         self.align_down(PAGE_SIZE)
     }
