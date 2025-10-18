@@ -90,7 +90,6 @@ where
     pub end: T,
 }
 
-// TODO: implement methods for PageNumRange
 impl<T> PageNumRange<T>
 where
     T: PageNum,
