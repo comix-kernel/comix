@@ -81,7 +81,6 @@ struct FrameAllocator {
     recycled: Vec<Ppn>,
 }
 
-// TODO: implement FrameAllocator
 /// lazy frame allocator
 impl FrameAllocator {
     pub fn new() -> Self {
