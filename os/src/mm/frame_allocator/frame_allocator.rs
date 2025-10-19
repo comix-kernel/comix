@@ -1,4 +1,4 @@
-use core::ptr::{addr_of_mut, addr_of};
+use core::ptr::{addr_of, addr_of_mut};
 use core::usize;
 
 use crate::config::PAGE_SIZE;
@@ -244,7 +244,11 @@ pub fn alloc_frames(num: usize) -> Option<Vec<FrameTracker>> {
 
 /// allocate contiguous frames
 pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
-    unsafe { (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut()?.alloc_contig_frames(num) }
+    unsafe {
+        (*addr_of_mut!(FRAME_ALLOCATOR))
+            .as_mut()?
+            .alloc_contig_frames(num)
+    }
 }
 
 /// deallocate a single frame
