@@ -27,7 +27,8 @@ mod operations;
 mod page_num;
 
 pub use address::{
-    Address, AddressRange, ConvertablePaddr, ConvertableVaddr, Paddr, PaddrRange, Vaddr, VaddrRange,
+    Address, AddressRange, AddressRangeIterator, ConvertablePaddr, ConvertableVaddr, Paddr,
+    PaddrRange, Vaddr, VaddrRange,
 };
 pub use operations::{AlignOps, CalcOps, UsizeConvert};
-pub use page_num::{PageNum, Ppn, Vpn};
+pub use page_num::{PageNum, PageNumRange, PageNumRangeIterator, Ppn, PpnRange, Vpn, VpnRange};
