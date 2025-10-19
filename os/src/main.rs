@@ -4,6 +4,27 @@
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+extern crate alloc;
+
+use core::alloc::{GlobalAlloc, Layout};
+
+/// TODO: replace with proper heap allocator
+/// Dummy allocator that always fails - placeholder until heap allocator is implemented
+struct DummyAllocator;
+
+unsafe impl GlobalAlloc for DummyAllocator {
+    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+        panic!("dealloc called on DummyAllocator");
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: DummyAllocator = DummyAllocator;
+
 #[macro_use]
 mod console;
 mod sbi;
