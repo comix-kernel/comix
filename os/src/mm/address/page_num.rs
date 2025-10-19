@@ -125,10 +125,12 @@ where
         }
     }
 
+    /// get the start page number
     pub fn start(&self) -> T {
         self.start
     }
 
+    /// get the end page number
     pub fn end(&self) -> T {
         self.end
     }
