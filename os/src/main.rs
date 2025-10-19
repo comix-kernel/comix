@@ -9,6 +9,7 @@ mod console;
 mod sbi;
 mod config;
 mod mm;
+mod arch;
 
 use core::arch::global_asm;
 use core::panic::PanicInfo;
