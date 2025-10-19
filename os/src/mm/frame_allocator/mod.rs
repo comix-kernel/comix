@@ -7,10 +7,13 @@
 //! - [`FrameTracker`]: RAII wrapper for single allocated frames
 //! - [`FrameRangeTracker`]: RAII wrapper for ranges of allocated frames
 //! - [`init_frame_allocator`]: Initialize the global frame allocator
+//! - [`alloc_frame`]: Allocate a single frame
+//! - [`alloc_frames`]: Allocate multiple (non-contiguous) frames
+//! - [`alloc_contig_frames`]: Allocate multiple contiguous frames
 
 mod frame_allocator;
 
-pub use frame_allocator::{FrameRangeTracker, FrameTracker};
+pub use frame_allocator::{FrameRangeTracker, FrameTracker, alloc_frame, alloc_frames, alloc_contig_frames};
 
 /// initialize the global frame allocator with the available physical memory range
 ///
