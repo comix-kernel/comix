@@ -110,8 +110,11 @@ macro_rules! impl_address {
     };
 }
 
+/// trait for converting physical addresses to virtual addresses
 pub trait ConvertablePaddr {
+    /// check if the address is a valid physical address
     fn is_valid_paddr(&self) -> bool;
+    /// convert physical address to virtual address
     fn to_vaddr(&self) -> Vaddr;
 }
 
@@ -131,8 +134,11 @@ impl ConvertablePaddr for Paddr {
     }
 }
 
+/// trait for converting virtual addresses to physical addresses
 pub trait ConvertableVaddr {
+    /// check if the address is a valid virtual address
     fn is_valid_vaddr(&self) -> bool;
+    /// convert virtual address to physical address
     fn to_paddr(&self) -> Paddr;
 }
 
