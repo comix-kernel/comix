@@ -9,9 +9,11 @@ mod console;
 mod sbi;
 mod config;
 mod mm;
+mod arch;
 
 use core::arch::global_asm;
 use core::panic::PanicInfo;
+use crate::arch::trap;
 use crate::sbi::shutdown;
 
 #[cfg(test)]
@@ -26,9 +28,12 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
 global_asm!(include_str!("entry.asm"));
 
 #[unsafe(no_mangle)]
-pub fn rust_main() -> ! {
+pub extern "C" fn rust_main() -> ! {
     clear_bss();
     println!("Hello, world!");
+
+    // 初始化工作
+    trap::init();
     
     #[cfg(test)]
     test_main();
