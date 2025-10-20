@@ -26,3 +26,10 @@ pub fn enable_timer_interrupt() {
         sie::set_stimer();
     }
 }
+
+pub fn enable_interrupts() {
+    unsafe {
+        use riscv::register::sstatus; 
+        sstatus::set_sie();
+    }
+}

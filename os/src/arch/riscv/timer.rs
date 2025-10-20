@@ -1,9 +1,19 @@
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::sbi::set_timer;
 use riscv::register::time;
 use crate::config::CLOCK_FREQ;
 
 const TICKS_PER_SEC: usize = 100;
 const MSEC_PER_SEC: usize = 1000;
+
+// 记录时钟中断次数
+pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
+
+// 获取当前tick数的
+pub fn get_ticks() -> usize {
+    TIMER_TICKS.load(Ordering::Relaxed)
+}
 
 /// 获取当前时间（以 ticks 为单位）
 pub fn get_time() -> usize {
