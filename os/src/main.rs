@@ -33,7 +33,10 @@ mod mm;
 mod arch;
 
 use core::arch::global_asm;
+use core::hint;
 use core::panic::PanicInfo;
+use crate::arch::trap;
+use crate::arch::timer;
 use crate::sbi::shutdown;
 
 #[cfg(test)]
@@ -48,9 +51,14 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
 global_asm!(include_str!("entry.asm"));
 
 #[unsafe(no_mangle)]
-pub fn rust_main() -> ! {
+pub extern "C" fn rust_main() -> ! {
     clear_bss();
     println!("Hello, world!");
+
+    // 初始化工作
+    trap::init();
+    timer::init();
+    trap::enable_interrupts();
     
     #[cfg(test)]
     test_main();
@@ -86,7 +94,6 @@ fn clear_bss() {
 
 #[test_case]
 fn trivial_assertion() {
-    print!("trivial assertion... ");
+    print!("Testing trivial assertion...");
     assert_ne!(0, 1);
-    println!("[ok]");
 }
