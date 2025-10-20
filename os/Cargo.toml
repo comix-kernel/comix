@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 sbi-rt = { version = "0.0.2", features = ["legacy"] }
 riscv = "0.15.0"
+talc = { version = "4" }
+lock_api = "0.4"
