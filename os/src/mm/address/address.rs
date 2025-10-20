@@ -110,17 +110,53 @@ macro_rules! impl_address {
     };
 }
 
+/// trait for converting physical addresses to virtual addresses
+pub trait ConvertablePaddr {
+    /// check if the address is a valid physical address
+    fn is_valid_paddr(&self) -> bool;
+    /// convert physical address to virtual address
+    fn to_vaddr(&self) -> Vaddr;
+}
+
 /// physical address
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Paddr(*const ());
 impl_address!(Paddr);
 
+impl ConvertablePaddr for Paddr {
+    fn is_valid_paddr(&self) -> bool {
+        self.as_usize() == crate::arch::mm::vaddr_to_paddr(self.as_usize())
+    }
+
+    fn to_vaddr(&self) -> Vaddr {
+        Vaddr::from_usize(crate::arch::mm::paddr_to_vaddr(self.as_usize()))
+    }
+}
+
+/// trait for converting virtual addresses to physical addresses
+pub trait ConvertableVaddr {
+    /// check if the address is a valid virtual address
+    fn is_valid_vaddr(&self) -> bool;
+    /// convert virtual address to physical address
+    fn to_paddr(&self) -> Paddr;
+}
+
 /// virtual address
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Vaddr(*const ());
 impl_address!(Vaddr);
+
+impl ConvertableVaddr for Vaddr {
+    fn is_valid_vaddr(&self) -> bool {
+        self.as_usize() == crate::arch::mm::paddr_to_vaddr(self.as_usize())
+    }
+
+    fn to_paddr(&self) -> Paddr {
+        Paddr::from_usize(crate::arch::mm::vaddr_to_paddr(self.as_usize()))
+    }
+}
 
 impl Vaddr {
     /// create a virtual address from a reference
@@ -177,10 +213,7 @@ where
 {
     /// create a new address range
     pub fn new(start: T, end: T) -> Self {
-        Self {
-            start,
-            end,
-        }
+        Self { start, end }
     }
 
     /// create an address range from a Range<T>
