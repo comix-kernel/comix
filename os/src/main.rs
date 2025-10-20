@@ -6,25 +6,6 @@
 
 extern crate alloc;
 
-use core::alloc::{GlobalAlloc, Layout};
-
-/// TODO: replace with proper heap allocator
-/// Dummy allocator that always fails - placeholder until heap allocator is implemented
-struct DummyAllocator;
-
-unsafe impl GlobalAlloc for DummyAllocator {
-    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
-        core::ptr::null_mut()
-    }
-
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        panic!("dealloc called on DummyAllocator");
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: DummyAllocator = DummyAllocator;
-
 #[macro_use]
 mod console;
 mod sbi;
@@ -52,17 +33,22 @@ global_asm!(include_str!("entry.asm"));
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> ! {
+    unsafe extern "C" {
+        fn ekernel();
+    }
     clear_bss();
+    mm::init_frame_allocator(ekernel as usize, config::MEMORY_END);
+    mm::init_heap();
     println!("Hello, world!");
 
     // 初始化工作
     trap::init();
     timer::init();
     trap::enable_interrupts();
-    
+
     #[cfg(test)]
     test_main();
-    
+
     shutdown(false)
 }
 
