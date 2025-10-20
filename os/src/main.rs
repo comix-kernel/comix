@@ -14,6 +14,7 @@ mod arch;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
 use crate::arch::trap;
+use crate::arch::timer;
 use crate::sbi::shutdown;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub extern "C" fn rust_main() -> ! {
 
     // 初始化工作
     trap::init();
+    timer::init();
     
     #[cfg(test)]
     test_main();
@@ -69,7 +71,6 @@ fn clear_bss() {
 
 #[test_case]
 fn trivial_assertion() {
-    print!("trivial assertion... ");
+    print!("Testing trivial assertion...");
     assert_ne!(0, 1);
-    println!("[ok]");
 }

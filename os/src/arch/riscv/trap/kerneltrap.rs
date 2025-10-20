@@ -1,24 +1,36 @@
 // 64 位 RISC-V，usize = 8 字节
 
 use riscv::register::{sepc, sstatus};
+use riscv::register::scause::{self, Trap};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
     // 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap
     // 在这里，trap_frame 指向了栈上保存的 KernelTrapFrame 结构体
-    use riscv::register::scause;
 
     // XXX: 有被中断的风险？或许应将这一段作为参数传递进来
     let scause = scause::read();
     let sepc = sepc::read();
     let sstatus = sstatus::read();
-
+    println!("Kernel trap: scause = {:?}, sepc = {:#x}, sstatus = {:#x}", scause.cause(), sepc, sstatus.bits());
     match scause.cause() {
-        // 不是我喜欢的异常，直接panic
-        _ => panic!("Unexpected trap in kernel: scause = {:?}, sepc = {:#x}, sstatus = {:#x}",
-                    scause.cause(),
-                    sepc,
-                    sstatus.bits()),
+        Trap::Interrupt(5) => {
+            // 处理时钟中断
+            crate::arch::timer::set_next_trigger();
+            check_timer();
+        },
+        Trap::Exception(e) => panic!(
+            "Unexpected exception in kernel: {:?}, sepc = {:#x}, sstatus = {:#x}",
+            e,
+            sepc,
+            sstatus.bits()
+        ),
+        trap => panic!(
+            "Unexpected trap in kernel: {:?}, sepc = {:#x}, sstatus = {:#x}",
+            trap,
+            sepc,
+            sstatus.bits()
+        ),
     }
 
     // XXX: CSR可能因调度被修改？
@@ -63,6 +75,8 @@ pub struct KernelTrapFrame {
 }
 
 /// TODO: 处理时钟中断
-pub fn check_timer() {}
+pub fn check_timer() {
+    println!("Timer interrupt received in kerneltrap");
+}
 /// TODO: 处理设备中断
 pub fn check_device() {}
