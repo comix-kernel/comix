@@ -1,39 +1,57 @@
 // 64 位 RISC-V，usize = 8 字节
 
+use core::sync::atomic::Ordering;
+
 use riscv::register::{sepc, sstatus};
 use riscv::register::scause::{self, Trap};
 
+use crate::arch::timer::TIMER_TICKS;
+
+// XXX: CSR可能因调度或中断被修改？
 #[unsafe(no_mangle)]
 pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
     // 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap
     // 在这里，trap_frame 指向了栈上保存的 KernelTrapFrame 结构体
 
-    // XXX: 有被中断的风险？或许应将这一段作为参数传递进来
+    // 保存进入中断时的状态
+    let sstatus_old = sstatus::read();
+    let sepc_old = sepc::read();
+    
+    // 临时禁用中断以防嵌套
+    unsafe {
+        sstatus::clear_sie();
+    }
+
     let scause = scause::read();
-    let sepc = sepc::read();
-    let sstatus = sstatus::read();
-    println!("Kernel trap: scause = {:?}, sepc = {:#x}, sstatus = {:#x}", scause.cause(), sepc, sstatus.bits());
+
     match scause.cause() {
         Trap::Interrupt(5) => {
             // 处理时钟中断
             crate::arch::timer::set_next_trigger();
             check_timer();
+            // 恢复sepc，确保正确返回
+            unsafe {
+                sepc::write(sepc_old);
+            }
         },
         Trap::Exception(e) => panic!(
             "Unexpected exception in kernel: {:?}, sepc = {:#x}, sstatus = {:#x}",
             e,
-            sepc,
-            sstatus.bits()
+            sepc_old,
+            sstatus_old.bits()
         ),
         trap => panic!(
             "Unexpected trap in kernel: {:?}, sepc = {:#x}, sstatus = {:#x}",
             trap,
-            sepc,
-            sstatus.bits()
+            sepc_old,
+            sstatus_old.bits()
         ),
     }
 
-    // XXX: CSR可能因调度被修改？
+    // 恢复进入中断前的状态
+    unsafe {
+        sstatus::write(sstatus_old);
+    }
 }
 
 #[repr(C)] // 确保 Rust 不会重新排列字段
@@ -74,9 +92,15 @@ pub struct KernelTrapFrame {
     // 汇编代码分配了 256 字节，最后 8 字节未使用。
 }
 
-/// TODO: 处理时钟中断
+/// 处理时钟中断
 pub fn check_timer() {
-    println!("Timer interrupt received in kerneltrap");
+    let ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+    
+    // TODO: 这里可以添加更多的时钟中断处理逻辑
+    // 比如：
+    // - 更新系统时间
+    // - 检查是否需要进行任务调度
+    // - 处理定时任务等
 }
 /// TODO: 处理设备中断
 pub fn check_device() {}

@@ -12,6 +12,7 @@ mod mm;
 mod arch;
 
 use core::arch::global_asm;
+use core::hint;
 use core::panic::PanicInfo;
 use crate::arch::trap;
 use crate::arch::timer;
@@ -36,6 +37,7 @@ pub extern "C" fn rust_main() -> ! {
     // 初始化工作
     trap::init();
     timer::init();
+    trap::enable_interrupts();
     
     #[cfg(test)]
     test_main();
