@@ -125,6 +125,16 @@ where
         }
     }
 
+    /// get the start page number
+    pub fn start(&self) -> T {
+        self.start
+    }
+
+    /// get the end page number
+    pub fn end(&self) -> T {
+        self.end
+    }
+
     /// get the length of the range
     pub fn len(&self) -> usize {
         debug_assert!(self.end.as_usize() >= self.start.as_usize());
@@ -196,3 +206,6 @@ where
         Some(result)
     }
 }
+
+pub type PpnRange = PageNumRange<Ppn>;
+pub type VpnRange = PageNumRange<Vpn>;
