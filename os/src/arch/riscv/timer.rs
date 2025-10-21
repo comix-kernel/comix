@@ -34,9 +34,10 @@ pub fn set_next_trigger() {
 /// 初始化定时器
 pub fn init() {
     set_next_trigger();
-    crate::arch::trap::enable_timer_interrupt();
+    unsafe { crate::arch::intr::enable_timer_interrupt() };
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test_case]
