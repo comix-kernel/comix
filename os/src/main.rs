@@ -4,16 +4,23 @@
 #![test_runner(test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+extern crate alloc;
+
 #[macro_use]
 mod console;
 mod sbi;
 mod config;
 mod mm;
+mod arch;
+
 mod test;
 use crate::test::{TEST_FAILED};
 use core::arch::global_asm;
+use core::hint;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::arch::trap;
+use crate::arch::timer;
+use core::sync::atomic::{Ordering};
 use crate::sbi::shutdown;
 
 
@@ -39,17 +46,26 @@ fn test_runner(tests: &[&dyn Fn()]) {
     );
 }
 
-
 global_asm!(include_str!("entry.asm"));
 
 #[unsafe(no_mangle)]
-pub fn rust_main() -> ! {
+pub extern "C" fn rust_main() -> ! {
+    unsafe extern "C" {
+        fn ekernel();
+    }
     clear_bss();
+    mm::init_frame_allocator(ekernel as usize, config::MEMORY_END);
+    mm::init_heap();
     println!("Hello, world!");
-    
+
+    // 初始化工作
+    trap::init();
+    timer::init();
+    trap::enable_interrupts();
+
     #[cfg(test)]
     test_main();
-    
+
     shutdown(false)
 }
 
