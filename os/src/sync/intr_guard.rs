@@ -36,25 +36,23 @@ impl Drop for IntrGuard {
 mod tests {
     use super::*;
 
-    use crate::arch::intr::*; 
+    use crate::{arch::intr::*, kassert, test_case}; 
 
     /// 测试 IntrGuard::new() 是否成功禁用中断，并检查 was_enabled
-    #[test_case]
-    fn test_guard_disables_interrupts() {
+    test_case!(test_guard_disables_interrupts, {
         println!("Testing: test_guard_disables_interrupts");
         unsafe { enable_interrupts() }; 
-        assert!(are_interrupts_enabled(), "初始环境：中断应为启用状态");
+        kassert!(are_interrupts_enabled());
 
         let guard = IntrGuard::new();
         
-        assert!(guard.was_enabled(), "was_enabled应为true (进入前启用)");
+        kassert!(guard.was_enabled());
         
-        assert!(!are_interrupts_enabled(), "临界区内：中断应为禁用状态");
-    }
+        kassert!(!are_interrupts_enabled());
+    });
 
     /// 测试 IntrGuard 在离开作用域时是否恢复中断状态
-    #[test_case]
-    fn test_guard_restores_on_drop() {
+    test_case!(test_guard_restores_on_drop, {
         println!("Testing: test_guard_restores_on_drop");
         let initial_flags: usize = {
             let flags = unsafe { read_and_disable_interrupts() }; 
@@ -64,17 +62,17 @@ mod tests {
         
         let initial_state = are_interrupts_enabled();
         
-        assert!(initial_state);
+        kassert!(initial_state);
 
         {
             let guard = IntrGuard::new();
-            assert!(!are_interrupts_enabled());
+            kassert!(!are_interrupts_enabled());
             
-            assert!(guard.flags & SSTATUS_SIE != 0);
+            kassert!(guard.flags & SSTATUS_SIE != 0);
         }
 
-        assert!(are_interrupts_enabled());
+        kassert!(are_interrupts_enabled());
 
         unsafe { restore_interrupts(initial_flags) };
-    }
+    });
 }
