@@ -1,5 +1,5 @@
-use super::{ActivePageTableInner, PageResult, PageSize, PageTableEntry, UniversalPTEFlag};
-use crate::mm::address::{Paddr, PaddrRange, Vaddr, VaddrRange};
+use super::{ActivePageTableInner, PagingResult, PageSize, PageTableEntry, UniversalPTEFlag};
+use crate::mm::address::{Ppn, PpnRange, Vpn, VpnRange};
 
 pub trait PageTableInner<T>
 where
@@ -9,68 +9,68 @@ where
     const MAX_VA_BITS: usize;
     const MAX_PA_BITS: usize;
 
-    fn tlb_flush(vaddr: Vaddr);
-    fn tlb_flush_range(start_vaddr: Vaddr, size: usize);
+    fn tlb_flush(vpn: Vpn);
+    fn tlb_flush_vpn_range(vpn_range: VpnRange) -> PagingResult<()>;
     fn tlb_flush_all();
 
     fn is_user_table(&self) -> bool;
 
-    fn activate(paddr: Paddr);
-    fn activating_table_paddr() -> Paddr;
+    fn activate(ppn: Ppn);
+    fn activating_table_ppn() -> Ppn;
 
     fn new() -> Self;
-    fn from_paddr(paddr: Paddr) -> Self;
+    fn from_ppn(ppn: Ppn) -> Self;
     fn new_as_kernel_table() -> Self;
 
-    fn root_paddr(&self) -> Paddr;
+    fn root_ppn(&self) -> Ppn;
 
-    fn get_entry(&self, vaddr: Vaddr, level: usize) -> Option<(T, PageSize)>;
+    fn get_entry(&self, vpn: Vpn, level: usize) -> Option<(T, PageSize)>;
 
-    fn translate(&self, vaddr: Vaddr) -> Option<Paddr>;
+    fn translate(&self, vpn: Vpn) -> Option<Ppn>;
 
     fn map(
         &mut self,
-        vaddr: Vaddr,
-        paddr: Paddr,
+        vpn: Vpn,
+        ppn: Ppn,
         page_size: PageSize,
         flags: UniversalPTEFlag,
-    ) -> PageResult<()>;
+    ) -> PagingResult<()>;
 
-    fn unmap(&mut self, vaddr: Vaddr) -> PageResult<(Paddr, PageSize)>;
+    fn unmap(&mut self, vpn: Vpn) -> PagingResult<(Ppn, PageSize)>;
 
     fn mvmap(
         &mut self,
-        vaddr: Vaddr,
-        target_paddr: Paddr,
+        vpn: Vpn,
+        target_ppn: Ppn,
         page_size: PageSize,
         flags: UniversalPTEFlag,
-    ) -> PageResult<(Paddr, PageSize)>;
+    ) -> PagingResult<(Ppn, PageSize)>;
 
-    fn update_flags(&mut self, vaddr: Vaddr, flags: UniversalPTEFlag) -> PageResult<()>;
+    fn update_flags(&mut self, vpn: Vpn, flags: UniversalPTEFlag) -> PagingResult<()>;
 
     fn map_range(
         &mut self,
-        vaddr_range: VaddrRange,
-        paddr_range: PaddrRange,
+        vpn_range: VpnRange,
+        ppn_range: PpnRange,
         flags: UniversalPTEFlag,
-    ) -> PageResult<()>;
+    ) -> PagingResult<()>;
 
-    fn unmap_range(&mut self, vaddr_range: VaddrRange) -> PageResult<PaddrRange>;
+    fn unmap_range(&mut self, vpn_range: VpnRange) -> PagingResult<PpnRange>;
 
     fn mvmap_range(
         &mut self,
-        vaddr_range: VaddrRange,
-        target_paddr_range: PaddrRange,
+        vpn_range: VpnRange,
+        target_ppn_range: PpnRange,
         flags: UniversalPTEFlag,
-    ) -> PageResult<PaddrRange>;
+    ) -> PagingResult<PpnRange>;
 
     fn update_flags_range(
         &mut self,
-        vaddr_range: VaddrRange,
+        vpn_range: VpnRange,
         flags: UniversalPTEFlag,
-    ) -> PageResult<()>;
+    ) -> PagingResult<()>;
 
-    fn walk(&self, vaddr: Vaddr) -> PageResult<(Paddr, PageSize, UniversalPTEFlag)>;
+    fn walk(&self, vpn: Vpn) -> PagingResult<(Ppn, PageSize, UniversalPTEFlag)>;
 }
 
 pub struct PageTable {

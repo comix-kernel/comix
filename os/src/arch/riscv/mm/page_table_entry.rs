@@ -1,4 +1,4 @@
-use crate::mm::address::{Paddr, UsizeConvert};
+use crate::mm::address::{Ppn, UsizeConvert};
 use crate::mm::page_table::PageTableEntry as PageTableEntryTrait;
 use crate::mm::page_table::{UniversalConvertableFlag, UniversalPTEFlag};
 
@@ -65,16 +65,16 @@ impl PageTableEntryTrait for PageTableEntry {
         PageTableEntry(0)
     }
 
-    fn new_leaf(paddr: Paddr, flags: UniversalPTEFlag) -> Self {
-        let ppn: u64 = ((paddr.as_usize() as u64) >> 12) & 0x000f_ffff_ffff; // Extract PPN from physical address
+    fn new_leaf(ppn: Ppn, flags: UniversalPTEFlag) -> Self {
+        let ppn_bits: u64 = ppn.as_usize() as u64;
         let sv39_flags = SV39PTEFlags::from_universal(flags);
-        PageTableEntry((ppn << SV39_PTE_PPN_OFFSET) | (sv39_flags.bits() as u64))
+        PageTableEntry((ppn_bits << SV39_PTE_PPN_OFFSET) | (sv39_flags.bits() as u64))
     }
 
-    fn new_table(paddr: Paddr) -> Self {
-        let ppn: u64 = ((paddr.as_usize() as u64) >> 12) & 0x000f_ffff_ffff; // Extract PPN from physical address
+    fn new_table(ppn: Ppn) -> Self {
+        let ppn_bits: u64 = ppn.as_usize() as u64;
         let sv39_flags = SV39PTEFlags::VALID; // Table entries must be valid
-        PageTableEntry((ppn << SV39_PTE_PPN_OFFSET) | (sv39_flags.bits() as u64))
+        PageTableEntry((ppn_bits << SV39_PTE_PPN_OFFSET) | (sv39_flags.bits() as u64))
     }
 
     fn is_valid(&self) -> bool {
@@ -91,9 +91,9 @@ impl PageTableEntryTrait for PageTableEntry {
         self.0 == 0
     }
 
-    fn paddr(&self) -> Paddr {
+    fn ppn(&self) -> Ppn {
         let ppn = (self.0 & SV39_PTE_PPN_MASK) >> SV39_PTE_PPN_OFFSET;
-        Paddr::from_usize((ppn << 12) as usize)
+        Ppn::from_usize(ppn as usize)
     }
 
     fn flags(&self) -> UniversalPTEFlag {
@@ -101,9 +101,9 @@ impl PageTableEntryTrait for PageTableEntry {
         sv39_flags.to_universal()
     }
 
-    fn set_paddr(&mut self, paddr: Paddr) {
-        let ppn = ((paddr.as_usize() as u64) >> 12) & 0x000f_ffff_ffff;
-        self.0 = (self.0 & !SV39_PTE_PPN_MASK) | (ppn << SV39_PTE_PPN_OFFSET);
+    fn set_ppn(&mut self, ppn: Ppn) {
+        let ppn_bits = ppn.as_usize() as u64;
+        self.0 = (self.0 & !SV39_PTE_PPN_MASK) | (ppn_bits << SV39_PTE_PPN_OFFSET);
     }
 
     fn set_flags(&mut self, flags: UniversalPTEFlag) {
