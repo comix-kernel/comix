@@ -78,45 +78,42 @@ impl Drop for SpinLockGuard<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arch::intr::{read_and_disable_interrupts, restore_interrupts, are_interrupts_enabled};
+    use crate::{arch::intr::{are_interrupts_enabled, read_and_disable_interrupts, restore_interrupts}, kassert, test_case};
     
     // 模拟一个共享资源，必须用 SpinLock 保护
     static COUNTER: AtomicBool = AtomicBool::new(false); 
     
     /// 测试锁的初始化状态和基本锁定/解锁功能
-    #[test_case]
-    fn test_spinlock_basic_lock_unlock() {
+    test_case!(test_spinlock_basic_lock_unlock, {
         let lock = SpinLock::new();
-        assert!(!lock.is_locked(), "初始状态应为未锁定");
+        kassert!(!lock.is_locked());
 
         let guard = lock.lock();
-        assert!(lock.is_locked(), "lock() 后锁应为锁定状态");
+        kassert!(lock.is_locked());
 
         // 手动释放 (Drop)
         drop(guard);
-        assert!(!lock.is_locked(), "Drop 后锁应为未锁定状态");
-    }
+        kassert!(!lock.is_locked());
+    });
 
     /// 测试 RAII 行为 (自动释放)
-    #[test_case]
-    fn test_spinlock_raii_release() {
+    test_case!(test_spinlock_raii_release, {
         let lock = SpinLock::new();
         
         {
             let _guard = lock.lock();
-            assert!(lock.is_locked(), "进入作用域后应锁定");
+            kassert!(lock.is_locked());
         } // <- _guard 在此离开作用域，Drop 被自动调用
 
-        assert!(!lock.is_locked(), "离开作用域后应自动解锁");
-    }
+        kassert!(!lock.is_locked());
+    });
 
     /// 测试互斥性 (只能获取一次)
-    #[test_case]
-    fn test_spinlock_mutual_exclusion() {
+    test_case!(test_spinlock_mutual_exclusion, {
         let lock = SpinLock::new();
         
         let guard1 = lock.lock();
-        assert!(lock.is_locked(), "第一次获取成功");
+        kassert!(lock.is_locked());
         
         // 尝试第二次获取 (理论上会进入无限自旋，但测试中我们只检查状态)
         // NOTE: 在实际运行环境中，第二次调用会死循环，测试环境通常需要模拟并发
@@ -136,34 +133,33 @@ mod tests {
             second_lock_failed = true;
         }
 
-        assert!(!second_lock_failed, "第二次尝试获取锁成功 (因为第一次已释放)");
+        kassert!(!second_lock_failed);
         drop(guard2);
-    }
+    });
     
     // -----------------------------------------------------------
     // 中断保护测试
     // -----------------------------------------------------------
     
     /// 测试 lock() 是否禁用了中断
-    #[test_case]
-    fn test_interrupt_disable() {
+    test_case!(test_interrupt_disable, {
         // 1. 确保中断最初是启用的
         let initial_flags = unsafe { read_and_disable_interrupts() };
         unsafe { restore_interrupts(initial_flags | (1 << 1)) }; // 确保 SIE 启用
-        assert!(are_interrupts_enabled(), "前提：中断应为启用状态");
+        kassert!(are_interrupts_enabled());
 
         let lock = SpinLock::new();
         let guard = lock.lock(); 
         
         // 2. 检查中断是否被禁用
-        assert!(!are_interrupts_enabled(), "获取锁后，中断应被禁用");
-        assert!(guard.intr_guard.was_enabled(), "was_enabled 应记录为 true");
+        kassert!(!are_interrupts_enabled());
+        kassert!(guard.intr_guard.was_enabled());
 
         // 3. 检查 Drop 后中断是否恢复
         drop(guard);
-        assert!(are_interrupts_enabled(), "释放锁后，中断应被恢复");
+        kassert!(are_interrupts_enabled());
         
         // 恢复测试前的环境
         unsafe { restore_interrupts(initial_flags) };
-    }
+    });
 }
