@@ -2,9 +2,9 @@ use core::sync::atomic::AtomicUsize;
 
 #[derive(Copy, Clone)]
 pub struct FailedAssertion {
-    cond: &'static str,
-    file: &'static str,
-    line: u32,
+    pub cond: &'static str,
+    pub file: &'static str,
+    pub line: u32,
 }
 pub static mut FAILED_LIST: [Option<FailedAssertion>; 32] = [None; 32];
 pub const FAILED_LIST_CAPACITY: usize = 32;
@@ -21,7 +21,7 @@ macro_rules! kassert {
             $crate::test::TEST_FAILED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             unsafe {
                 if $crate::test::FAILED_INDEX < $crate::test::FAILED_LIST_CAPACITY  {
-                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some(FailedAssertion {
+                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some($crate::test::FailedAssertion {
                         cond: stringify!($cond),
                         file: file!(),
                         line: line!(),
