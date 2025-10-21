@@ -10,7 +10,7 @@
 //! - [`global_allocator`]: Global heap allocator
 //! - [`page_table`]: Page table abstractions and implementations(arch-independent)
 
-mod address;
+pub mod address;
 mod frame_allocator;
 mod global_allocator;
 pub mod page_table;

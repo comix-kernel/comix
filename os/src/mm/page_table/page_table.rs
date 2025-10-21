@@ -13,7 +13,7 @@ where
     fn tlb_flush_range(start_vaddr: Vaddr, size: usize);
     fn tlb_flush_all();
 
-    fn is_user_table() -> bool;
+    fn is_user_table(&self) -> bool;
 
     fn activate(paddr: Paddr);
     fn activating_table_paddr() -> Paddr;
@@ -75,6 +75,6 @@ where
 
 pub struct PageTable {
     inner: ActivePageTableInner,
-    // TODO: 
+    // TODO:
     tracker: (),
 }
