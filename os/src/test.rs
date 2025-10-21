@@ -1,5 +1,6 @@
 use core::sync::atomic::AtomicUsize;
 
+
 #[derive(Copy, Clone)]
 pub struct FailedAssertion {
     pub cond: &'static str,
@@ -21,7 +22,7 @@ macro_rules! kassert {
             $crate::test::TEST_FAILED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             unsafe {
                 if $crate::test::FAILED_INDEX < $crate::test::FAILED_LIST_CAPACITY  {
-                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some(FailedAssertion {
+                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some($crate::test::FailedAssertion {
                         cond: stringify!($cond),
                         file: file!(),
                         line: line!(),
@@ -42,11 +43,10 @@ macro_rules! test_case {
             println!("\x1b[33m=======================================\x1b[0m");
             println!("\x1b[33mRunning test: {}::{}\x1b[0m", module_path!(), stringify!($func));
 
-            let failed_before = $crate::test::TEST_FAILED.load(Ordering::SeqCst);
-
+            let failed_before = $crate::test::TEST_FAILED.load(core::sync::atomic::Ordering::SeqCst);
             $body // 执行测试
 
-            let failed_after = $crate::test::TEST_FAILED.load(Ordering::SeqCst);
+            let failed_after = $crate::test::TEST_FAILED.load(core::sync::atomic::Ordering::SeqCst);
             let failed_count = failed_after - failed_before;
 
             unsafe {

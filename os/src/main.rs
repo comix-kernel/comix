@@ -16,13 +16,13 @@ mod sync;
 
 mod test;
 use crate::test::{TEST_FAILED,FailedAssertion};
+
 use core::arch::global_asm;
-use core::hint;
 use core::panic::PanicInfo;
 use crate::arch::intr;
 use crate::arch::trap;
 use crate::arch::timer;
-use core::sync::atomic::{Ordering};
+use core::sync::atomic::Ordering;
 use crate::sbi::shutdown;
 
 
@@ -97,16 +97,7 @@ fn clear_bss() {
     });
 }
 
-
+#[cfg(test)]
 test_case!(trivial_assertion,{
     kassert!(0 != 1);
-});
-
-
-test_case!(trivial_assertion2, {
-    kassert!(1 != 1); // 这个测试会失败，但不会中断程序
-});
-
-test_case!(trivial_assertion3,{
-    kassert!(21 != 1);
 });
