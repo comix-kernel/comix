@@ -1,3 +1,4 @@
+pub mod kernel;
 pub mod constant;
 pub mod intr;
 pub mod mm;
