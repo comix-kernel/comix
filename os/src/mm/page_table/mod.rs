@@ -30,5 +30,5 @@ pub enum PagingError {
     FrameAllocFailed,
 }
 
-pub type PageResult<T> = Result<T, PagingError>;
+pub type PagingResult<T> = Result<T, PagingError>;
 
