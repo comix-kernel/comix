@@ -1,4 +1,4 @@
-use crate::mm::address::Paddr;
+use crate::mm::address::Ppn;
 
 bitflags::bitflags! {
     /// Designs a universal set of page table entry flags that can be mapped to various architectures.
@@ -27,21 +27,21 @@ pub trait UniversalConvertableFlag {
 
 pub trait PageTableEntry {
     type Bits;
-                                                                                                                                                                                                                                                                                                                                                                                 
+
     fn from_bits(bits: Self::Bits) -> Self;
     fn to_bits(&self) -> Self::Bits;
     fn empty() -> Self;
-    fn new_leaf(paddr: Paddr, flags: UniversalPTEFlag) -> Self;
-    fn new_table(paddr: Paddr) -> Self;
+    fn new_leaf(ppn: Ppn, flags: UniversalPTEFlag) -> Self;
+    fn new_table(ppn: Ppn) -> Self;
 
     fn is_valid(&self) -> bool;
     fn is_huge(&self) -> bool;
     fn is_empty(&self) -> bool;
 
-    fn paddr(&self) -> Paddr;
+    fn ppn(&self) -> Ppn;
     fn flags(&self) -> UniversalPTEFlag;
 
-    fn set_paddr(&mut self, paddr: Paddr);
+    fn set_ppn(&mut self, ppn: Ppn);
     fn set_flags(&mut self, flags: UniversalPTEFlag);
     fn clear(&mut self);
 
