@@ -21,5 +21,24 @@ pub trait UniversalConvertableFlag {
 }
 
 pub trait PageTableEntry {
+    type Bits;
 
+    fn from_bits(bits: Self::Bits) -> Self;
+    fn to_bits(&self) -> Self::Bits;
+    fn empty() -> Self;
+    fn new_leaf(paddr: Paddr, flags: UniversalPTEFlag) -> Self;
+    fn new_table(paddr: Paddr) -> Self;
+
+    fn is_valid(&self) -> bool;
+    fn is_huge(&self) -> bool;
+    fn is_empty(&self) -> bool;
+    
+    fn paddr(&self) -> Paddr;
+    fn flags(&self) -> UniversalPTEFlag;
+
+    fn set_paddr(&mut self, paddr: Paddr);
+    fn set_flags(&mut self, flags: UniversalPTEFlag);
+    fn clear(&mut self);
+    fn remove_flags(&mut self, flags: UniversalPTEFlag);
+    fn add_flags(&mut self, flags: UniversalPTEFlag);
 }
