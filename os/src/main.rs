@@ -13,6 +13,7 @@ mod config;
 mod mm;
 mod arch;
 mod sync;
+mod kernel;
 
 mod test;
 use crate::test::TEST_FAILED;
