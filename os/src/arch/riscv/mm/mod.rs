@@ -17,6 +17,12 @@
 //! - Physical addresses are extracted using bitwise AND with `PADDR_MASK`
 //! - Virtual addresses are created using bitwise OR with `VADDR_START`
 
+mod page_table;
+mod page_table_entry;
+
+pub use page_table::PageTable;
+pub use page_table_entry::PageTableEntry;
+
 /// starting address of the virtual address space in SV39
 ///
 /// This constant defines the starting position of the kernel's high virtual address space.

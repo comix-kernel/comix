@@ -10,8 +10,8 @@ extern crate alloc;
 mod console;
 mod sbi;
 mod config;
-mod mm;
-mod arch;
+pub mod mm;
+pub mod arch;
 mod sync;
 
 use core::arch::global_asm;
