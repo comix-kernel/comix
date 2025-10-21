@@ -1,4 +1,4 @@
-mod kerneltrap;
+pub mod kerneltrap;
 
 use core::arch::global_asm;
 use riscv::register::{
