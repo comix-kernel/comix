@@ -15,7 +15,7 @@ mod arch;
 mod sync;
 
 mod test;
-use crate::test::{TEST_FAILED};
+use crate::test::{TEST_FAILED,FailedAssertion};
 use core::arch::global_asm;
 use core::hint;
 use core::panic::PanicInfo;

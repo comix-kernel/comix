@@ -2,9 +2,9 @@ use core::sync::atomic::AtomicUsize;
 
 #[derive(Copy, Clone)]
 pub struct FailedAssertion {
-    cond: &'static str,
-    file: &'static str,
-    line: u32,
+    pub cond: &'static str,
+    pub file: &'static str,
+    pub line: u32,
 }
 pub static mut FAILED_LIST: [Option<FailedAssertion>; 32] = [None; 32];
 pub const FAILED_LIST_CAPACITY: usize = 32;
