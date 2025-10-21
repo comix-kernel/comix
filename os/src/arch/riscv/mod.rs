@@ -1,3 +1,4 @@
+pub mod constant;
 pub mod intr;
 pub mod mm;
 pub mod platform;
