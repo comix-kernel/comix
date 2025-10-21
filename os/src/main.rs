@@ -12,12 +12,14 @@ mod sbi;
 mod config;
 mod mm;
 mod arch;
+mod sync;
 
 mod test;
 use crate::test::{TEST_FAILED};
 use core::arch::global_asm;
 use core::hint;
 use core::panic::PanicInfo;
+use crate::arch::intr;
 use crate::arch::trap;
 use crate::arch::timer;
 use core::sync::atomic::{Ordering};
@@ -61,7 +63,7 @@ pub extern "C" fn rust_main() -> ! {
     // 初始化工作
     trap::init();
     timer::init();
-    trap::enable_interrupts();
+    unsafe { intr::enable_interrupts() };
 
     #[cfg(test)]
     test_main();
