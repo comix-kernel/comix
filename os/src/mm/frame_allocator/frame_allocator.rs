@@ -1,4 +1,4 @@
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::addr_of_mut;
 use core::usize;
 
 use crate::config::PAGE_SIZE;
@@ -37,7 +37,7 @@ pub struct FrameRangeTracker {
 
 impl FrameRangeTracker {
     pub fn new(range: PpnRange) -> Self {
-        for ppn in range.clone() {
+        for ppn in range {
             clear_frame(ppn);
         }
         FrameRangeTracker { range }

@@ -1,6 +1,5 @@
 use core::sync::atomic::AtomicUsize;
 
-
 #[derive(Copy, Clone)]
 pub struct FailedAssertion {
     pub cond: &'static str,
@@ -21,15 +20,18 @@ macro_rules! kassert {
         if !$cond {
             $crate::test::TEST_FAILED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             unsafe {
-                if $crate::test::FAILED_INDEX < $crate::test::FAILED_LIST_CAPACITY  {
-                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some($crate::test::FailedAssertion {
-                        cond: stringify!($cond),
-                        file: file!(),
-                        line: line!(),
-                    });
+                if $crate::test::FAILED_INDEX < $crate::test::FAILED_LIST_CAPACITY {
+                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] =
+                        Some($crate::test::FailedAssertion {
+                            cond: stringify!($cond),
+                            file: file!(),
+                            line: line!(),
+                        });
                     $crate::test::FAILED_INDEX += 1;
-                }else {
-                    println!("\x1b[31mWarning: FAILED_LIST overflow, assertion not recorded\x1b[0m");
+                } else {
+                    println!(
+                        "\x1b[31mWarning: FAILED_LIST overflow, assertion not recorded\x1b[0m"
+                    );
                 }
             }
         }
