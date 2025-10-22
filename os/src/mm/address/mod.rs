@@ -1,3 +1,6 @@
+// HACK: 在一个模块目录/文件的顶层又声明了一个同名子模块，这会造成 “module inception”。
+// 虽然功能上可行，但会引起 API/模块层次混淆，Clippy 建议消除这种重复。
+#![allow(clippy::module_inception)]
 //! Address module
 //!
 //! This module provides abstractions for working with physical and virtual addresses,
@@ -43,9 +46,6 @@ mod address;
 mod operations;
 mod page_num;
 
-pub use address::{
-    Address, AddressRange, AddressRangeIterator, ConvertablePaddr, ConvertableVaddr, Paddr,
-    PaddrRange, Vaddr, VaddrRange,
-};
-pub use operations::{AlignOps, CalcOps, UsizeConvert};
-pub use page_num::{PageNum, PageNumRange, PageNumRangeIterator, Ppn, PpnRange, Vpn, VpnRange};
+pub use address::{ConvertablePaddr, Paddr};
+pub use operations::UsizeConvert;
+pub use page_num::{PageNum, Ppn, PpnRange};

@@ -5,6 +5,7 @@ pub fn console_putchar(c: usize) {
 }
 
 /// use sbi call to getchar from console (qemu uart handler)
+#[allow(dead_code)]
 pub fn console_getchar() -> usize {
     #[allow(deprecated)]
     sbi_rt::legacy::console_getchar()
@@ -17,7 +18,7 @@ pub fn set_timer(timer: usize) {
 
 /// use sbi call to shutdown the system
 pub fn shutdown(failure: bool) -> ! {
-    use sbi_rt::{system_reset, NoReason, Shutdown, SystemFailure};
+    use sbi_rt::{NoReason, Shutdown, SystemFailure, system_reset};
     if !failure {
         system_reset(Shutdown, NoReason);
     } else {

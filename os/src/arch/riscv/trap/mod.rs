@@ -1,14 +1,15 @@
-mod kerneltrap;
+pub mod kerneltrap;
 
 use core::arch::global_asm;
 use riscv::register::{
-    mtvec::TrapMode, stvec::{self, Stvec},
+    mtvec::TrapMode,
+    stvec::{self, Stvec},
 };
 
 global_asm!(include_str!("kernelvec.S"));
 
 unsafe extern "C" {
-    unsafe fn kernelvec(); 
+    unsafe fn kernelvec();
 }
 
 pub fn init() {
