@@ -1,5 +1,5 @@
-use super::{ActivePageTableInner, PagingResult, PageSize, PageTableEntry, UniversalPTEFlag};
-use crate::mm::address::{Ppn, PpnRange, Vpn, VpnRange};
+use super::{ActivePageTableInner, PageSize, PageTableEntry, PagingResult, UniversalPTEFlag};
+use crate::mm::address::{Paddr, Ppn, PpnRange, Vaddr, Vpn, VpnRange};
 
 pub trait PageTableInner<T>
 where
@@ -10,7 +10,6 @@ where
     const MAX_PA_BITS: usize;
 
     fn tlb_flush(vpn: Vpn);
-    fn tlb_flush_vpn_range(vpn_range: VpnRange) -> PagingResult<()>;
     fn tlb_flush_all();
 
     fn is_user_table(&self) -> bool;
@@ -26,7 +25,7 @@ where
 
     fn get_entry(&self, vpn: Vpn, level: usize) -> Option<(T, PageSize)>;
 
-    fn translate(&self, vpn: Vpn) -> Option<Ppn>;
+    fn translate(&self, vaddr: Vaddr) -> Option<Paddr>;
 
     fn map(
         &mut self,
@@ -36,7 +35,7 @@ where
         flags: UniversalPTEFlag,
     ) -> PagingResult<()>;
 
-    fn unmap(&mut self, vpn: Vpn) -> PagingResult<(Ppn, PageSize)>;
+    fn unmap(&mut self, vpn: Vpn) -> PagingResult<()>;
 
     fn mvmap(
         &mut self,
@@ -44,31 +43,9 @@ where
         target_ppn: Ppn,
         page_size: PageSize,
         flags: UniversalPTEFlag,
-    ) -> PagingResult<(Ppn, PageSize)>;
+    ) -> PagingResult<()>;
 
     fn update_flags(&mut self, vpn: Vpn, flags: UniversalPTEFlag) -> PagingResult<()>;
-
-    fn map_range(
-        &mut self,
-        vpn_range: VpnRange,
-        ppn_range: PpnRange,
-        flags: UniversalPTEFlag,
-    ) -> PagingResult<()>;
-
-    fn unmap_range(&mut self, vpn_range: VpnRange) -> PagingResult<PpnRange>;
-
-    fn mvmap_range(
-        &mut self,
-        vpn_range: VpnRange,
-        target_ppn_range: PpnRange,
-        flags: UniversalPTEFlag,
-    ) -> PagingResult<PpnRange>;
-
-    fn update_flags_range(
-        &mut self,
-        vpn_range: VpnRange,
-        flags: UniversalPTEFlag,
-    ) -> PagingResult<()>;
 
     fn walk(&self, vpn: Vpn) -> PagingResult<(Ppn, PageSize, UniversalPTEFlag)>;
 }

@@ -11,8 +11,8 @@
 //! - [`page_table`]: Page table abstractions and implementations(arch-independent)
 
 pub mod address;
-mod frame_allocator;
-mod global_allocator;
+pub mod frame_allocator;
+pub mod global_allocator;
 pub mod page_table;
 
 pub use frame_allocator::init_frame_allocator;

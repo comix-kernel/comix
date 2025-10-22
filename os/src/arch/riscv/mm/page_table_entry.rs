@@ -48,6 +48,7 @@ impl UniversalConvertableFlag for SV39PTEFlags {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PageTableEntry(u64);
 
 impl PageTableEntryTrait for PageTableEntry {
@@ -84,7 +85,7 @@ impl PageTableEntryTrait for PageTableEntry {
     fn is_huge(&self) -> bool {
         // In SV39, we can't directly determine huge pages from the PTE alone.
         let sv39_flags = SV39PTEFlags::from_bits((self.0 & SV39_PTE_FLAG_MASK as u64) as usize).unwrap();
-        sv39_flags.intersects(SV39PTEFlags::union(SV39PTEFlags::READ, SV39PTEFlags::EXECUTE))
+        sv39_flags.intersects(SV39PTEFlags::union(SV39PTEFlags::READ, SV39PTEFlags::EXECUTE).union(SV39PTEFlags::WRITE))
     }
 
     fn is_empty(&self) -> bool {
