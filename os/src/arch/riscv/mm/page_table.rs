@@ -1,5 +1,5 @@
 use super::PageTableEntry;
-use crate::mm::address::{AlignOps, PageNum, Ppn, PpnRange, UsizeConvert, Vaddr, Vpn, VpnRange, Paddr, ConvertablePaddr};
+use crate::mm::address::{AlignOps, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, Paddr, ConvertablePaddr};
 use crate::mm::frame_allocator::FrameTracker;
 use crate::mm::page_table::{
     PageSize, PageTableInner as PageTableInnerTrait, PagingError, PagingResult, UniversalPTEFlag, PageTableEntry as PageTableEntryTrait
