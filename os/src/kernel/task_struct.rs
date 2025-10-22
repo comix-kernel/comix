@@ -4,6 +4,7 @@ use crate::arch::trap::kerneltrap::TrapFrame;
 /// 关于任务的资源信息
 /// 存放与进程资源、内存管理、I/O 权限、用户 ID 等相关的、相对稳定或低频访问的数据。
 /// 主要由内存管理子系统和权限管理子系统使用。
+#[allow(dead_code)]
 pub struct TaskStruct {
     /// 内核栈基址
     kstack_base: usize,

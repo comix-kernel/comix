@@ -212,6 +212,7 @@ macro_rules! impl_calc_ops {
 }
 
 /// alignment operations
+#[allow(dead_code)]
 pub trait AlignOps: UsizeConvert {
     /// check if the address is aligned to the given alignment
     fn is_aligned(self, alignment: usize) -> bool {
