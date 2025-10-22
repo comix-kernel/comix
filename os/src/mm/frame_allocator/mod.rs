@@ -16,6 +16,8 @@
 
 mod frame_allocator;
 
+pub use frame_allocator::{FrameRangeTracker, FrameTracker, TrackedFrames, alloc_frame, alloc_frames, alloc_contig_frames};
+
 /// initialize the global frame allocator with the available physical memory range
 ///
 /// # Parameters
