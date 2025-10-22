@@ -66,6 +66,12 @@ impl Drop for FrameRangeTracker {
     }
 }
 
+pub enum TrackedFrames {
+    Single(FrameTracker),
+    Multiple(Vec<FrameTracker>),
+    Contiguous(FrameRangeTracker),
+}
+
 /// TODO: replace with proper synchronization primitive
 ///
 /// global frame allocator instance
