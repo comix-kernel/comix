@@ -20,6 +20,33 @@ bitflags::bitflags! {
     }
 }
 
+impl UniversalPTEFlag {
+    /// constructs a flag set for user read-only access
+    pub const fn user_read() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::UserAccessible)
+    }
+
+    /// constructs a flag set for user read-write access
+    pub const fn user_rw() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::Writeable).union(Self::UserAccessible)
+    }
+
+    /// constructs a flag set for user read-execute access
+    pub const fn user_rx() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::Executable).union(Self::UserAccessible)
+    }
+
+    /// constructs a flag set for kernel read-write access
+    pub const fn kernel_rw() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::Writeable)
+    }
+
+    /// constructs a flag set for kernel read-only access
+    pub const fn kernel_r() -> Self {
+        Self::Valid.union(Self::Readable)
+    }
+}
+
 pub trait UniversalConvertableFlag {
     fn from_universal(flag: UniversalPTEFlag) -> Self;
     fn to_universal(&self) -> UniversalPTEFlag;
