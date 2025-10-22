@@ -49,9 +49,3 @@ where
 
     fn walk(&self, vpn: Vpn) -> PagingResult<(Ppn, PageSize, UniversalPTEFlag)>;
 }
-
-pub struct PageTable {
-    inner: ActivePageTableInner,
-    // TODO:
-    tracker: (),
-}
