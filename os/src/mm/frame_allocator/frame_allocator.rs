@@ -147,6 +147,41 @@ impl FrameAllocator {
         }
     }
 
+    pub fn alloc_contig_frames_aligned(
+        &mut self,
+        num: usize,
+        align_pages: usize,
+    ) -> Option<FrameRangeTracker> {
+        if num == 0 {
+            return None;
+        }
+
+        debug_assert!(
+            align_pages.is_power_of_two(),
+            "Alignment must be power of 2"
+        );
+
+        // 向上对齐
+        let aligned_cur_val =
+            (self.cur.as_usize() + align_pages - 1).div_ceil(align_pages) * align_pages;
+        let aligned_cur = Ppn::from_usize(aligned_cur_val);
+
+        // 检查空间
+        let required_end = aligned_cur + num;
+        if required_end <= self.end {
+            // 跳过的帧加入 recycled
+            for ppn_val in self.cur.as_usize()..aligned_cur.as_usize() {
+                self.recycled.push(Ppn::from_usize(ppn_val));
+            }
+
+            self.cur = required_end;
+            let range = PpnRange::from_start_len(aligned_cur, num);
+            Some(FrameRangeTracker::new(range))
+        } else {
+            None
+        }
+    }
+
     pub fn dealloc_frame(&mut self, frame: &FrameTracker) {
         // is valid
         debug_assert!(
@@ -253,6 +288,15 @@ pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
         (*addr_of_mut!(FRAME_ALLOCATOR))
             .as_mut()?
             .alloc_contig_frames(num)
+    }
+}
+
+/// allocate contiguous frames with alignment
+pub fn alloc_contig_frames_aligned(num: usize, align_pages: usize) -> Option<FrameRangeTracker> {
+    unsafe {
+        (*addr_of_mut!(FRAME_ALLOCATOR))
+            .as_mut()?
+            .alloc_contig_frames_aligned(num, align_pages)
     }
 }
 
