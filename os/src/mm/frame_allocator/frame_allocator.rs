@@ -1,5 +1,5 @@
+#![allow(dead_code)]
 use core::ptr::addr_of_mut;
-use core::usize;
 
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert};

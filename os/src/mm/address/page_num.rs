@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::config::PAGE_SIZE;
 use crate::mm::address::address::{Address, Paddr, Vaddr};
 use crate::mm::address::operations::{AlignOps, CalcOps, UsizeConvert};
