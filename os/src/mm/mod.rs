@@ -8,10 +8,12 @@
 //! - [`address`]: Address and page number abstractions
 //! - [`frame_allocator`]: Physical frame allocation
 //! - [`global_allocator`]: Global heap allocator
+//! - [`page_table`]: Page table abstractions and implementations(arch-independent)
 
-mod address;
-mod frame_allocator;
-mod global_allocator;
+pub mod address;
+pub mod frame_allocator;
+pub mod global_allocator;
+pub mod page_table;
 
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
