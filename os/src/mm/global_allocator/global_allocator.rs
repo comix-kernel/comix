@@ -8,7 +8,6 @@
 //! - Heap memory region defined by linker symbols
 //! - Initialization function to set up the heap
 
-use core::cell::UnsafeCell;
 use lock_api::{GuardSend, RawMutex};
 use talc::{Span, Talc, Talck};
 
@@ -47,10 +46,8 @@ unsafe impl RawMutex for EmptyRawMutex {
 ///
 /// Initialized with an empty span; actual memory will be claimed in init_heap().
 #[global_allocator]
-static ALLOCATOR: Talck<EmptyRawMutex, talc::ClaimOnOom> = Talc::new(unsafe {
-    talc::ClaimOnOom::new(Span::empty())
-})
-.lock();
+static ALLOCATOR: Talck<EmptyRawMutex, talc::ClaimOnOom> =
+    Talc::new(unsafe { talc::ClaimOnOom::new(Span::empty()) }).lock();
 
 /// Initialize the heap allocator with the heap memory region defined in linker script
 ///

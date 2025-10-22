@@ -173,14 +173,14 @@ impl Vaddr {
     /// # Safety
     /// the caller must ensure that the address is valid for type T
     pub unsafe fn as_ref<T>(&self) -> &T {
-        &*(self.as_usize() as *const T)
+        unsafe { &*(self.as_usize() as *const T) }
     }
 
     /// convert the address to a mutable reference
     /// # Safety
     /// the caller must ensure that the address is valid for type T
     pub unsafe fn as_mut<T>(&mut self) -> &mut T {
-        &mut *(self.as_usize() as *mut T)
+        unsafe { &mut *(self.as_usize() as *mut T) }
     }
 
     /// convert the address to a const pointer
