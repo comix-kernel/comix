@@ -15,6 +15,7 @@ pub enum PageSize {
 }
 
 /// Errors that can occur during paging operations
+#[derive(Debug)]
 pub enum PagingError {
     /// The virtual address is not mapped
     NotMapped,
