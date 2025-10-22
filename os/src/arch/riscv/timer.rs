@@ -1,16 +1,18 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::config::CLOCK_FREQ;
 use crate::sbi::set_timer;
 use riscv::register::time;
-use crate::config::CLOCK_FREQ;
 
 const TICKS_PER_SEC: usize = 100;
+#[allow(dead_code)]
 const MSEC_PER_SEC: usize = 1000;
 
 // 记录时钟中断次数
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
 
 // 获取当前tick数的
+#[allow(dead_code)]
 pub fn get_ticks() -> usize {
     TIMER_TICKS.load(Ordering::Relaxed)
 }
@@ -21,6 +23,7 @@ pub fn get_time() -> usize {
 }
 
 /// 获取当前时间（以毫秒为单位）
+#[allow(dead_code)]
 pub fn get_time_ms() -> usize {
     time::read() * MSEC_PER_SEC / CLOCK_FREQ
 }
@@ -40,19 +43,33 @@ pub fn init() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test_case]
-    fn test_set_next_trigger() {
-        println!("Testing set_next_trigger...");
+    use crate::{kassert, test_case};
+    test_case!(test_set_next_trigger, {
         let current_time = get_time();
         set_next_trigger();
         let next_time = get_time();
-        assert!(next_time > current_time);
-    }
+        kassert!(next_time > current_time);
+    });
 
-    #[test_case]
-    fn test_get_time_ms() {
+    test_case!(test_timer_ticks_increment, {
+        let initial_ticks = TIMER_TICKS.load(Ordering::Relaxed);
+        // 模拟等待一段时间以触发定时器中断
+        for _ in 0..1000000 {
+            core::hint::spin_loop();
+        }
+        let later_ticks = TIMER_TICKS.load(Ordering::Relaxed);
+        kassert!(later_ticks > initial_ticks);
+    });
+
+    test_case!(test_get_time, {
+        println!("Testing get_time...");
+        let time = get_time();
+        kassert!(time > 0);
+    });
+
+    test_case!(test_get_time_ms, {
         println!("Testing get_time_ms...");
         let time_ms = get_time_ms();
-        assert!(time_ms > 0);
-    }
+        kassert!(time_ms > 0);
+    });
 }

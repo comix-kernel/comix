@@ -1,5 +1,8 @@
 #![allow(unused)]
-use riscv::register::{sie, sstatus::{self, Sstatus}};
+use riscv::register::{
+    sie,
+    sstatus::{self, Sstatus},
+};
 
 /// 启用定时器中断
 pub unsafe fn enable_timer_interrupt() {
