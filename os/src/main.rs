@@ -8,26 +8,26 @@ extern crate alloc;
 
 #[macro_use]
 mod console;
-mod sbi;
-mod config;
-mod mm;
 mod arch;
-mod sync;
+mod config;
 mod kernel;
-
+mod mm;
+mod sbi;
+mod sync;
+#[macro_use]
 mod test;
-use crate::test::TEST_FAILED;
+use crate::arch::intr;
+use crate::arch::timer;
+use crate::arch::trap;
+use crate::sbi::shutdown;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
-use crate::arch::intr;
-use crate::arch::trap;
-use crate::arch::timer;
-use core::sync::atomic::Ordering;
-use crate::sbi::shutdown;
-
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
+#[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
+    use crate::test::TEST_FAILED;
+    use core::sync::atomic::Ordering;
     println!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());
 
     // 重置失败计数器
@@ -92,12 +92,10 @@ fn clear_bss() {
         fn ebss();
     }
 
-    (sbss as usize..ebss as usize).for_each(|a| {
-        unsafe { (a as *mut u8).write_volatile(0) }
-    });
+    (sbss as usize..ebss as usize).for_each(|a| unsafe { (a as *mut u8).write_volatile(0) });
 }
 
 #[cfg(test)]
-test_case!(trivial_assertion,{
+test_case!(trivial_assertion, {
     kassert!(0 != 1);
 });

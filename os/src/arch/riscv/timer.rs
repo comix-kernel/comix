@@ -1,18 +1,18 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::test_case;
-use crate::kassert;
+use crate::config::CLOCK_FREQ;
 use crate::sbi::set_timer;
 use riscv::register::time;
-use crate::config::CLOCK_FREQ;
 
 const TICKS_PER_SEC: usize = 100;
+#[allow(dead_code)]
 const MSEC_PER_SEC: usize = 1000;
 
 // 记录时钟中断次数
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
 
 // 获取当前tick数的
+#[allow(dead_code)]
 pub fn get_ticks() -> usize {
     TIMER_TICKS.load(Ordering::Relaxed)
 }
@@ -23,6 +23,7 @@ pub fn get_time() -> usize {
 }
 
 /// 获取当前时间（以毫秒为单位）
+#[allow(dead_code)]
 pub fn get_time_ms() -> usize {
     time::read() * MSEC_PER_SEC / CLOCK_FREQ
 }
@@ -42,6 +43,7 @@ pub fn init() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{kassert, test_case};
     test_case!(test_set_next_trigger, {
         let current_time = get_time();
         set_next_trigger();
