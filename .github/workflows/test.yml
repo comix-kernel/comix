@@ -42,13 +42,16 @@ jobs:
       # --- 2.1 代码质量检查 (优先执行) ---
 
       - name: 🔍 Cargo Check (快速验证编译)
+        working-directory: os
         run: cargo check --target riscv64gc-unknown-none-elf
 
       - name: 📏 Run Code Formatting Check
+        working-directory: os
         # 使用 --check 模式，如果代码未格式化，则 CI 失败
         run: cargo fmt --all -- --check
 
       - name: 🔬 Run Clippy Lint Check
+        working-directory: os
         # 使用 -D warnings 强制将所有警告升级为错误，确保 PR 必须解决所有代码异味
         run: cargo clippy --target riscv64gc-unknown-none-elf -- -D warnings
         
