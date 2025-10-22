@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /// 关于任务的管理信息
 /// 存放与调度器、任务状态、队列相关的、需要高频访问和修改的数据。
 /// 主要由调度器子系统使用。
@@ -18,11 +19,11 @@ pub struct TaskInfo {
 /// 任务状态
 pub enum TaskState {
     /// 可执行。正在执行或可被调度执行
-    RUNNING,
+    Running,
     /// 停止。没有也不能执行
-    STOPPED,
+    Stopped,
     /// 等待可中断的事件。可以被信号等中断唤醒
-    INTERRUPTABLE,
+    Interruptable,
     /// 等待不可中断的事件。不能被信号等中断唤醒
-    UNINTERRUPTABLE,
+    Uninterruptable,
 }

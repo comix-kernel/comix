@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::mm::address::operations::{AlignOps, CalcOps, UsizeConvert};
 use core::mem::size_of;
 use core::ops::Range;

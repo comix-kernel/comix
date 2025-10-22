@@ -21,6 +21,7 @@ impl IntrGuard {
     }
 
     /// 检查进入临界区前，中断是否处于启用状态。
+    #[allow(dead_code)]
     pub fn was_enabled(&self) -> bool {
         self.flags & SSTATUS_SIE != 0
     }
@@ -39,7 +40,7 @@ mod tests {
 
     use crate::{arch::intr::*, kassert, test_case};
 
-    /// 测试 IntrGuard::new() 是否成功禁用中断，并检查 was_enabled
+    // 测试 IntrGuard::new() 是否成功禁用中断，并检查 was_enabled
     test_case!(test_guard_disables_interrupts, {
         println!("Testing: test_guard_disables_interrupts");
         unsafe { enable_interrupts() };
@@ -52,7 +53,7 @@ mod tests {
         kassert!(!are_interrupts_enabled());
     });
 
-    /// 测试 IntrGuard 在离开作用域时是否恢复中断状态
+    // 测试 IntrGuard 在离开作用域时是否恢复中断状态
     test_case!(test_guard_restores_on_drop, {
         println!("Testing: test_guard_restores_on_drop");
         let initial_flags: usize = {

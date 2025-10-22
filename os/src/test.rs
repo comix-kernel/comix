@@ -1,3 +1,5 @@
+// HACK： 该模块下有几个变量不知道为什么被视作未使用，权宜之计
+#![allow(dead_code)]
 use core::sync::atomic::AtomicUsize;
 
 #[derive(Copy, Clone)]
@@ -6,6 +8,14 @@ pub struct FailedAssertion {
     pub file: &'static str,
     pub line: u32,
 }
+
+// 添加公有构造函数，便于宏/其它代码显式构造
+impl FailedAssertion {
+    pub const fn new(cond: &'static str, file: &'static str, line: u32) -> Self {
+        Self { cond, file, line }
+    }
+}
+
 pub static mut FAILED_LIST: [Option<FailedAssertion>; 32] = [None; 32];
 pub const FAILED_LIST_CAPACITY: usize = 32;
 pub static mut FAILED_INDEX: usize = 0;
@@ -19,14 +29,11 @@ macro_rules! kassert {
     ($cond:expr) => {{
         if !$cond {
             $crate::test::TEST_FAILED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+            // 在安全上下文中先构造值，避免在 unsafe 块内展开 metavariables
+            let fa = $crate::test::FailedAssertion::new(stringify!($cond), file!(), line!());
             unsafe {
                 if $crate::test::FAILED_INDEX < $crate::test::FAILED_LIST_CAPACITY {
-                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] =
-                        Some($crate::test::FailedAssertion {
-                            cond: stringify!($cond),
-                            file: file!(),
-                            line: line!(),
-                        });
+                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some(fa);
                     $crate::test::FAILED_INDEX += 1;
                 } else {
                     println!(
@@ -37,6 +44,7 @@ macro_rules! kassert {
         }
     }};
 }
+
 #[macro_export]
 macro_rules! test_case {
     ($func:ident, $body:block) => {

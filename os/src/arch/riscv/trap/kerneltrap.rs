@@ -94,7 +94,7 @@ pub struct TrapFrame {
 
 /// 处理时钟中断
 pub fn check_timer() {
-    let ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+    let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
 
     // TODO: 这里可以添加更多的时钟中断处理逻辑
     // 比如：
@@ -102,5 +102,7 @@ pub fn check_timer() {
     // - 检查是否需要进行任务调度
     // - 处理定时任务等
 }
+
+#[allow(dead_code)]
 /// TODO: 处理设备中断
 pub fn check_device() {}
