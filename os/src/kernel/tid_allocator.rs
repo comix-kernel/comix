@@ -19,6 +19,7 @@ impl TidAllocator {
 
     /// 分配一个新的任务ID。
     pub fn allocate(&self) -> u32 {
-        self.next_tid.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
+        self.next_tid
+            .fetch_add(1, core::sync::atomic::Ordering::SeqCst)
     }
 }
