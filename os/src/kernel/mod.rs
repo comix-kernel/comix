@@ -1,5 +1,4 @@
-pub mod task_info;
-pub mod task_struct;
+pub mod task;
 
 mod scheduler;
 mod tid_allocator;
