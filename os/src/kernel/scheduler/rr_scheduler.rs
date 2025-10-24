@@ -2,7 +2,7 @@ use crate::{
     arch::kernel::switch,
     kernel::{
         scheduler::{RunQueue, Scheduler, WaitQueue},
-        task_info::{TaskInfo, TaskState},
+        task::{Task, TaskState},
     },
 };
 
@@ -19,7 +19,7 @@ pub struct RRScheduler {
     // 当前时间片剩余时间
     current_slice: usize,
     // 正在运行的任务
-    current_task: Option<TaskInfo>,
+    current_task: Option<Task>,
 }
 
 impl RRScheduler {
@@ -80,7 +80,7 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn add_task(&mut self, task: TaskInfo) {
+    fn add_task(&mut self, task: Task) {
         match task.state {
             TaskState::Running => {
                 // 将任务添加到运行队列
@@ -93,7 +93,7 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn next_task(&mut self) -> TaskInfo {
+    fn next_task(&mut self) -> Task {
         // 从运行队列中选择下一个任务
         if let Some(task) = self.run_queue.pop_task() {
             task
