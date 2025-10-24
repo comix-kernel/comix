@@ -2,9 +2,11 @@
 
 use core::sync::atomic::AtomicPtr;
 
+use alloc::sync::Arc;
+
 use crate::{
     arch::{kernel::context::Context, trap::kerneltrap::TrapFrame},
-    mm::frame_allocator::FrameTracker,
+    mm::{frame_allocator::FrameTracker, memory_space::MemorySpace},
 };
 
 /// 任务
@@ -38,6 +40,9 @@ pub struct Task {
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
     /// XXX: AtomicPtr or *mut？
     pub trap_frame_ptr: AtomicPtr<TrapFrame>,
+    /// 任务的内存空间
+    /// 对于内核任务，该字段为 None
+    pub memory_space: Option<Arc<MemorySpace>>,
     /// 退出码
     pub exit_code: isize,
     // TODO: 由于部分相关子系统尚未实现，暂时留空
