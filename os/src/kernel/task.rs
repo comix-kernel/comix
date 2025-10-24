@@ -2,7 +2,7 @@
 
 use core::sync::atomic::AtomicPtr;
 
-use crate::arch::{kernel::context::Context, trap::kerneltrap::TrapFrame};
+use crate::{arch::{kernel::context::Context, trap::kerneltrap::TrapFrame}, mm::frame_allocator::FrameTracker};
 
 /// 任务
 /// 存放任务的核心信息
@@ -26,14 +26,17 @@ pub struct Task {
     /// 任务的所属进程id
     /// NOTE: 由于采用了统一的任务模型，一个任务组内任务的 pid 是相同的，等于父任务的 pid 而父任务的 pid 等于自己的 tid
     pub pid: usize,
-    /// 内核栈基址
-    kstack_base: usize,
-    /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
-    trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 父任务的id
-    parient_tid: usize,
+    pub ptid: usize,
+    /// 内核栈基址
+    pub kstack_base: usize,
+    /// 内核栈跟踪器
+    pub kstack_tracker: FrameTracker,
+    /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
+    /// XXX: AtomicPtr or *mut？
+    pub trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 退出码
-    exit_code: isize,
+    pub exit_code: isize,
     // TODO: 由于部分相关子系统尚未实现，暂时留空
 }
 
