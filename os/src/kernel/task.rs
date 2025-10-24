@@ -2,7 +2,12 @@
 
 use core::sync::atomic::AtomicPtr;
 
-use crate::arch::{kernel::context::Context, trap::kerneltrap::TrapFrame};
+use alloc::sync::Arc;
+
+use crate::{
+    arch::{kernel::context::Context, trap::kerneltrap::TrapFrame},
+    mm::{frame_allocator::FrameTracker, memory_space::MemorySpace},
+};
 
 /// 任务
 /// 存放任务的核心信息
@@ -26,14 +31,20 @@ pub struct Task {
     /// 任务的所属进程id
     /// NOTE: 由于采用了统一的任务模型，一个任务组内任务的 pid 是相同的，等于父任务的 pid 而父任务的 pid 等于自己的 tid
     pub pid: usize,
-    /// 内核栈基址
-    kstack_base: usize,
-    /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
-    trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 父任务的id
-    parient_tid: usize,
+    pub ptid: usize,
+    /// 内核栈基址
+    pub kstack_base: usize,
+    /// 内核栈跟踪器
+    pub kstack_tracker: FrameTracker,
+    /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
+    /// XXX: AtomicPtr or *mut？
+    pub trap_frame_ptr: AtomicPtr<TrapFrame>,
+    /// 任务的内存空间
+    /// 对于内核任务，该字段为 None
+    pub memory_space: Option<Arc<MemorySpace>>,
     /// 退出码
-    exit_code: isize,
+    pub exit_code: isize,
     // TODO: 由于部分相关子系统尚未实现，暂时留空
 }
 
@@ -48,6 +59,37 @@ pub enum TaskState {
     Interruptable,
     /// 等待不可中断的事件。不能被信号等中断唤醒
     Uninterruptable,
+}
+
+/// 创建一个新的内核线程并返回其 Arc 包装
+///
+/// 该函数负责：
+/// 1. 分配 Task 结构体本身，并用 Arc 包装
+/// 2. 分配内核栈物理页帧 (FrameTracker)
+/// 3. 将内核栈映射到虚拟地址空间 (VMM 逻辑)
+/// 4. 初始化 Task Context，设置栈指针和入口点
+/// 5. 将新的 Task 加入调度器队列
+///
+/// # 参数
+/// * `entry_point`: 线程开始执行的函数地址
+///
+/// # 返回值
+/// 包含新创建任务的 Arc<Task>
+pub fn kthread_spawn(_entry_point: fn()) -> Arc<Task> {
+    // 1. 分配内核栈 (假设 FrameTracker::alloc_one() 存在)
+    // let kstack_tracker = FrameTracker::alloc_one().expect("Failed to allocate kernel stack");
+    // let kstack_paddr = kstack_tracker.get_paddr();
+
+    // 2. 将物理页映射到连续的虚拟地址 (kstack_base)
+    // NOTE: 内核线程共享内核地址空间，映射逻辑相对简单
+
+    // 3. 构建 Task 实例
+    // let task = Task { /* ... 初始化字段 ... */ };
+
+    // 4. 将任务加入全局任务队列
+    // SCHEDULER.add_task(task.clone());
+
+    unimplemented!("kthread_spawn 核心逻辑尚未实现")
 }
 
 // /// 关于任务的管理信息
