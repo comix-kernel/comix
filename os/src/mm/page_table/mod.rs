@@ -32,6 +32,12 @@ pub enum PagingError {
     InvalidFlags,
     /// Failed to alloc frame
     FrameAllocFailed,
+    /// Unsupported mapping type for this operation
+    UnsupportedMapType,
+    /// Cannot shrink the area below its start
+    ShrinkBelowStart,
+    /// Huge page splitting is not implemented
+    HugePageSplitNotImplemented,
 }
 
 pub type PagingResult<T> = Result<T, PagingError>;
