@@ -19,6 +19,6 @@ impl Cpu {
 }
 
 pub fn current_cpu() -> &'static Cpu {
-    let cpu_id = crate::arch::cpu::cpu_id();
+    let cpu_id = crate::arch::kernel::cpu::cpu_id();
     &crate::kernel::CPUS[cpu_id]
 }

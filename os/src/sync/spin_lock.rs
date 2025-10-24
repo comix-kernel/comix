@@ -1,6 +1,6 @@
 use core::cell::UnsafeCell;
 
-use crate::sync::{RawSpinLock, RawSpinLockGuard};
+use crate::sync::raw_spin_lock::{RawSpinLock, RawSpinLockGuard};
 
 /// 提供对数据的互斥访问的自旋锁结构体。
 /// 内部包含一个 RawSpinLock 和一个 UnsafeCell 用于存储数据。
