@@ -12,8 +12,9 @@
 
 pub mod address;
 pub mod frame_allocator;
-pub mod heap;
 pub mod global_allocator;
+pub mod heap;
+pub mod memory_space;
 pub mod page_table;
 
 pub use frame_allocator::init_frame_allocator;
