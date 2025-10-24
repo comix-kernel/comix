@@ -1,6 +1,8 @@
 use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
+use core::iter::Map;
 
+use crate::arch::mm::paddr_to_vaddr;
 use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert, Vpn, VpnRange, Ppn};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
 use crate::mm::page_table::{
@@ -22,6 +24,7 @@ pub enum AreaType {
     KernelText,   // Kernel code segment
     KernelRodata, // Kernel read-only data segment
     KernelData,   // Kernel data segment
+    KernelStack,  // Kernel stack
     KernelBss,    // Kernel BSS segment
     KernelHeap,   // Kernel heap
     KernelMmio,   // Kernel memory-mapped I/O
@@ -89,7 +92,7 @@ impl MappingArea {
     }
 
     /// Map a single virtual page to a physical page
-    pub fn map_one(&mut self, page_table: &mut ActivePageTableInner, vpn: Vpn) -> Result<(), &'static str> {
+    pub fn map_one(&mut self, page_table: &mut ActivePageTableInner, vpn: Vpn) -> Result<(), page_table::PagingError> {
         let ppn = match self.map_type {
             MapType::Identical => {
                 // For identical mapping, vpn equals ppn
@@ -98,7 +101,7 @@ impl MappingArea {
             }
             MapType::Framed => {
                 // Allocate a new frame
-                let frame = alloc_frame().expect("failed to allocate frame");
+                let frame = alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
                 let ppn = frame.ppn();
                 self.frames.insert(vpn, TrackedFrames::Single(frame));
                 ppn
@@ -106,13 +109,12 @@ impl MappingArea {
         };
 
         page_table
-            .map(vpn, ppn, PageSize::Size4K, self.permission)
-            .expect("failed to map page");
+            .map(vpn, ppn, PageSize::Size4K, self.permission)?;
         Ok(())
     }
 
     /// Map all pages in this mapping area
-    pub fn map(&mut self, page_table: &mut ActivePageTableInner) -> Result<(), &'static str> {
+    pub fn map(&mut self, page_table: &mut ActivePageTableInner) -> Result<(), page_table::PagingError> {
         for vpn in self.vpn_range {
             self.map_one(page_table, vpn)?;
         }
@@ -120,8 +122,8 @@ impl MappingArea {
     }
 
     /// Unmap a single virtual page
-    pub fn unmap_one(&mut self, page_table: &mut ActivePageTableInner, vpn: Vpn) -> Result<(), &'static str> {
-        page_table.unmap(vpn).expect("failed to unmap page");
+    pub fn unmap_one(&mut self, page_table: &mut ActivePageTableInner, vpn: Vpn) -> Result<(), page_table::PagingError> {
+        page_table.unmap(vpn)?;
 
         // For framed mapping, remove the frame tracker
         if self.map_type == MapType::Framed {
@@ -131,7 +133,7 @@ impl MappingArea {
     }
 
     /// Unmap all pages in this mapping area
-    pub fn unmap(&mut self, page_table: &mut ActivePageTableInner) -> Result<(), &'static str> {
+    pub fn unmap(&mut self, page_table: &mut ActivePageTableInner) -> Result<(), page_table::PagingError> {
         for vpn in self.vpn_range {
             self.unmap_one(page_table, vpn)?;
         }
@@ -179,6 +181,92 @@ impl MappingArea {
             permission: self.permission,
             frames: BTreeMap::new(), // Don't clone frames
         }
+    }
+
+    /// Clone the mapping area along with its data
+    /// Only supports framed mapping areas
+    pub fn clone_with_data(&self, page_table: &mut ActivePageTableInner) -> Result<Self, page_table::PagingError> {
+        let mut new_area = self.clone_metadata();
+        if self.map_type != MapType::Framed {
+            return Err(page_table::PagingError::UnsupportedMapType);
+        }
+
+        // 遍历原 area 的 frames BTreeMap
+        for (vpn, tracked_frames) in &self.frames {
+            match tracked_frames {
+                TrackedFrames::Single(frame) => {
+                    // 复制单个 4K 页
+                    let new_frame = alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+                    let new_ppn = new_frame.ppn();
+                    let src_ppn = frame.ppn();
+
+                    unsafe {
+                        let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                        let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
+
+                        core::ptr::copy_nonoverlapping(
+                            src_va as *const u8,
+                            dst_va as *mut u8,
+                            crate::config::PAGE_SIZE
+                        );
+                    }
+
+                    new_area.frames.insert(*vpn, TrackedFrames::Single(new_frame));
+                }
+                TrackedFrames::Multiple(frames) => {
+                    // 复制多个不连续的页
+                    let mut new_frames = alloc::vec::Vec::new();
+
+                    for frame in frames {
+                        let new_frame = alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+                        let new_ppn = new_frame.ppn();
+                        let src_ppn = frame.ppn();
+
+                        unsafe {
+                            let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                            let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
+
+                            core::ptr::copy_nonoverlapping(
+                                src_va as *const u8,
+                                dst_va as *mut u8,
+                                crate::config::PAGE_SIZE
+                            );
+                        }
+
+                        new_frames.push(new_frame);
+                    }
+
+                    new_area.frames.insert(*vpn, TrackedFrames::Multiple(new_frames));
+                }
+                TrackedFrames::Contiguous(frame_range) => {
+                    // 复制连续页（大页）
+                    let num_pages = frame_range.len();
+                    let new_frame_range = crate::mm::frame_allocator::alloc_contig_frames_aligned(
+                        num_pages,
+                        num_pages,
+                    ).ok_or(page_table::PagingError::FrameAllocFailed)?;
+
+                    let src_ppn = frame_range.start_ppn();
+                    let new_ppn = new_frame_range.start_ppn();
+                    let total_size = num_pages * crate::config::PAGE_SIZE;
+
+                    unsafe {
+                        let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                        let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
+
+                        core::ptr::copy_nonoverlapping(
+                            src_va as *const u8,
+                            dst_va as *mut u8,
+                            total_size
+                        );
+                    }
+
+                    new_area.frames.insert(*vpn, TrackedFrames::Contiguous(new_frame_range));
+                }
+            }
+        }
+
+        Ok(new_area)
     }
 }
 
@@ -299,5 +387,142 @@ impl MappingArea {
                 Ok(ppn)
             }
         }
+    }
+}
+
+/// Dynamic Extension and Shrinking
+impl MappingArea {
+    /// Extends the area by adding pages at the end
+    ///
+    /// Supports huge page allocation if alignment and size permit
+    /// Returns the new end VPN
+    pub fn extend(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        count: usize,
+    ) -> Result<Vpn, page_table::PagingError> {
+        let old_end = self.vpn_range.end();
+        let new_end = Vpn::from_usize(old_end.as_usize() + count);
+
+        let start_va = old_end.start_addr();
+        let end_va = new_end.start_addr();
+        let mut current_va = start_va;
+
+        // 使用贪心算法映射新页（支持大页）
+        while current_va < end_va {
+            let remaining = end_va.as_usize() - current_va.as_usize();
+            let current_vpn = Vpn::from_addr_floor(current_va);
+
+            // 尝试 1GB 页
+            if remaining >= PageSize::Size1G as usize
+                && current_va.as_usize() % (PageSize::Size1G as usize) == 0
+            {
+                let ppn = self.allocate_for_huge_page(current_vpn, 262144)?;
+                page_table.map(current_vpn, ppn, PageSize::Size1G, self.permission)?;
+                current_va = current_va + PageSize::Size1G as usize;
+            }
+            // 尝试 2MB 页
+            else if remaining >= PageSize::Size2M as usize
+                && current_va.as_usize() % (PageSize::Size2M as usize) == 0
+            {
+                let ppn = self.allocate_for_huge_page(current_vpn, 512)?;
+                page_table.map(current_vpn, ppn, PageSize::Size2M, self.permission)?;
+                current_va = current_va + PageSize::Size2M as usize;
+            }
+            // 使用 4KB 页
+            else {
+                let ppn = self.allocate_for_small_page(current_vpn)?;
+                page_table.map(current_vpn, ppn, PageSize::Size4K, self.permission)?;
+                current_va = current_va + PageSize::Size4K as usize;
+            }
+        }
+
+        // 更新范围
+        self.vpn_range = VpnRange::from_start_end(self.vpn_range.start(), new_end);
+
+        Ok(new_end)
+    }
+
+    /// Shrinks the area by removing pages from the end
+    ///
+    /// Handles huge page boundaries:
+    /// - If removing entire huge pages: unmap them directly
+    /// - If partially removing a huge page: currently returns an error
+    ///   (TODO: implement huge page splitting if needed)
+    ///
+    /// Returns the new end VPN
+    pub fn shrink(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        count: usize,
+    ) -> Result<Vpn, page_table::PagingError> {
+        if count > self.vpn_range.len() {
+            return Err(page_table::PagingError::ShrinkBelowStart);
+        }
+
+        let old_end = self.vpn_range.end();
+        let new_end = Vpn::from_usize(old_end.as_usize() - count);
+
+        // 收集需要移除的 VPN 范围
+        let remove_range = VpnRange::from_start_end(new_end, old_end);
+
+        // 检查并移除帧
+        // 需要从后向前遍历，以便正确处理大页
+        let mut vpns_to_remove: alloc::vec::Vec<Vpn> = remove_range.into_iter().collect();
+        vpns_to_remove.sort_by(|a, b| b.cmp(a)); // 降序排列
+
+        let mut i = 0;
+        while i < vpns_to_remove.len() {
+            let vpn = vpns_to_remove[i];
+
+            // 检查这个 VPN 是否有对应的帧记录
+            if let Some(tracked_frames) = self.frames.get(&vpn) {
+                match tracked_frames {
+                    TrackedFrames::Single(_) => {
+                        // 单个 4K 页，直接取消映射
+                        page_table.unmap(vpn)?;
+                        self.frames.remove(&vpn);
+                        i += 1;
+                    }
+                    TrackedFrames::Multiple(_) => {
+                        // 多个不连续页，直接取消映射
+                        page_table.unmap(vpn)?;
+                        self.frames.remove(&vpn);
+                        i += 1;
+                    }
+                    TrackedFrames::Contiguous(frame_range) => {
+                        // 连续页（大页）
+                        let num_pages = frame_range.len();
+
+                        // 检查是否要移除整个大页
+                        let huge_page_vpns: alloc::vec::Vec<Vpn> = (vpn.as_usize()..vpn.as_usize() + num_pages)
+                            .map(|v| Vpn::from_usize(v))
+                            .collect();
+
+                        let all_in_remove = huge_page_vpns.iter()
+                            .all(|v| remove_range.contains(*v));
+
+                        if all_in_remove {
+                            // 整个大页都要移除，直接取消映射
+                            page_table.unmap(vpn)?;
+                            self.frames.remove(&vpn);
+                            i += num_pages;
+                        } else {
+                            // 部分移除大页：目前不支持，需要实现大页拆分
+                            return Err(page_table::PagingError::HugePageSplitNotImplemented);
+                        }
+                    }
+                }
+            } else {
+                // 没有帧记录（可能是恒等映射），只需取消映射
+                page_table.unmap(vpn)?;
+                i += 1;
+            }
+        }
+
+        // 更新范围
+        self.vpn_range = VpnRange::from_start_end(self.vpn_range.start(), new_end);
+
+        Ok(new_end)
     }
 }
