@@ -5,6 +5,7 @@ use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert};
 use alloc::vec::Vec;
 
+#[derive(Debug)]
 pub struct FrameTracker(Ppn);
 
 impl FrameTracker {
