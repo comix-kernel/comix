@@ -16,8 +16,6 @@ bitflags::bitflags! {
     }
 }
 
-
-
 /*
  * SV39 Page Table Entry (PTE) format:
  * ------------------------------------------------
@@ -35,7 +33,7 @@ bitflags::bitflags! {
  */
 
 const SV39_PTE_FLAG_MASK: usize = 0xff; // Lower 8 bits for SV39 PTE flags
-const SV39_PTE_PPN_OFFSET: usize = 10;  // PPN starts from bit 10
+const SV39_PTE_PPN_OFFSET: usize = 10; // PPN starts from bit 10
 const SV39_PTE_PPN_MASK: u64 = 0x000f_ffff_ffff_c00; // Bits 10-53 for PPN
 
 impl UniversalConvertableFlag for SV39PTEFlags {
@@ -84,8 +82,12 @@ impl PageTableEntryTrait for PageTableEntry {
 
     fn is_huge(&self) -> bool {
         // In SV39, we can't directly determine huge pages from the PTE alone.
-        let sv39_flags = SV39PTEFlags::from_bits((self.0 & SV39_PTE_FLAG_MASK as u64) as usize).unwrap();
-        sv39_flags.intersects(SV39PTEFlags::union(SV39PTEFlags::READ, SV39PTEFlags::EXECUTE).union(SV39PTEFlags::WRITE))
+        let sv39_flags =
+            SV39PTEFlags::from_bits((self.0 & SV39_PTE_FLAG_MASK as u64) as usize).unwrap();
+        sv39_flags.intersects(
+            SV39PTEFlags::union(SV39PTEFlags::READ, SV39PTEFlags::EXECUTE)
+                .union(SV39PTEFlags::WRITE),
+        )
     }
 
     fn is_empty(&self) -> bool {
@@ -98,7 +100,8 @@ impl PageTableEntryTrait for PageTableEntry {
     }
 
     fn flags(&self) -> UniversalPTEFlag {
-        let sv39_flags = SV39PTEFlags::from_bits((self.0 & SV39_PTE_FLAG_MASK as u64) as usize).unwrap();
+        let sv39_flags =
+            SV39PTEFlags::from_bits((self.0 & SV39_PTE_FLAG_MASK as u64) as usize).unwrap();
         sv39_flags.to_universal()
     }
 
