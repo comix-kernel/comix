@@ -2,7 +2,10 @@
 
 use core::sync::atomic::AtomicPtr;
 
-use crate::{arch::{kernel::context::Context, trap::kerneltrap::TrapFrame}, mm::frame_allocator::FrameTracker};
+use crate::{
+    arch::{kernel::context::Context, trap::kerneltrap::TrapFrame},
+    mm::frame_allocator::FrameTracker,
+};
 
 /// 任务
 /// 存放任务的核心信息
