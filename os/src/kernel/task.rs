@@ -1,11 +1,14 @@
 #![allow(dead_code)]
 
+use core::sync::atomic::AtomicPtr;
+
 use crate::arch::{kernel::context::Context, trap::kerneltrap::TrapFrame};
 
 /// 任务
 /// 存放任务的核心信息
 /// OPTIMIZE: 简单起见目前的设计中，Task 结构体包含了所有信息，包括调度相关的信息和资源管理相关的信息。
 ///           未来可以考虑将其拆分为 TaskInfo 和 TaskStruct 两个部分，以提高访问效率和模块化程度。
+#[derive(Debug)]
 pub struct Task {
     /// 任务的上下文信息，用于任务切换
     pub context: Context,
@@ -26,7 +29,7 @@ pub struct Task {
     /// 内核栈基址
     kstack_base: usize,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
-    trap_frame_ptr: *mut TrapFrame,
+    trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 父任务的id
     parient_tid: usize,
     /// 退出码
@@ -35,6 +38,7 @@ pub struct Task {
 }
 
 /// 任务状态
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskState {
     /// 可执行。正在执行或可被调度执行
     Running,
