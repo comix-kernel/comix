@@ -32,6 +32,7 @@ impl Drop for FrameTracker {
     }
 }
 
+#[derive(Debug)]
 pub struct FrameRangeTracker {
     range: PpnRange,
 }
@@ -67,6 +68,7 @@ impl Drop for FrameRangeTracker {
     }
 }
 
+#[derive(Debug)]
 pub enum TrackedFrames {
     Single(FrameTracker),
     Multiple(Vec<FrameTracker>),

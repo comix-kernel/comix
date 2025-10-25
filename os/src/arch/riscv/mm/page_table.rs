@@ -1,14 +1,13 @@
 use super::PageTableEntry;
-use crate::mm::address::{
-    AlignOps, ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert, Vaddr, Vpn, VpnRange,
-};
-use crate::mm::frame_allocator::FrameTracker;
+use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn};
+use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::mm::page_table::{
     PageSize, PageTableEntry as PageTableEntryTrait, PageTableInner as PageTableInnerTrait,
     PagingError, PagingResult, UniversalPTEFlag,
 };
 use alloc::vec::Vec;
 
+#[derive(Debug)]
 pub struct PageTableInner {
     root: Ppn,
     // only store middle-level frames here
@@ -16,7 +15,7 @@ pub struct PageTableInner {
     is_user: bool,
 }
 
-impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
+impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     const LEVELS: usize = 3;
     const MAX_VA_BITS: usize = 39;
     const MAX_PA_BITS: usize = 56;
@@ -61,7 +60,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
     }
 
     fn new() -> Self {
-        let frame = crate::mm::frame_allocator::alloc_frame().unwrap();
+        let frame = alloc_frame().unwrap();
         Self {
             root: frame.ppn(),
             frames: alloc::vec![frame],
@@ -76,7 +75,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
         }
     }
     fn new_as_kernel_table() -> Self {
-        let frame = crate::mm::frame_allocator::alloc_frame().unwrap();
+        let frame = alloc_frame().unwrap();
         Self {
             root: frame.ppn(),
             frames: alloc::vec![frame],
@@ -88,7 +87,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
         self.root
     }
 
-    fn get_entry(&self, vpn: Vpn, level: usize) -> Option<(super::PageTableEntry, PageSize)> {
+    fn get_entry(&self, vpn: Vpn, level: usize) -> Option<(PageTableEntry, PageSize)> {
         if level >= Self::LEVELS {
             return None;
         }
@@ -101,7 +100,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             let idx = (vpn_value >> (9 * current_level)) & 0x1ff;
             let pte_array = unsafe {
                 core::slice::from_raw_parts(
-                    ppn.start_addr().to_vaddr().as_usize() as *const super::PageTableEntry,
+                    ppn.start_addr().to_vaddr().as_usize() as *const PageTableEntry,
                     512,
                 )
             };
@@ -188,7 +187,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             let idx = (vpn_value >> (9 * level)) & 0x1ff;
             let pte_array = unsafe {
                 core::slice::from_raw_parts_mut(
-                    current_ppn.start_addr().to_vaddr().as_usize() as *mut super::PageTableEntry,
+                    current_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
                     512,
                 )
             };
@@ -199,29 +198,28 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
                 if pte.is_valid() {
                     return Err(PagingError::AlreadyMapped);
                 }
-                *pte = super::PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::Valid);
+                *pte = PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::Valid);
                 return Ok(());
             } else {
                 // Intermediate level - need to continue walking
                 if !pte.is_valid() {
                     // Allocate a new page table for this level
-                    let new_frame = crate::mm::frame_allocator::alloc_frame()
+                    let new_frame = alloc_frame()
                         .ok_or(PagingError::FrameAllocFailed)?;
                     let new_ppn = new_frame.ppn();
 
                     // Clear the new page table
                     let new_table = unsafe {
                         core::slice::from_raw_parts_mut(
-                            new_ppn.start_addr().to_vaddr().as_usize()
-                                as *mut super::PageTableEntry,
+                            new_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
                             512,
                         )
                     };
                     for entry in new_table.iter_mut() {
-                        *entry = super::PageTableEntry::empty();
+                        *entry = PageTableEntry::empty();
                     }
 
-                    *pte = super::PageTableEntry::new_table(new_ppn);
+                    *pte = PageTableEntry::new_table(new_ppn);
                     self.frames.push(new_frame);
                 } else if pte.is_huge() {
                     // There's already a huge page mapping here
@@ -244,7 +242,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             let idx = (vpn_value >> (9 * level)) & 0x1ff;
             let pte_array = unsafe {
                 core::slice::from_raw_parts_mut(
-                    current_ppn.start_addr().to_vaddr().as_usize() as *mut super::PageTableEntry,
+                    current_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
                     512,
                 )
             };
@@ -288,7 +286,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             let idx = (vpn_value >> (9 * level)) & 0x1ff;
             let pte_array = unsafe {
                 core::slice::from_raw_parts_mut(
-                    current_ppn.start_addr().to_vaddr().as_usize() as *mut super::PageTableEntry,
+                    current_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
                     512,
                 )
             };
@@ -320,7 +318,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             let idx = (vpn_value >> (9 * level)) & 0x1ff;
             let pte_array = unsafe {
                 core::slice::from_raw_parts(
-                    ppn.start_addr().to_vaddr().as_usize() as *const super::PageTableEntry,
+                    ppn.start_addr().to_vaddr().as_usize() as *const PageTableEntry,
                     512,
                 )
             };

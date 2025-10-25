@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 
 use crate::{
     arch::{kernel::context::Context, trap::kerneltrap::TrapFrame},
-    mm::{frame_allocator::FrameTracker, memory_space::MemorySpace},
+    mm::{frame_allocator::FrameTracker, MemorySpace},
 };
 
 /// 任务

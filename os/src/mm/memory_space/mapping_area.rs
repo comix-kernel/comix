@@ -36,6 +36,7 @@ pub enum AreaType {
 }
 
 /// A memory mapping area in a memory space
+#[derive(Debug)]
 pub struct MappingArea {
     /// Virtual page number range of this mapping area
     ///
@@ -73,6 +74,18 @@ impl MappingArea {
 
     pub fn area_type(&self) -> AreaType {
         self.area_type
+    }
+
+    /// Gets the PPN for a VPN (if mapped)
+    pub fn get_ppn(&self, vpn: Vpn) -> Option<crate::mm::address::Ppn> {
+        self.frames.get(&vpn).map(|tracked| match tracked {
+            TrackedFrames::Single(frame) => frame.ppn(),
+            TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
+            TrackedFrames::Contiguous(_) => {
+                // Not supported for simplified 4K-only implementation
+                panic!("Contiguous frames not supported in current implementation");
+            }
+        })
     }
 
     pub fn new(
@@ -447,7 +460,7 @@ impl MappingArea {
     //     }
     //
     //     // 更新范围
-    //     self.vpn_range = VpnRange::from_start_end(self.vpn_range.start(), new_end);
+    //     self.vpn_range = VpnRange::new(self.vpn_range.start(), new_end);
     //
     //     Ok(new_end)
     // }
@@ -498,7 +511,7 @@ impl MappingArea {
     //     let new_end = Vpn::from_usize(old_end.as_usize() - count);
     //
     //     // 收集需要移除的 VPN 范围
-    //     let remove_range = VpnRange::from_start_end(new_end, old_end);
+    //     let remove_range = VpnRange::new(new_end, old_end);
     //
     //     // 检查并移除帧
     //     // 需要从后向前遍历，以便正确处理大页
@@ -555,7 +568,7 @@ impl MappingArea {
     //     }
     //
     //     // 更新范围
-    //     self.vpn_range = VpnRange::from_start_end(self.vpn_range.start(), new_end);
+    //     self.vpn_range = VpnRange::new(self.vpn_range.start(), new_end);
     //
     //     Ok(new_end)
     // }

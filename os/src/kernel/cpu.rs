@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use crate::{arch::kernel::context::Context, kernel::task::Task, mm::memory_space::MemorySpace};
+use crate::{arch::kernel::context::Context, kernel::task::Task, mm::MemorySpace};
 
 /// CPU 结构体
 pub struct Cpu {
