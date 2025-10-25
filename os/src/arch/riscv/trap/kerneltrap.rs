@@ -9,7 +9,7 @@ use crate::arch::timer::TIMER_TICKS;
 
 // XXX: CSR可能因调度或中断被修改？
 #[unsafe(no_mangle)]
-pub extern "C" fn kerneltrap(_trap_frame: &mut TrapFrame) {
+pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
     // 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap
     // 在这里，trap_frame 指向了栈上保存的 KernelTrapFrame 结构体
 
@@ -56,7 +56,7 @@ pub extern "C" fn kerneltrap(_trap_frame: &mut TrapFrame) {
 
 #[repr(C)] // 确保 Rust 不会重新排列字段
 #[derive(Debug, Clone, Copy)]
-pub struct TrapFrame {
+pub struct KernelTrapFrame {
     pub x1_ra: usize,   // 0(sp)
     pub x2_sp: usize,   // 8(sp)
     pub x3_gp: usize,   // 16(sp)

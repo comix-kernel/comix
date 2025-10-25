@@ -5,7 +5,7 @@ use core::sync::atomic::AtomicPtr;
 use alloc::sync::Arc;
 
 use crate::{
-    arch::{kernel::context::Context, trap::kerneltrap::TrapFrame},
+    arch::{kernel::context::Context, trap::usertrap::TrapFrame, },
     mm::{frame_allocator::FrameTracker, memory_space::MemorySpace},
 };
 
