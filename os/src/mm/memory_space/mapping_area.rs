@@ -1,8 +1,8 @@
 use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
-use crate::arch::mm::paddr_to_vaddr;
-use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert, Vpn, VpnRange};
+use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
 use crate::mm::page_table::{
     self, ActivePageTableInner, PageSize, PageTableInner, UniversalPTEFlag,
@@ -11,8 +11,8 @@ use crate::mm::page_table::{
 /// Mapping stretagy type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapType {
-    /// Identical mapped (virtual address equals physical address)
-    Identical,
+    /// Direct mapped (virtual address = physical address + VIRTUAL_BASE)
+    Direct,
     /// Frame mapped (allocated from frame allocator)
     Framed,
 }
@@ -104,12 +104,17 @@ impl MappingArea {
     }
 
     /// Map a single virtual page to a physical page
-    pub fn map_one(&mut self, page_table: &mut ActivePageTableInner, vpn: Vpn) -> Result<(), page_table::PagingError> {
+    pub fn map_one(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        vpn: Vpn,
+    ) -> Result<(), page_table::PagingError> {
         let ppn = match self.map_type {
-            MapType::Identical => {
-                // For identical mapping, vpn equals ppn
-                use crate::mm::address::Ppn;
-                Ppn::from_usize(vpn.as_usize())
+            MapType::Direct => {
+                // For direct mapping, vpn equals ppn + offset
+                let vaddr = vpn.start_addr();
+                let paddr = vaddr_to_paddr(vaddr.as_usize());
+                Ppn::from_addr_floor(Paddr::from_usize(paddr))
             }
             MapType::Framed => {
                 // Allocate a new frame
@@ -120,13 +125,15 @@ impl MappingArea {
             }
         };
 
-        page_table
-            .map(vpn, ppn, PageSize::Size4K, self.permission)?;
+        page_table.map(vpn, ppn, PageSize::Size4K, self.permission)?;
         Ok(())
     }
 
     /// Map all pages in this mapping area
-    pub fn map(&mut self, page_table: &mut ActivePageTableInner) -> Result<(), page_table::PagingError> {
+    pub fn map(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+    ) -> Result<(), page_table::PagingError> {
         for vpn in self.vpn_range {
             self.map_one(page_table, vpn)?;
         }
@@ -134,7 +141,11 @@ impl MappingArea {
     }
 
     /// Unmap a single virtual page
-    pub fn unmap_one(&mut self, page_table: &mut ActivePageTableInner, vpn: Vpn) -> Result<(), page_table::PagingError> {
+    pub fn unmap_one(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        vpn: Vpn,
+    ) -> Result<(), page_table::PagingError> {
         page_table.unmap(vpn)?;
 
         // For framed mapping, remove the frame tracker
@@ -145,7 +156,10 @@ impl MappingArea {
     }
 
     /// Unmap all pages in this mapping area
-    pub fn unmap(&mut self, page_table: &mut ActivePageTableInner) -> Result<(), page_table::PagingError> {
+    pub fn unmap(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+    ) -> Result<(), page_table::PagingError> {
         for vpn in self.vpn_range {
             self.unmap_one(page_table, vpn)?;
         }
@@ -174,7 +188,8 @@ impl MappingArea {
 
             // Copy data to the physical page
             unsafe {
-                let dst = paddr.to_vaddr().as_mut_ptr::<u8>();
+                let dst_va = paddr_to_vaddr(paddr.as_usize());
+                let dst = dst_va as *mut u8;
                 let src = data.as_ptr().add(copied);
                 core::ptr::copy_nonoverlapping(src, dst, to_copy);
             }
@@ -197,7 +212,10 @@ impl MappingArea {
 
     /// Clone the mapping area along with its data
     /// Only supports framed mapping areas
-    pub fn clone_with_data(&self, _page_table: &mut ActivePageTableInner) -> Result<Self, page_table::PagingError> {
+    pub fn clone_with_data(
+        &self,
+        _page_table: &mut ActivePageTableInner,
+    ) -> Result<Self, page_table::PagingError> {
         let mut new_area = self.clone_metadata();
         if self.map_type != MapType::Framed {
             return Err(page_table::PagingError::UnsupportedMapType);
@@ -208,7 +226,8 @@ impl MappingArea {
             match tracked_frames {
                 TrackedFrames::Single(frame) => {
                     // 复制单个 4K 页
-                    let new_frame = alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+                    let new_frame =
+                        alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
                     let new_ppn = new_frame.ppn();
                     let src_ppn = frame.ppn();
 
@@ -219,18 +238,21 @@ impl MappingArea {
                         core::ptr::copy_nonoverlapping(
                             src_va as *const u8,
                             dst_va as *mut u8,
-                            crate::config::PAGE_SIZE
+                            crate::config::PAGE_SIZE,
                         );
                     }
 
-                    new_area.frames.insert(*vpn, TrackedFrames::Single(new_frame));
+                    new_area
+                        .frames
+                        .insert(*vpn, TrackedFrames::Single(new_frame));
                 }
                 TrackedFrames::Multiple(frames) => {
                     // 复制多个不连续的页
                     let mut new_frames = alloc::vec::Vec::new();
 
                     for frame in frames {
-                        let new_frame = alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+                        let new_frame =
+                            alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
                         let new_ppn = new_frame.ppn();
                         let src_ppn = frame.ppn();
 
@@ -241,14 +263,16 @@ impl MappingArea {
                             core::ptr::copy_nonoverlapping(
                                 src_va as *const u8,
                                 dst_va as *mut u8,
-                                crate::config::PAGE_SIZE
+                                crate::config::PAGE_SIZE,
                             );
                         }
 
                         new_frames.push(new_frame);
                     }
 
-                    new_area.frames.insert(*vpn, TrackedFrames::Multiple(new_frames));
+                    new_area
+                        .frames
+                        .insert(*vpn, TrackedFrames::Multiple(new_frames));
                 }
                 // TODO(暂时注释): 大页克隆逻辑
                 //
@@ -373,7 +397,7 @@ impl MappingArea {
 //
 //     fn allocate_for_huge_page(&mut self, vpn: Vpn, num_pages: usize) -> Result<Ppn, page_table::PagingError> {
 //         match self.map_type {
-//             MapType::Identical => {
+//             MapType::Direct => {
 //                 // 恒等映射：PPN = VPN
 //                 Ok(Ppn::from_usize(vpn.as_usize()))
 //             }
@@ -396,7 +420,7 @@ impl MappingArea {
 //
 //     fn allocate_for_small_page(&mut self, vpn: Vpn) -> Result<Ppn, page_table::PagingError> {
 //         match self.map_type {
-//             MapType::Identical => {
+//             MapType::Direct => {
 //                 Ok(Ppn::from_usize(vpn.as_usize()))
 //             }
 //             MapType::Framed => {

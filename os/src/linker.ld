@@ -1,14 +1,16 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
-BASE_ADDRESS = 0x80200000;
+PHYSICAL_BASE = 0x80200000;           /* 物理地址 */
+VIRTUAL_BASE = 0xffffffffc0200000;    /* 虚拟地址（高半核） */
 
 SECTIONS
 {
-    . = BASE_ADDRESS;
-    skernel = .;
+    . = VIRTUAL_BASE;                 /* 虚拟地址计数器 */
 
+    skernel = .;
     stext = .;
-    .text : {
+
+    .text : AT(PHYSICAL_BASE) {       /* AT() 指定物理地址 */
         *(.text.entry)
         *(.text .text.*)
     }
@@ -16,7 +18,7 @@ SECTIONS
     . = ALIGN(4K);
     etext = .;
     srodata = .;
-    .rodata : {
+    .rodata : AT(PHYSICAL_BASE + (srodata - VIRTUAL_BASE)) {
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
     }
@@ -24,14 +26,14 @@ SECTIONS
     . = ALIGN(4K);
     erodata = .;
     sdata = .;
-    .data : {
+    .data : AT(PHYSICAL_BASE + (sdata - VIRTUAL_BASE)) {
         *(.data .data.*)
         *(.sdata .sdata.*)
     }
 
     . = ALIGN(4K);
     edata = .;
-    .bss : {
+    .bss : AT(PHYSICAL_BASE + (edata - VIRTUAL_BASE)) {
         *(.bss.stack)
         sbss = .;
         *(.bss .bss.*)
