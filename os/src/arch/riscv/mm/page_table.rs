@@ -1,7 +1,11 @@
-use crate::mm::address::{PageNum, Ppn, UsizeConvert, Vaddr, Vpn, Paddr, ConvertablePaddr};
+use super::PageTableEntry;
+use crate::mm::address::{
+    AlignOps, ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert, Vaddr, Vpn, VpnRange,
+};
 use crate::mm::frame_allocator::FrameTracker;
 use crate::mm::page_table::{
-    PageSize, PageTableInner as PageTableInnerTrait, PagingError, PagingResult, UniversalPTEFlag, PageTableEntry as PageTableEntryTrait
+    PageSize, PageTableEntry as PageTableEntryTrait, PageTableInner as PageTableInnerTrait,
+    PagingError, PagingResult, UniversalPTEFlag,
 };
 use alloc::vec::Vec;
 
@@ -162,9 +166,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
     ) -> PagingResult<()> {
         // Validate flags: leaf pages must have at least one of R/W/X set
         if !flags.intersects(
-            UniversalPTEFlag::Readable
-                | UniversalPTEFlag::Writeable
-                | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::Readable | UniversalPTEFlag::Writeable | UniversalPTEFlag::Executable,
         ) {
             return Err(PagingError::InvalidFlags);
         }

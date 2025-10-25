@@ -2,7 +2,7 @@
 mod rr_scheduler;
 use alloc::vec::Vec;
 
-use crate::kernel::task_info::TaskInfo;
+use crate::kernel::task::Task;
 
 /// 调度器接口定义
 pub trait Scheduler {
@@ -13,8 +13,8 @@ pub trait Scheduler {
     fn schedule(&mut self); // 核心调度逻辑 (调用 switch_to)
 
     // 任务管理
-    fn add_task(&mut self, task: TaskInfo); // 任务首次创建或从阻塞队列返回
-    fn next_task(&mut self) -> TaskInfo; // 选择下一个要运行的任务
+    fn add_task(&mut self, task: Task); // 任务首次创建或从阻塞队列返回
+    fn next_task(&mut self) -> Task; // 选择下一个要运行的任务
 
     // 状态转换 (由任务自身或中断调用)
     fn yield_task(&mut self); // 主动放弃 CPU
@@ -26,7 +26,7 @@ pub trait Scheduler {
 /// 简单的等待队列结构体
 /// 用于任务阻塞和唤醒
 pub struct WaitQueue {
-    queue: Vec<TaskInfo>,
+    queue: Vec<Task>,
 }
 
 impl WaitQueue {
@@ -36,17 +36,17 @@ impl WaitQueue {
     }
 
     /// 向等待队列添加任务
-    pub fn add_task(&mut self, task: TaskInfo) {
+    pub fn add_task(&mut self, task: Task) {
         self.queue.push(task);
     }
 
     /// 从等待队列中移除任务
-    pub fn remove_task(&mut self, task: &TaskInfo) {
+    pub fn remove_task(&mut self, task: &Task) {
         self.queue.retain(|t| t.tid != task.tid);
     }
 
     /// 从等待队列中弹出一个任务
-    pub fn pop_task(&mut self) -> Option<TaskInfo> {
+    pub fn pop_task(&mut self) -> Option<Task> {
         if !self.queue.is_empty() {
             Some(self.queue.remove(0))
         } else {
@@ -58,7 +58,7 @@ impl WaitQueue {
 /// 运行队列
 /// 用于存放可运行的任务
 pub struct RunQueue {
-    queue: Vec<TaskInfo>,
+    queue: Vec<Task>,
 }
 
 impl RunQueue {
@@ -68,17 +68,17 @@ impl RunQueue {
     }
 
     /// 向运行队列添加任务
-    pub fn add_task(&mut self, task: TaskInfo) {
+    pub fn add_task(&mut self, task: Task) {
         self.queue.push(task);
     }
 
     /// 从运行队列中移除任务
-    pub fn remove_task(&mut self, task: &TaskInfo) {
+    pub fn remove_task(&mut self, task: &Task) {
         self.queue.retain(|t| t.tid != task.tid);
     }
 
     /// 从运行队列中弹出一个任务
-    pub fn pop_task(&mut self) -> Option<TaskInfo> {
+    pub fn pop_task(&mut self) -> Option<Task> {
         if !self.queue.is_empty() {
             Some(self.queue.remove(0))
         } else {
