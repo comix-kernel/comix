@@ -12,7 +12,9 @@ pub type ActivePageTableInner = crate::arch::mm::PageTableInner;
 /// Supported page sizes
 pub enum PageSize {
     Size4K = 0x1000,
+    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
     Size2M = 0x20_0000,
+    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
     Size1G = 0x4000_0000,
     // ban bigger sizes for now
 }
@@ -27,6 +29,7 @@ pub enum PagingError {
     /// Invalid address provided
     InvalidAddress,
     /// The operation failed due to a conflict with an existing huge page mapping.
+    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
     HugePageConflict,
     /// Invalid Flags provided
     InvalidFlags,
@@ -37,6 +40,7 @@ pub enum PagingError {
     /// Cannot shrink the area below its start
     ShrinkBelowStart,
     /// Huge page splitting is not implemented
+    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
     HugePageSplitNotImplemented,
 }
 

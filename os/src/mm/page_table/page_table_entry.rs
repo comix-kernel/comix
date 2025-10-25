@@ -16,6 +16,7 @@ bitflags::bitflags! {
         const Dirty = 1 << 7;               // Indicates whether the page has been written to
 
         // ---- Additional universal flags ----
+        #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
         const Huge = 1 << 8;                // Indicates whether the page is a huge page ()
     }
 }
