@@ -1,3 +1,4 @@
+use crate::arch::mm::{vaddr_to_paddr, paddr_to_vaddr};
 use crate::mm::address::{Ppn, Vpn, VpnRange, Vaddr, PageNum, UsizeConvert};
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
 use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag};
@@ -198,13 +199,17 @@ impl MemorySpace {
         )
         .expect("Failed to map kernel bss");
 
-        // 5. Map physical memory (using 4KB pages, identical mapping)
-        let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(ekernel as usize));
-        let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(MEMORY_END));
+        // 5. Map physical memory (using 4KB pages, direct mapping)
+        let ekernel_paddr = vaddr_to_paddr(ekernel as usize);
+        let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
+        let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
+
+        let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_start_vaddr));
+        let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_end_vaddr));
         let mut phys_mem_area = MappingArea::new(
             VpnRange::new(phys_mem_start, phys_mem_end),
             AreaType::KernelHeap,
-            MapType::Identical,
+            MapType::Direct,
             UniversalPTEFlag::kernel_rw(),
         );
 
@@ -240,7 +245,7 @@ impl MemorySpace {
         let mut area = MappingArea::new(
             VpnRange::new(vpn_start, vpn_end),
             area_type,
-            MapType::Identical,
+            MapType::Direct,
             flags,
         );
 
@@ -261,7 +266,7 @@ impl MemorySpace {
         let mut area = MappingArea::new(
             VpnRange::new(vpn_start, vpn_end),
             AreaType::KernelMmio,
-            MapType::Identical,
+            MapType::Direct,
             UniversalPTEFlag::kernel_rw(),
         );
 
@@ -508,7 +513,7 @@ impl MemorySpace {
     /// Clones the memory space (for fork system call)
     ///
     /// # Note
-    /// - Identical mappings are shared (no copy)
+    /// - Direct mappings are shared (no copy)
     /// - Framed mappings are deep copied
     pub fn clone_for_fork(&self) -> Result<Self, PagingError> {
         let mut new_space = MemorySpace::new();
@@ -516,8 +521,8 @@ impl MemorySpace {
 
         for area in &self.areas {
             match area.map_type() {
-                MapType::Identical => {
-                    // Identical mapping: clone metadata and remap to new page table
+                MapType::Direct => {
+                    // Direct mapping: clone metadata and remap to new page table
                     let mut new_area = area.clone_metadata();
                     new_area.map(&mut new_space.page_table)?;
                     new_space.areas.push(new_area);

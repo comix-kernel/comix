@@ -17,6 +17,7 @@ mod sync;
 #[macro_use]
 mod test;
 use crate::arch::intr;
+use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
 use crate::sbi::shutdown;
@@ -56,7 +57,10 @@ pub extern "C" fn rust_main() -> ! {
         fn ekernel();
     }
     clear_bss();
-    mm::init_frame_allocator(ekernel as usize, config::MEMORY_END);
+
+    let ekernel_paddr = vaddr_to_paddr(ekernel as usize);
+    mm::init_frame_allocator(ekernel_paddr, config::MEMORY_END);
+
     mm::init_heap();
     println!("Hello, world!");
 
@@ -92,7 +96,14 @@ fn clear_bss() {
         fn ebss();
     }
 
-    (sbss as usize..ebss as usize).for_each(|a| unsafe { (a as *mut u8).write_volatile(0) });
+    let sbss_paddr = vaddr_to_paddr(sbss as usize);
+    let ebss_paddr = vaddr_to_paddr(ebss as usize);
+
+    (sbss_paddr..ebss_paddr).for_each(|a| unsafe {
+        // 访问物理地址需要通过 paddr_to_vaddr 转换
+        let va = crate::arch::mm::paddr_to_vaddr(a);
+        (va as *mut u8).write_volatile(0)
+    });
 }
 
 #[cfg(test)]
