@@ -162,6 +162,12 @@ where
         self.start >= other.start && self.end <= other.end
     }
 
+    /// check if two ranges overlap
+    /// Note: PageNumRange is [start, end), adjacent ranges do NOT overlap
+    pub fn overlaps(&self, other: &Self) -> bool {
+        !(self.end <= other.start || self.start >= other.end)
+    }
+
     /// get an iterator over the range
     pub fn iter(&self) -> PageNumRangeIterator<T> {
         PageNumRangeIterator {
