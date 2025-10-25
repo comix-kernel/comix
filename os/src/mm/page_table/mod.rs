@@ -45,4 +45,3 @@ pub enum PagingError {
 }
 
 pub type PagingResult<T> = Result<T, PagingError>;
-

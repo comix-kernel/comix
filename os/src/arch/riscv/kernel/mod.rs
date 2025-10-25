@@ -3,6 +3,7 @@ use core::arch::global_asm;
 use crate::arch::kernel::context::Context;
 
 pub mod context;
+pub mod cpu;
 
 global_asm!(include_str!("switch.S"));
 
