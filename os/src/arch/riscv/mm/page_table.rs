@@ -1,5 +1,4 @@
-use super::PageTableEntry;
-use crate::mm::address::{AlignOps, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, Paddr, ConvertablePaddr};
+use crate::mm::address::{PageNum, Ppn, UsizeConvert, Vaddr, Vpn, Paddr, ConvertablePaddr};
 use crate::mm::frame_allocator::FrameTracker;
 use crate::mm::page_table::{
     PageSize, PageTableInner as PageTableInnerTrait, PagingError, PagingResult, UniversalPTEFlag, PageTableEntry as PageTableEntryTrait
@@ -109,12 +108,14 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             }
 
             if current_level == level {
-                let page_size = match level {
-                    2 => PageSize::Size1G,
-                    1 => PageSize::Size2M,
-                    0 => PageSize::Size4K,
-                    _ => unreachable!(),
-                };
+                // TODO(暂时注释): 当前仅支持4K页
+                // let page_size = match level {
+                //     2 => PageSize::Size1G,
+                //     1 => PageSize::Size2M,
+                //     0 => PageSize::Size4K,
+                //     _ => unreachable!(),
+                // };
+                let page_size = PageSize::Size4K; // 仅支持4K页
                 return Some((*pte, page_size));
             }
 
@@ -128,20 +129,23 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
         let vpn = Vpn::from_addr_ceil(vaddr);
         let offset = vaddr.as_usize() & 0xfff; // Lower 12 bits for page offset
 
+        // TODO(暂时注释): 当前仅支持4K页，大页translation逻辑已禁用
         match self.walk(vpn) {
             Ok((ppn, page_size, _flags)) => {
                 let paddr_base = match page_size {
                     PageSize::Size4K => ppn.start_addr().as_usize(),
-                    PageSize::Size2M => {
-                        // For 2M pages, preserve the lower 21 bits from vaddr
-                        let offset_2m = vaddr.as_usize() & 0x1f_ffff;
-                        ppn.start_addr().as_usize() + offset_2m - offset
-                    }
-                    PageSize::Size1G => {
-                        // For 1G pages, preserve the lower 30 bits from vaddr
-                        let offset_1g = vaddr.as_usize() & 0x3fff_ffff;
-                        ppn.start_addr().as_usize() + offset_1g - offset
-                    }
+                    // TODO(暂时注释): 大页偏移计算
+                    // PageSize::Size2M => {
+                    //     // For 2M pages, preserve the lower 21 bits from vaddr
+                    //     let offset_2m = vaddr.as_usize() & 0x1f_ffff;
+                    //     ppn.start_addr().as_usize() + offset_2m - offset
+                    // }
+                    // PageSize::Size1G => {
+                    //     // For 1G pages, preserve the lower 30 bits from vaddr
+                    //     let offset_1g = vaddr.as_usize() & 0x3fff_ffff;
+                    //     ppn.start_addr().as_usize() + offset_1g - offset
+                    // }
+                    _ => ppn.start_addr().as_usize(), // 默认按4K处理
                 };
                 Some(Paddr::from_usize(paddr_base + offset))
             }
@@ -153,7 +157,7 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
         &mut self,
         vpn: Vpn,
         ppn: Ppn,
-        page_size: PageSize,
+        _page_size: PageSize,
         flags: UniversalPTEFlag,
     ) -> PagingResult<()> {
         // Validate flags: leaf pages must have at least one of R/W/X set
@@ -165,12 +169,14 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             return Err(PagingError::InvalidFlags);
         }
 
+        // TODO(暂时注释): 当前仅支持4K页，强制使用level 0
         // Determine the target level based on page size
-        let target_level = match page_size {
-            PageSize::Size1G => 2,
-            PageSize::Size2M => 1,
-            PageSize::Size4K => 0,
-        };
+        // let target_level = match page_size {
+        //     PageSize::Size1G => 2,
+        //     PageSize::Size2M => 1,
+        //     PageSize::Size4K => 0,
+        // };
+        let target_level = 0; // 仅支持4K页
 
         let mut current_ppn = self.root;
         let vpn_value = vpn.as_usize();
@@ -323,12 +329,14 @@ impl PageTableInnerTrait<super::PageTableEntry> for PageTableInner {
             }
 
             if pte.is_huge() || level == 0 {
-                let page_size = match level {
-                    2 => PageSize::Size1G,
-                    1 => PageSize::Size2M,
-                    0 => PageSize::Size4K,
-                    _ => unreachable!(),
-                };
+                // TODO(暂时注释): 当前仅支持4K页
+                // let page_size = match level {
+                //     2 => PageSize::Size1G,
+                //     1 => PageSize::Size2M,
+                //     0 => PageSize::Size4K,
+                //     _ => unreachable!(),
+                // };
+                let page_size = PageSize::Size4K; // 仅支持4K页
                 return Ok((pte.ppn(), page_size, pte.flags()));
             }
 
