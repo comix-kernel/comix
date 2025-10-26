@@ -1,4 +1,5 @@
 pub mod kerneltrap;
+pub mod usertrap;
 
 use core::arch::global_asm;
 use riscv::register::{
