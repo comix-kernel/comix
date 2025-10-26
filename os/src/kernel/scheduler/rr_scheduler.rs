@@ -1,25 +1,27 @@
-use crate::{
-    arch::kernel::switch,
-    kernel::{
-        scheduler::{RunQueue, Scheduler, WaitQueue},
-        task::{Task, TaskState},
-    },
+use alloc::sync::Arc;
+
+use crate::kernel::{
+    TaskState,
+    scheduler::{Scheduler, task_queue::TaskQueue},
+    task::SharedTask,
 };
+
+const DEFAULT_TIME_SLICE: usize = 5; // 默认时间片长度（以时钟中断滴答数为单位）
 
 /// 简单的轮转调度器实现
 /// 每个任务按顺序轮流获得 CPU 时间片
 // XXX: 现在的实现是单核的。
 pub struct RRScheduler {
     // 运行队列
-    run_queue: RunQueue,
-    // 睡眠队列
-    sleep_queues: WaitQueue,
+    run_queue: TaskQueue,
+    // 等待队列
+    wait_queue: TaskQueue,
     // 时间片长度（以时钟中断滴答数为单位）
     time_slice: usize,
     // 当前时间片剩余时间
     current_slice: usize,
     // 正在运行的任务
-    current_task: Option<Task>,
+    current_task: Option<SharedTask>,
 }
 
 impl RRScheduler {
@@ -38,63 +40,55 @@ impl RRScheduler {
 impl Scheduler for RRScheduler {
     fn new() -> Self {
         RRScheduler {
-            run_queue: RunQueue::new(),
-            sleep_queues: WaitQueue::new(),
-            time_slice: 5, // 假设每个任务的时间片为5个时钟中断滴答
-            current_slice: 5,
+            run_queue: TaskQueue::new(),
+            wait_queue: TaskQueue::new(),
+            time_slice: DEFAULT_TIME_SLICE,
+            current_slice: DEFAULT_TIME_SLICE,
             current_task: None,
         }
     }
 
     fn schedule(&mut self) {
-        let next_task = self.next_task();
-
-        if let Some(current_task) = self.current_task.as_mut() {
-            unsafe {
-                switch(
-                    &mut current_task.context as *mut _,
-                    &next_task.context as *const _,
-                );
-            }
+        if self.run_queue.is_empty() {
+            return;
         }
 
-        // 将 next_task 放到 current_task
-        // XXX: 注意地址稳定性问题,不要对栈上的临时 next_task 取指针然后再移动它
-        self.current_task = Some(next_task);
-        match self.run_queue.pop_task() {
-            Some(next_task) => {
-                if let Some(current_task) = self.current_task.as_mut() {
-                    unsafe {
-                        switch(
-                            &mut current_task.context as *mut _,
-                            &next_task.context as *const _,
-                        );
-                    }
+        let prev_task = self.current_task.take();
+
+        if let Some(task) = prev_task {
+            let state = unsafe { task.lock().state };
+
+            match state {
+                // 如果是 Running 状态，说明是时间片用尽，重新加入运行队列
+                TaskState::Running => {
+                    self.run_queue.add_task(task);
                 }
-                self.current_task = Some(next_task);
-                self.current_slice = self.time_slice;
-            }
-            None => {
-                self.current_slice = self.time_slice;
+                // 如果是 Sleeping/Interruptable/Stopped/Terminated 等状态，
+                // 那么它已经被 sleep_task/exit_task 处理了，无需再加入 run_queue
+                _ => {
+                    // 如果是 sleep/exit 导致的 schedule，任务已经被移除，这里无需操作
+                }
             }
         }
+
+        let next_task = self.next_task();
+        self.current_task = Some(next_task);
+
+        // 4. 触发上下文切换 (此处省略)
     }
 
-    fn add_task(&mut self, task: Task) {
-        match task.state {
+    fn add_task(&mut self, task: SharedTask) {
+        match unsafe { task.lock().state } {
             TaskState::Running => {
-                // 将任务添加到运行队列
-                self.run_queue.queue.push(task);
+                self.run_queue.add_task(task);
             }
             _ => {
-                // 将任务添加到睡眠队列
-                self.sleep_queues.queue.push(task);
+                self.wait_queue.add_task(task);
             }
         }
     }
 
-    fn next_task(&mut self) -> Task {
-        // 从运行队列中选择下一个任务
+    fn next_task(&mut self) -> SharedTask {
         if let Some(task) = self.run_queue.pop_task() {
             task
         } else {
@@ -106,15 +100,54 @@ impl Scheduler for RRScheduler {
         self.schedule();
     }
 
-    fn sleep_task(&mut self, _wq: &WaitQueue) {
-        todo!()
+    fn sleep_task(&mut self, task: SharedTask) {
+        self.run_queue.remove_task(&task);
+
+        unsafe { task.lock().state = TaskState::Interruptable };
+
+        if !self.wait_queue.contains(&task) {
+            self.wait_queue.add_task(task.clone());
+        }
+
+        if let Some(cur) = &self.current_task {
+            if Arc::ptr_eq(cur, &task) {
+                self.current_task = None;
+                self.schedule();
+            }
+        }
     }
 
-    fn wake_up(&mut self, _wq: &WaitQueue) {
-        todo!()
+    fn wake_up(&mut self, task: SharedTask) {
+        self.wait_queue.remove_task(&task);
+
+        unsafe { task.lock().state = TaskState::Running };
+
+        if !self.run_queue.contains(&task) {
+            self.run_queue.add_task(task.clone());
+        }
     }
 
-    fn exit_task(&mut self, _code: i32) {
-        todo!()
+    fn exit_task(&mut self, task: SharedTask, code: i32) {
+        let state: TaskState;
+        unsafe {
+            let mut t = task.lock();
+            state = t.state;
+            t.exit_code = Some(code);
+            t.state = TaskState::Stopped;
+        }
+        match state {
+            TaskState::Running => {
+                self.run_queue.remove_task(&task);
+            }
+            _ => {
+                self.wait_queue.remove_task(&task);
+            }
+        }
+        if let Some(cur) = &self.current_task {
+            if Arc::ptr_eq(cur, &task) {
+                self.current_task = None;
+                self.schedule();
+            }
+        }
     }
 }
