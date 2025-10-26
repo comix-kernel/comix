@@ -1,6 +1,9 @@
 use alloc::sync::Arc;
 
-use crate::{arch::kernel::context::Context, kernel::TaskStruct, mm::memory_space::MemorySpace};
+use crate::{
+    arch::kernel::context::Context, kernel::TaskStruct, mm::memory_space::MemorySpace,
+    sync::spin_lock::SpinLock,
+};
 
 /// CPU 结构体
 pub struct Cpu {
@@ -24,7 +27,7 @@ impl Cpu {
     }
 }
 
-pub fn current_cpu() -> &'static Cpu {
+pub fn current_cpu() -> &'static SpinLock<Cpu> {
     let cpu_id = crate::arch::kernel::cpu::cpu_id();
     &crate::kernel::CPUS[cpu_id]
 }
