@@ -8,9 +8,14 @@ mod tid_allocator;
 pub use task_state::TaskState;
 pub use task_struct::Task as TaskStruct;
 
-use crate::kernel::{
-    cpu::current_cpu,
-    scheduler::{SCHEDULER, Scheduler},
+pub type SharedTask = Arc<SpinLock<TaskStruct>>;
+
+use crate::{
+    kernel::{
+        cpu::current_cpu,
+        scheduler::{SCHEDULER, Scheduler},
+    },
+    sync::spin_lock::SpinLock,
 };
 
 lazy_static! {
@@ -30,8 +35,8 @@ lazy_static! {
 /// * `entry_point`: 线程开始执行的函数地址
 ///
 /// # 返回值
-/// 包含新创建任务的 Arc<Task>
-pub fn kthread_spawn(entry_point: fn()) -> Arc<TaskStruct> {
+/// Task id
+pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let entry_addr = entry_point as usize;
     let cur_task = current_cpu().current_task.as_ref().unwrap();
     let ppid = cur_task.pid;
@@ -39,12 +44,17 @@ pub fn kthread_spawn(entry_point: fn()) -> Arc<TaskStruct> {
     let mut task = TaskStruct::ktask_create(ppid);
     task.init_kernel_thread_context(entry_addr);
 
+    let tid = task.tid;
     // TODO: 将物理页映射到连续的虚拟地址 (kstack_base)
     // NOTE: 内核线程共享内核地址空间，映射逻辑相对简单
 
     // 将任务加入全局任务队列
-    let task = Arc::new(task);
-    unsafe { SCHEDULER.lock().add_task(task.clone()) };
+    unsafe { SCHEDULER.lock().add_task(into_shared(task)) };
 
-    task
+    tid
+}
+
+/// 把已初始化的 TaskStruct 包装为共享任务句柄
+pub fn into_shared(task: TaskStruct) -> SharedTask {
+    Arc::new(SpinLock::new(task))
 }
