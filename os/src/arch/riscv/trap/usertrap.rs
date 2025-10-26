@@ -2,7 +2,7 @@
 #[repr(C)] // 确保 Rust 不会重新排列字段
 #[derive(Debug, Clone, Copy)]
 pub struct TrapFrame {
-    pub epc: usize, // 程序计数器
+    pub epc: usize,     // 程序计数器
     pub x1_ra: usize,   // 8(sp)
     pub x2_sp: usize,   // 16(sp)
     pub x3_gp: usize,   // 24(sp)
