@@ -8,45 +8,18 @@
 //! - Heap memory region defined by linker symbols
 //! - Initialization function to set up the heap
 
-use lock_api::{GuardSend, RawMutex};
+use crate::sync::raw_spin_lock_without_guard::RawSpinLockWithoutGuard;
 use talc::{Span, Talc, Talck};
-
-/// Empty mutex implementation for single-core, single-task environment
-///
-/// This is a zero-overhead placeholder that provides no actual locking,
-/// as it's only used before multitasking is enabled.
-///
-/// TODO: Replace with proper synchronization primitive when multitasking is implemented
-pub struct EmptyRawMutex;
-
-unsafe impl RawMutex for EmptyRawMutex {
-    #[allow(clippy::declare_interior_mutable_const)]
-    const INIT: Self = EmptyRawMutex;
-
-    type GuardMarker = GuardSend;
-
-    fn lock(&self) {
-        // No-op: single-task environment doesn't need locking
-    }
-
-    fn try_lock(&self) -> bool {
-        // Always succeeds: no contention possible
-        true
-    }
-
-    unsafe fn unlock(&self) {
-        // No-op: nothing to unlock
-    }
-}
 
 /// Global heap allocator instance
 ///
-/// Uses talc's lock-based allocator (Talck) with a placeholder empty mutex.
-/// In single-core, single-task environment, locking is not needed.
+/// Uses talc's lock-based allocator (Talck) with our custom `RawSpinLockWithoutGuard`.
+/// This lock implements `lock_api::RawMutex` and provides interrupt protection
+/// to prevent deadlocks when interrupt handlers allocate memory.
 ///
 /// Initialized with an empty span; actual memory will be claimed in init_heap().
 #[global_allocator]
-static ALLOCATOR: Talck<EmptyRawMutex, talc::ClaimOnOom> =
+static ALLOCATOR: Talck<RawSpinLockWithoutGuard, talc::ClaimOnOom> =
     Talc::new(unsafe { talc::ClaimOnOom::new(Span::empty()) }).lock();
 
 /// Initialize the heap allocator with the heap memory region defined in linker script
