@@ -1,11 +1,8 @@
 use alloc::sync::Arc;
 
-use crate::{
-    arch::kernel::switch,
-    kernel::{
-        TaskState, TaskStruct,
-        scheduler::{RunQueue, Scheduler, WaitQueue},
-    },
+use crate::kernel::{
+    TaskState, TaskStruct,
+    scheduler::{Scheduler, task_queue::TaskQueue},
 };
 
 /// 简单的轮转调度器实现
@@ -13,9 +10,9 @@ use crate::{
 // XXX: 现在的实现是单核的。
 pub struct RRScheduler {
     // 运行队列
-    run_queue: RunQueue,
+    run_queue: TaskQueue,
     // 睡眠队列
-    sleep_queues: WaitQueue,
+    sleep_queues: TaskQueue,
     // 时间片长度（以时钟中断滴答数为单位）
     time_slice: usize,
     // 当前时间片剩余时间
@@ -40,8 +37,8 @@ impl RRScheduler {
 impl Scheduler for RRScheduler {
     fn new() -> Self {
         RRScheduler {
-            run_queue: RunQueue::new(),
-            sleep_queues: WaitQueue::new(),
+            run_queue: TaskQueue::new(),
+            sleep_queues: TaskQueue::new(),
             time_slice: 5, // 假设每个任务的时间片为5个时钟中断滴答
             current_slice: 5,
             current_task: None,
@@ -56,11 +53,11 @@ impl Scheduler for RRScheduler {
         match task.state {
             TaskState::Running => {
                 // 将任务添加到运行队列
-                self.run_queue.queue.push(task);
+                self.run_queue.add_task(task);
             }
             _ => {
                 // 将任务添加到睡眠队列
-                self.sleep_queues.queue.push(task);
+                self.sleep_queues.add_task(task);
             }
         }
     }
@@ -78,11 +75,11 @@ impl Scheduler for RRScheduler {
         self.schedule();
     }
 
-    fn sleep_task(&mut self, _wq: &WaitQueue) {
+    fn sleep_task(&mut self) {
         todo!()
     }
 
-    fn wake_up(&mut self, _wq: &WaitQueue) {
+    fn wake_up(&mut self) {
         todo!()
     }
 
