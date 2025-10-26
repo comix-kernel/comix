@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use core::ptr::addr_of_mut;
-
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert};
+use crate::sync::spin_lock::SpinLock;
 use alloc::vec::Vec;
+use lazy_static::lazy_static;
 
 #[derive(Debug)]
 pub struct FrameTracker(Ppn);
@@ -75,12 +75,9 @@ pub enum TrackedFrames {
     Contiguous(FrameRangeTracker),
 }
 
-/// TODO: replace with proper synchronization primitive
-///
-/// global frame allocator instance
-///
-/// use static mut in single-core environment without multitasking
-static mut FRAME_ALLOCATOR: Option<FrameAllocator> = None;
+lazy_static! {
+    static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
+}
 
 struct FrameAllocator {
     start: Ppn,
@@ -258,47 +255,42 @@ impl FrameAllocator {
     }
 }
 
-/// TODO: replace with proper synchronization primitive
+/// initialize the global frame allocator with the available physical memory range
 ///
-/// initialize the global frame allocator while booting
+/// # Parameters
+///
+/// * `start_addr` - start address of the available physical memory
+/// * `end_addr` - end address of the available physical memory
 pub fn init_frame_allocator(start_addr: usize, end_addr: usize) {
     let start_ppn = Ppn::from_addr_ceil(Paddr::from_usize(start_addr));
     let end_ppn = Ppn::from_addr_floor(Paddr::from_usize(end_addr));
 
     unsafe {
-        let allocator_ptr = addr_of_mut!(FRAME_ALLOCATOR);
-        if (*allocator_ptr).is_none() {
-            let mut allocator = FrameAllocator::new();
-            allocator.init(start_ppn, end_ppn);
-            *allocator_ptr = Some(allocator);
-        }
+        let mut allocator = FRAME_ALLOCATOR.lock();
+        allocator.init(start_ppn, end_ppn);
     }
 }
 
 /// allocate a single frame
 pub fn alloc_frame() -> Option<FrameTracker> {
-    unsafe { (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut()?.alloc_frame() }
+    unsafe { FRAME_ALLOCATOR.lock().alloc_frame() }
 }
 
 /// allocate multiple frames (may not be contiguous)
 pub fn alloc_frames(num: usize) -> Option<Vec<FrameTracker>> {
-    unsafe { (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut()?.alloc_frames(num) }
+    unsafe { FRAME_ALLOCATOR.lock().alloc_frames(num) }
 }
 
 /// allocate contiguous frames
 pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
-    unsafe {
-        (*addr_of_mut!(FRAME_ALLOCATOR))
-            .as_mut()?
-            .alloc_contig_frames(num)
-    }
+    unsafe { FRAME_ALLOCATOR.lock().alloc_contig_frames(num) }
 }
 
 /// allocate contiguous frames with alignment
 pub fn alloc_contig_frames_aligned(num: usize, align_pages: usize) -> Option<FrameRangeTracker> {
     unsafe {
-        (*addr_of_mut!(FRAME_ALLOCATOR))
-            .as_mut()?
+        FRAME_ALLOCATOR
+            .lock()
             .alloc_contig_frames_aligned(num, align_pages)
     }
 }
@@ -306,19 +298,16 @@ pub fn alloc_contig_frames_aligned(num: usize, align_pages: usize) -> Option<Fra
 /// deallocate a single frame
 fn dealloc_frame(frame: &FrameTracker) {
     unsafe {
-        if let Some(allocator) = (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut() {
-            allocator.dealloc_frame(frame);
-        }
+        FRAME_ALLOCATOR.lock().dealloc_frame(frame);
     }
 }
 
 /// deallocate multiple frames (may not be contiguous)
 fn dealloc_frames(frames: &[FrameTracker]) {
     unsafe {
-        if let Some(allocator) = (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut() {
-            for frame in frames {
-                allocator.dealloc_frame(frame);
-            }
+        let mut allocator = FRAME_ALLOCATOR.lock();
+        for frame in frames {
+            allocator.dealloc_frame(frame);
         }
     }
 }
@@ -326,8 +315,6 @@ fn dealloc_frames(frames: &[FrameTracker]) {
 /// deallocate contiguous frames
 fn dealloc_contig_frames(frame_range: &FrameRangeTracker) {
     unsafe {
-        if let Some(allocator) = (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut() {
-            allocator.dealloc_contig_frames(frame_range);
-        }
+        FRAME_ALLOCATOR.lock().dealloc_contig_frames(frame_range);
     }
 }
