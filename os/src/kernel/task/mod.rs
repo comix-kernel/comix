@@ -8,6 +8,11 @@ mod tid_allocator;
 pub use task_state::TaskState;
 pub use task_struct::Task as TaskStruct;
 
+use crate::kernel::{
+    cpu::current_cpu,
+    scheduler::{SCHEDULER, Scheduler},
+};
+
 lazy_static! {
     static ref TID_ALLOCATOR: tid_allocator::TidAllocator = tid_allocator::TidAllocator::new();
 }
@@ -26,19 +31,20 @@ lazy_static! {
 ///
 /// # 返回值
 /// 包含新创建任务的 Arc<Task>
-pub fn kthread_spawn(_entry_point: fn()) -> Arc<TaskStruct> {
-    // 1. 分配内核栈 (假设 FrameTracker::alloc_one() 存在)
-    // let kstack_tracker = FrameTracker::alloc_one().expect("Failed to allocate kernel stack");
-    // let kstack_paddr = kstack_tracker.get_paddr();
+pub fn kthread_spawn(entry_point: fn()) -> Arc<TaskStruct> {
+    let entry_addr = entry_point as usize;
+    let cur_task = current_cpu().current_task.as_ref().unwrap();
+    let ppid = cur_task.pid;
+    // 分配 Task 结构体和内核栈
+    let mut task = TaskStruct::ktask_create(ppid);
+    task.init_kernel_thread_context(entry_addr);
 
-    // 2. 将物理页映射到连续的虚拟地址 (kstack_base)
+    // TODO: 将物理页映射到连续的虚拟地址 (kstack_base)
     // NOTE: 内核线程共享内核地址空间，映射逻辑相对简单
 
-    // 3. 构建 Task 实例
-    // let task = Task { /* ... 初始化字段 ... */ };
+    // 将任务加入全局任务队列
+    let task = Arc::new(task);
+    unsafe { SCHEDULER.lock().add_task(task.clone()) };
 
-    // 4. 将任务加入全局任务队列
-    // SCHEDULER.add_task(task.clone());
-
-    unimplemented!("kthread_spawn 核心逻辑尚未实现")
+    task
 }
