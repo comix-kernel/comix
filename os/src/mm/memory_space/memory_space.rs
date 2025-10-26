@@ -1,8 +1,8 @@
 use crate::arch::mm::{vaddr_to_paddr, paddr_to_vaddr};
-use crate::mm::address::{Ppn, Vpn, VpnRange, Vaddr, PageNum, UsizeConvert};
+use crate::mm::address::{Ppn, Vpn, VpnRange, Vaddr, Paddr, PageNum, UsizeConvert};
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
-use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag};
-use crate::config::{MEMORY_END, TRAP_CONTEXT, USER_STACK_TOP, USER_STACK_SIZE, MAX_USER_HEAP_SIZE};
+use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag, PageSize};
+use crate::config::{MEMORY_END, TRAP_CONTEXT, USER_STACK_TOP, USER_STACK_SIZE, MAX_USER_HEAP_SIZE, TRAMPOLINE, PAGE_SIZE};
 use crate::sync::spin_lock::SpinLock;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
@@ -18,6 +18,7 @@ unsafe extern "C" {
     fn sbss();
     fn ebss();
     fn ekernel();
+    fn strampoline();
 }
 
 lazy_static! {
@@ -83,6 +84,42 @@ impl MemorySpace {
     /// Returns the root page table PPN
     pub fn root_ppn(&self) -> Ppn {
         self.page_table.root_ppn()
+    }
+
+    /// Maps the trampoline page to both kernel and user space
+    fn map_trampoline(&mut self) -> Result<(), PagingError> {
+        let trampoline_vpn = Vpn::from_addr_floor(Vaddr::from_usize(TRAMPOLINE));
+
+        // High-half kernel: strampoline is a virtual address, needs conversion to physical
+        let strampoline_paddr = unsafe { vaddr_to_paddr(strampoline as usize) };
+        let trampoline_ppn = Ppn::from_addr_floor(Paddr::from_usize(strampoline_paddr));
+
+        self.page_table.map(
+            trampoline_vpn,
+            trampoline_ppn,
+            PageSize::Size4K,
+            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::Executable,
+        )?;
+
+        Ok(())
+    }
+
+    /// Maps the trampoline page to user space (with user access permission)
+    fn map_trampoline_user(&mut self) -> Result<(), PagingError> {
+        let trampoline_vpn = Vpn::from_addr_floor(Vaddr::from_usize(TRAMPOLINE));
+
+        // High-half kernel: strampoline is a virtual address, needs conversion to physical
+        let strampoline_paddr = unsafe { vaddr_to_paddr(strampoline as usize) };
+        let trampoline_ppn = Ppn::from_addr_floor(Paddr::from_usize(strampoline_paddr));
+
+        self.page_table.map(
+            trampoline_vpn,
+            trampoline_ppn,
+            PageSize::Size4K,
+            UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Readable | UniversalPTEFlag::Executable,
+        )?;
+
+        Ok(())
     }
 
     /// Inserts a new mapping area with overlap detection
@@ -159,11 +196,15 @@ impl MemorySpace {
     pub fn new_kernel() -> Self {
         let mut space = MemorySpace::new();
 
+        // 0. Map trampoline (must be first, before any kernel sections)
+        space.map_trampoline()
+            .expect("Failed to map trampoline");
+
         // 1. Map kernel text segment (.text) - read + execute
         Self::map_kernel_section(
             &mut space,
-            stext as usize,
-            etext as usize,
+            unsafe { stext as usize },
+            unsafe { etext as usize },
             AreaType::KernelText,
             UniversalPTEFlag::kernel_r() | UniversalPTEFlag::Executable,
         )
@@ -172,8 +213,8 @@ impl MemorySpace {
         // 2. Map kernel read-only data segment (.rodata)
         Self::map_kernel_section(
             &mut space,
-            srodata as usize,
-            erodata as usize,
+            unsafe { srodata as usize },
+            unsafe { erodata as usize },
             AreaType::KernelRodata,
             UniversalPTEFlag::kernel_r(),
         )
@@ -182,8 +223,8 @@ impl MemorySpace {
         // 3. Map kernel data segment (.data)
         Self::map_kernel_section(
             &mut space,
-            sdata as usize,
-            edata as usize,
+            unsafe { sdata as usize },
+            unsafe { edata as usize },
             AreaType::KernelData,
             UniversalPTEFlag::kernel_rw(),
         )
@@ -192,15 +233,15 @@ impl MemorySpace {
         // 4. Map kernel BSS segment (.bss)
         Self::map_kernel_section(
             &mut space,
-            sbss as usize,
-            ebss as usize,
+            unsafe { sbss as usize },
+            unsafe { ebss as usize },
             AreaType::KernelBss,
             UniversalPTEFlag::kernel_rw(),
         )
         .expect("Failed to map kernel bss");
 
         // 5. Map physical memory (using 4KB pages, direct mapping)
-        let ekernel_paddr = vaddr_to_paddr(ekernel as usize);
+        let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
         let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
         let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
 
@@ -223,7 +264,9 @@ impl MemorySpace {
         {
             use crate::config::MMIO;
             for (addr, size) in MMIO {
-                Self::map_mmio_region(&mut space, *addr, *size)
+                // MMIO addresses are physical addresses, convert to virtual
+                let mmio_vaddr = paddr_to_vaddr(*addr);
+                Self::map_mmio_region(&mut space, mmio_vaddr, *size)
                     .expect("Failed to map MMIO device");
             }
         }
@@ -290,6 +333,11 @@ impl MemorySpace {
         }
 
         let mut space = MemorySpace::new();
+
+        // 0. Map trampoline (user space needs user access permission)
+        space.map_trampoline_user()
+            .expect("Failed to map trampoline in user space");
+
         let mut max_end_vpn = Vpn::from_usize(0);
 
         // 1. Parse and map ELF segments

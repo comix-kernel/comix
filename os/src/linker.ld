@@ -12,6 +12,10 @@ SECTIONS
 
     .text : AT(PHYSICAL_BASE) {       /* AT() 指定物理地址 */
         *(.text.entry)
+        . = ALIGN(4K);
+        strampoline = .;         /* 标记 trampoline 虚拟地址 */
+        *(.text.trampoline);     /* trampoline 代码段 */
+        . = ALIGN(4K);           /* 对齐到页边界 */
         *(.text .text.*)
     }
 
