@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use core::sync::atomic::AtomicPtr;
+use core::{
+    ptr,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 use alloc::sync::Arc;
 
@@ -40,7 +43,7 @@ pub struct Task {
     /// NOTE: 由于采用了统一的任务模型，一个任务组内任务的 pid 是相同的，等于父任务的 pid 而父任务的 pid 等于自己的 tid
     pub pid: u32,
     /// 父任务的id
-    pub ptid: u32,
+    pub ppid: u32,
     /// 内核栈基址
     pub kstack_base: usize,
     /// 内核栈跟踪器
@@ -58,21 +61,58 @@ pub struct Task {
 impl Task {
     /// 创建一个新的内核任务
     /// # 参数
-    /// * `ptid`: 父任务ID
+    /// * `ppid`: 父任务ID
     /// # 返回值
     /// 新创建的任务
-    pub fn ktask_create(ptid: u32) -> Self {
-        Self::new(ptid, None)
+    pub fn ktask_create(ppid: u32) -> Self {
+        Self::new(ppid, None)
     }
 
     /// 创建一个新的用户任务
     /// # 参数
-    /// * `ptid`: 父任务ID
+    /// * `ppid`: 父任务ID
     /// * `memory_space`: 任务的内存空间
     /// # 返回值
     /// 新创建的任务
-    pub fn utask_create(ptid: u32, memory_space: Arc<MemorySpace>) -> Self {
-        Self::new(ptid, Some(memory_space))
+    pub fn utask_create(ppid: u32, memory_space: Arc<MemorySpace>) -> Self {
+        Self::new(ppid, Some(memory_space))
+    }
+
+    /// 为内核线程准备最小 Context：sp 指向栈顶，ra 指向线程入口
+    /// # 参数
+    /// * `entry`: 线程入口地址
+    pub fn init_kernel_thread_context(&mut self, entry: usize) {
+        let kstack_top = self.kstack_base;
+        let mut ctx = Context::zero_init();
+        ctx.sp = kstack_top;
+        ctx.ra = entry;
+        self.context = ctx;
+        // 对于内核线程，通常不在栈上预置 TrapFrame
+        self.trap_frame_ptr
+            .store(core::ptr::null_mut(), Ordering::SeqCst);
+    }
+
+    /// 为用户进程在其内核栈上构造初始 TrapFrame，并设置 Context 指向 trampoline
+    /// # 参数
+    /// * `user_entry`: 用户态入口地址
+    /// * `trampoline`: 内核态恢复到用户态的 trampoline 函数地址
+    pub unsafe fn init_user_trapframe_and_context(&mut self, user_entry: usize, trampoline: usize) {
+        let kstack_top = self.kstack_base;
+        let tf_size = size_of::<TrapFrame>();
+        let tf_ptr = (kstack_top - tf_size) as *mut TrapFrame;
+
+        // 用零化的 TrapFrame 起始值，然后设置 epc（用户PC）等必要字段
+        let mut tf: TrapFrame = unsafe { core::mem::zeroed() };
+        tf.epc = user_entry;
+        // 如果需要，可在这里设置初始用户寄存器 a0/a1 等
+        unsafe { ptr::write(tf_ptr, tf) };
+
+        // 记录 TrapFrame 指针（可用 AtomicPtr，也可以省略并按约定计算）
+        self.trap_frame_ptr.store(tf_ptr, Ordering::SeqCst);
+
+        // 为调度器准备最小 Context：sp 指向栈顶，ra 指向 trampoline（trampoline 会从 tf_ptr 恢复并返回用户态）
+        self.context.sp = kstack_top;
+        self.context.ra = trampoline;
     }
 
     /// 判断该任务是否为内核线程
@@ -80,7 +120,7 @@ impl Task {
         self.memory_space.is_none()
     }
 
-    fn new(ptid: u32, memory_space: Option<Arc<MemorySpace>>) -> Self {
+    fn new(ppid: u32, memory_space: Option<Arc<MemorySpace>>) -> Self {
         let kstack_tracker =
             physical_page_alloc().expect("Failed to allocate kernel stack for new Task");
         let id = TID_ALLOCATOR.allocate();
@@ -92,7 +132,7 @@ impl Task {
             state: TaskState::Running,
             tid: id,
             pid: id,
-            ptid,
+            ppid,
             // TODO: 以后改成虚拟地址
             kstack_base: kstack_tracker.ppn().end_addr().as_usize(),
             kstack_tracker,

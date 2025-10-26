@@ -1,3 +1,5 @@
+use alloc::sync::Arc;
+
 use crate::{
     arch::kernel::switch,
     kernel::{
@@ -19,7 +21,7 @@ pub struct RRScheduler {
     // 当前时间片剩余时间
     current_slice: usize,
     // 正在运行的任务
-    current_task: Option<TaskStruct>,
+    current_task: Option<Arc<TaskStruct>>,
 }
 
 impl RRScheduler {
@@ -47,40 +49,10 @@ impl Scheduler for RRScheduler {
     }
 
     fn schedule(&mut self) {
-        let next_task = self.next_task();
-
-        if let Some(current_task) = self.current_task.as_mut() {
-            unsafe {
-                switch(
-                    &mut current_task.context as *mut _,
-                    &next_task.context as *const _,
-                );
-            }
-        }
-
-        // 将 next_task 放到 current_task
-        // XXX: 注意地址稳定性问题,不要对栈上的临时 next_task 取指针然后再移动它
-        self.current_task = Some(next_task);
-        match self.run_queue.pop_task() {
-            Some(next_task) => {
-                if let Some(current_task) = self.current_task.as_mut() {
-                    unsafe {
-                        switch(
-                            &mut current_task.context as *mut _,
-                            &next_task.context as *const _,
-                        );
-                    }
-                }
-                self.current_task = Some(next_task);
-                self.current_slice = self.time_slice;
-            }
-            None => {
-                self.current_slice = self.time_slice;
-            }
-        }
+        todo!()
     }
 
-    fn add_task(&mut self, task: TaskStruct) {
+    fn add_task(&mut self, task: Arc<TaskStruct>) {
         match task.state {
             TaskState::Running => {
                 // 将任务添加到运行队列
@@ -93,7 +65,7 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn next_task(&mut self) -> TaskStruct {
+    fn next_task(&mut self) -> Arc<TaskStruct> {
         // 从运行队列中选择下一个任务
         if let Some(task) = self.run_queue.pop_task() {
             task

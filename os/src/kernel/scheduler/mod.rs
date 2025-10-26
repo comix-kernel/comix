@@ -1,8 +1,13 @@
 #![allow(dead_code)]
 mod rr_scheduler;
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
+use lazy_static::lazy_static;
 
-use crate::kernel::TaskStruct;
+use crate::{kernel::{scheduler::rr_scheduler::RRScheduler, TaskStruct}, sync::spin_lock::SpinLock};
+
+lazy_static! {
+    pub static ref SCHEDULER: SpinLock<RRScheduler> = SpinLock::new(RRScheduler::new());
+}
 
 /// 调度器接口定义
 pub trait Scheduler {
@@ -13,8 +18,8 @@ pub trait Scheduler {
     fn schedule(&mut self); // 核心调度逻辑 (调用 switch_to)
 
     // 任务管理
-    fn add_task(&mut self, task: TaskStruct); // 任务首次创建或从阻塞队列返回
-    fn next_task(&mut self) -> TaskStruct; // 选择下一个要运行的任务
+    fn add_task(&mut self, task: Arc<TaskStruct>); // 任务首次创建或从阻塞队列返回
+    fn next_task(&mut self) -> Arc<TaskStruct>; // 选择下一个要运行的任务
 
     // 状态转换 (由任务自身或中断调用)
     fn yield_task(&mut self); // 主动放弃 CPU
@@ -26,7 +31,7 @@ pub trait Scheduler {
 /// 简单的等待队列结构体
 /// 用于任务阻塞和唤醒
 pub struct WaitQueue {
-    queue: Vec<TaskStruct>,
+    queue: Vec<Arc<TaskStruct>>,
 }
 
 impl WaitQueue {
@@ -36,7 +41,7 @@ impl WaitQueue {
     }
 
     /// 向等待队列添加任务
-    pub fn add_task(&mut self, task: TaskStruct) {
+    pub fn add_task(&mut self, task: Arc<TaskStruct>) {
         self.queue.push(task);
     }
 
@@ -46,7 +51,7 @@ impl WaitQueue {
     }
 
     /// 从等待队列中弹出一个任务
-    pub fn pop_task(&mut self) -> Option<TaskStruct> {
+    pub fn pop_task(&mut self) -> Option<Arc<TaskStruct>> {
         if !self.queue.is_empty() {
             Some(self.queue.remove(0))
         } else {
@@ -58,7 +63,7 @@ impl WaitQueue {
 /// 运行队列
 /// 用于存放可运行的任务
 pub struct RunQueue {
-    queue: Vec<TaskStruct>,
+    queue: Vec<Arc<TaskStruct>>,
 }
 
 impl RunQueue {
@@ -68,7 +73,7 @@ impl RunQueue {
     }
 
     /// 向运行队列添加任务
-    pub fn add_task(&mut self, task: TaskStruct) {
+    pub fn add_task(&mut self, task: Arc<TaskStruct>) {
         self.queue.push(task);
     }
 
@@ -78,7 +83,7 @@ impl RunQueue {
     }
 
     /// 从运行队列中弹出一个任务
-    pub fn pop_task(&mut self) -> Option<TaskStruct> {
+    pub fn pop_task(&mut self) -> Option<Arc<TaskStruct>> {
         if !self.queue.is_empty() {
             Some(self.queue.remove(0))
         } else {
