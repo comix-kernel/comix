@@ -7,6 +7,7 @@ use riscv::register::{
 };
 
 global_asm!(include_str!("kernelvec.S"));
+global_asm!(include_str!("trampoline.S"));
 
 unsafe extern "C" {
     unsafe fn kernelvec();
