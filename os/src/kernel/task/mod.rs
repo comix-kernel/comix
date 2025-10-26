@@ -38,7 +38,8 @@ lazy_static! {
 /// Task id
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let entry_addr = entry_point as usize;
-    let cur_task = current_cpu().current_task.as_ref().unwrap();
+    let cur_cpu = unsafe { current_cpu().lock() };
+    let cur_task = cur_cpu.current_task.as_ref().unwrap();
     let ppid = cur_task.pid;
     // 分配 Task 结构体和内核栈
     let mut task = TaskStruct::ktask_create(ppid);
