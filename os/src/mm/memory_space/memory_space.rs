@@ -1,8 +1,14 @@
-use crate::arch::mm::{vaddr_to_paddr, paddr_to_vaddr};
-use crate::mm::address::{Ppn, Vpn, VpnRange, Vaddr, Paddr, PageNum, UsizeConvert};
+use core::cmp::Ordering;
+
+use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::config::{
+    MAX_USER_HEAP_SIZE, MEMORY_END, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE, USER_STACK_TOP,
+};
+use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
-use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag, PageSize};
-use crate::config::{MEMORY_END, TRAP_CONTEXT, USER_STACK_TOP, USER_STACK_SIZE, MAX_USER_HEAP_SIZE, TRAMPOLINE, PAGE_SIZE};
+use crate::mm::page_table::{
+    ActivePageTableInner, PageSize, PageTableInner, PagingError, UniversalPTEFlag,
+};
 use crate::sync::spin_lock::SpinLock;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
@@ -30,7 +36,12 @@ lazy_static! {
 
 /// Returns the kernel page table token
 pub fn kernel_token() -> usize {
-    unsafe { KERNEL_SPACE.lock() }.page_table.root_ppn().as_usize() << 44 | 8 << 60
+    (unsafe { KERNEL_SPACE.lock() }
+        .page_table
+        .root_ppn()
+        .as_usize()
+        << 44)
+        | (8 << 60)
 }
 
 /// Returns the kernel root PPN
@@ -46,7 +57,6 @@ where
     let mut guard = unsafe { KERNEL_SPACE.lock() };
     f(&mut guard)
 }
-
 
 /// Memory space structure representing an address space
 #[derive(Debug)]
@@ -98,7 +108,7 @@ impl MemorySpace {
             trampoline_vpn,
             trampoline_ppn,
             PageSize::Size4K,
-            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::EXECUTABLE,
         )?;
 
         Ok(())
@@ -116,7 +126,9 @@ impl MemorySpace {
             trampoline_vpn,
             trampoline_ppn,
             PageSize::Size4K,
-            UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Readable | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::USER_ACCESSIBLE
+                | UniversalPTEFlag::READABLE
+                | UniversalPTEFlag::EXECUTABLE,
         )?;
 
         Ok(())
@@ -169,21 +181,21 @@ impl MemorySpace {
 
     /// Finds the area containing the given VPN
     pub fn find_area(&self, vpn: Vpn) -> Option<&MappingArea> {
-        self.areas.iter().find(|area| area.vpn_range().contains(vpn))
+        self.areas
+            .iter()
+            .find(|area| area.vpn_range().contains(vpn))
     }
 
     /// Finds the area containing the given VPN (mutable)
     pub fn find_area_mut(&mut self, vpn: Vpn) -> Option<&mut MappingArea> {
-        self.areas.iter_mut().find(|area| area.vpn_range().contains(vpn))
+        self.areas
+            .iter_mut()
+            .find(|area| area.vpn_range().contains(vpn))
     }
 
     /// Removes and unmaps an area by VPN
     pub fn remove_area(&mut self, vpn: Vpn) -> Result<(), PagingError> {
-        if let Some(pos) = self
-            .areas
-            .iter()
-            .position(|a| a.vpn_range().contains(vpn))
-        {
+        if let Some(pos) = self.areas.iter().position(|a| a.vpn_range().contains(vpn)) {
             let mut area = self.areas.remove(pos);
             area.unmap(&mut self.page_table)?;
             Ok(())
@@ -197,24 +209,23 @@ impl MemorySpace {
         let mut space = MemorySpace::new();
 
         // 0. Map trampoline (must be first, before any kernel sections)
-        space.map_trampoline()
-            .expect("Failed to map trampoline");
+        space.map_trampoline().expect("Failed to map trampoline");
 
         // 1. Map kernel text segment (.text) - read + execute
         Self::map_kernel_section(
             &mut space,
-            unsafe { stext as usize },
-            unsafe { etext as usize },
+            stext as usize,
+            etext as usize,
             AreaType::KernelText,
-            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::EXECUTABLE,
         )
         .expect("Failed to map kernel text");
 
         // 2. Map kernel read-only data segment (.rodata)
         Self::map_kernel_section(
             &mut space,
-            unsafe { srodata as usize },
-            unsafe { erodata as usize },
+            srodata as usize,
+            erodata as usize,
             AreaType::KernelRodata,
             UniversalPTEFlag::kernel_r(),
         )
@@ -223,8 +234,8 @@ impl MemorySpace {
         // 3. Map kernel data segment (.data)
         Self::map_kernel_section(
             &mut space,
-            unsafe { sdata as usize },
-            unsafe { edata as usize },
+            sdata as usize,
+            edata as usize,
             AreaType::KernelData,
             UniversalPTEFlag::kernel_rw(),
         )
@@ -233,8 +244,8 @@ impl MemorySpace {
         // 4. Map kernel BSS segment (.bss)
         Self::map_kernel_section(
             &mut space,
-            unsafe { sbss as usize },
-            unsafe { ebss as usize },
+            sbss as usize,
+            ebss as usize,
             AreaType::KernelBss,
             UniversalPTEFlag::kernel_rw(),
         )
@@ -323,7 +334,7 @@ impl MemorySpace {
     /// Returns (space, entry_point, user_stack_top)
     pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
-        use xmas_elf::program::{Type, SegmentData};
+        use xmas_elf::program::{SegmentData, Type};
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
 
@@ -335,7 +346,8 @@ impl MemorySpace {
         let mut space = MemorySpace::new();
 
         // 0. Map trampoline (user space needs user access permission)
-        space.map_trampoline_user()
+        space
+            .map_trampoline_user()
             .expect("Failed to map trampoline in user space");
 
         let mut max_end_vpn = Vpn::from_usize(0);
@@ -366,15 +378,15 @@ impl MemorySpace {
             };
 
             // Build permissions
-            let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Valid;
+            let mut flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
             if ph.flags().is_read() {
-                flags |= UniversalPTEFlag::Readable;
+                flags |= UniversalPTEFlag::READABLE;
             }
             if ph.flags().is_write() {
-                flags |= UniversalPTEFlag::Writeable;
+                flags |= UniversalPTEFlag::WRITEABLE;
             }
             if ph.flags().is_execute() {
-                flags |= UniversalPTEFlag::Executable;
+                flags |= UniversalPTEFlag::EXECUTABLE;
             }
 
             // Determine area type
@@ -400,7 +412,8 @@ impl MemorySpace {
         space.heap_top = Some(max_end_vpn);
 
         // 3. Map user stack (with guard pages)
-        let user_stack_bottom = Vpn::from_addr_floor(Vaddr::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
+        let user_stack_bottom =
+            Vpn::from_addr_floor(Vaddr::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
         let user_stack_top = Vpn::from_addr_ceil(Vaddr::from_usize(USER_STACK_TOP));
 
         space.insert_framed_area(
@@ -461,14 +474,22 @@ impl MemorySpace {
             // Existing heap area, adjust size
             let old_end = area.vpn_range().end();
 
-            if new_end_vpn > old_end {
-                // Extend
-                let count = new_end_vpn.as_usize() - old_end.as_usize();
-                area.extend(&mut self.page_table, count)?;
-            } else if new_end_vpn < old_end {
-                // Shrink
-                let count = old_end.as_usize() - new_end_vpn.as_usize();
-                area.shrink(&mut self.page_table, count)?;
+            match new_end_vpn.cmp(&old_end) {
+                Ordering::Greater => {
+                    // Extend
+                    let count = new_end_vpn.as_usize() - old_end.as_usize();
+                    if count != 0 {
+                        area.extend(&mut self.page_table, count)?;
+                    }
+                }
+                Ordering::Less => {
+                    // Shrink
+                    let count = old_end.as_usize() - new_end_vpn.as_usize();
+                    if count != 0 {
+                        area.shrink(&mut self.page_table, count)?;
+                    }
+                }
+                Ordering::Equal => { /* no-op */ }
             }
         } else {
             // First time allocating heap, create new area
@@ -536,15 +557,15 @@ impl MemorySpace {
         }
 
         // Convert permissions
-        let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Valid;
+        let mut flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
         if prot & 0x1 != 0 {
-            flags |= UniversalPTEFlag::Readable;
+            flags |= UniversalPTEFlag::READABLE;
         }
         if prot & 0x2 != 0 {
-            flags |= UniversalPTEFlag::Writeable;
+            flags |= UniversalPTEFlag::WRITEABLE;
         }
         if prot & 0x4 != 0 {
-            flags |= UniversalPTEFlag::Executable;
+            flags |= UniversalPTEFlag::EXECUTABLE;
         }
 
         self.insert_framed_area(vpn_range, AreaType::UserHeap, flags, None)?;

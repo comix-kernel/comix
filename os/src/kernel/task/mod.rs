@@ -36,6 +36,7 @@ lazy_static! {
 ///
 /// # 返回值
 /// Task id
+#[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let entry_addr = entry_point as usize;
     let cur_cpu = unsafe { current_cpu().lock() };

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::mm::address::Ppn;
 
 bitflags::bitflags! {
@@ -6,45 +7,53 @@ bitflags::bitflags! {
     pub struct UniversalPTEFlag: usize {
 
         // ---- RISC-V SV39 compatible flags ----
-        const Valid = 1 << 0;               // Indicates whether the entry is valid
-        const Readable = 1 << 1;            // Indicates whether the page is readable
-        const Writeable = 1 << 2;           // Indicates whether the page is writeable
-        const Executable = 1 << 3;          // Indicates whether the page is executable
-        const UserAccessible = 1 << 4;      // Indicates whether the page is accessible from user mode
-        const Global = 1 << 5;              // Indicates whether the page is global
-        const Accessed = 1 << 6;            // Indicates whether the page has been accessed
-        const Dirty = 1 << 7;               // Indicates whether the page has been written to
+        const VALID = 1 << 0;               // Indicates whether the entry is valid
+        const READABLE = 1 << 1;            // Indicates whether the page is readable
+        const WRITEABLE = 1 << 2;           // Indicates whether the page is writeable
+        const EXECUTABLE = 1 << 3;          // Indicates whether the page is executable
+        const USER_ACCESSIBLE = 1 << 4;      // Indicates whether the page is accessible from user mode
+        const GLOBAL = 1 << 5;              // Indicates whether the page is global
+        const ACCESSED = 1 << 6;            // Indicates whether the page has been accessed
+        const DIRTY = 1 << 7;               // Indicates whether the page has been written to
 
         // ---- Additional universal flags ----
         #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
-        const Huge = 1 << 8;                // Indicates whether the page is a huge page ()
+        const HUGE = 1 << 8;                // Indicates whether the page is a huge page ()
     }
 }
 
 impl UniversalPTEFlag {
     /// constructs a flag set for user read-only access
     pub const fn user_read() -> Self {
-        Self::Valid.union(Self::Readable).union(Self::UserAccessible)
+        Self::VALID
+            .union(Self::READABLE)
+            .union(Self::USER_ACCESSIBLE)
     }
 
     /// constructs a flag set for user read-write access
     pub const fn user_rw() -> Self {
-        Self::Valid.union(Self::Readable).union(Self::Writeable).union(Self::UserAccessible)
+        Self::VALID
+            .union(Self::READABLE)
+            .union(Self::WRITEABLE)
+            .union(Self::USER_ACCESSIBLE)
     }
 
     /// constructs a flag set for user read-execute access
     pub const fn user_rx() -> Self {
-        Self::Valid.union(Self::Readable).union(Self::Executable).union(Self::UserAccessible)
+        Self::VALID
+            .union(Self::READABLE)
+            .union(Self::EXECUTABLE)
+            .union(Self::USER_ACCESSIBLE)
     }
 
     /// constructs a flag set for kernel read-write access
     pub const fn kernel_rw() -> Self {
-        Self::Valid.union(Self::Readable).union(Self::Writeable)
+        Self::VALID.union(Self::READABLE).union(Self::WRITEABLE)
     }
 
     /// constructs a flag set for kernel read-only access
     pub const fn kernel_r() -> Self {
-        Self::Valid.union(Self::Readable)
+        Self::VALID.union(Self::READABLE)
     }
 }
 

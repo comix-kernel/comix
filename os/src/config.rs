@@ -19,11 +19,11 @@ pub const USER_STACK_SIZE: usize = 4 * 1024 * 1024; // 4MB
 // [USER_TEXT]
 
 pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
-pub const TRAP_CONTEXT: usize = TRAMPOLINE - 2 * PAGE_SIZE;  // leave one guard page
-pub const USER_STACK_TOP: usize = TRAP_CONTEXT - PAGE_SIZE;   // leave another guard page
+pub const TRAP_CONTEXT: usize = TRAMPOLINE - 2 * PAGE_SIZE; // leave one guard page
+pub const USER_STACK_TOP: usize = TRAP_CONTEXT - PAGE_SIZE; // leave another guard page
 
 /// Maximum heap size (prevent OOM)
-pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024;  // 64MB
+pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024; // 64MB
 
 // TODO: 这里之后应该改成从设备获取 CPU 数量
 pub const NUM_CPU: usize = 4;

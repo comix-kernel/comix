@@ -8,5 +8,6 @@ pub enum TaskState {
     /// 等待可中断的事件。可以被信号等中断唤醒
     Interruptable,
     /// 等待不可中断的事件。不能被信号等中断唤醒
+    #[allow(dead_code)]
     Uninterruptable,
 }

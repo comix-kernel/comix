@@ -3,4 +3,3 @@
 #![allow(clippy::module_inception)]
 pub mod mapping_area;
 pub mod memory_space;
-

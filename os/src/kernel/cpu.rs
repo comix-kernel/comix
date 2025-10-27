@@ -1,11 +1,12 @@
 use alloc::sync::Arc;
 
 use crate::{
-    arch::kernel::context::Context, kernel::TaskStruct, mm::memory_space::memory_space::MemorySpace,
-    sync::spin_lock::SpinLock,
+    arch::kernel::context::Context, kernel::TaskStruct,
+    mm::memory_space::memory_space::MemorySpace, sync::spin_lock::SpinLock,
 };
 
 /// CPU 结构体
+#[allow(dead_code)]
 pub struct Cpu {
     /// 任务上下文
     /// 用于在调度器中保存和恢复 CPU 寄存器状态
