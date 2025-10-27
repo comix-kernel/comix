@@ -127,7 +127,7 @@ impl_address!(Paddr);
 
 impl ConvertablePaddr for Paddr {
     fn is_valid_paddr(&self) -> bool {
-        self.as_usize() == crate::arch::mm::vaddr_to_paddr(self.as_usize())
+        self.as_usize() == unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) }
     }
 
     fn to_vaddr(&self) -> Vaddr {
@@ -155,7 +155,7 @@ impl ConvertableVaddr for Vaddr {
     }
 
     fn to_paddr(&self) -> Paddr {
-        Paddr::from_usize(crate::arch::mm::vaddr_to_paddr(self.as_usize()))
+        Paddr::from_usize(unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) })
     }
 }
 

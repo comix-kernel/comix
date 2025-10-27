@@ -165,7 +165,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     ) -> PagingResult<()> {
         // Validate flags: leaf pages must have at least one of R/W/X set
         if !flags.intersects(
-            UniversalPTEFlag::Readable | UniversalPTEFlag::Writeable | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::READABLE | UniversalPTEFlag::WRITEABLE | UniversalPTEFlag::EXECUTABLE,
         ) {
             return Err(PagingError::InvalidFlags);
         }

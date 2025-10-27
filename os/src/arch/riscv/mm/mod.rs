@@ -48,7 +48,7 @@ pub const PADDR_MASK: usize = 0x0000_3fff_ffff_ffff;
 /// # Note
 ///
 /// This function must be implemented in all architecture-specific mm modules.
-pub const fn vaddr_to_paddr(vaddr: usize) -> usize {
+pub const unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
     vaddr & PADDR_MASK
 }
 

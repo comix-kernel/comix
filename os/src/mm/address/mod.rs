@@ -47,5 +47,5 @@ mod operations;
 mod page_num;
 
 pub use address::{ConvertablePaddr, Paddr, Vaddr};
-pub use operations::{AlignOps, UsizeConvert};
+pub use operations::UsizeConvert;
 pub use page_num::{PageNum, Ppn, PpnRange, Vpn, VpnRange};
