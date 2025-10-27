@@ -22,7 +22,7 @@ pub trait Scheduler {
     /// 添加任务到调度器
     fn add_task(&mut self, task: SharedTask);
     /// 选择下一个要运行的任务
-    fn next_task(&mut self) -> SharedTask;
+    fn next_task(&mut self) -> Option<SharedTask>;
     /// 主动放弃 CPU
     fn yield_task(&mut self);
     /// 任务阻塞（由调用者指定任务）

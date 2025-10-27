@@ -11,7 +11,6 @@ use crate::config::NUM_CPU;
 use crate::sync::spin_lock::SpinLock;
 
 pub use task::TaskState;
-pub use task::TaskStruct;
 
 lazy_static! {
     pub static ref CPUS: [SpinLock<Cpu>; NUM_CPU] = array::from_fn(|_| SpinLock::new(Cpu::new()));

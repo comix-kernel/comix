@@ -39,9 +39,9 @@ lazy_static! {
 #[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let entry_addr = entry_point as usize;
-    let cur_cpu = unsafe { current_cpu().lock() };
+    let cur_cpu = current_cpu().lock();
     let cur_task = cur_cpu.current_task.as_ref().unwrap();
-    let ppid = cur_task.pid;
+    let ppid = cur_task.lock().pid;
     // 分配 Task 结构体和内核栈
     let mut task = TaskStruct::ktask_create(ppid);
     task.init_kernel_thread_context(entry_addr);
@@ -51,7 +51,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
     // NOTE: 内核线程共享内核地址空间，映射逻辑相对简单
 
     // 将任务加入全局任务队列
-    unsafe { SCHEDULER.lock().add_task(into_shared(task)) };
+    SCHEDULER.lock().add_task(into_shared(task));
 
     tid
 }

@@ -29,7 +29,7 @@ impl<T> SpinLock<T> {
         }
     }
 
-    pub unsafe fn lock(&self) -> SpinLockGuard<'_, T> {
+    pub fn lock(&self) -> SpinLockGuard<'_, T> {
         let _raw_guard = self.raw_lock.lock();
         SpinLockGuard {
             _raw_guard,
@@ -78,15 +78,13 @@ mod tests {
         // 初始应未锁定
         kassert!(!lock.is_locked());
 
-        unsafe {
-            // 获取锁并修改数据
-            {
-                let mut guard = lock.lock();
-                kassert!(lock.is_locked());
-                *guard = 42;
-                kassert!(*guard == 42);
-            } // guard 离开作用域，释放锁
-        }
+        // 获取锁并修改数据
+        {
+            let mut guard = lock.lock();
+            kassert!(lock.is_locked());
+            *guard = 42;
+            kassert!(*guard == 42);
+        } // guard 离开作用域，释放锁
 
         // 释放后应恢复为未锁定
         kassert!(!lock.is_locked());
@@ -97,20 +95,19 @@ mod tests {
         println!("Testing: test_spinlock_relock_after_drop");
         let lock = SpinLock::new(1usize);
 
-        unsafe {
-            {
-                let mut g1 = lock.lock();
-                *g1 += 1;
-                kassert!(*g1 == 2);
-                // g1 在此作用域结束并释放锁
-            }
+        {
+            let mut g1 = lock.lock();
+            *g1 += 1;
+            kassert!(*g1 == 2);
+            // g1 在此作用域结束并释放锁
+        }
 
-            // 释放后，应该能再次获取锁
+        // 释放后，应该能再次获取锁
+        {
             let mut g2 = lock.lock();
             *g2 += 1;
             kassert!(*g2 == 3);
         }
-
         kassert!(!lock.is_locked());
     });
 }

@@ -76,10 +76,10 @@ pub enum TrackedFrames {
 }
 
 lazy_static! {
-    static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
+    pub static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
 }
 
-struct FrameAllocator {
+pub struct FrameAllocator {
     start: Ppn,
     end: Ppn,
     cur: Ppn,
@@ -265,56 +265,46 @@ pub fn init_frame_allocator(start_addr: usize, end_addr: usize) {
     let start_ppn = Ppn::from_addr_ceil(Paddr::from_usize(start_addr));
     let end_ppn = Ppn::from_addr_floor(Paddr::from_usize(end_addr));
 
-    unsafe {
-        let mut allocator = FRAME_ALLOCATOR.lock();
-        allocator.init(start_ppn, end_ppn);
-    }
+    let mut allocator = FRAME_ALLOCATOR.lock();
+    allocator.init(start_ppn, end_ppn);
 }
 
 /// allocate a single frame
 pub fn alloc_frame() -> Option<FrameTracker> {
-    unsafe { FRAME_ALLOCATOR.lock().alloc_frame() }
+    FRAME_ALLOCATOR.lock().alloc_frame()
 }
 
 /// allocate multiple frames (may not be contiguous)
 pub fn alloc_frames(num: usize) -> Option<Vec<FrameTracker>> {
-    unsafe { FRAME_ALLOCATOR.lock().alloc_frames(num) }
+    FRAME_ALLOCATOR.lock().alloc_frames(num)
 }
 
 /// allocate contiguous frames
 pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
-    unsafe { FRAME_ALLOCATOR.lock().alloc_contig_frames(num) }
+    FRAME_ALLOCATOR.lock().alloc_contig_frames(num)
 }
 
 /// allocate contiguous frames with alignment
 pub fn alloc_contig_frames_aligned(num: usize, align_pages: usize) -> Option<FrameRangeTracker> {
-    unsafe {
-        FRAME_ALLOCATOR
-            .lock()
-            .alloc_contig_frames_aligned(num, align_pages)
-    }
+    FRAME_ALLOCATOR
+        .lock()
+        .alloc_contig_frames_aligned(num, align_pages)
 }
 
 /// deallocate a single frame
 fn dealloc_frame(frame: &FrameTracker) {
-    unsafe {
-        FRAME_ALLOCATOR.lock().dealloc_frame(frame);
-    }
+    FRAME_ALLOCATOR.lock().dealloc_frame(frame);
 }
 
 /// deallocate multiple frames (may not be contiguous)
 fn dealloc_frames(frames: &[FrameTracker]) {
-    unsafe {
-        let mut allocator = FRAME_ALLOCATOR.lock();
-        for frame in frames {
-            allocator.dealloc_frame(frame);
-        }
+    let mut allocator = FRAME_ALLOCATOR.lock();
+    for frame in frames {
+        allocator.dealloc_frame(frame);
     }
 }
 
 /// deallocate contiguous frames
 fn dealloc_contig_frames(frame_range: &FrameRangeTracker) {
-    unsafe {
-        FRAME_ALLOCATOR.lock().dealloc_contig_frames(frame_range);
-    }
+    FRAME_ALLOCATOR.lock().dealloc_contig_frames(frame_range);
 }
