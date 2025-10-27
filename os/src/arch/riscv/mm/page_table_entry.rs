@@ -34,7 +34,7 @@ bitflags::bitflags! {
 
 const SV39_PTE_FLAG_MASK: usize = 0xff; // Lower 8 bits for SV39 PTE flags
 const SV39_PTE_PPN_OFFSET: usize = 10; // PPN starts from bit 10
-const SV39_PTE_PPN_MASK: u64 = 0x000f_ffff_ffff_c00; // Bits 10-53 for PPN
+const SV39_PTE_PPN_MASK: u64 = 0x0000_ffff_ffff_fc00; // Bits 10-53 for PPN
 
 impl UniversalConvertableFlag for SV39PTEFlags {
     fn from_universal(flag: UniversalPTEFlag) -> Self {
