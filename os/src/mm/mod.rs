@@ -21,7 +21,9 @@ pub mod physmem;
 
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
-pub use memory_space::memory_space::{kernel_token, kernel_root_ppn, with_kernel_space, MemorySpace};
+pub use memory_space::memory_space::{
+    MemorySpace, kernel_root_ppn, kernel_token, with_kernel_space,
+};
 
 use crate::config::{MEMORY_END, PAGE_SIZE};
 
@@ -35,7 +37,10 @@ pub fn init() {
     let start = ((ekernel as usize + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE; // Page-aligned
     let end = MEMORY_END;
 
-    println!("[mm] Initializing frame allocator: {:#x} - {:#x}", start, end);
+    println!(
+        "[mm] Initializing frame allocator: {:#x} - {:#x}",
+        start, end
+    );
     init_frame_allocator(start, end);
 
     // 2. Initialize heap
