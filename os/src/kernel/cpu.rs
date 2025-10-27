@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use crate::{
-    arch::kernel::context::Context, kernel::TaskStruct, mm::memory_space::MemorySpace,
+    arch::kernel::context::Context, kernel::TaskStruct, mm::memory_space::memory_space::MemorySpace,
     sync::spin_lock::SpinLock,
 };
 

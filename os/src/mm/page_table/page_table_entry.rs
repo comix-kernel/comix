@@ -16,7 +16,35 @@ bitflags::bitflags! {
         const Dirty = 1 << 7;               // Indicates whether the page has been written to
 
         // ---- Additional universal flags ----
+        #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
         const Huge = 1 << 8;                // Indicates whether the page is a huge page ()
+    }
+}
+
+impl UniversalPTEFlag {
+    /// constructs a flag set for user read-only access
+    pub const fn user_read() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::UserAccessible)
+    }
+
+    /// constructs a flag set for user read-write access
+    pub const fn user_rw() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::Writeable).union(Self::UserAccessible)
+    }
+
+    /// constructs a flag set for user read-execute access
+    pub const fn user_rx() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::Executable).union(Self::UserAccessible)
+    }
+
+    /// constructs a flag set for kernel read-write access
+    pub const fn kernel_rw() -> Self {
+        Self::Valid.union(Self::Readable).union(Self::Writeable)
+    }
+
+    /// constructs a flag set for kernel read-only access
+    pub const fn kernel_r() -> Self {
+        Self::Valid.union(Self::Readable)
     }
 }
 

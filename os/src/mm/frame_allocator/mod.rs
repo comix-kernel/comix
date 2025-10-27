@@ -13,8 +13,11 @@
 //! - [`alloc_frame`]: Allocate a single frame
 //! - [`alloc_frames`]: Allocate multiple (non-contiguous) frames
 //! - [`alloc_contig_frames`]: Allocate multiple contiguous frames
+//! - [`alloc_contig_frames_aligned`]: Allocate multiple contiguous frames with alignment
 
 mod frame_allocator;
+
+pub use frame_allocator::{FrameTracker, TrackedFrames, alloc_frame};
 
 /// initialize the global frame allocator with the available physical memory range
 ///
@@ -25,5 +28,3 @@ mod frame_allocator;
 pub fn init_frame_allocator(start_addr: usize, end_addr: usize) {
     frame_allocator::init_frame_allocator(start_addr, end_addr);
 }
-
-pub use frame_allocator::FrameTracker;

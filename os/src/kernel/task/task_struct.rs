@@ -13,7 +13,7 @@ use crate::{
     mm::{
         address::{PageNum, UsizeConvert},
         frame_allocator::FrameTracker,
-        memory_space::MemorySpace,
+        memory_space::memory_space::MemorySpace,
         physmem::physical_page_alloc,
     },
 };
