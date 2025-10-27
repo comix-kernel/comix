@@ -1,5 +1,5 @@
-use super::{ActivePageTableInner, PageSize, PageTableEntry, PagingResult, UniversalPTEFlag};
-use crate::mm::address::{Paddr, Ppn, PpnRange, Vaddr, Vpn, VpnRange};
+use super::{PageSize, PageTableEntry, PagingResult, UniversalPTEFlag};
+use crate::mm::address::{Paddr, Ppn, Vaddr, Vpn};
 
 pub trait PageTableInner<T>
 where

@@ -1,5 +1,6 @@
-/// MemorySpace：进程虚拟地址空间管理器。
-///
-/// 封装了进程的页表、所有虚拟内存区域 (VMA) 列表以及相关的同步和统计信息。
-#[derive(Debug)]
-pub struct MemorySpace {}
+// HACK: 在一个模块目录/文件的顶层又声明了一个同名子模块，这会造成 "module inception"。
+// 虽然功能上可行，但会引起 API/模块层次混淆，Clippy 建议消除这种重复。
+#![allow(clippy::module_inception)]
+pub mod mapping_area;
+pub mod memory_space;
+

@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use core::ptr::addr_of_mut;
-
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert};
+use crate::sync::spin_lock::SpinLock;
 use alloc::vec::Vec;
+use lazy_static::lazy_static;
 
 #[derive(Debug)]
 pub struct FrameTracker(Ppn);
@@ -32,6 +32,7 @@ impl Drop for FrameTracker {
     }
 }
 
+#[derive(Debug)]
 pub struct FrameRangeTracker {
     range: PpnRange,
 }
@@ -67,12 +68,16 @@ impl Drop for FrameRangeTracker {
     }
 }
 
-/// TODO: replace with proper synchronization primitive
-///
-/// global frame allocator instance
-///
-/// use static mut in single-core environment without multitasking
-static mut FRAME_ALLOCATOR: Option<FrameAllocator> = None;
+#[derive(Debug)]
+pub enum TrackedFrames {
+    Single(FrameTracker),
+    Multiple(Vec<FrameTracker>),
+    Contiguous(FrameRangeTracker),
+}
+
+lazy_static! {
+    static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
+}
 
 struct FrameAllocator {
     start: Ppn,
@@ -136,6 +141,41 @@ impl FrameAllocator {
             let start = self.cur;
             self.cur = required_end;
             let range = PpnRange::from_start_len(start, num);
+            Some(FrameRangeTracker::new(range))
+        } else {
+            None
+        }
+    }
+
+    pub fn alloc_contig_frames_aligned(
+        &mut self,
+        num: usize,
+        align_pages: usize,
+    ) -> Option<FrameRangeTracker> {
+        if num == 0 {
+            return None;
+        }
+
+        debug_assert!(
+            align_pages.is_power_of_two(),
+            "Alignment must be power of 2"
+        );
+
+        // 向上对齐
+        let aligned_cur_val =
+            (self.cur.as_usize() + align_pages - 1).div_ceil(align_pages) * align_pages;
+        let aligned_cur = Ppn::from_usize(aligned_cur_val);
+
+        // 检查空间
+        let required_end = aligned_cur + num;
+        if required_end <= self.end {
+            // 跳过的帧加入 recycled
+            for ppn_val in self.cur.as_usize()..aligned_cur.as_usize() {
+                self.recycled.push(Ppn::from_usize(ppn_val));
+            }
+
+            self.cur = required_end;
+            let range = PpnRange::from_start_len(aligned_cur, num);
             Some(FrameRangeTracker::new(range))
         } else {
             None
@@ -215,58 +255,59 @@ impl FrameAllocator {
     }
 }
 
-/// TODO: replace with proper synchronization primitive
+/// initialize the global frame allocator with the available physical memory range
 ///
-/// initialize the global frame allocator while booting
+/// # Parameters
+///
+/// * `start_addr` - start address of the available physical memory
+/// * `end_addr` - end address of the available physical memory
 pub fn init_frame_allocator(start_addr: usize, end_addr: usize) {
     let start_ppn = Ppn::from_addr_ceil(Paddr::from_usize(start_addr));
     let end_ppn = Ppn::from_addr_floor(Paddr::from_usize(end_addr));
 
     unsafe {
-        let allocator_ptr = addr_of_mut!(FRAME_ALLOCATOR);
-        if (*allocator_ptr).is_none() {
-            let mut allocator = FrameAllocator::new();
-            allocator.init(start_ppn, end_ppn);
-            *allocator_ptr = Some(allocator);
-        }
+        let mut allocator = FRAME_ALLOCATOR.lock();
+        allocator.init(start_ppn, end_ppn);
     }
 }
 
 /// allocate a single frame
 pub fn alloc_frame() -> Option<FrameTracker> {
-    unsafe { (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut()?.alloc_frame() }
+    unsafe { FRAME_ALLOCATOR.lock().alloc_frame() }
 }
 
 /// allocate multiple frames (may not be contiguous)
 pub fn alloc_frames(num: usize) -> Option<Vec<FrameTracker>> {
-    unsafe { (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut()?.alloc_frames(num) }
+    unsafe { FRAME_ALLOCATOR.lock().alloc_frames(num) }
 }
 
 /// allocate contiguous frames
 pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
+    unsafe { FRAME_ALLOCATOR.lock().alloc_contig_frames(num) }
+}
+
+/// allocate contiguous frames with alignment
+pub fn alloc_contig_frames_aligned(num: usize, align_pages: usize) -> Option<FrameRangeTracker> {
     unsafe {
-        (*addr_of_mut!(FRAME_ALLOCATOR))
-            .as_mut()?
-            .alloc_contig_frames(num)
+        FRAME_ALLOCATOR
+            .lock()
+            .alloc_contig_frames_aligned(num, align_pages)
     }
 }
 
 /// deallocate a single frame
 fn dealloc_frame(frame: &FrameTracker) {
     unsafe {
-        if let Some(allocator) = (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut() {
-            allocator.dealloc_frame(frame);
-        }
+        FRAME_ALLOCATOR.lock().dealloc_frame(frame);
     }
 }
 
 /// deallocate multiple frames (may not be contiguous)
 fn dealloc_frames(frames: &[FrameTracker]) {
     unsafe {
-        if let Some(allocator) = (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut() {
-            for frame in frames {
-                allocator.dealloc_frame(frame);
-            }
+        let mut allocator = FRAME_ALLOCATOR.lock();
+        for frame in frames {
+            allocator.dealloc_frame(frame);
         }
     }
 }
@@ -274,8 +315,6 @@ fn dealloc_frames(frames: &[FrameTracker]) {
 /// deallocate contiguous frames
 fn dealloc_contig_frames(frame_range: &FrameRangeTracker) {
     unsafe {
-        if let Some(allocator) = (*addr_of_mut!(FRAME_ALLOCATOR)).as_mut() {
-            allocator.dealloc_contig_frames(frame_range);
-        }
+        FRAME_ALLOCATOR.lock().dealloc_contig_frames(frame_range);
     }
 }

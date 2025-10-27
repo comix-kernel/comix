@@ -11,3 +11,4 @@ lock_api = "0.4"
 bitflags = {version = "1.2.1"}
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 once_cell = { version = "1.21.3", default-features = false, features = ["alloc", "race"] }
+xmas-elf = "0.9"
