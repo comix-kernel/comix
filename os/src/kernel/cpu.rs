@@ -6,6 +6,7 @@ use crate::{
 };
 
 /// CPU 结构体
+#[allow(dead_code)]
 pub struct Cpu {
     /// 任务上下文
     /// 用于在调度器中保存和恢复 CPU 寄存器状态
