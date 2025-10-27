@@ -103,10 +103,11 @@ mod tests {
         }
 
         // 释放后，应该能再次获取锁
-        let mut g2 = lock.lock();
-        *g2 += 1;
-        kassert!(*g2 == 3);
-
+        {
+            let mut g2 = lock.lock();
+            *g2 += 1;
+            kassert!(*g2 == 3);
+        }
         kassert!(!lock.is_locked());
     });
 }
