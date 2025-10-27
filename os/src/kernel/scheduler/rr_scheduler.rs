@@ -56,7 +56,7 @@ impl Scheduler for RRScheduler {
         let prev_task = self.current_task.take();
 
         if let Some(task) = prev_task {
-            let state = unsafe { task.lock().state };
+            let state = { task.lock().state };
 
             match state {
                 // 如果是 Running 状态，说明是时间片用尽，重新加入运行队列
@@ -78,7 +78,8 @@ impl Scheduler for RRScheduler {
     }
 
     fn add_task(&mut self, task: SharedTask) {
-        match unsafe { task.lock().state } {
+        let state = { task.lock().state };
+        match state {
             TaskState::Running => {
                 self.run_queue.add_task(task);
             }
@@ -103,7 +104,9 @@ impl Scheduler for RRScheduler {
     fn sleep_task(&mut self, task: SharedTask) {
         self.run_queue.remove_task(&task);
 
-        unsafe { task.lock().state = TaskState::Interruptable };
+        {
+            task.lock().state = TaskState::Interruptable;
+        }
 
         if !self.wait_queue.contains(&task) {
             self.wait_queue.add_task(task.clone());
@@ -120,7 +123,9 @@ impl Scheduler for RRScheduler {
     fn wake_up(&mut self, task: SharedTask) {
         self.wait_queue.remove_task(&task);
 
-        unsafe { task.lock().state = TaskState::Running };
+        {
+            task.lock().state = TaskState::Running;
+        }
 
         if !self.run_queue.contains(&task) {
             self.run_queue.add_task(task.clone());
@@ -129,7 +134,7 @@ impl Scheduler for RRScheduler {
 
     fn exit_task(&mut self, task: SharedTask, code: i32) {
         let state: TaskState;
-        unsafe {
+        {
             let mut t = task.lock();
             state = t.state;
             t.exit_code = Some(code);
