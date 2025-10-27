@@ -16,8 +16,10 @@
 //! - [`alloc_contig_frames_aligned`]: Allocate multiple contiguous frames with alignment
 
 mod frame_allocator;
+mod physmem;
 
 pub use frame_allocator::{FrameTracker, TrackedFrames, alloc_frame};
+pub use physmem::*;
 
 /// initialize the global frame allocator with the available physical memory range
 ///

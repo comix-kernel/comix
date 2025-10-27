@@ -36,17 +36,12 @@ lazy_static! {
 
 /// Returns the kernel page table token
 pub fn kernel_token() -> usize {
-    (unsafe { KERNEL_SPACE.lock() }
-        .page_table
-        .root_ppn()
-        .as_usize()
-        << 44)
-        | (8 << 60)
+    (KERNEL_SPACE.lock().page_table.root_ppn().as_usize() << 44) | (8 << 60)
 }
 
 /// Returns the kernel root PPN
 pub fn kernel_root_ppn() -> Ppn {
-    unsafe { KERNEL_SPACE.lock() }.root_ppn()
+    KERNEL_SPACE.lock().root_ppn()
 }
 
 /// Executes a closure with exclusive access to kernel space
@@ -54,7 +49,7 @@ pub fn with_kernel_space<F, R>(f: F) -> R
 where
     F: FnOnce(&mut MemorySpace) -> R,
 {
-    let mut guard = unsafe { KERNEL_SPACE.lock() };
+    let mut guard = KERNEL_SPACE.lock();
     f(&mut guard)
 }
 
