@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // 内核堆（Kernel Heap）的公共接口，提供了 C 风格的 kmalloc 家族函数。
 
 // 引入在 kalloc.rs 中实现的全局分配器

@@ -2,7 +2,7 @@ use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
-use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
+use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
 use crate::mm::page_table::{
     self, ActivePageTableInner, PageSize, PageTableInner, UniversalPTEFlag,

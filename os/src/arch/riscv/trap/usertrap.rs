@@ -38,10 +38,12 @@ pub struct TrapFrame {
 }
 
 /// 处理来自用户态的陷阱（系统调用、中断、异常）
+#[allow(dead_code)]
 pub fn handle_user_trap() {
     todo!()
 }
 
+#[allow(dead_code)]
 /// 从用户态返回到用户态
 pub fn return_to_user() {
     todo!()

@@ -36,8 +36,10 @@ pub enum PagingError {
     /// Failed to alloc frame
     FrameAllocFailed,
     /// Unsupported mapping type for this operation
+    #[allow(dead_code)]
     UnsupportedMapType,
     /// Cannot shrink the area below its start
+    #[allow(dead_code)]
     ShrinkBelowStart,
     /// Huge page splitting is not implemented
     #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用

@@ -377,7 +377,7 @@ impl MemorySpace {
             };
 
             // Build permissions
-            let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Valid;
+            let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::VALID;
             if ph.flags().is_read() {
                 flags |= UniversalPTEFlag::Readable;
             }
@@ -548,7 +548,7 @@ impl MemorySpace {
         }
 
         // Convert permissions
-        let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Valid;
+        let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::VALID;
         if prot & 0x1 != 0 {
             flags |= UniversalPTEFlag::Readable;
         }

@@ -198,7 +198,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 if pte.is_valid() {
                     return Err(PagingError::AlreadyMapped);
                 }
-                *pte = PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::Valid);
+                *pte = PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::VALID);
                 return Ok(());
             } else {
                 // Intermediate level - need to continue walking
@@ -297,7 +297,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
             // Check if this is a leaf entry (has R/W/X permissions or is level 0)
             if pte.is_huge() || level == 0 {
-                pte.set_flags(flags | UniversalPTEFlag::Valid);
+                pte.set_flags(flags | UniversalPTEFlag::VALID);
                 Self::tlb_flush(vpn);
                 return Ok(());
             }
