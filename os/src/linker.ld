@@ -1,7 +1,7 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 PHYSICAL_BASE = 0x80200000;           /* 物理地址 */
-VIRTUAL_BASE = 0xffffffffc0200000;    /* 虚拟地址（高半核） */
+VIRTUAL_BASE = 0xffffffc080200000;    /* 虚拟地址（高半核），与arch/mm保持一致 */
 
 SECTIONS
 {
