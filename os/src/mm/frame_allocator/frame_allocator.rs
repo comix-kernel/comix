@@ -76,10 +76,10 @@ pub enum TrackedFrames {
 }
 
 lazy_static! {
-    static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
+    pub static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
 }
 
-struct FrameAllocator {
+pub struct FrameAllocator {
     start: Ppn,
     end: Ppn,
     cur: Ppn,

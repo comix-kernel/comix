@@ -11,10 +11,9 @@ use crate::{
     arch::{kernel::context::Context, trap::usertrap::TrapFrame},
     kernel::task::{TID_ALLOCATOR, task_state::TaskState},
     mm::{
-        address::{PageNum, UsizeConvert},
-        frame_allocator::FrameTracker,
+        address::{ConvertablePaddr, PageNum, UsizeConvert},
+        frame_allocator::{FrameTracker, physical_page_alloc},
         memory_space::memory_space::MemorySpace,
-        physmem::physical_page_alloc,
     },
 };
 
@@ -133,8 +132,7 @@ impl Task {
             tid: id,
             pid: id,
             ppid,
-            // TODO: 以后改成虚拟地址
-            kstack_base: kstack_tracker.ppn().end_addr().as_usize(),
+            kstack_base: kstack_tracker.ppn().end_addr().to_vaddr().as_usize(),
             kstack_tracker,
             trap_frame_ptr: AtomicPtr::new(core::ptr::null_mut()),
             memory_space,

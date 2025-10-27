@@ -10,5 +10,6 @@
 //! - [`init_heap`]: Initialize the global heap allocator
 
 mod global_allocator;
+mod heap;
 
 pub use global_allocator::init_heap;
