@@ -204,8 +204,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 // Intermediate level - need to continue walking
                 if !pte.is_valid() {
                     // Allocate a new page table for this level
-                    let new_frame = alloc_frame()
-                        .ok_or(PagingError::FrameAllocFailed)?;
+                    let new_frame = alloc_frame().ok_or(PagingError::FrameAllocFailed)?;
                     let new_ppn = new_frame.ppn();
 
                     // Clear the new page table

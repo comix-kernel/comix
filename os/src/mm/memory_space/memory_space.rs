@@ -1,8 +1,13 @@
-use crate::arch::mm::{vaddr_to_paddr, paddr_to_vaddr};
-use crate::mm::address::{Ppn, Vpn, VpnRange, Vaddr, Paddr, PageNum, UsizeConvert};
+use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::config::{
+    MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE,
+    USER_STACK_TOP,
+};
+use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
-use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag, PageSize};
-use crate::config::{MEMORY_END, TRAP_CONTEXT, USER_STACK_TOP, USER_STACK_SIZE, MAX_USER_HEAP_SIZE, TRAMPOLINE, PAGE_SIZE};
+use crate::mm::page_table::{
+    ActivePageTableInner, PageSize, PageTableInner, PagingError, UniversalPTEFlag,
+};
 use crate::sync::spin_lock::SpinLock;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
@@ -30,7 +35,12 @@ lazy_static! {
 
 /// Returns the kernel page table token
 pub fn kernel_token() -> usize {
-    unsafe { KERNEL_SPACE.lock() }.page_table.root_ppn().as_usize() << 44 | 8 << 60
+    unsafe { KERNEL_SPACE.lock() }
+        .page_table
+        .root_ppn()
+        .as_usize()
+        << 44
+        | 8 << 60
 }
 
 /// Returns the kernel root PPN
@@ -46,7 +56,6 @@ where
     let mut guard = unsafe { KERNEL_SPACE.lock() };
     f(&mut guard)
 }
-
 
 /// Memory space structure representing an address space
 #[derive(Debug)]
@@ -116,7 +125,9 @@ impl MemorySpace {
             trampoline_vpn,
             trampoline_ppn,
             PageSize::Size4K,
-            UniversalPTEFlag::UserAccessible | UniversalPTEFlag::Readable | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::UserAccessible
+                | UniversalPTEFlag::Readable
+                | UniversalPTEFlag::Executable,
         )?;
 
         Ok(())
@@ -169,21 +180,21 @@ impl MemorySpace {
 
     /// Finds the area containing the given VPN
     pub fn find_area(&self, vpn: Vpn) -> Option<&MappingArea> {
-        self.areas.iter().find(|area| area.vpn_range().contains(vpn))
+        self.areas
+            .iter()
+            .find(|area| area.vpn_range().contains(vpn))
     }
 
     /// Finds the area containing the given VPN (mutable)
     pub fn find_area_mut(&mut self, vpn: Vpn) -> Option<&mut MappingArea> {
-        self.areas.iter_mut().find(|area| area.vpn_range().contains(vpn))
+        self.areas
+            .iter_mut()
+            .find(|area| area.vpn_range().contains(vpn))
     }
 
     /// Removes and unmaps an area by VPN
     pub fn remove_area(&mut self, vpn: Vpn) -> Result<(), PagingError> {
-        if let Some(pos) = self
-            .areas
-            .iter()
-            .position(|a| a.vpn_range().contains(vpn))
-        {
+        if let Some(pos) = self.areas.iter().position(|a| a.vpn_range().contains(vpn)) {
             let mut area = self.areas.remove(pos);
             area.unmap(&mut self.page_table)?;
             Ok(())
@@ -197,8 +208,7 @@ impl MemorySpace {
         let mut space = MemorySpace::new();
 
         // 0. Map trampoline (must be first, before any kernel sections)
-        space.map_trampoline()
-            .expect("Failed to map trampoline");
+        space.map_trampoline().expect("Failed to map trampoline");
 
         // 1. Map kernel text segment (.text) - read + execute
         Self::map_kernel_section(
@@ -323,7 +333,7 @@ impl MemorySpace {
     /// Returns (space, entry_point, user_stack_top)
     pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
-        use xmas_elf::program::{Type, SegmentData};
+        use xmas_elf::program::{SegmentData, Type};
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
 
@@ -335,7 +345,8 @@ impl MemorySpace {
         let mut space = MemorySpace::new();
 
         // 0. Map trampoline (user space needs user access permission)
-        space.map_trampoline_user()
+        space
+            .map_trampoline_user()
             .expect("Failed to map trampoline in user space");
 
         let mut max_end_vpn = Vpn::from_usize(0);
@@ -400,7 +411,8 @@ impl MemorySpace {
         space.heap_top = Some(max_end_vpn);
 
         // 3. Map user stack (with guard pages)
-        let user_stack_bottom = Vpn::from_addr_floor(Vaddr::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
+        let user_stack_bottom =
+            Vpn::from_addr_floor(Vaddr::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
         let user_stack_top = Vpn::from_addr_ceil(Vaddr::from_usize(USER_STACK_TOP));
 
         space.insert_framed_area(

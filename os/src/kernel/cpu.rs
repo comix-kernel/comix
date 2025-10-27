@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
 use crate::{
-    arch::kernel::context::Context, kernel::TaskStruct, mm::memory_space::memory_space::MemorySpace,
-    sync::spin_lock::SpinLock,
+    arch::kernel::context::Context, kernel::TaskStruct,
+    mm::memory_space::memory_space::MemorySpace, sync::spin_lock::SpinLock,
 };
 
 /// CPU 结构体
