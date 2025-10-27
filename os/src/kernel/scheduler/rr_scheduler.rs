@@ -1,16 +1,22 @@
 use alloc::sync::Arc;
 
-use crate::kernel::{
-    TaskState,
-    scheduler::{Scheduler, task_queue::TaskQueue},
-    task::SharedTask,
+use crate::{
+    arch::kernel::{context::Context, switch},
+    kernel::{
+        TaskState,
+        cpu::current_cpu,
+        scheduler::{Scheduler, task_queue::TaskQueue},
+        task::SharedTask,
+    },
 };
 
 const DEFAULT_TIME_SLICE: usize = 5; // 默认时间片长度（以时钟中断滴答数为单位）
 
 /// 简单的轮转调度器实现
 /// 每个任务按顺序轮流获得 CPU 时间片
-// XXX: 现在的实现是单核的。
+/// 约束：
+/// 1. 要求开始调度后任何时刻，至少有一个任务处于运行状态
+// XXX: 现在的实现是单核的。且没有支持内核抢占。
 pub struct RRScheduler {
     // 运行队列
     run_queue: TaskQueue,
@@ -20,8 +26,6 @@ pub struct RRScheduler {
     time_slice: usize,
     // 当前时间片剩余时间
     current_slice: usize,
-    // 正在运行的任务
-    current_task: Option<SharedTask>,
 }
 
 impl RRScheduler {
@@ -32,6 +36,7 @@ impl RRScheduler {
         }
         if self.current_slice == 0 {
             self.current_slice = self.time_slice;
+            // XXX: 要不要分为下半部处理？
             self.schedule();
         }
     }
@@ -44,37 +49,37 @@ impl Scheduler for RRScheduler {
             wait_queue: TaskQueue::new(),
             time_slice: DEFAULT_TIME_SLICE,
             current_slice: DEFAULT_TIME_SLICE,
-            current_task: None,
         }
     }
 
     fn schedule(&mut self) {
-        if self.run_queue.is_empty() {
-            return;
-        }
-
-        let prev_task = self.current_task.take();
-
-        if let Some(task) = prev_task {
-            let state = { task.lock().state };
-
-            match state {
-                // 如果是 Running 状态，说明是时间片用尽，重新加入运行队列
-                TaskState::Running => {
-                    self.run_queue.add_task(task);
-                }
-                // 如果是 Sleeping/Interruptable/Stopped/Terminated 等状态，
-                // 那么它已经被 sleep_task/exit_task 处理了，无需再加入 run_queue
-                _ => {
-                    // 如果是 sleep/exit 导致的 schedule，任务已经被移除，这里无需操作
-                }
+        let next_task = match self.next_task() {
+            Some(t) => t,
+            None => {
+                return;
             }
+        };
+
+        let mut next_guard = next_task.lock();
+        let mut cpu = current_cpu().lock();
+        let next_ctx_ptr = &mut next_guard.context as *mut _;
+        let old_ctx_ptr: *mut Context = if let Some(cur_arc) = &cpu.current_task {
+            let mut cur_guard = cur_arc.lock();
+            &mut cur_guard.context as *mut _
+        } else {
+            // 约束1
+            panic!("no current task to schedule from");
+        };
+
+        cpu.current_task = Some(next_task.clone());
+
+        // 在调用 switch 前释放所有锁（否则死锁），但指针在栈帧内仍有效
+        drop(cpu);
+        drop(next_guard);
+
+        unsafe {
+            switch(old_ctx_ptr, next_ctx_ptr);
         }
-
-        let next_task = self.next_task();
-        self.current_task = Some(next_task);
-
-        // 4. 触发上下文切换 (此处省略)
     }
 
     fn add_task(&mut self, task: SharedTask) {
@@ -89,12 +94,8 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn next_task(&mut self) -> SharedTask {
-        if let Some(task) = self.run_queue.pop_task() {
-            task
-        } else {
-            panic!("No runnable tasks available");
-        }
+    fn next_task(&mut self) -> Option<SharedTask> {
+        self.run_queue.pop_task()
     }
 
     fn yield_task(&mut self) {
@@ -112,9 +113,12 @@ impl Scheduler for RRScheduler {
             self.wait_queue.add_task(task.clone());
         }
 
-        if let Some(cur) = &self.current_task {
+        let mut cpu = current_cpu().lock();
+        if let Some(cur) = &mut cpu.current_task {
             if Arc::ptr_eq(cur, &task) {
-                self.current_task = None;
+                cpu.current_task = None;
+                // schedule 不会返回
+                drop(cpu);
                 self.schedule();
             }
         }
@@ -148,9 +152,13 @@ impl Scheduler for RRScheduler {
                 self.wait_queue.remove_task(&task);
             }
         }
-        if let Some(cur) = &self.current_task {
+
+        let mut cpu = current_cpu().lock();
+        if let Some(cur) = &mut cpu.current_task {
             if Arc::ptr_eq(cur, &task) {
-                self.current_task = None;
+                cpu.current_task = None;
+                // schedule 不会返回
+                drop(cpu);
                 self.schedule();
             }
         }
