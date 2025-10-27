@@ -5,11 +5,11 @@
 #[derive(Debug, Clone, Copy)]
 pub struct Context {
     /// 返回地址
-    ra: usize,
+    pub ra: usize,
     /// 栈指针
-    sp: usize,
+    pub sp: usize,
     /// 保存s0-s11寄存器
-    s: [usize; 12],
+    pub s: [usize; 12],
 }
 
 impl Context {
