@@ -17,6 +17,7 @@ pub mod global_allocator;
 pub mod heap;
 pub mod memory_space;
 pub mod page_table;
+pub mod physmem;
 
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
