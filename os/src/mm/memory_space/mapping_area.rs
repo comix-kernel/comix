@@ -113,7 +113,7 @@ impl MappingArea {
             MapType::Direct => {
                 // For direct mapping, vpn equals ppn + offset
                 let vaddr = vpn.start_addr();
-                let paddr = vaddr_to_paddr(vaddr.as_usize());
+                let paddr = unsafe { vaddr_to_paddr(vaddr.as_usize()) };
                 Ppn::from_addr_floor(Paddr::from_usize(paddr))
             }
             MapType::Framed => {

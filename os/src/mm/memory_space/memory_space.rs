@@ -1,7 +1,8 @@
+use core::cmp::Ordering;
+
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
 use crate::config::{
-    MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE,
-    USER_STACK_TOP,
+    MAX_USER_HEAP_SIZE, MEMORY_END, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE, USER_STACK_TOP,
 };
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
@@ -35,12 +36,12 @@ lazy_static! {
 
 /// Returns the kernel page table token
 pub fn kernel_token() -> usize {
-    unsafe { KERNEL_SPACE.lock() }
+    (unsafe { KERNEL_SPACE.lock() }
         .page_table
         .root_ppn()
         .as_usize()
-        << 44
-        | 8 << 60
+        << 44)
+        | (8 << 60)
 }
 
 /// Returns the kernel root PPN
@@ -107,7 +108,7 @@ impl MemorySpace {
             trampoline_vpn,
             trampoline_ppn,
             PageSize::Size4K,
-            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::EXECUTABLE,
         )?;
 
         Ok(())
@@ -125,9 +126,9 @@ impl MemorySpace {
             trampoline_vpn,
             trampoline_ppn,
             PageSize::Size4K,
-            UniversalPTEFlag::UserAccessible
-                | UniversalPTEFlag::Readable
-                | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::USER_ACCESSIBLE
+                | UniversalPTEFlag::READABLE
+                | UniversalPTEFlag::EXECUTABLE,
         )?;
 
         Ok(())
@@ -213,18 +214,18 @@ impl MemorySpace {
         // 1. Map kernel text segment (.text) - read + execute
         Self::map_kernel_section(
             &mut space,
-            unsafe { stext as usize },
-            unsafe { etext as usize },
+            stext as usize,
+            etext as usize,
             AreaType::KernelText,
-            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::Executable,
+            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::EXECUTABLE,
         )
         .expect("Failed to map kernel text");
 
         // 2. Map kernel read-only data segment (.rodata)
         Self::map_kernel_section(
             &mut space,
-            unsafe { srodata as usize },
-            unsafe { erodata as usize },
+            srodata as usize,
+            erodata as usize,
             AreaType::KernelRodata,
             UniversalPTEFlag::kernel_r(),
         )
@@ -233,8 +234,8 @@ impl MemorySpace {
         // 3. Map kernel data segment (.data)
         Self::map_kernel_section(
             &mut space,
-            unsafe { sdata as usize },
-            unsafe { edata as usize },
+            sdata as usize,
+            edata as usize,
             AreaType::KernelData,
             UniversalPTEFlag::kernel_rw(),
         )
@@ -243,8 +244,8 @@ impl MemorySpace {
         // 4. Map kernel BSS segment (.bss)
         Self::map_kernel_section(
             &mut space,
-            unsafe { sbss as usize },
-            unsafe { ebss as usize },
+            sbss as usize,
+            ebss as usize,
             AreaType::KernelBss,
             UniversalPTEFlag::kernel_rw(),
         )
@@ -377,15 +378,15 @@ impl MemorySpace {
             };
 
             // Build permissions
-            let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::VALID;
+            let mut flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
             if ph.flags().is_read() {
-                flags |= UniversalPTEFlag::Readable;
+                flags |= UniversalPTEFlag::READABLE;
             }
             if ph.flags().is_write() {
-                flags |= UniversalPTEFlag::Writeable;
+                flags |= UniversalPTEFlag::WRITEABLE;
             }
             if ph.flags().is_execute() {
-                flags |= UniversalPTEFlag::Executable;
+                flags |= UniversalPTEFlag::EXECUTABLE;
             }
 
             // Determine area type
@@ -473,14 +474,22 @@ impl MemorySpace {
             // Existing heap area, adjust size
             let old_end = area.vpn_range().end();
 
-            if new_end_vpn > old_end {
-                // Extend
-                let count = new_end_vpn.as_usize() - old_end.as_usize();
-                area.extend(&mut self.page_table, count)?;
-            } else if new_end_vpn < old_end {
-                // Shrink
-                let count = old_end.as_usize() - new_end_vpn.as_usize();
-                area.shrink(&mut self.page_table, count)?;
+            match new_end_vpn.cmp(&old_end) {
+                Ordering::Greater => {
+                    // Extend
+                    let count = new_end_vpn.as_usize() - old_end.as_usize();
+                    if count != 0 {
+                        area.extend(&mut self.page_table, count)?;
+                    }
+                }
+                Ordering::Less => {
+                    // Shrink
+                    let count = old_end.as_usize() - new_end_vpn.as_usize();
+                    if count != 0 {
+                        area.shrink(&mut self.page_table, count)?;
+                    }
+                }
+                Ordering::Equal => { /* no-op */ }
             }
         } else {
             // First time allocating heap, create new area
@@ -548,15 +557,15 @@ impl MemorySpace {
         }
 
         // Convert permissions
-        let mut flags = UniversalPTEFlag::UserAccessible | UniversalPTEFlag::VALID;
+        let mut flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
         if prot & 0x1 != 0 {
-            flags |= UniversalPTEFlag::Readable;
+            flags |= UniversalPTEFlag::READABLE;
         }
         if prot & 0x2 != 0 {
-            flags |= UniversalPTEFlag::Writeable;
+            flags |= UniversalPTEFlag::WRITEABLE;
         }
         if prot & 0x4 != 0 {
-            flags |= UniversalPTEFlag::Executable;
+            flags |= UniversalPTEFlag::EXECUTABLE;
         }
 
         self.insert_framed_area(vpn_range, AreaType::UserHeap, flags, None)?;

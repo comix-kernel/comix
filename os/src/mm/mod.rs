@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Memory management module
 //!
 //! This module provides architecture-independent memory management abstractions
@@ -21,9 +22,7 @@ pub mod physmem;
 
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
-pub use memory_space::memory_space::{
-    MemorySpace, kernel_root_ppn, kernel_token, with_kernel_space,
-};
+pub use memory_space::memory_space::kernel_token;
 
 use crate::config::{MEMORY_END, PAGE_SIZE};
 
@@ -34,7 +33,7 @@ unsafe extern "C" {
 /// Initializes the memory management subsystem
 pub fn init() {
     // 1. Initialize frame allocator
-    let start = ((ekernel as usize + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE; // Page-aligned
+    let start = (ekernel as usize).div_ceil(PAGE_SIZE) * PAGE_SIZE; // Page-aligned
     let end = MEMORY_END;
 
     println!(

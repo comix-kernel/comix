@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use super::{PageSize, PageTableEntry, PagingResult, UniversalPTEFlag};
 use crate::mm::address::{Paddr, Ppn, Vaddr, Vpn};
 
