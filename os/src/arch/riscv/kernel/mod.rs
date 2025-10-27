@@ -7,6 +7,7 @@ pub mod cpu;
 
 global_asm!(include_str!("switch.S"));
 
+#[allow(dead_code)]
 unsafe extern "C" {
     /// 上下文切换函数
     ///

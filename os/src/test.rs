@@ -22,6 +22,18 @@ pub static mut FAILED_INDEX: usize = 0;
 
 pub static TEST_FAILED: AtomicUsize = AtomicUsize::new(0);
 
+// 把对 static mut 的不安全写操作封装到一个函数里（仅此处使用 unsafe）
+pub fn record_failed_assertion(fa: FailedAssertion) {
+    unsafe {
+        if FAILED_INDEX < FAILED_LIST_CAPACITY {
+            FAILED_LIST[FAILED_INDEX] = Some(fa);
+            FAILED_INDEX += 1;
+        } else {
+            println!("\x1b[31mWarning: FAILED_LIST overflow, assertion not recorded\x1b[0m");
+        }
+    }
+}
+
 /// 一个不会 panic 的断言宏。它会记录打印失败状态，但不会中断程序。传入表达式，接受一个布尔值.
 /// 只记录32个失败信息，超了不会记录
 #[macro_export]
@@ -31,16 +43,8 @@ macro_rules! kassert {
             $crate::test::TEST_FAILED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             // 在安全上下文中先构造值，避免在 unsafe 块内展开 metavariables
             let fa = $crate::test::FailedAssertion::new(stringify!($cond), file!(), line!());
-            unsafe {
-                if $crate::test::FAILED_INDEX < $crate::test::FAILED_LIST_CAPACITY {
-                    $crate::test::FAILED_LIST[$crate::test::FAILED_INDEX] = Some(fa);
-                    $crate::test::FAILED_INDEX += 1;
-                } else {
-                    println!(
-                        "\x1b[31mWarning: FAILED_LIST overflow, assertion not recorded\x1b[0m"
-                    );
-                }
-            }
+            // 调用安全封装函数（内部负责 unsafe）
+            $crate::test::record_failed_assertion(fa);
         }
     }};
 }

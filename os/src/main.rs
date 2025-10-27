@@ -58,7 +58,7 @@ pub extern "C" fn rust_main() -> ! {
     }
     clear_bss();
 
-    let ekernel_paddr = vaddr_to_paddr(ekernel as usize);
+    let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
     mm::init_frame_allocator(ekernel_paddr, config::MEMORY_END);
 
     mm::init_heap();
@@ -96,8 +96,8 @@ fn clear_bss() {
         fn ebss();
     }
 
-    let sbss_paddr = vaddr_to_paddr(sbss as usize);
-    let ebss_paddr = vaddr_to_paddr(ebss as usize);
+    let sbss_paddr = unsafe { vaddr_to_paddr(sbss as usize) };
+    let ebss_paddr = unsafe { vaddr_to_paddr(ebss as usize) };
 
     (sbss_paddr..ebss_paddr).for_each(|a| unsafe {
         // 访问物理地址需要通过 paddr_to_vaddr 转换
