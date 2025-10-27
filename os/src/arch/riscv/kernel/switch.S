@@ -3,10 +3,11 @@
 #   fn swtch(struct context *old, struct context *new);
 # 
 # 保存当前任务的寄存器状态到 old 指向的 context 结构体中，
+# 然后从 new 指向的 context 结构体中恢复寄存器状态，
+# 实现任务切换。
 
-
-.globl swtch
-swtch:
+.globl switch
+switch:
         sd ra, 0(a0)
         sd sp, 8(a0)
         sd s0, 16(a0)
