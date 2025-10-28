@@ -226,7 +226,7 @@ impl FrameAllocator {
         );
         // is allocated
         debug_assert!(
-            end < self.cur,
+            end <= self.cur,
             "dealloc_contig_frames: frame range not allocated"
         );
 
