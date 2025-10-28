@@ -361,3 +361,62 @@ pub type PaddrRange = AddressRange<Paddr>;
 
 /// virtual address range
 pub type VaddrRange = AddressRange<Vaddr>;
+
+#[cfg(test)]
+mod address_basic_tests {
+    use super::*;
+    use crate::arch::mm::paddr_to_vaddr;
+    use crate::{test_case, kassert};
+
+    // 1.1 Paddr/Vaddr creation and conversion
+    test_case!(test_address_roundtrip, {
+        let test_values = [0x0, 0x1000, 0x8000_0000, 0x8000_1234];
+
+        for &val in &test_values {
+            let paddr = Paddr::from_usize(val);
+            kassert!(paddr.as_usize() == val);
+
+            let vaddr = Vaddr::from_usize(val);
+            kassert!(vaddr.as_usize() == val);
+        }
+    });
+
+    // 1.2 Null address
+    test_case!(test_null_address, {
+        let paddr = Paddr::null();
+        kassert!(paddr.is_null());
+        kassert!(paddr.as_usize() == 0);
+    });
+
+    // 1.3 Page offset
+    test_case!(test_page_offset, {
+        let cases = [(0x8000_0000, 0), (0x8000_0123, 0x123), (0x8000_0FFF, 0xFFF)];
+        for &(addr, expected) in &cases {
+            kassert!(Paddr::from_usize(addr).page_offset() == expected);
+        }
+    });
+
+    // 1.4 Paddr ↔ Vaddr conversion
+    test_case!(test_paddr_vaddr_conversion, {
+        let paddrs = [0x8000_0000, 0x8000_1000, 0x8020_0000];
+
+        for &paddr_val in &paddrs {
+            let paddr = Paddr::from_usize(paddr_val);
+            let vaddr = paddr.to_vaddr();
+            let back = vaddr.to_paddr();
+            kassert!(back.as_usize() == paddr_val);
+            kassert!(vaddr.as_usize() == paddr_to_vaddr(paddr_val));
+        }
+    });
+
+    // 1.5 Address comparison
+    test_case!(test_address_comparison, {
+        let a1 = Paddr::from_usize(0x8000_0000);
+        let a2 = Paddr::from_usize(0x8000_0000);
+        let a3 = Paddr::from_usize(0x8000_1000);
+
+        kassert!(a1 == a2);
+        kassert!(a1 < a3);
+        kassert!(a3 > a1);
+    });
+}

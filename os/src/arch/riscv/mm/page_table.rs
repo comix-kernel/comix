@@ -24,9 +24,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         let vaddr = vpn.start_addr();
         unsafe {
             core::arch::asm!(
-                "sfence.vma {0} {1}",
-                in(reg) vaddr.as_usize(),
-                in(reg) 0usize
+                "sfence.vma {0}, zero",
+                in(reg) vaddr.as_usize()
             )
         }
     }
@@ -253,6 +252,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
             // Check if this is a leaf entry (has R/W/X permissions or is level 0)
             if pte.is_huge() || level == 0 {
+                // Clear the PTE to remove the mapping
+                pte.clear();
                 Self::tlb_flush(vpn);
                 return Ok(());
             }
@@ -348,4 +349,129 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
 fn ppn_to_satp(ppn: Ppn) -> usize {
     ppn.as_usize() | (8usize << 60) // MODE=8 for SV39
+}
+
+#[cfg(test)]
+mod page_table_tests {
+    use super::*;
+    use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
+    use crate::{test_case, kassert};
+
+    // 1. Page table creation
+    test_case!(test_pt_create, {
+        let pt = PageTableInner::new();
+        // Root PPN should be valid
+        kassert!(pt.root_ppn().as_usize() > 0);
+        kassert!(pt.is_user_table());
+    });
+
+    // 2. Map and translate
+    test_case!(test_pt_map_translate, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x1000);
+        let ppn = Ppn::from_usize(0x80000);
+
+        // Map vpn -> ppn
+        let result = pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        kassert!(result.is_ok());
+
+        // Translate back - use vpn.start_addr() to get correct vaddr
+        let vaddr = vpn.start_addr();
+        let translated = pt.translate(vaddr);
+        kassert!(translated.is_some());
+        let paddr = translated.unwrap();
+        kassert!(paddr.as_usize() >> 12 == ppn.as_usize());
+    });
+
+    // 3. Unmap
+    test_case!(test_pt_unmap, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x1000);
+        let ppn = Ppn::from_usize(0x80000);
+
+        // Map first
+        pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw()).unwrap();
+
+        // Unmap
+        let result = pt.unmap(vpn);
+        kassert!(result.is_ok());
+
+        // Should not be mapped anymore
+        let vaddr = vpn.start_addr();
+        let translated = pt.translate(vaddr);
+        kassert!(translated.is_none());
+    });
+
+    // 4. Error: already mapped
+    test_case!(test_pt_error_already_mapped, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x1000);
+
+        // First mapping succeeds
+        let result1 = pt.map(vpn, Ppn::from_usize(0x80000), PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        kassert!(result1.is_ok());
+
+        // Second mapping should fail
+        let result2 = pt.map(vpn, Ppn::from_usize(0x80001), PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        kassert!(result2.is_err());
+    });
+
+    // 5. Walk page table
+    test_case!(test_pt_walk, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x1000);
+        let ppn = Ppn::from_usize(0x80000);
+        let flags = UniversalPTEFlag::kernel_rw();
+
+        // Map first
+        pt.map(vpn, ppn, PageSize::Size4K, flags).unwrap();
+
+        // Walk to get mapping info
+        let walk_result = pt.walk(vpn);
+        kassert!(walk_result.is_ok());
+
+        let (mapped_ppn, _, mapped_flags) = walk_result.unwrap();
+        kassert!(mapped_ppn == ppn);
+        kassert!(mapped_flags.bits() == flags.bits());
+    });
+
+    // 6. Update flags
+    test_case!(test_pt_update_flags, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x1000);
+        let ppn = Ppn::from_usize(0x80000);
+
+        // Map with kernel_rw
+        pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw()).unwrap();
+
+        // Update to kernel read-only
+        let new_flags = UniversalPTEFlag::kernel_r();
+        let result = pt.update_flags(vpn, new_flags);
+        kassert!(result.is_ok());
+
+        // Verify flags changed
+        let (_, _, flags) = pt.walk(vpn).unwrap();
+        kassert!(flags.bits() == new_flags.bits());
+    });
+
+    // 7. Multiple mappings
+    test_case!(test_pt_multiple_mappings, {
+        let mut pt = PageTableInner::new();
+
+        // Map multiple VPNs
+        for i in 0..10 {
+            let vpn = Vpn::from_usize(0x1000 + i);
+            let ppn = Ppn::from_usize(0x80000 + i);
+            let result = pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+            kassert!(result.is_ok());
+        }
+
+        // Verify all mappings
+        for i in 0..10 {
+            let vpn = Vpn::from_usize(0x1000 + i);
+            let expected_ppn = Ppn::from_usize(0x80000 + i);
+            let (mapped_ppn, _, _) = pt.walk(vpn).unwrap();
+            kassert!(mapped_ppn == expected_ppn);
+        }
+    });
 }
