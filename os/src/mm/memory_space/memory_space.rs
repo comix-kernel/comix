@@ -240,8 +240,8 @@ impl MemorySpace {
         // Note: .bss.stack is placed BEFORE sbss in linker.ld
         Self::map_kernel_section(
             &mut space,
-            edata as usize,  // .bss.stack starts at edata
-            sbss as usize,   // .bss.stack ends at sbss
+            edata as usize, // .bss.stack starts at edata
+            sbss as usize,  // .bss.stack ends at sbss
             AreaType::KernelStack,
             UniversalPTEFlag::kernel_rw(),
         )
@@ -260,7 +260,7 @@ impl MemorySpace {
         // 4c. Map kernel heap (defined in linker.ld between ebss and ekernel)
         Self::map_kernel_section(
             &mut space,
-            ebss as usize,   // sheap (from linker.ld)
+            ebss as usize,    // sheap (from linker.ld)
             ekernel as usize, // eheap (from linker.ld)
             AreaType::KernelHeap,
             UniversalPTEFlag::kernel_rw(),
@@ -629,9 +629,9 @@ impl MemorySpace {
 #[cfg(test)]
 mod memory_space_tests {
     use super::*;
-    use crate::mm::page_table::UniversalPTEFlag;
     use crate::mm::address::{Vpn, VpnRange};
-    use crate::{test_case, kassert};
+    use crate::mm::page_table::UniversalPTEFlag;
+    use crate::{kassert, test_case};
 
     // 1. Create memory space
     test_case!(test_memspace_create, {
@@ -676,6 +676,6 @@ mod memory_space_tests {
         use crate::mm::memory_space::memory_space::kernel_token;
 
         let token = kernel_token();
-        kassert!(token > 0);  // Valid SATP value
+        kassert!(token > 0); // Valid SATP value
     });
 }
