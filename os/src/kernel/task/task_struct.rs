@@ -122,9 +122,12 @@ impl Task {
     fn new(ppid: u32, memory_space: Option<Arc<MemorySpace>>) -> Self {
         let kstack_tracker =
             physical_page_alloc().expect("Failed to allocate kernel stack for new Task");
+        let kstack_base = kstack_tracker.ppn().end_addr().to_vaddr().as_usize();
         let id = TID_ALLOCATOR.allocate();
+        let mut context = Context::zero_init();
+        context.sp = kstack_base;
         Task {
-            context: Context::zero_init(),
+            context,
             preempt_count: 0,
             priority: 0,
             processor_id: 0,
@@ -132,7 +135,7 @@ impl Task {
             tid: id,
             pid: id,
             ppid,
-            kstack_base: kstack_tracker.ppn().end_addr().to_vaddr().as_usize(),
+            kstack_base,
             kstack_tracker,
             trap_frame_ptr: AtomicPtr::new(core::ptr::null_mut()),
             memory_space,

@@ -17,9 +17,12 @@ mod sync;
 #[macro_use]
 mod test;
 use crate::arch::intr;
+use crate::arch::kernel::context::Context;
+use crate::arch::kernel::switch;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
+use crate::kernel::current_cpu;
 use crate::sbi::shutdown;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
@@ -47,6 +50,7 @@ fn test_runner(tests: &[&dyn Fn()]) {
         tests.len() - failed,
         failed
     );
+    shutdown(false);
 }
 
 global_asm!(include_str!("entry.asm"));
@@ -72,7 +76,19 @@ pub extern "C" fn rust_main() -> ! {
     #[cfg(test)]
     test_main();
 
-    shutdown(false)
+    kinit_entry();
+    unreachable!("Unreachable in rust_main()");
+}
+
+// 内核初始化后将第一个任务(kinit)放到 CPU 上运行
+// 并且当这个函数结束时，应该切换到第一个任务的上下文
+fn kinit_entry() {
+    let kinit_task = crate::kernel::task::kinit_task();
+    let old = &mut Context::zero_init();
+    let new = &mut kinit_task.lock().context;
+    current_cpu().lock().current_task = Some(kinit_task.clone());
+    // TODO: 设置当前内存空间
+    unsafe { switch(old, new) };
 }
 
 #[panic_handler]
