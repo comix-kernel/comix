@@ -33,7 +33,7 @@ pub const VADDR_START: usize = 0xffff_ffc0_0000_0000;
 ///
 /// This mask preserves the lower 38 bits (bits 0-37), which corresponds to
 /// the physical address space size in SV39.
-pub const PADDR_MASK: usize = 0x0000_3fff_ffff_ffff;
+pub const PADDR_MASK: usize = 0x0000_003f_ffff_ffff;
 
 /// convert virtual address to physical address
 ///
