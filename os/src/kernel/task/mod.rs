@@ -1,3 +1,5 @@
+use core::hint;
+
 use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
@@ -59,4 +61,20 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
 /// 把已初始化的 TaskStruct 包装为共享任务句柄
 pub fn into_shared(task: TaskStruct) -> SharedTask {
     Arc::new(SpinLock::new(task))
+}
+
+/// 内核的第一个任务
+/// 在初始化完成后由调度器运行
+/// TODO: 现在只是一个空循环
+fn kinit() {
+    loop {
+        hint::spin_loop();
+    }
+}
+
+pub fn kinit_task() -> SharedTask {
+    let mut task = TaskStruct::ktask_create(0); // kinit 没有父任务
+    task.init_kernel_thread_context(kinit as usize);
+    task.context.ra = kinit as usize;
+    into_shared(task)
 }
