@@ -312,7 +312,7 @@ fn dealloc_contig_frames(frame_range: &FrameRangeTracker) {
 #[cfg(test)]
 mod frame_allocator_tests {
     use super::*;
-    use crate::{test_case, kassert};
+    use crate::{kassert, test_case};
 
     // 1. Single frame allocation
     test_case!(test_single_frame_alloc, {
@@ -365,7 +365,7 @@ mod frame_allocator_tests {
 
         // Allocate again - should get the same frame from recycled stack
         let frame2 = alloc_frame().expect("alloc failed");
-        kassert!(frame2.ppn() == first_ppn);  // Verify reuse
+        kassert!(frame2.ppn() == first_ppn); // Verify reuse
     });
 
     // 5. Aligned allocation

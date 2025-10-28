@@ -606,9 +606,9 @@ impl MemorySpace {
 #[cfg(test)]
 mod memory_space_tests {
     use super::*;
-    use crate::mm::page_table::UniversalPTEFlag;
     use crate::mm::address::{Vpn, VpnRange};
-    use crate::{test_case, kassert};
+    use crate::mm::page_table::UniversalPTEFlag;
+    use crate::{kassert, test_case};
 
     // 1. Create memory space
     test_case!(test_memspace_create, {
@@ -653,6 +653,6 @@ mod memory_space_tests {
         use crate::mm::memory_space::memory_space::kernel_token;
 
         let token = kernel_token();
-        kassert!(token > 0);  // Valid SATP value
+        kassert!(token > 0); // Valid SATP value
     });
 }
