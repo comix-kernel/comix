@@ -216,3 +216,105 @@ where
 
 pub type PpnRange = PageNumRange<Ppn>;
 pub type VpnRange = PageNumRange<Vpn>;
+
+#[cfg(test)]
+mod page_num_tests {
+    use super::*;
+    use crate::mm::address::{Paddr, Ppn, Vpn, PageNum};
+    use crate::{test_case, kassert};
+
+    // 1. Ppn/Vpn basic conversion
+    test_case!(test_pagenum_from_usize, {
+        let ppn = Ppn::from_usize(0x80000);
+        kassert!(ppn.as_usize() == 0x80000);
+
+        let vpn = Vpn::from_usize(0x000F_FFFF_FC08_0000);
+        kassert!(vpn.as_usize() == 0x000F_FFFF_FC08_0000);
+    });
+
+    // 2. Address to page number conversion
+    test_case!(test_pagenum_from_addr, {
+        let paddr = Paddr::from_usize(0x8000_1234);
+
+        let ppn_floor = Ppn::from_addr_floor(paddr);
+        kassert!(ppn_floor.as_usize() == 0x80001);  // 0x80001000 >> 12
+
+        let ppn_ceil = Ppn::from_addr_ceil(paddr);
+        kassert!(ppn_ceil.as_usize() == 0x80002);   // ceil to next page
+    });
+
+    // 3. Page number to address
+    test_case!(test_pagenum_to_addr, {
+        let ppn = Ppn::from_usize(0x80000);
+
+        let start = ppn.start_addr();
+        kassert!(start.as_usize() == 0x8000_0000);
+
+        let end = ppn.end_addr();
+        kassert!(end.as_usize() == 0x8000_1000);
+    });
+
+    // 4. Page number stepping
+    test_case!(test_pagenum_step, {
+        let mut ppn = Ppn::from_usize(0x80000);
+
+        ppn.step();
+        kassert!(ppn.as_usize() == 0x80001);
+
+        ppn.step_back();
+        kassert!(ppn.as_usize() == 0x80000);
+    });
+
+    // 5. Page number range
+    test_case!(test_pagenum_range, {
+        let start = Ppn::from_usize(0x80000);
+        let end = Ppn::from_usize(0x80003);
+        let range = PpnRange::new(start, end);
+
+        kassert!(range.start().as_usize() == 0x80000);
+        kassert!(range.end().as_usize() == 0x80003);
+        kassert!(range.len() == 3);
+    });
+
+    // 6. Page number range iteration
+    test_case!(test_pagenum_range_iter, {
+        let range = PpnRange::new(
+            Ppn::from_usize(0x80000),
+            Ppn::from_usize(0x80003),
+        );
+
+        let mut count = 0;
+        for ppn in range {
+            kassert!(ppn.as_usize() >= 0x80000);
+            kassert!(ppn.as_usize() < 0x80003);
+            count += 1;
+        }
+        kassert!(count == 3);
+    });
+
+    // 7. Floor vs Ceil conversion
+    test_case!(test_floor_ceil_difference, {
+        // Aligned address: floor == ceil
+        let aligned = Paddr::from_usize(0x8000_0000);
+        let floor1 = Ppn::from_addr_floor(aligned);
+        let ceil1 = Ppn::from_addr_ceil(aligned);
+        kassert!(floor1.as_usize() == ceil1.as_usize());
+
+        // Unaligned: ceil = floor + 1
+        let unaligned = Paddr::from_usize(0x8000_0001);
+        let floor2 = Ppn::from_addr_floor(unaligned);
+        let ceil2 = Ppn::from_addr_ceil(unaligned);
+        kassert!(ceil2.as_usize() == floor2.as_usize() + 1);
+    });
+
+    // 8. Page number comparison
+    test_case!(test_pagenum_comparison, {
+        let ppn1 = Ppn::from_usize(0x80000);
+        let ppn2 = Ppn::from_usize(0x80000);
+        let ppn3 = Ppn::from_usize(0x80001);
+
+        kassert!(ppn1 == ppn2);
+        kassert!(ppn1 < ppn3);
+        kassert!(ppn3 > ppn1);
+    });
+}

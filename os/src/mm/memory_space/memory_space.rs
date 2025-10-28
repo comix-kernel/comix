@@ -602,3 +602,57 @@ impl MemorySpace {
         Ok(new_space)
     }
 }
+
+#[cfg(test)]
+mod memory_space_tests {
+    use super::*;
+    use crate::mm::page_table::UniversalPTEFlag;
+    use crate::mm::address::{Vpn, VpnRange};
+    use crate::{test_case, kassert};
+
+    // 1. Create memory space
+    test_case!(test_memspace_create, {
+        #[allow(unused)]
+        let ms = MemorySpace::new();
+        // Should have page table initialized
+    });
+
+    // 2. Direct mapping
+    test_case!(test_direct_mapping, {
+        let mut ms = MemorySpace::new();
+        let vpn_range = VpnRange::new(Vpn::from_usize(0x80000), Vpn::from_usize(0x80010));
+
+        let area = MappingArea::new(
+            vpn_range,
+            AreaType::KernelData,
+            MapType::Direct,
+            UniversalPTEFlag::kernel_rw(),
+        );
+
+        ms.insert_area(area).expect("add area failed");
+    });
+
+    // 3. Framed mapping
+    test_case!(test_framed_mapping, {
+        let mut ms = MemorySpace::new();
+        let vpn_range = VpnRange::new(Vpn::from_usize(0x1000), Vpn::from_usize(0x1010));
+
+        let area = MappingArea::new(
+            vpn_range,
+            AreaType::UserData,
+            MapType::Framed,
+            UniversalPTEFlag::user_rw(),
+        );
+
+        ms.insert_area(area).expect("add area failed");
+        // Frames auto-allocated for framed mapping
+    });
+
+    // 4. Kernel space access
+    test_case!(test_kernel_space, {
+        use crate::mm::memory_space::memory_space::kernel_token;
+
+        let token = kernel_token();
+        kassert!(token > 0);  // Valid SATP value
+    });
+}
