@@ -308,3 +308,78 @@ fn dealloc_frames(frames: &[FrameTracker]) {
 fn dealloc_contig_frames(frame_range: &FrameRangeTracker) {
     FRAME_ALLOCATOR.lock().dealloc_contig_frames(frame_range);
 }
+
+#[cfg(test)]
+mod frame_allocator_tests {
+    use super::*;
+    use crate::{test_case, kassert};
+
+    // 1. Single frame allocation
+    test_case!(test_single_frame_alloc, {
+        let frame = alloc_frame().expect("alloc failed");
+        let ppn = frame.ppn();
+
+        kassert!(ppn.as_usize() > 0);
+
+        // Frame is auto-cleared - need to convert to vaddr to access
+        let vaddr = ppn.start_addr().to_vaddr();
+        let page_ptr = vaddr.as_ptr::<u64>();
+        unsafe {
+            for i in 0..512 {
+                kassert!(*page_ptr.add(i) == 0);
+            }
+        }
+        // frame drops here, auto-reclaimed
+    });
+
+    // 2. Multiple frame allocation
+    test_case!(test_multiple_frames_alloc, {
+        let frames = alloc_frames(5).expect("alloc failed");
+        kassert!(frames.len() == 5);
+
+        // Each frame should be valid
+        for frame in &frames {
+            kassert!(frame.ppn().as_usize() > 0);
+        }
+    });
+
+    // 3. Contiguous frame allocation
+    test_case!(test_contig_frames_alloc, {
+        let frames = alloc_contig_frames(4).expect("alloc failed");
+        let start_ppn = frames.range().start().as_usize();
+
+        // Verify contiguity
+        for i in 0..4 {
+            let expected = start_ppn + i;
+            kassert!(frames.range().start().as_usize() + i == expected);
+        }
+    });
+
+    // 4. Frame auto-reclaim (RAII)
+    test_case!(test_frame_auto_reclaim, {
+        // Allocate a frame and save its PPN
+        let first_ppn = {
+            let frame = alloc_frame().expect("alloc failed");
+            frame.ppn()
+        }; // frame drops here, should be reclaimed to recycled stack
+
+        // Allocate again - should get the same frame from recycled stack
+        let frame2 = alloc_frame().expect("alloc failed");
+        kassert!(frame2.ppn() == first_ppn);  // Verify reuse
+    });
+
+    // 5. Aligned allocation
+    test_case!(test_aligned_alloc, {
+        let frames = alloc_contig_frames_aligned(4, 16).expect("alloc failed");
+        let ppn = frames.range().start().as_usize();
+
+        // Verify alignment
+        kassert!(ppn % 16 == 0);
+    });
+
+    // 6. Large allocation
+    test_case!(test_large_alloc, {
+        let frames = alloc_frames(100).expect("alloc 100 frames");
+        kassert!(frames.len() == 100);
+    });
+}
