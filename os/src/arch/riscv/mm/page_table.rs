@@ -24,9 +24,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         let vaddr = vpn.start_addr();
         unsafe {
             core::arch::asm!(
-                "sfence.vma {0} {1}",
-                in(reg) vaddr.as_usize(),
-                in(reg) 0usize
+                "sfence.vma {0}, zero",
+                in(reg) vaddr.as_usize()
             )
         }
     }
@@ -253,6 +252,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
             // Check if this is a leaf entry (has R/W/X permissions or is level 0)
             if pte.is_huge() || level == 0 {
+                // Clear the PTE to remove the mapping
+                pte.clear();
                 Self::tlb_flush(vpn);
                 return Ok(());
             }
@@ -369,13 +370,13 @@ mod page_table_tests {
         let mut pt = PageTableInner::new();
         let vpn = Vpn::from_usize(0x1000);
         let ppn = Ppn::from_usize(0x80000);
-        let vaddr = Vaddr::from_usize(0x1000_0000); // vpn 0x1000 << 12
 
         // Map vpn -> ppn
         let result = pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw());
         kassert!(result.is_ok());
 
-        // Translate back
+        // Translate back - use vpn.start_addr() to get correct vaddr
+        let vaddr = vpn.start_addr();
         let translated = pt.translate(vaddr);
         kassert!(translated.is_some());
         let paddr = translated.unwrap();
@@ -396,7 +397,7 @@ mod page_table_tests {
         kassert!(result.is_ok());
 
         // Should not be mapped anymore
-        let vaddr = Vaddr::from_usize(0x1000_0000);
+        let vaddr = vpn.start_addr();
         let translated = pt.translate(vaddr);
         kassert!(translated.is_none());
     });
