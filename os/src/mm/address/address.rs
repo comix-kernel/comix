@@ -366,7 +366,7 @@ pub type VaddrRange = AddressRange<Vaddr>;
 mod address_basic_tests {
     use super::*;
     use crate::arch::mm::paddr_to_vaddr;
-    use crate::{test_case, kassert};
+    use crate::{kassert, test_case};
 
     // 1.1 Paddr/Vaddr creation and conversion
     test_case!(test_address_roundtrip, {

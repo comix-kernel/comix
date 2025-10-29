@@ -220,8 +220,8 @@ pub type VpnRange = PageNumRange<Vpn>;
 #[cfg(test)]
 mod page_num_tests {
     use super::*;
-    use crate::mm::address::{Paddr, Ppn, Vpn, PageNum};
-    use crate::{test_case, kassert};
+    use crate::mm::address::{Paddr, PageNum, Ppn, Vpn};
+    use crate::{kassert, test_case};
 
     // 1. Ppn/Vpn basic conversion
     test_case!(test_pagenum_from_usize, {
@@ -237,10 +237,10 @@ mod page_num_tests {
         let paddr = Paddr::from_usize(0x8000_1234);
 
         let ppn_floor = Ppn::from_addr_floor(paddr);
-        kassert!(ppn_floor.as_usize() == 0x80001);  // 0x80001000 >> 12
+        kassert!(ppn_floor.as_usize() == 0x80001); // 0x80001000 >> 12
 
         let ppn_ceil = Ppn::from_addr_ceil(paddr);
-        kassert!(ppn_ceil.as_usize() == 0x80002);   // ceil to next page
+        kassert!(ppn_ceil.as_usize() == 0x80002); // ceil to next page
     });
 
     // 3. Page number to address
@@ -278,10 +278,7 @@ mod page_num_tests {
 
     // 6. Page number range iteration
     test_case!(test_pagenum_range_iter, {
-        let range = PpnRange::new(
-            Ppn::from_usize(0x80000),
-            Ppn::from_usize(0x80003),
-        );
+        let range = PpnRange::new(Ppn::from_usize(0x80000), Ppn::from_usize(0x80003));
 
         let mut count = 0;
         for ppn in range {

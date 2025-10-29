@@ -53,15 +53,10 @@ global_asm!(include_str!("entry.asm"));
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> ! {
-    unsafe extern "C" {
-        fn ekernel();
-    }
     clear_bss();
 
-    let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
-    mm::init_frame_allocator(ekernel_paddr, config::MEMORY_END);
-
-    mm::init_heap();
+    // Initialize memory management (frame allocator + heap + kernel page table)
+    mm::init();
     println!("Hello, world!");
 
     // 初始化工作
