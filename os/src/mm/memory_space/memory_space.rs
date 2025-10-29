@@ -545,15 +545,12 @@ impl MemorySpace {
                 .as_usize();
 
             // Find actual heap end
-            let actual_heap_end = self
-                .areas
+            self.areas
                 .iter()
                 .filter(|a| a.area_type() == AreaType::UserHeap)
                 .map(|a| a.vpn_range().end().start_addr().as_usize())
                 .max()
-                .unwrap_or(heap_end);
-
-            actual_heap_end
+                .unwrap_or(heap_end)
         } else {
             // User specified address, check if available
             if hint >= USER_STACK_TOP - USER_STACK_SIZE {

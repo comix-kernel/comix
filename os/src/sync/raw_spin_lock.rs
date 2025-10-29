@@ -30,7 +30,7 @@ impl RawSpinLock {
     /// 尝试获取自旋锁，并返回一个 RAII 保护器。
     ///
     /// 内部原子地获取锁，并在当前 CPU 禁用本地中断。
-    pub fn lock(&self) -> RawSpinLockGuard {
+    pub fn lock(&self) -> RawSpinLockGuard<'_> {
         let guard = IntrGuard::new();
 
         while self

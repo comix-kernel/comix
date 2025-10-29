@@ -374,7 +374,7 @@ mod frame_allocator_tests {
         let ppn = frames.range().start().as_usize();
 
         // Verify alignment
-        kassert!(ppn % 16 == 0);
+        kassert!(ppn.is_multiple_of(16));
     });
 
     // 6. Large allocation
