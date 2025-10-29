@@ -1,4 +1,4 @@
-// 64 位 RISC-V，usize = 8 字节
+//! 64 位 RISC-V，usize = 8 字节
 
 use core::sync::atomic::Ordering;
 
@@ -7,7 +7,7 @@ use riscv::register::{sepc, sstatus};
 
 use crate::arch::timer::TIMER_TICKS;
 
-// XXX: CSR可能因调度或中断被修改？
+/// XXX: CSR可能因调度或中断被修改？
 #[unsafe(no_mangle)]
 pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
     // 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap

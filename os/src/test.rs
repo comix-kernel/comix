@@ -1,9 +1,9 @@
-// HACK： 该模块下有几个变量不知道为什么被视作未使用，权宜之计
+//! HACK： 该模块下有几个变量不知道为什么被视作未使用，权宜之计
 #![allow(dead_code)]
 use core::sync::atomic::AtomicUsize;
 
 #[derive(Copy, Clone)]
-pub struct FailedAssertion {
+pub(crate) struct FailedAssertion {
     pub cond: &'static str,
     pub file: &'static str,
     pub line: u32,
@@ -11,19 +11,19 @@ pub struct FailedAssertion {
 
 // 添加公有构造函数，便于宏/其它代码显式构造
 impl FailedAssertion {
-    pub const fn new(cond: &'static str, file: &'static str, line: u32) -> Self {
+    pub(crate) const fn new(cond: &'static str, file: &'static str, line: u32) -> Self {
         Self { cond, file, line }
     }
 }
 
-pub static mut FAILED_LIST: [Option<FailedAssertion>; 32] = [None; 32];
-pub const FAILED_LIST_CAPACITY: usize = 32;
-pub static mut FAILED_INDEX: usize = 0;
+pub(crate) static mut FAILED_LIST: [Option<FailedAssertion>; 32] = [None; 32];
+pub(crate) const FAILED_LIST_CAPACITY: usize = 32;
+pub(crate) static mut FAILED_INDEX: usize = 0;
 
-pub static TEST_FAILED: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static TEST_FAILED: AtomicUsize = AtomicUsize::new(0);
 
 // 把对 static mut 的不安全写操作封装到一个函数里（仅此处使用 unsafe）
-pub fn record_failed_assertion(fa: FailedAssertion) {
+pub(crate) fn record_failed_assertion(fa: FailedAssertion) {
     unsafe {
         if FAILED_INDEX < FAILED_LIST_CAPACITY {
             FAILED_LIST[FAILED_INDEX] = Some(fa);
@@ -49,9 +49,31 @@ macro_rules! kassert {
     }};
 }
 
+/// 定义一个测试用例
+///
+/// 这个宏用于定义内核测试用例。它会自动处理测试的执行和结果报告,
+/// 包括失败断言的详细信息和统计数据。
+///
+/// # Examples
+///
+/// ```ignore
+/// test_case!(my_test, {
+///     kassert!(1 + 1 == 2);
+///     kassert!(true);
+/// });
+/// ```
+///
+/// # Implementation
+///
+/// 这个宏会：
+/// - 创建一个带有 `#[test_case]` 属性的函数
+/// - 记录测试前后的失败计数
+/// - 打印测试名称和结果
+/// - 显示详细的失败断言信息
 #[macro_export]
 macro_rules! test_case {
     ($func:ident, $body:block) => {
+        #[doc = concat!("Test case: ", stringify!($func))]
         #[test_case]
         fn $func() {
             println!("\x1b[33m=======================================\x1b[0m");
