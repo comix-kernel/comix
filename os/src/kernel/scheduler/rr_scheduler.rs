@@ -114,13 +114,13 @@ impl Scheduler for RRScheduler {
         }
 
         let mut cpu = current_cpu().lock();
-        if let Some(cur) = &mut cpu.current_task {
-            if Arc::ptr_eq(cur, &task) {
-                cpu.current_task = None;
-                // schedule 不会返回
-                drop(cpu);
-                self.schedule();
-            }
+        if let Some(cur) = &mut cpu.current_task
+            && Arc::ptr_eq(cur, &task)
+        {
+            cpu.current_task = None;
+            // schedule 不会返回
+            drop(cpu);
+            self.schedule();
         }
     }
 
@@ -154,13 +154,13 @@ impl Scheduler for RRScheduler {
         }
 
         let mut cpu = current_cpu().lock();
-        if let Some(cur) = &mut cpu.current_task {
-            if Arc::ptr_eq(cur, &task) {
-                cpu.current_task = None;
-                // schedule 不会返回
-                drop(cpu);
-                self.schedule();
-            }
+        if let Some(cur) = &mut cpu.current_task
+            && Arc::ptr_eq(cur, &task)
+        {
+            cpu.current_task = None;
+            // schedule 不会返回
+            drop(cpu);
+            self.schedule();
         }
     }
 }

@@ -8,7 +8,25 @@ sbi-rt = { version = "0.0.2", features = ["legacy"] }
 riscv = "0.15.0"
 talc = { version = "4" }
 lock_api = "0.4"
-bitflags = {version = "1.2.1"}
+bitflags = { version = "1.2.1" }
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
-once_cell = { version = "1.21.3", default-features = false, features = ["alloc", "race"] }
+once_cell = { version = "1.21.3", default-features = false, features = [
+    "alloc",
+    "race",
+] }
 xmas-elf = "0.9"
+
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+bare_urls = "deny"
+private_intra_doc_links = "deny"
+
+[lints.rust]
+missing_docs = "deny"
+single_use_lifetimes = "warn"
+
+[lints.clippy]
+todo = "warn"
+needless_borrow = "deny"
+redundant_clone = "deny"

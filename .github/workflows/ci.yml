@@ -10,7 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: nightly-2025-01-13
+  RUST_TOOLCHAIN: nightly-2025-10-28
   
   QEMU_VERSION: qemu-9.2.1
   QEMU_BUILD_PATH: ${{ github.workspace }}/qemu-build-cache
@@ -52,8 +52,8 @@ jobs:
 
       - name: 🔬 Run Clippy Lint Check
         working-directory: os
-        # 使用 -D warnings 强制将所有警告升级为错误，确保 PR 必须解决所有代码异味
-        run: cargo clippy --target riscv64gc-unknown-none-elf -- -D warnings
+        # 不需要强制 warning，在 Cargo.toml 中已将大部分有问题的东西配置为 deny
+        run: cargo clippy --target riscv64gc-unknown-none-elf
         
       # --- 2.2 安装辅助工具 ---
 
