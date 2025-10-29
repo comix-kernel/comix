@@ -17,8 +17,6 @@ mod sync;
 #[macro_use]
 mod test;
 use crate::arch::intr;
-use crate::arch::kernel::context::Context;
-use crate::arch::kernel::switch;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
@@ -84,11 +82,26 @@ pub extern "C" fn rust_main() -> ! {
 // 并且当这个函数结束时，应该切换到第一个任务的上下文
 fn kinit_entry() {
     let kinit_task = crate::kernel::task::kinit_task();
-    let old = &mut Context::zero_init();
-    let new = &mut kinit_task.lock().context;
-    current_cpu().lock().current_task = Some(kinit_task.clone());
-    // TODO: 设置当前内存空间
-    unsafe { switch(old, new) };
+
+    let (ra, sp) = {
+        let g = kinit_task.lock();
+        let ra = g.context.ra;
+        let sp = g.context.sp;
+        (ra, sp)
+    };
+
+    current_cpu().lock().current_task = Some(kinit_task);
+
+    // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
+    unsafe {
+        core::arch::asm!(
+            "mv sp, {sp}",
+            "jr {ra}",
+            sp = in(reg) sp,
+            ra = in(reg) ra,
+            options(noreturn)
+        );
+    }
 }
 
 #[panic_handler]

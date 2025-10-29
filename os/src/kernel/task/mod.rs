@@ -13,6 +13,7 @@ pub use task_struct::Task as TaskStruct;
 pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 
 use crate::{
+    arch::intr::{are_interrupts_enabled, enable_interrupts},
     kernel::{
         cpu::current_cpu,
         scheduler::{SCHEDULER, Scheduler},
@@ -63,10 +64,30 @@ pub fn into_shared(task: TaskStruct) -> SharedTask {
     Arc::new(SpinLock::new(task))
 }
 
+fn a() {
+    unsafe { enable_interrupts() };
+    loop {
+        print!("a");
+    }
+}
+
+fn b() {
+    unsafe { enable_interrupts() };
+    loop {
+        print!("b");
+    }
+}
 /// 内核的第一个任务
 /// 在初始化完成后由调度器运行
 /// TODO: 现在只是一个空循环
 fn kinit() {
+    if !are_interrupts_enabled() {
+        panic!("kinit: interrupts should be enabled");
+    }
+    let tid = kthread_spawn(a);
+    println!("Spawned kernel thread with tid {}", tid);
+    let tid = kthread_spawn(b);
+    println!("Spawned kernel thread with tid {}", tid);
     loop {
         hint::spin_loop();
     }
