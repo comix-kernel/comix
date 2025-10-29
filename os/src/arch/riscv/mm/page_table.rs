@@ -12,6 +12,7 @@ pub struct PageTableInner {
     root: Ppn,
     // only store middle-level frames here
     frames: Vec<FrameTracker>,
+    #[allow(dead_code)]
     is_user: bool,
 }
 
