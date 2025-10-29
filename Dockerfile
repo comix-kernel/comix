@@ -43,8 +43,8 @@ ENV RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain none
 
 # 然后安装指定版本的 nightly
-RUN rustup toolchain install nightly-2025-01-13 && \
-    rustup default nightly-2025-01-13 && \
+RUN rustup toolchain install nightly-2025-10-28 && \
+    rustup default nightly-2025-10-28 && \
     rustup component add rustfmt clippy rust-src rust-analyzer llvm-tools && \
     rustup target add \
         riscv64gc-unknown-none-elf \
