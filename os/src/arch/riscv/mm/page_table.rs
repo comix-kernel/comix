@@ -355,7 +355,7 @@ fn ppn_to_satp(ppn: Ppn) -> usize {
 mod page_table_tests {
     use super::*;
     use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
-    use crate::{test_case, kassert};
+    use crate::{kassert, test_case};
 
     // 1. Page table creation
     test_case!(test_pt_create, {
@@ -390,7 +390,8 @@ mod page_table_tests {
         let ppn = Ppn::from_usize(0x80000);
 
         // Map first
-        pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw()).unwrap();
+        pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw())
+            .unwrap();
 
         // Unmap
         let result = pt.unmap(vpn);
@@ -408,11 +409,21 @@ mod page_table_tests {
         let vpn = Vpn::from_usize(0x1000);
 
         // First mapping succeeds
-        let result1 = pt.map(vpn, Ppn::from_usize(0x80000), PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        let result1 = pt.map(
+            vpn,
+            Ppn::from_usize(0x80000),
+            PageSize::Size4K,
+            UniversalPTEFlag::kernel_rw(),
+        );
         kassert!(result1.is_ok());
 
         // Second mapping should fail
-        let result2 = pt.map(vpn, Ppn::from_usize(0x80001), PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        let result2 = pt.map(
+            vpn,
+            Ppn::from_usize(0x80001),
+            PageSize::Size4K,
+            UniversalPTEFlag::kernel_rw(),
+        );
         kassert!(result2.is_err());
     });
 
@@ -442,7 +453,8 @@ mod page_table_tests {
         let ppn = Ppn::from_usize(0x80000);
 
         // Map with kernel_rw
-        pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw()).unwrap();
+        pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw())
+            .unwrap();
 
         // Update to kernel read-only
         let new_flags = UniversalPTEFlag::kernel_r();

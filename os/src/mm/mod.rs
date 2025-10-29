@@ -20,8 +20,9 @@ pub mod page_table;
 
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
-pub use memory_space::memory_space::kernel_token;
+pub use memory_space::memory_space::with_kernel_space;
 
+use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
 
 unsafe extern "C" {
@@ -31,33 +32,21 @@ unsafe extern "C" {
 /// Initializes the memory management subsystem
 pub fn init() {
     // 1. Initialize frame allocator
-    let start = (ekernel as usize).div_ceil(PAGE_SIZE) * PAGE_SIZE; // Page-aligned
+    // ekernel is a virtual address, need to convert to physical address
+    let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
+    let start = ekernel_paddr.div_ceil(PAGE_SIZE) * PAGE_SIZE; // Page-aligned
     let end = MEMORY_END;
 
-    println!(
-        "[mm] Initializing frame allocator: {:#x} - {:#x}",
-        start, end
-    );
     init_frame_allocator(start, end);
 
     // 2. Initialize heap
     init_heap();
-    println!("[mm] Heap initialized");
 
     // 3. Create and activate kernel address space (lazy_static will auto-initialize)
-    let token = kernel_token();
-    println!("[mm] Kernel page table token: {:#x}", token);
-
-    // 4. Activate kernel page table
     #[cfg(target_arch = "riscv64")]
-    unsafe {
-        riscv::asm::sfence_vma_all();
-        core::arch::asm!(
-            "csrw satp, {satp}",
-            satp = in(reg) token,
-        );
-        riscv::asm::sfence_vma_all();
+    {
+        use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
+        let root_ppn = with_kernel_space(|space| space.root_ppn());
+        crate::arch::mm::PageTableInner::activate(root_ppn);
     }
-
-    println!("[mm] Memory management initialized successfully");
 }
