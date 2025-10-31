@@ -10,6 +10,7 @@ pub use page_table_entry::*;
 pub type ActivePageTableInner = crate::arch::mm::PageTableInner;
 
 /// Supported page sizes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageSize {
     Size4K = 0x1000,
     #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用

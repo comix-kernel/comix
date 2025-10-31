@@ -236,7 +236,18 @@ impl MemorySpace {
         )
         .expect("Failed to map kernel data");
 
-        // 4. Map kernel BSS segment (.bss)
+        // 4a. Map kernel boot stack (.bss.stack section)
+        // Note: .bss.stack is placed BEFORE sbss in linker.ld
+        Self::map_kernel_section(
+            &mut space,
+            edata as usize, // .bss.stack starts at edata
+            sbss as usize,  // .bss.stack ends at sbss
+            AreaType::KernelStack,
+            UniversalPTEFlag::kernel_rw(),
+        )
+        .expect("Failed to map kernel stack");
+
+        // 4b. Map kernel BSS segment (actual .bss data)
         Self::map_kernel_section(
             &mut space,
             sbss as usize,
@@ -246,7 +257,18 @@ impl MemorySpace {
         )
         .expect("Failed to map kernel bss");
 
+        // 4c. Map kernel heap (defined in linker.ld between ebss and ekernel)
+        Self::map_kernel_section(
+            &mut space,
+            ebss as usize,    // sheap (from linker.ld)
+            ekernel as usize, // eheap (from linker.ld)
+            AreaType::KernelHeap,
+            UniversalPTEFlag::kernel_rw(),
+        )
+        .expect("Failed to map kernel heap");
+
         // 5. Map physical memory (using 4KB pages, direct mapping)
+        // Map from ekernel onwards to avoid conflict with kernel segments
         let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
         let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
         let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
@@ -266,16 +288,17 @@ impl MemorySpace {
         space.areas.push(phys_mem_area);
 
         // 6. Map MMIO devices
-        #[cfg(target_arch = "riscv64")]
-        {
-            use crate::config::MMIO;
-            for (addr, size) in MMIO {
-                // MMIO addresses are physical addresses, convert to virtual
-                let mmio_vaddr = paddr_to_vaddr(*addr);
-                Self::map_mmio_region(&mut space, mmio_vaddr, *size)
-                    .expect("Failed to map MMIO device");
-            }
-        }
+        // TODO: MMIO mapping not yet implemented, commenting out for now
+        // #[cfg(target_arch = "riscv64")]
+        // {
+        //     use crate::config::MMIO;
+        //     for (addr, size) in MMIO {
+        //         // MMIO addresses are physical addresses, convert to virtual
+        //         let mmio_vaddr = paddr_to_vaddr(*addr);
+        //         Self::map_mmio_region(&mut space, mmio_vaddr, *size)
+        //             .expect("Failed to map MMIO device");
+        //     }
+        // }
 
         space
     }
@@ -522,15 +545,12 @@ impl MemorySpace {
                 .as_usize();
 
             // Find actual heap end
-            let actual_heap_end = self
-                .areas
+            self.areas
                 .iter()
                 .filter(|a| a.area_type() == AreaType::UserHeap)
                 .map(|a| a.vpn_range().end().start_addr().as_usize())
                 .max()
-                .unwrap_or(heap_end);
-
-            actual_heap_end
+                .unwrap_or(heap_end)
         } else {
             // User specified address, check if available
             if hint >= USER_STACK_TOP - USER_STACK_SIZE {

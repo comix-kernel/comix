@@ -1,3 +1,9 @@
+//! ComixOS - A RISC-V operating system kernel
+//!
+//! This is the main crate for ComixOS, an operating system kernel written in Rust
+//! for RISC-V architecture. It provides basic OS functionalities including memory
+//! management, process scheduling, and system call handling.
+
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
@@ -52,17 +58,21 @@ fn test_runner(tests: &[&dyn Fn()]) {
 
 global_asm!(include_str!("entry.asm"));
 
+/// Rust 内核主入口点
+///
+/// 这是从汇编代码跳转到的第一个 Rust 函数。它负责初始化内核的所有子系统,
+/// 包括内存管理、中断处理、定时器和任务调度器。
+///
+/// # Safety
+///
+/// 此函数标记为 `#[unsafe(no_mangle)]` 以确保链接器可以找到它。
+/// 它必须从正确初始化的汇编入口点调用。
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> ! {
-    unsafe extern "C" {
-        fn ekernel();
-    }
     clear_bss();
 
-    let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
-    mm::init_frame_allocator(ekernel_paddr, config::MEMORY_END);
-
-    mm::init_heap();
+    // Initialize memory management (frame allocator + heap + kernel page table)
+    mm::init();
     println!("Hello, world!");
 
     // 初始化工作
