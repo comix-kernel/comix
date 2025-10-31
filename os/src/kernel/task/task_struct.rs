@@ -161,36 +161,38 @@ impl Task {
 // #[allow(dead_code)]
 // pub struct TaskStruct {}
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::{kassert, test_case};
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{kassert, test_case};
 
-//     // 创建内核任务的基本属性检查
-//     test_case!(test_ktask_create_basic, {
-//         println!("Testing: test_ktask_create_basic");
-//         let t = Task::ktask_create(0);
-//         // tid/ pid 应有效且相等
-//         kassert!(t.tid != 0);
-//         kassert!(t.pid == t.tid);
-//         // 默认创建为内核线程（memory_space == None）
-//         kassert!(t.is_kernel_thread());
-//         // 内核栈基址应非零
-//         kassert!(t.kstack_base != 0);
-//         // 初始 trap_frame_ptr 应为 null
-//         kassert!(t.trap_frame_ptr.load(Ordering::SeqCst).is_null());
-//     });
+    // 创建内核任务的基本属性检查
+    test_case!(test_ktask_create_basic, {
+        println!("Testing: test_ktask_create_basic");
+        let t = Task::ktask_create(0);
+        // tid/ pid 应有效且相等
+        kassert!(t.tid != 0);
+        kassert!(t.pid == t.tid);
+        // 默认创建为内核线程（memory_space == None）
+        kassert!(t.is_kernel_thread());
+        // 内核栈基址应非零
+        kassert!(t.kstack_base != 0);
+        // 初始 trap_frame_ptr 应为 null
+        kassert!(t.trap_frame_ptr.load(Ordering::SeqCst).is_null());
+    });
 
-//     // 初始化内核线程上下文（sp/ra）检查
-//     test_case!(test_init_kernel_thread_context, {
-//         println!("Testing: test_init_kernel_thread_context");
-//         let mut t = Task::ktask_create(0);
-//         let entry = 0x1000usize;
-//         t.init_kernel_thread_context(entry);
-//         // sp 应为栈顶（kstack_base），ra 应为入口地址
-//         kassert!(t.context.sp == t.kstack_base);
-//         kassert!(t.context.ra == entry);
-//         // 内核线程不应在创建时拥有有效的 trap_frame_ptr
-//         kassert!(t.trap_frame_ptr.load(Ordering::SeqCst).is_null());
-//     });
-// }
+    // 初始化内核线程上下文（sp/ra）检查
+    test_case!(test_init_kernel_thread_context, {
+        println!("Testing: test_init_kernel_thread_context");
+        let mut t = Task::ktask_create(0);
+        let entry = 0x1000usize;
+        t.init_kernel_thread_context(entry);
+        // sp 应为栈顶（kstack_base），ra 应为统一入口地址
+        kassert!(t.context.sp == t.kstack_base - size_of::<TrapFrame>());
+        kassert!(t.context.ra == forkret as usize);
+        // sepc 应为 entry
+        kassert!(unsafe { (*t.trap_frame_ptr.load(Ordering::SeqCst)).sepc } == entry);
+        // 内核线程不应在创建时拥有有效的 trap_frame_ptr
+        // kassert!(t.trap_frame_ptr.load(Ordering::SeqCst).is_null());
+    });
+}
