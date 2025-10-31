@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
 use crate::{
-    arch::kernel::context::Context, kernel::task::SharedTask,
-    mm::memory_space::memory_space::MemorySpace, sync::spin_lock::SpinLock,
+    kernel::task::SharedTask, mm::memory_space::memory_space::MemorySpace,
+    sync::spin_lock::SpinLock,
 };
 
 /// CPU 结构体
@@ -10,7 +10,6 @@ use crate::{
 pub struct Cpu {
     /// 任务上下文
     /// 用于在调度器中保存和恢复 CPU 寄存器状态
-    pub context: Context,
     /// 当前运行的任务
     pub current_task: Option<SharedTask>,
     /// 当前使用的内存空间
@@ -21,7 +20,6 @@ pub struct Cpu {
 impl Cpu {
     pub fn new() -> Self {
         Cpu {
-            context: Context::zero_init(),
             current_task: None,
             cur_memory_space: None,
         }

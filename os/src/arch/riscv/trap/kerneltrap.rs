@@ -6,22 +6,21 @@ use riscv::register::scause::{self, Trap};
 use riscv::register::{sepc, sstatus};
 
 use crate::arch::timer::TIMER_TICKS;
+use crate::kernel::{SCHEDULER, schedule};
 
-/// XXX: CSR可能因调度或中断被修改？
+// XXX: CSR可能因调度或中断被修改？
+/// 内核陷阱处理程序
+/// 从 kernelvec 跳转到这里时，
+/// 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap，
+/// 在这里，trap_frame 指向了栈上保存的 KernelTrapFrame 结构体。
+/// 此外，在通过 stvec 跳转到 kernelvec 时，SSIE 被自动清除，
+/// 因此在内核陷阱处理程序开始时，中断是被禁用的。
+/// 必须从这个函数正常返回后，通过 kernelvec 中的 sret 指令才能正确恢复中断状态。
 #[unsafe(no_mangle)]
 pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
-    // 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap
-    // 在这里，trap_frame 指向了栈上保存的 KernelTrapFrame 结构体
-
     // 保存进入中断时的状态
     let sstatus_old = sstatus::read();
     let sepc_old = sepc::read();
-
-    // 临时禁用中断以防嵌套
-    unsafe {
-        sstatus::clear_sie();
-    }
-
     let scause = scause::read();
 
     match scause.cause() {
@@ -29,10 +28,6 @@ pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
             // 处理时钟中断
             crate::arch::timer::set_next_trigger();
             check_timer();
-            // 恢复sepc，确保正确返回
-            unsafe {
-                sepc::write(sepc_old);
-            }
         }
         Trap::Exception(e) => panic!(
             "Unexpected exception in kernel: {:?}, sepc = {:#x}, sstatus = {:#x}",
@@ -46,11 +41,6 @@ pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
             sepc_old,
             sstatus_old.bits()
         ),
-    }
-
-    // 恢复进入中断前的状态
-    unsafe {
-        sstatus::write(sstatus_old);
     }
 }
 
@@ -88,19 +78,17 @@ pub struct KernelTrapFrame {
     pub x29_t4: usize,  // 224(sp)
     pub x30_t5: usize,  // 232(sp)
     pub x31_t6: usize,  // 240(sp)
-                        // 总共 31 个寄存器，总大小 31 * 8 = 248 字节。
-                        // 汇编代码分配了 256 字节，最后 8 字节未使用。
+    pub sepc: usize,    // 248(sp)
+    pub sstatus: usize, // 256(sp)
+                        // 总共 264 字节
 }
 
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
-
-    // TODO: 这里可以添加更多的时钟中断处理逻辑
-    // 比如：
-    // - 更新系统时间
-    // - 检查是否需要进行任务调度
-    // - 处理定时任务等
+    if SCHEDULER.lock().update_time_slice() {
+        schedule();
+    }
 }
 
 #[allow(dead_code)]
