@@ -16,7 +16,6 @@ mod sbi;
 mod sync;
 #[macro_use]
 mod test;
-use crate::arch::intr;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
@@ -69,7 +68,7 @@ pub extern "C" fn rust_main() -> ! {
     // 初始化工作
     trap::init();
     timer::init();
-    unsafe { intr::enable_interrupts() };
+    unsafe { arch::intr::enable_interrupts() };
 
     #[cfg(test)]
     test_main();

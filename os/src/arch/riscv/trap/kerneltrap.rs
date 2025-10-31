@@ -27,10 +27,6 @@ pub extern "C" fn kerneltrap(_trap_frame: &mut KernelTrapFrame) {
         Trap::Interrupt(5) => {
             // 处理时钟中断
             crate::arch::timer::set_next_trigger();
-            // XXX 恢复sepc，确保正确返回?
-            unsafe {
-                sepc::write(sepc_old);
-            }
             check_timer();
         }
         Trap::Exception(e) => panic!(
@@ -82,16 +78,14 @@ pub struct KernelTrapFrame {
     pub x29_t4: usize,  // 224(sp)
     pub x30_t5: usize,  // 232(sp)
     pub x31_t6: usize,  // 240(sp)
-                        // 总共 31 个寄存器，总大小 31 * 8 = 248 字节。
-                        // 汇编代码分配了 256 字节，最后 8 字节未使用。
+    pub sepc: usize,    // 248(sp)
+    pub sstatus: usize, // 256(sp)
+                        // 总共 264 字节
 }
 
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
-    println!("Timer interrupt: ticks = {}", _ticks + 1);
-    // FIXME: 这个锁没有被释放
-    // FIXME: 中断没有恢复
     if SCHEDULER.lock().update_time_slice() {
         schedule();
     }
