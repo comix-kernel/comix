@@ -1,4 +1,4 @@
-use core::hint;
+use core::{hint, sync::atomic::Ordering};
 
 use alloc::sync::Arc;
 use lazy_static::lazy_static;
@@ -13,7 +13,10 @@ pub use task_struct::Task as TaskStruct;
 pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 
 use crate::{
-    arch::intr::{are_interrupts_enabled, enable_interrupts},
+    arch::{
+        intr,
+        trap::{__restore, usertrap::TrapFrame},
+    },
     kernel::{
         cpu::current_cpu,
         scheduler::{SCHEDULER, Scheduler},
@@ -64,30 +67,11 @@ pub fn into_shared(task: TaskStruct) -> SharedTask {
     Arc::new(SpinLock::new(task))
 }
 
-fn a() {
-    unsafe { enable_interrupts() };
-    loop {
-        print!("a");
-    }
-}
-
-fn b() {
-    unsafe { enable_interrupts() };
-    loop {
-        print!("b");
-    }
-}
 /// 内核的第一个任务
 /// 在初始化完成后由调度器运行
 /// TODO: 现在只是一个空循环
 fn kinit() {
-    if !are_interrupts_enabled() {
-        panic!("kinit: interrupts should be enabled");
-    }
-    let tid = kthread_spawn(a);
-    println!("Spawned kernel thread with tid {}", tid);
-    let tid = kthread_spawn(b);
-    println!("Spawned kernel thread with tid {}", tid);
+    unsafe { intr::enable_interrupts() };
     loop {
         hint::spin_loop();
     }
@@ -96,6 +80,17 @@ fn kinit() {
 pub fn kinit_task() -> SharedTask {
     let mut task = TaskStruct::ktask_create(0); // kinit 没有父任务
     task.init_kernel_thread_context(kinit as usize);
-    task.context.ra = kinit as usize;
     into_shared(task)
+}
+
+/// 新创建的线程发生第一次调度时会从 forkret 开始执行
+#[allow(dead_code)]
+pub fn forkret() {
+    let fp: *mut TrapFrame;
+    {
+        let cpu = current_cpu().lock();
+        let task = cpu.current_task.as_ref().unwrap();
+        fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    }
+    unsafe { __restore(&*fp) };
 }

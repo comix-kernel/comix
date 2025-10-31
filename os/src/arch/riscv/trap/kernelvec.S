@@ -7,7 +7,7 @@
 .globl kernelvec
 .align 4
 kernelvec:
-        addi sp, sp, -256
+        addi sp, sp, -264
 
         // 保存寄存器
         sd ra, 0(sp)
@@ -41,6 +41,10 @@ kernelvec:
         sd t4, 224(sp)
         sd t5, 232(sp)
         sd t6, 240(sp)
+        csrr a0, sepc       // 保存陷阱发生时的程序计数器
+        sd a0, 248(sp)      // 将 sepc 保存到栈上
+        csrr a0, sstatus    // 保存陷阱发生时的状态寄存器
+        sd a0, 256(sp)      // 将 sstatus 保存到栈上
 
     	// call the trap handler in kerneltrap.rs
         call kerneltrap
@@ -83,8 +87,12 @@ kernelvec:
         ld t4, 224(sp)
         ld t5, 232(sp)
         ld t6, 240(sp)
+        ld a0, 248(sp)
+        csrw sepc, a0       // 恢复 sepc
+        ld a0, 256(sp)
+        csrw sstatus, a0    // 恢复 sstatus
 
-        addi sp, sp, 256
+        addi sp, sp, 264
 
         // return to whatever we were doing in the kernel.
         sret
