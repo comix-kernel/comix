@@ -25,7 +25,7 @@
 /// 分配内存块的指针 (*mut u8)；失败则返回 ptr::null_mut()。
 #[inline]
 pub unsafe fn kmalloc(_size: usize) -> *mut u8 {
-    todo!()
+    unimplemented!()
 }
 
 /// kcalloc: 内核动态内存分配并清零函数。
@@ -43,7 +43,7 @@ pub unsafe fn kmalloc(_size: usize) -> *mut u8 {
 /// 分配内存块的指针 (*mut u8)；失败则返回 ptr::null_mut()。
 #[inline]
 pub unsafe fn kcalloc(_count: usize, _size: usize) -> *mut u8 {
-    todo!()
+    unimplemented!()
 }
 
 /// kfree: 释放之前由 kmalloc/kcalloc/krealloc 分配的内存块。
@@ -58,7 +58,7 @@ pub unsafe fn kcalloc(_count: usize, _size: usize) -> *mut u8 {
 /// * `size` 必须与分配时的 `size` 相同。
 #[inline]
 pub unsafe fn kfree(_ptr: *mut u8, _size: usize) {
-    todo!()
+    unimplemented!()
 }
 
 /// krealloc: 重新调整内存块的大小。
@@ -78,5 +78,5 @@ pub unsafe fn kfree(_ptr: *mut u8, _size: usize) {
 /// 新的内存块指针 (*mut u8)；失败则返回 ptr::null_mut()。
 #[inline]
 pub unsafe fn krealloc(_old_ptr: *mut u8, _old_size: usize, _new_size: usize) -> *mut u8 {
-    todo!()
+    unimplemented!()
 }

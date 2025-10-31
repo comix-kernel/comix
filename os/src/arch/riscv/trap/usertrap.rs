@@ -1,8 +1,11 @@
-/// 陷阱帧结构体，保存用户态下的寄存器状态
+/// 陷阱帧结构体，保存寄存器状态
 #[repr(C)] // 确保 Rust 不会重新排列字段
 #[derive(Debug, Clone, Copy)]
 pub struct TrapFrame {
-    pub epc: usize,     // 程序计数器
+    /// 程序计数器
+    /// 在发生陷阱时，sepc 寄存器的值应保存到这里
+    ///
+    pub sepc: usize, // 0(sp)
     pub x1_ra: usize,   // 8(sp)
     pub x2_sp: usize,   // 16(sp)
     pub x3_gp: usize,   // 24(sp)
@@ -34,17 +37,17 @@ pub struct TrapFrame {
     pub x29_t4: usize,  // 232(sp)
     pub x30_t5: usize,  // 240(sp)
     pub x31_t6: usize,  // 248(sp)
-                        // 总共 32 个寄存器，总大小 32 * 8 = 256 字节。
+    pub sstatus: usize, // 256(sp)
 }
 
 /// 处理来自用户态的陷阱（系统调用、中断、异常）
 #[allow(dead_code)]
 pub fn handle_user_trap() {
-    todo!()
+    unimplemented!()
 }
 
 #[allow(dead_code)]
 /// 从用户态返回到用户态
 pub fn return_to_user() {
-    todo!()
+    unimplemented!()
 }

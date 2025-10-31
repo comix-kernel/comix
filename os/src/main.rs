@@ -22,10 +22,10 @@ mod sbi;
 mod sync;
 #[macro_use]
 mod test;
-use crate::arch::intr;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
+use crate::kernel::current_cpu;
 use crate::sbi::shutdown;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
@@ -53,6 +53,7 @@ fn test_runner(tests: &[&dyn Fn()]) {
         tests.len() - failed,
         failed
     );
+    shutdown(false);
 }
 
 global_asm!(include_str!("entry.asm"));
@@ -77,12 +78,39 @@ pub extern "C" fn rust_main() -> ! {
     // 初始化工作
     trap::init();
     timer::init();
-    unsafe { intr::enable_interrupts() };
+    unsafe { arch::intr::enable_interrupts() };
 
     #[cfg(test)]
     test_main();
 
-    shutdown(false)
+    kinit_entry();
+    unreachable!("Unreachable in rust_main()");
+}
+
+// 内核初始化后将第一个任务(kinit)放到 CPU 上运行
+// 并且当这个函数结束时，应该切换到第一个任务的上下文
+fn kinit_entry() {
+    let kinit_task = crate::kernel::task::kinit_task();
+
+    let (ra, sp) = {
+        let g = kinit_task.lock();
+        let ra = g.context.ra;
+        let sp = g.context.sp;
+        (ra, sp)
+    };
+
+    current_cpu().lock().current_task = Some(kinit_task);
+
+    // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
+    unsafe {
+        core::arch::asm!(
+            "mv sp, {sp}",
+            "jr {ra}",
+            sp = in(reg) sp,
+            ra = in(reg) ra,
+            options(noreturn)
+        );
+    }
 }
 
 #[panic_handler]
