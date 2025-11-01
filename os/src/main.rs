@@ -76,7 +76,7 @@ pub extern "C" fn rust_main() -> ! {
     println!("Hello, world!");
 
     // 初始化工作
-    trap::init();
+    trap::init_boot_trap();
     timer::init();
     unsafe { arch::intr::enable_interrupts() };
 

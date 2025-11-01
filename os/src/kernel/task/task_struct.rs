@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 use riscv::register::sstatus;
 
 use crate::{
-    arch::{kernel::context::Context, trap::usertrap::TrapFrame},
+    arch::{kernel::context::Context, trap::TrapFrame},
     kernel::task::{TID_ALLOCATOR, forkret, task_state::TaskState},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
