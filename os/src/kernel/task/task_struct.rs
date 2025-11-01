@@ -13,7 +13,7 @@ use crate::{
     kernel::task::{TID_ALLOCATOR, forkret, task_state::TaskState},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
-        frame_allocator::{FrameTracker, physical_page_alloc},
+        frame_allocator::{FrameRangeTracker, physical_page_alloc_contiguous},
         memory_space::memory_space::MemorySpace,
     },
 };
@@ -47,7 +47,7 @@ pub struct Task {
     /// 内核栈基址
     pub kstack_base: usize,
     /// 内核栈跟踪器
-    pub kstack_tracker: FrameTracker,
+    pub kstack_tracker: FrameRangeTracker,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
     /// XXX: AtomicPtr or *mut？
     pub trap_frame_ptr: AtomicPtr<TrapFrame>,
@@ -82,18 +82,21 @@ impl Task {
     /// # 参数
     /// * `entry`: 线程入口地址
     pub fn init_kernel_thread_context(&mut self, entry: usize) {
+        let tf_base = self.kstack_base - core::mem::size_of::<TrapFrame>();
         let mut sstatus = sstatus::read();
         sstatus.set_sie(false);
         sstatus.set_spie(true);
         sstatus.set_spp(sstatus::SPP::Supervisor);
-        let tf: *mut TrapFrame = (self.kstack_base - size_of::<TrapFrame>()) as *mut TrapFrame;
-        self.context.sp = self.kstack_base - size_of::<TrapFrame>();
+        let tf: *mut TrapFrame = tf_base as *mut TrapFrame;
+        self.context.sp = tf_base;
         self.context.ra = forkret as usize;
         self.trap_frame_ptr.store(tf, Ordering::SeqCst);
         unsafe {
+            (*tf).x4_tp = self.pid as usize;
             (*tf).sepc = entry;
             (*tf).sstatus = sstatus.bits();
-            (*tf).x2_sp = self.kstack_base;
+            (*tf).x2_sp = tf_base;
+            (*tf).kernel_sp = tf_base;
         }
     }
 
@@ -126,12 +129,11 @@ impl Task {
     }
 
     fn new(ppid: u32, memory_space: Option<Arc<MemorySpace>>) -> Self {
-        let kstack_tracker =
-            physical_page_alloc().expect("Failed to allocate kernel stack for new Task");
-        let kstack_base = kstack_tracker.ppn().end_addr().to_vaddr().as_usize();
+        let kstack_tracker = physical_page_alloc_contiguous(4)
+            .expect("Failed to allocate kernel stack for new Task");
+        let kstack_base = kstack_tracker.end_ppn().end_addr().to_vaddr().as_usize();
         let id = TID_ALLOCATOR.allocate();
-        let mut context = Context::zero_init();
-        context.sp = kstack_base;
+        let context = Context::zero_init();
         Task {
             context,
             preempt_count: 0,
