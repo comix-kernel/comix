@@ -13,10 +13,7 @@ pub use task_struct::Task as TaskStruct;
 pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 
 use crate::{
-    arch::{
-        intr,
-        trap::{__restore, usertrap::TrapFrame},
-    },
+    arch::trap::{TrapFrame, restore},
     kernel::{
         cpu::current_cpu,
         scheduler::{SCHEDULER, Scheduler},
@@ -67,12 +64,36 @@ pub fn into_shared(task: TaskStruct) -> SharedTask {
     Arc::new(SpinLock::new(task))
 }
 
+fn a() {
+    loop {
+        for _ in 0..1000 {
+            core::hint::spin_loop();
+        }
+        print!("A");
+    }
+}
+
+fn b() {
+    loop {
+        for _ in 0..1000 {
+            core::hint::spin_loop();
+        }
+        print!("B");
+    }
+}
+
 /// 内核的第一个任务
 /// 在初始化完成后由调度器运行
 /// TODO: 现在只是一个空循环
 fn kinit() {
-    unsafe { intr::enable_interrupts() };
+    kthread_spawn(a);
+    kthread_spawn(b);
+    // unsafe { intr::enable_interrupts() };
     loop {
+        for _ in 0..1000 {
+            core::hint::spin_loop();
+        }
+        print!("C");
         hint::spin_loop();
     }
 }
@@ -92,5 +113,5 @@ pub fn forkret() {
         let task = cpu.current_task.as_ref().unwrap();
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
-    unsafe { __restore(&*fp) };
+    unsafe { restore(&*fp) };
 }
