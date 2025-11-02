@@ -27,7 +27,7 @@
             "path": "/usr/bin/fish" // 确保路径正确，Fish 是在 apt-get 中安装的
           }
         },
-        "rust-analyzer.checkOnSave.command": "clippy",
+        "rust-analyzer.checkOnSave": true,
         "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer"
       }
     }
