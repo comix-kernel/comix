@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtool-bin help2man gawk \
     pkg-config libglib2.0-dev libpixman-1-dev libsdl2-dev libslirp-dev \
     libncurses5-dev libreadline-dev libssl-dev sudo tmux unzip xz-utils ca-certificates \
-    openssl \
+    openssl openssh-client \
     gcc-riscv64-linux-gnu g++-riscv64-linux-gnu \
     libgmp-dev libexpat1-dev fish libmpfr-dev libmpc-dev \
     lldb \
@@ -43,8 +43,8 @@ ENV RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain none
 
 # 然后安装指定版本的 nightly
-RUN rustup toolchain install nightly-2025-01-13 && \
-    rustup default nightly-2025-01-13 && \
+RUN rustup toolchain install nightly-2025-10-28 && \
+    rustup default nightly-2025-10-28 && \
     rustup component add rustfmt clippy rust-src rust-analyzer llvm-tools && \
     rustup target add \
         riscv64gc-unknown-none-elf \
