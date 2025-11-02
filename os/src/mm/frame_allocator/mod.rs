@@ -18,7 +18,7 @@
 mod frame_allocator;
 mod physmem;
 
-pub use frame_allocator::{FrameTracker, TrackedFrames, alloc_frame};
+pub use frame_allocator::{FrameRangeTracker, FrameTracker, TrackedFrames, alloc_frame};
 pub use physmem::*;
 
 /// initialize the global frame allocator with the available physical memory range
