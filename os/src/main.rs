@@ -76,6 +76,15 @@ pub extern "C" fn rust_main() -> ! {
     // Initialize memory management (frame allocator + heap + kernel page table)
     mm::init();
     println!("Hello, world!");
+    
+    pr_emerg!("Emergency log test");
+    pr_alert!("Alert log test");
+    pr_crit!("Critical log test");
+    pr_err!("Error log test");
+    pr_warn!("Warning log test");
+    pr_notice!("Notice log test");
+    pr_info!("Info log test");
+    pr_debug!("Debug log test");
 
     // 初始化工作
     trap::init_boot_trap();
