@@ -6,7 +6,6 @@ use riscv::register::{
     stvec::{self, Stvec},
 };
 
-use crate::arch::trap;
 pub use crate::arch::trap::trap_handler::TrapFrame;
 
 global_asm!(include_str!("trap_entry.S"));
