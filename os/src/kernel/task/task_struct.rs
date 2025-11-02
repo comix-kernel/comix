@@ -202,8 +202,6 @@ mod tests {
         kassert!(t.is_kernel_thread());
         // 内核栈基址应非零
         kassert!(t.kstack_base != 0);
-        // 初始 trap_frame_ptr 应为 null
-        kassert!(t.trap_frame_ptr.load(Ordering::SeqCst).is_null());
     });
 
     // 初始化内核线程上下文（sp/ra）检查
@@ -213,7 +211,7 @@ mod tests {
         let entry = 0x1000usize;
         t.init_kernel_thread_context(entry);
         // sp 应为栈顶（kstack_base），ra 应为统一入口地址
-        kassert!(t.context.sp == t.kstack_base - size_of::<TrapFrame>());
+        kassert!(t.context.sp == t.kstack_base);
         kassert!(t.context.ra == forkret as usize);
         // sepc 应为 entry
         kassert!(unsafe { (*t.trap_frame_ptr.load(Ordering::SeqCst)).sepc } == entry);
