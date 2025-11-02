@@ -13,7 +13,9 @@ use crate::{
     kernel::task::{TID_ALLOCATOR, forkret, task_state::TaskState},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
-        frame_allocator::{FrameRangeTracker, physical_page_alloc_contiguous},
+        frame_allocator::{
+            FrameRangeTracker, FrameTracker, physical_page_alloc, physical_page_alloc_contiguous,
+        },
         memory_space::memory_space::MemorySpace,
     },
 };
@@ -48,6 +50,8 @@ pub struct Task {
     pub kstack_base: usize,
     /// 内核栈跟踪器
     pub kstack_tracker: FrameRangeTracker,
+    /// 任务的 TrapFrame 跟踪器
+    pub trap_frame_tracker: FrameTracker,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
     /// XXX: AtomicPtr or *mut？
     pub trap_frame_ptr: AtomicPtr<TrapFrame>,
@@ -82,24 +86,32 @@ impl Task {
     /// # 参数
     /// * `entry`: 线程入口地址
     pub fn init_kernel_thread_context(&mut self, entry: usize) {
-        let tf_base = self.kstack_base - core::mem::size_of::<TrapFrame>();
+        let tf = self.trap_frame_ptr.load(Ordering::SeqCst);
         let mut sstatus = sstatus::read();
         sstatus.set_sie(false);
         sstatus.set_spie(true);
         sstatus.set_spp(sstatus::SPP::Supervisor);
-        let tf: *mut TrapFrame = tf_base as *mut TrapFrame;
-        self.context.sp = tf_base;
+        self.context.sp = self.kstack_base;
         self.context.ra = forkret as usize;
-        self.trap_frame_ptr.store(tf, Ordering::SeqCst);
         unsafe {
             (*tf).x4_tp = self.pid as usize;
             (*tf).sepc = entry;
             (*tf).sstatus = sstatus.bits();
-            (*tf).x2_sp = tf_base;
-            (*tf).kernel_sp = tf_base;
+            // 内核线程的栈指针初始化为内核栈顶
+            (*tf).x2_sp = self.kstack_base;
+            (*tf).kernel_sp = self.kstack_base;
         }
+        println!(
+            "Task {}: init_kernel_thread_context: stack_base={:#x}, 
+            stack.end={:#x}, tf={:#?}",
+            self.tid,
+            self.kstack_base,
+            self.context.sp,
+            unsafe { *tf }
+        );
     }
 
+    /// FIXME: 检查寄存器设置
     /// 为用户进程在其内核栈上构造初始 TrapFrame，并设置 Context 指向 trampoline
     /// # 参数
     /// * `user_entry`: 用户态入口地址
@@ -131,9 +143,19 @@ impl Task {
     fn new(ppid: u32, memory_space: Option<Arc<MemorySpace>>) -> Self {
         let kstack_tracker = physical_page_alloc_contiguous(4)
             .expect("Failed to allocate kernel stack for new Task");
+        // OPTIMIZE: 可以节省内存使用
+        let trap_frame_tracker =
+            physical_page_alloc().expect("Failed to allocate frame for new Task");
+        let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().end_addr().to_vaddr().as_usize();
         let id = TID_ALLOCATOR.allocate();
         let context = Context::zero_init();
+        // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
+        unsafe {
+            let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize() - size_of::<u8>())
+                as *mut u8;
+            ptr.write_volatile(0xFF);
+        };
         Task {
             context,
             preempt_count: 0,
@@ -145,7 +167,8 @@ impl Task {
             ppid,
             kstack_base,
             kstack_tracker,
-            trap_frame_ptr: AtomicPtr::new(core::ptr::null_mut()),
+            trap_frame_tracker,
+            trap_frame_ptr: AtomicPtr::new(trap_frame_ptr as *mut TrapFrame),
             memory_space,
             exit_code: None,
         }
