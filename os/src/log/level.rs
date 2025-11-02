@@ -1,14 +1,14 @@
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
-    Emergency = 0,  // KERN_EMERG
-    Alert = 1,      // KERN_ALERT
-    Critical = 2,   // KERN_CRIT
-    Error = 3,      // KERN_ERR
-    Warning = 4,    // KERN_WARNING
-    Notice = 5,     // KERN_NOTICE
-    Info = 6,       // KERN_INFO
-    Debug = 7,      // KERN_DEBUG
+    Emergency = 0, // KERN_EMERG
+    Alert = 1,     // KERN_ALERT
+    Critical = 2,  // KERN_CRIT
+    Error = 3,     // KERN_ERR
+    Warning = 4,   // KERN_WARNING
+    Notice = 5,    // KERN_NOTICE
+    Info = 6,      // KERN_INFO
+    Debug = 7,     // KERN_DEBUG
 }
 
 impl LogLevel {
