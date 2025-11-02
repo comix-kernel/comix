@@ -1,8 +1,7 @@
+use super::config::MAX_LOG_MESSAGE_LENGTH;
 use super::level::LogLevel;
-use core::fmt;
 use core::cmp::min;
-
-pub const MAX_LOG_MESSAGE_LENGTH: usize = 256;
+use core::fmt;
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +26,13 @@ impl LogEntry {
         }
     }
 
-    pub fn new(level: LogLevel, cpu_id: usize, task_id: u32, timestamp: u64, message: &str) -> Self {
+    pub fn new(
+        level: LogLevel,
+        cpu_id: usize,
+        task_id: u32,
+        timestamp: u64,
+        message: &str,
+    ) -> Self {
         let bytes = message.as_bytes();
         let length = min(bytes.len(), MAX_LOG_MESSAGE_LENGTH);
         let mut message = [0; MAX_LOG_MESSAGE_LENGTH];
