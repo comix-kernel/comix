@@ -10,7 +10,6 @@ use lazy_static::lazy_static;
 use crate::config::NUM_CPU;
 use crate::sync::spin_lock::SpinLock;
 
-pub use cpu::current_cpu;
 pub use scheduler::SCHEDULER;
 pub use scheduler::schedule;
 pub use task::TaskState;
