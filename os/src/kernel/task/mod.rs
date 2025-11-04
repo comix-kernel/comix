@@ -8,13 +8,14 @@ mod task_state;
 mod task_struct;
 mod tid_allocator;
 
+use riscv::register::sscratch;
 pub use task_state::TaskState;
 pub use task_struct::Task as TaskStruct;
 
 pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 
 use crate::{
-    arch::trap::{TrapFrame, restore},
+    arch::trap::{self, TrapFrame, restore},
     kernel::{
         cpu::current_cpu,
         scheduler::{SCHEDULER, Scheduler},
@@ -115,6 +116,10 @@ pub fn kinit_entry() {
         (ra, sp)
     };
 
+    let ptr = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    unsafe {
+        sscratch::write(ptr as usize);
+    }
     current_cpu().lock().current_task = Some(task);
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
@@ -133,6 +138,7 @@ pub fn kinit_entry() {
 /// 在初始化完成后由调度器运行
 /// TODO: 现在只是一个空循环
 fn kinit() {
+    trap::init();
     kthread_spawn(a);
     kthread_spawn(b);
     // unsafe { intr::enable_interrupts() };
