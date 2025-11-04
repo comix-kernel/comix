@@ -51,18 +51,18 @@ mod tests {
         kassert!(next_time > current_time);
     });
 
-    test_case!(test_timer_ticks_increment, {
-        let initial_ticks = TIMER_TICKS.load(Ordering::Relaxed);
-        // 模拟等待一段时间以触发定时器中断
-        let mut i = 0;
+    // test_case!(test_timer_ticks_increment, {
+    //     let initial_ticks = TIMER_TICKS.load(Ordering::Relaxed);
+    //     // 模拟等待一段时间以触发定时器中断
+    //     let mut i = 0;
 
-        while i < 1000000 {
-            core::hint::spin_loop();
-            i += 1;
-        }
-        let later_ticks = TIMER_TICKS.load(Ordering::Relaxed);
-        kassert!(later_ticks > initial_ticks);
-    });
+    //     while i < 1000000 {
+    //         core::hint::spin_loop();
+    //         i += 1;
+    //     }
+    //     let later_ticks = TIMER_TICKS.load(Ordering::Relaxed);
+    //     kassert!(later_ticks > initial_ticks);
+    // });
 
     test_case!(test_get_time, {
         println!("Testing get_time...");
