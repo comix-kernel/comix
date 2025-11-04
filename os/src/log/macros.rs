@@ -13,7 +13,7 @@
 #[macro_export]
 macro_rules! __log_impl_filtered {
     ($level:expr, $args:expr) => {
-        if $crate::log::filter::is_level_enabled($level) {
+        if $crate::log::is_level_enabled($level) {
             $crate::log::log_impl($level, $args);
         }
     };
