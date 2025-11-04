@@ -1,22 +1,44 @@
+//! Log entry structure and serialization
+//!
+//! This module defines the `LogEntry` structure that represents a single log message
+//! along with its metadata, and provides utilities for creating and formatting log entries.
+
 use super::config::MAX_LOG_MESSAGE_LENGTH;
 use super::level::LogLevel;
 use core::cmp::min;
 use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+/// A single log entry with metadata and message
+///
+/// The structure is carefully laid out for lock-free synchronization:
+/// - The `seq` field is used as a synchronization point between producers and consumers
+/// - C representation with 8-byte alignment ensures proper atomic access
+/// - Fields are ordered to minimize padding
 #[repr(C, align(8))]
 #[derive(Debug)]
 pub struct LogEntry {
+    /// Sequence number for synchronization (must be first field)
     seq: AtomicUsize,
+    /// Log level (Emergency, Error, Info, etc.)
     level: LogLevel,
+    /// CPU ID that generated this log
     cpu_id: usize,
+    /// Actual length of the message in bytes
     length: usize,
+    /// Task/process ID that generated this log
     task_id: u32,
+    /// Timestamp when the log was created
     timestamp: usize,
+    /// Fixed-size buffer for the log message
     message: [u8; MAX_LOG_MESSAGE_LENGTH],
 }
 
 impl LogEntry {
+    /// Creates an empty log entry (used for initialization)
+    ///
+    /// This is a `const fn` so it can be evaluated at compile time,
+    /// allowing for const initialization of the global buffer.
     pub const fn empty() -> Self {
         Self {
             seq: AtomicUsize::new(0),
@@ -29,6 +51,15 @@ impl LogEntry {
         }
     }
 
+    /// Creates a log entry from format arguments
+    ///
+    /// # Parameters
+    ///
+    /// * `level` - Log level
+    /// * `cpu_id` - ID of the CPU generating the log
+    /// * `task_id` - ID of the task generating the log
+    /// * `timestamp` - Timestamp of the log
+    /// * `args` - Formatted arguments from `format_args!` macro
     pub(super) fn from_args(
         level: LogLevel,
         cpu_id: usize,
@@ -46,6 +77,7 @@ impl LogEntry {
             message: [0; MAX_LOG_MESSAGE_LENGTH],
         };
 
+        // Format the message into the fixed-size buffer
         let mut writer = MessageWriter::new(&mut entry.message);
         let _ = core::fmt::write(&mut writer, args);
 
@@ -54,33 +86,45 @@ impl LogEntry {
         entry
     }
 
+    /// Returns the log message as a string slice
     pub fn message(&self) -> &str {
+        // Safety: MessageWriter ensures valid UTF-8
         unsafe { core::str::from_utf8_unchecked(&self.message[..self.length]) }
     }
 
+    /// Returns the log level
     pub fn level(&self) -> LogLevel {
         self.level
     }
 
+    /// Returns the CPU ID that generated this log
     pub fn cpu_id(&self) -> usize {
         self.cpu_id
     }
 
+    /// Returns the task ID that generated this log
     pub fn task_id(&self) -> u32 {
         self.task_id
     }
 
+    /// Returns the timestamp of this log
     pub fn timestamp(&self) -> usize {
         self.timestamp
     }
 }
 
 impl LogEntry {
-    /// (内部使用) 复制数据到缓冲区槽位
-    /// `dest` 是指向 buffer[slot] 的裸指针
+    /// Copies log data to a buffer slot (for internal use)
+    ///
+    /// Copies all fields except the `seq` field, which must be set separately
+    /// via `publish()` to ensure proper memory ordering.
+    ///
+    /// # Safety
+    ///
+    /// `dest` must point to a valid `LogEntry` in the ring buffer
     pub(super) unsafe fn copy_data_to(&self, dest: *mut LogEntry) {
-        // 我们不能用 ptr::write, 因为它会覆盖 dest.seq
-        // 我们必须逐个字段复制 *除了* seq
+        // We can't use ptr::write because it would overwrite dest.seq
+        // We must copy field by field, *except* seq
         (*dest).level = self.level;
         (*dest).cpu_id = self.cpu_id;
         (*dest).length = self.length;
@@ -89,18 +133,30 @@ impl LogEntry {
         (*dest).message.copy_from_slice(&self.message);
     }
 
-    /// (内部使用) 设置序列号并“发布”
-    /// `dest` 是指向 buffer[slot] 的裸指针
+    /// Publishes the entry by setting its sequence number (for internal use)
+    ///
+    /// Uses Release memory ordering to ensure all data writes are visible
+    /// to other cores before the sequence number update.
+    ///
+    /// # Safety
+    ///
+    /// `dest` must point to a valid `LogEntry` in the ring buffer
     pub(super) unsafe fn publish(&self, dest: *mut LogEntry, seq_num: usize) {
-        // 使用 Release 内存序, 确保所有上面的数据写入
-        // 在 'seq' 更新之前对其他核心可见
+        // Use Release memory ordering to ensure all data writes
+        // are visible before the 'seq' update
         (*dest).seq.store(seq_num, Ordering::Release);
     }
 
-    /// (内部使用) 检查槽位是否已准备好
-    /// `slot_ptr` 是指向 buffer[slot] 的裸指针
+    /// Checks if a slot is ready for reading (for internal use)
+    ///
+    /// Uses Acquire memory ordering to pair with the producer's Release store
+    /// in `publish()`, ensuring proper synchronization.
+    ///
+    /// # Safety
+    ///
+    /// `slot_ptr` must point to a valid `LogEntry` in the ring buffer
     pub(super) unsafe fn is_ready(&self, slot_ptr: *const LogEntry, expected_seq: usize) -> bool {
-        // 使用 Acquire 内存序, 与生产者的 'publish' (Release store) 配对
+        // Use Acquire memory ordering to pair with producer's Release store
         (*slot_ptr).seq.load(Ordering::Acquire) == expected_seq
     }
 }
@@ -133,23 +189,29 @@ impl fmt::Display for LogEntry {
     }
 }
 
-/// a helper to write message from args to [u8; MAX_LOG_MESSAGE_LENGTH]
+/// Helper struct to write formatted output to a fixed-size byte buffer
+///
+/// Implements `core::fmt::Write` to capture formatted output from `format_args!`
+/// without dynamic allocation. Messages exceeding the buffer size are truncated.
 struct MessageWriter<'a> {
     buffer: &'a mut [u8],
     pos: usize,
 }
 
 impl<'a> MessageWriter<'a> {
+    /// Creates a new message writer with the given buffer
     fn new(buffer: &'a mut [u8]) -> Self {
         Self { buffer, pos: 0 }
     }
 
+    /// Returns the number of bytes written so far
     fn len(&self) -> usize {
         self.pos
     }
 }
 
 impl<'a> Write for MessageWriter<'a> {
+    /// Writes a string slice to the buffer, truncating if necessary
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let bytes = s.as_bytes();
         let remaining = self.buffer.get_mut(self.pos..).unwrap_or(&mut []);
