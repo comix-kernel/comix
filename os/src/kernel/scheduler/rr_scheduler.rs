@@ -124,11 +124,15 @@ impl Scheduler for RRScheduler {
         schedule();
     }
 
-    fn sleep_task(&mut self, task: SharedTask) {
+    fn sleep_task(&mut self, task: SharedTask, receive_signal: bool) {
         self.run_queue.remove_task(&task);
 
         {
-            task.lock().state = TaskState::Interruptable;
+            task.lock().state = if receive_signal {
+                TaskState::Interruptible
+            } else {
+                TaskState::Uninterruptible
+            };
         }
 
         if !self.wait_queue.contains(&task) {
