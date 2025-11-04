@@ -2,10 +2,12 @@ use super::config::MAX_LOG_MESSAGE_LENGTH;
 use super::level::LogLevel;
 use core::cmp::min;
 use core::fmt;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[repr(C, align(8))]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct LogEntry {
+    seq: AtomicUsize,
     level: LogLevel,
     cpu_id: usize,
     length: usize,
@@ -17,6 +19,7 @@ pub struct LogEntry {
 impl LogEntry {
     pub const fn empty() -> Self {
         Self {
+            seq: AtomicUsize::new(0),
             level: LogLevel::Debug,
             cpu_id: 0,
             length: 0,
@@ -38,6 +41,7 @@ impl LogEntry {
         let mut message = [0; MAX_LOG_MESSAGE_LENGTH];
         message[..length].copy_from_slice(&bytes[..length]);
         Self {
+            seq: AtomicUsize::new(0),
             level,
             cpu_id,
             length,
@@ -65,6 +69,50 @@ impl LogEntry {
 
     pub fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+}
+
+impl LogEntry {
+    /// (内部使用) 复制数据到缓冲区槽位
+    /// `dest` 是指向 buffer[slot] 的裸指针
+    pub(super) unsafe fn copy_data_to(&self, dest: *mut LogEntry) {
+        // 我们不能用 ptr::write, 因为它会覆盖 dest.seq
+        // 我们必须逐个字段复制 *除了* seq
+        (*dest).level = self.level;
+        (*dest).cpu_id = self.cpu_id;
+        (*dest).length = self.length;
+        (*dest).task_id = self.task_id;
+        (*dest).timestamp = self.timestamp;
+        (*dest).message.copy_from_slice(&self.message);
+    }
+    
+    /// (内部使用) 设置序列号并“发布”
+    /// `dest` 是指向 buffer[slot] 的裸指针
+    pub(super) unsafe fn publish(&self, dest: *mut LogEntry, seq_num: usize) {
+        // 使用 Release 内存序, 确保所有上面的数据写入
+        // 在 'seq' 更新之前对其他核心可见
+        (*dest).seq.store(seq_num, Ordering::Release);
+    }
+    
+    /// (内部使用) 检查槽位是否已准备好
+    /// `slot_ptr` 是指向 buffer[slot] 的裸指针
+    pub(super) unsafe fn is_ready(&self, slot_ptr: *const LogEntry, expected_seq: usize) -> bool {
+        // 使用 Acquire 内存序, 与生产者的 'publish' (Release store) 配对
+        (*slot_ptr).seq.load(Ordering::Acquire) == expected_seq
+    }
+}
+
+impl Clone for LogEntry {
+    fn clone(&self) -> Self {
+        Self {
+            seq: AtomicUsize::new(self.seq.load(Ordering::Relaxed)),
+            level: self.level,
+            cpu_id: self.cpu_id,
+            length: self.length,
+            task_id: self.task_id,
+            timestamp: self.timestamp,
+            message: self.message,
+        }
     }
 }
 

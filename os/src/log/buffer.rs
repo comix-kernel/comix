@@ -1,0 +1,145 @@
+use core::ops::{Deref, DerefMut};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use super::config::GLOBAL_LOG_BUFFER_SIZE;
+use super::entry::LogEntry;
+
+const LOG_ENTRY_SIZE: usize = core::mem::size_of::<LogEntry>();
+pub const MAX_LOG_ENTRIES: usize = GLOBAL_LOG_BUFFER_SIZE / LOG_ENTRY_SIZE;
+
+#[repr(C, align(64))]
+struct CachePadded64<T> {
+    inner: T,
+}
+
+impl<T> Deref for CachePadded64<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for CachePadded64<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+#[repr(C)]
+pub struct GlobalLogBuffer {
+    writer_data: CachePadded64<WriterData>,
+    reader_data: CachePadded64<ReaderData>,
+    buffer: [LogEntry; MAX_LOG_ENTRIES],
+}
+
+#[repr(C)]
+pub struct WriterData {
+    write_seq: AtomicUsize,
+}
+
+#[repr(C)]
+pub struct ReaderData {
+    read_seq: AtomicUsize,
+    dropped: AtomicUsize,
+    initialized: AtomicBool,
+}
+
+impl GlobalLogBuffer {
+    pub const fn new() -> Self {
+        const EMPTY: LogEntry = LogEntry::empty();
+        Self {
+            writer_data: CachePadded64 {
+                inner: WriterData {
+                    write_seq: AtomicUsize::new(1),
+                },
+            },
+            reader_data: CachePadded64 {
+                inner: ReaderData {
+                    read_seq: AtomicUsize::new(1),
+                    dropped: AtomicUsize::new(0),
+                    initialized: AtomicBool::new(false),
+                },
+            },
+            buffer: [EMPTY; MAX_LOG_ENTRIES],
+        }
+    }
+
+    pub fn write(&self, entry: &LogEntry) {
+        // step1: Atomically claim a unique sequence number (ticket)
+        let seq = self.writer_data.write_seq.fetch_add(1, Ordering::Relaxed);
+
+        // step2: Calculate the target slot index from the sequence
+        let slot = seq % MAX_LOG_ENTRIES;
+        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) as *mut LogEntry };
+
+        // step3: Check and handle potential buffer full (overwrite) logic
+        self.handle_overwrite(seq);
+
+        // step4: Copy all log data (*except* the seq field) to the slot
+        unsafe {
+            entry.copy_data_to(slot_ptr);
+        }
+
+        // step5: Publish the entry by atomically setting its seq (Release barrier)
+        unsafe {
+            entry.publish(slot_ptr, seq);
+        }
+    }
+
+    fn handle_overwrite(&self, current_seq: usize) {
+        let read_seq = self.reader_data.read_seq.load(Ordering::Acquire);
+        if current_seq < read_seq + MAX_LOG_ENTRIES {
+            return;
+        }
+        let new_read_seq = current_seq - MAX_LOG_ENTRIES + 1;
+        let overwritten = new_read_seq.saturating_sub(read_seq);
+        self.reader_data
+            .dropped
+            .fetch_add(overwritten, Ordering::Relaxed);
+
+        let mut current_read_seq = read_seq;
+        while current_read_seq < new_read_seq {
+            match self.reader_data.read_seq.compare_exchange_weak(
+                current_read_seq,
+                new_read_seq,
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(seen_seq) => {
+                    if seen_seq >= new_read_seq {
+                        break;
+                    }
+                    current_read_seq = seen_seq;
+                }
+            }
+        }
+    }
+
+    pub fn read(&self) -> Option<LogEntry> {
+        let read_seq = self.reader_data.read_seq.load(Ordering::Acquire);
+        
+        let slot = read_seq % MAX_LOG_ENTRIES;
+        let slot_ptr = unsafe {
+            self.buffer.as_ptr().add(slot) as *const LogEntry
+        };
+
+        const EMPTY: LogEntry = LogEntry::empty();
+        unsafe {
+            if !EMPTY.is_ready(slot_ptr, read_seq) {
+                return None;
+            }
+        }
+
+        let entry_data = unsafe {
+            (*slot_ptr).clone()
+        };
+
+        self.reader_data.read_seq.store(read_seq + 1, Ordering::Release);
+
+        Some(entry_data)
+    }
+}

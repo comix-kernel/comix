@@ -1,4 +1,5 @@
 //! Logging configuration
+#![allow(unused)]
 
 /// Global log buffer size
 pub const GLOBAL_LOG_BUFFER_SIZE: usize = 16 * 1024; // 16KB
