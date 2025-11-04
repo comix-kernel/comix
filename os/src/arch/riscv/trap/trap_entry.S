@@ -10,25 +10,16 @@ trap_entry:
 
         # 交换 sscratch 和 a0
         csrrw a0, sscratch, a0
-        # 立即保存用户a0并恢复sscratch
-        sd t0, 40(a0)
-        csrr t0, sscratch           # t0 = 用户a0
-        sd t0, 80(a0)               # 保存到TRAPFRAME->a0
-        csrw sscratch, a0           # 恢复sscratch=TRAPFRAME
-        # 保存用户 sp
-        sd sp, 16(a0)
-        # 换到内核栈
-        ld sp, 264(a0)              # 约束: kernel_sp已经提前设置好
-        # 保存 sepc
-        csrr t0, sepc
-        sd t0, 0(a0)
-        # 保存 sstatus
-        csrr t0, sstatus
-        sd t0, 256(a0)
+        # 转到内核栈
+        # TODO: 内核进程可以不切换栈，但是用户进程必须切换栈  
+        # ld sp, 264(a0)              # 约束: kernel_sp已经提前设置好
+
         # 保存所有通用寄存器
         sd ra, 8(a0)
+        sd sp, 16(a0)
         sd gp, 24(a0)
         sd tp, 32(a0)
+        sd t0, 40(a0)
         sd t1, 48(a0)
         sd t2, 56(a0)
         sd s0, 64(a0)
@@ -55,10 +46,18 @@ trap_entry:
         sd t5, 240(a0)
         sd t6, 248(a0)
 
-        call trap_handler
-        # 恢复 a0 = TRAPFRAME
-        csrr a0, sscratch
-        j __restore
+        # 保存 a0
+        csrr t0, sscratch
+        sd t0, 80(a0)
+
+        # 保存 sepc
+        csrr t0, sepc
+        sd t0, 0(a0)
+        # 保存 sstatus
+        csrr t0, sstatus
+        sd t0, 256(a0)
+
+        j trap_handler
 
 __restore:
         # 约束: a0 = trapframe 指针

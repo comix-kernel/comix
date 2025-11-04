@@ -162,11 +162,18 @@ impl Task {
         memory_space: Option<Arc<MemorySpace>>,
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
-        let kstack_base = kstack_tracker.end_ppn().end_addr().to_vaddr().as_usize();
+        let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
+        // let kstack_top = kstack_tracker.start_ppn().start_addr().to_vaddr().as_usize();
+        // let trap_end = trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize();
+        // println!(
+        //     "Task::new: tid={}, ppid={}, kstack: [{:#x} - {:#x}], trap_frame: [{:#x} - {:#x}]",
+        //     tid, ppid, kstack_top, kstack_base, trap_frame_ptr, trap_end
+        // );
         // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
         unsafe {
-            let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize() - size_of::<u8>())
-                as *mut u8;
+            let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize()
+                - size_of::<u8>()
+                - 1) as *mut u8;
             ptr.write_volatile(0xFF);
         };
         Task {
