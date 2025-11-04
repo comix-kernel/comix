@@ -1,7 +1,7 @@
 use super::config::MAX_LOG_MESSAGE_LENGTH;
 use super::level::LogLevel;
 use core::cmp::min;
-use core::fmt;
+use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[repr(C, align(8))]
@@ -12,7 +12,7 @@ pub struct LogEntry {
     cpu_id: usize,
     length: usize,
     task_id: u32,
-    timestamp: u64,
+    timestamp: usize,
     message: [u8; MAX_LOG_MESSAGE_LENGTH],
 }
 
@@ -33,7 +33,7 @@ impl LogEntry {
         level: LogLevel,
         cpu_id: usize,
         task_id: u32,
-        timestamp: u64,
+        timestamp: usize,
         message: &str,
     ) -> Self {
         let bytes = message.as_bytes();
@@ -49,6 +49,31 @@ impl LogEntry {
             timestamp,
             message,
         }
+    }
+
+    pub fn from_args(
+        level: LogLevel,
+        cpu_id: usize,
+        task_id: u32,
+        timestamp: usize,
+        args: fmt::Arguments,
+    ) -> Self {
+        let mut entry = Self {
+            seq: AtomicUsize::new(0),
+            level,
+            cpu_id,
+            length: 0,
+            task_id,
+            timestamp,
+            message: [0; MAX_LOG_MESSAGE_LENGTH],
+        };
+
+        let mut writer = MessageWriter::new(&mut entry.message);
+        let _ = core::fmt::write(&mut writer, args);
+
+        entry.length = writer.len();
+
+        entry
     }
 
     pub fn message(&self) -> &str {
@@ -67,7 +92,7 @@ impl LogEntry {
         self.task_id
     }
 
-    pub fn timestamp(&self) -> u64 {
+    pub fn timestamp(&self) -> usize {
         self.timestamp
     }
 }
@@ -85,7 +110,7 @@ impl LogEntry {
         (*dest).timestamp = self.timestamp;
         (*dest).message.copy_from_slice(&self.message);
     }
-    
+
     /// (内部使用) 设置序列号并“发布”
     /// `dest` 是指向 buffer[slot] 的裸指针
     pub(super) unsafe fn publish(&self, dest: *mut LogEntry, seq_num: usize) {
@@ -93,7 +118,7 @@ impl LogEntry {
         // 在 'seq' 更新之前对其他核心可见
         (*dest).seq.store(seq_num, Ordering::Release);
     }
-    
+
     /// (内部使用) 检查槽位是否已准备好
     /// `slot_ptr` 是指向 buffer[slot] 的裸指针
     pub(super) unsafe fn is_ready(&self, slot_ptr: *const LogEntry, expected_seq: usize) -> bool {
@@ -127,5 +152,33 @@ impl fmt::Display for LogEntry {
             self.task_id,
             self.message()
         )
+    }
+}
+
+/// a helper to write message from args to [u8; MAX_LOG_MESSAGE_LENGTH]
+struct MessageWriter<'a> {
+    buffer: &'a mut [u8],
+    pos: usize,
+}
+
+impl<'a> MessageWriter<'a> {
+    fn new(buffer: &'a mut [u8]) -> Self {
+        Self { buffer, pos: 0 }
+    }
+
+    fn len(&self) -> usize {
+        self.pos
+    }
+}
+
+impl<'a> Write for MessageWriter<'a> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let bytes = s.as_bytes();
+        let remaining = self.buffer.get_mut(self.pos..).unwrap_or(&mut []);
+        let to_copy = min(bytes.len(), remaining.len());
+
+        remaining[..to_copy].copy_from_slice(&bytes[..to_copy]);
+        self.pos += to_copy;
+        Ok(())
     }
 }

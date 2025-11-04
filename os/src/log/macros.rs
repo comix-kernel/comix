@@ -9,11 +9,21 @@
 //     Debug = 7,     // KERN_DEBUG
 // }
 
+/// Internal core macro that implements the "pre-filter" (acquisition filter).
+#[macro_export]
+macro_rules! __log_impl_filtered {
+    ($level:expr, $args:expr) => {
+        if $crate::log::filter::is_level_enabled($level) {
+            $crate::log::log_impl($level, $args);
+        }
+    };
+}
+
 /// Logs a message at the EMERGENCY level.
 #[macro_export]
 macro_rules! pr_emerg {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Emergency,
             format_args!($($arg)*)
         )
@@ -24,7 +34,7 @@ macro_rules! pr_emerg {
 #[macro_export]
 macro_rules! pr_alert {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Alert,
             format_args!($($arg)*)
         )
@@ -35,7 +45,7 @@ macro_rules! pr_alert {
 #[macro_export]
 macro_rules! pr_crit {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Critical,
             format_args!($($arg)*)
         )
@@ -46,7 +56,7 @@ macro_rules! pr_crit {
 #[macro_export]
 macro_rules! pr_err {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Error,
             format_args!($($arg)*)
         )
@@ -57,7 +67,7 @@ macro_rules! pr_err {
 #[macro_export]
 macro_rules! pr_warn {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Warning,
             format_args!($($arg)*)
         )
@@ -68,7 +78,7 @@ macro_rules! pr_warn {
 #[macro_export]
 macro_rules! pr_notice {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Notice,
             format_args!($($arg)*)
         )
@@ -79,7 +89,7 @@ macro_rules! pr_notice {
 #[macro_export]
 macro_rules! pr_info {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Info,
             format_args!($($arg)*)
         )
@@ -90,7 +100,7 @@ macro_rules! pr_info {
 #[macro_export]
 macro_rules! pr_debug {
     ($($arg:tt)*) => {
-        $crate::log::log_impl(
+        $crate::__log_impl_filtered!(
             $crate::log::LogLevel::Debug,
             format_args!($($arg)*)
         )

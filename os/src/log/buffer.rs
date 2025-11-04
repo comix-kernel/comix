@@ -29,7 +29,7 @@ impl<T> DerefMut for CachePadded64<T> {
 }
 
 /// Glaobal Log Buffer
-/// 
+///
 /// We don't need a lock (like Mutex) or `Lazy` (like OnceCell) because:
 ///
 /// 1.  **No `Mutex` (lock) is needed:** `GlobalLogBuffer` is inherently thread-safe.
@@ -144,11 +144,9 @@ impl GlobalLogBuffer {
 
     pub fn read(&self) -> Option<LogEntry> {
         let read_seq = self.reader_data.read_seq.load(Ordering::Acquire);
-        
+
         let slot = read_seq % MAX_LOG_ENTRIES;
-        let slot_ptr = unsafe {
-            self.buffer.as_ptr().add(slot) as *const LogEntry
-        };
+        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) as *const LogEntry };
 
         const EMPTY: LogEntry = LogEntry::empty();
         unsafe {
@@ -157,12 +155,42 @@ impl GlobalLogBuffer {
             }
         }
 
-        let entry_data = unsafe {
-            (*slot_ptr).clone()
-        };
+        let entry_data = unsafe { (*slot_ptr).clone() };
 
-        self.reader_data.read_seq.store(read_seq + 1, Ordering::Release);
+        self.reader_data
+            .read_seq
+            .store(read_seq + 1, Ordering::Release);
 
         Some(entry_data)
     }
+
+    pub fn len(&self) -> usize {
+        let write = self.writer_data.write_seq.load(Ordering::Relaxed);
+        let read = self.reader_data.read_seq.load(Ordering::Relaxed);
+        write.saturating_sub(read)
+    }
+
+    pub fn dropped_count(&self) -> usize {
+        self.reader_data.dropped.load(Ordering::Relaxed)
+    }
+}
+
+#[inline]
+pub fn write_log(entry: &LogEntry) {
+    GLOBAL_LOG_BUFFER.write(entry);
+}
+
+#[inline]
+pub fn read_log() -> Option<LogEntry> {
+    GLOBAL_LOG_BUFFER.read()
+}
+
+#[inline]
+pub fn log_dropped_count() -> usize {
+    GLOBAL_LOG_BUFFER.dropped_count()
+}
+
+#[inline]
+pub fn log_len() -> usize {
+    GLOBAL_LOG_BUFFER.len()
 }

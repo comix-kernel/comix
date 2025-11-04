@@ -9,3 +9,6 @@ pub const MAX_LOG_MESSAGE_LENGTH: usize = 256;
 
 /// Default log level
 pub const DEFAULT_LOG_LEVEL: super::level::LogLevel = super::level::LogLevel::Info;
+
+/// Default console level
+pub const DEFAULT_CONSOLE_LEVEL: super::level::LogLevel = super::level::LogLevel::Warning;
