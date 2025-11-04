@@ -6,6 +6,7 @@ use riscv::register::scause::{self, Trap};
 use riscv::register::{sepc, sstatus};
 
 use crate::arch::timer::TIMER_TICKS;
+use crate::arch::trap::restore;
 use crate::kernel::{SCHEDULER, schedule};
 
 /// 陷阱帧结构体，保存寄存器状态
@@ -61,7 +62,7 @@ pub struct TrapFrame {
 /// 因此在内核陷阱处理程序开始时，中断是被禁用的。
 /// 必须从这个函数正常返回后，通过 kernelvec 中的 sret 指令才能正确恢复中断状态。
 #[unsafe(no_mangle)]
-pub extern "C" fn trap_handler(_trap_frame: &mut TrapFrame) {
+pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     // 保存进入中断时的状态
     let sstatus_old = sstatus::read();
     let sepc_old = sepc::read();
@@ -86,6 +87,8 @@ pub extern "C" fn trap_handler(_trap_frame: &mut TrapFrame) {
             sstatus_old.bits()
         ),
     }
+
+    restore(trap_frame);
 }
 
 /// 处理来自用户态的陷阱（系统调用、中断、异常）
@@ -102,7 +105,7 @@ pub fn kernel_trap() {
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
-    println!("[kernel timer interrupt] ticks = {}", _ticks + 1);
+    // println!("[kernel timer interrupt] ticks = {}", _ticks + 1);
     if SCHEDULER.lock().update_time_slice() {
         schedule();
     }

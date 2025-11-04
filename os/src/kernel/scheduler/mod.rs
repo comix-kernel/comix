@@ -35,7 +35,7 @@ pub trait Scheduler {
     /// 主动放弃 CPU
     fn yield_task(&mut self);
     /// 任务阻塞（由调用者指定任务）
-    fn sleep_task(&mut self, task: SharedTask);
+    fn sleep_task(&mut self, task: SharedTask, receive_signal: bool);
     /// 唤醒任务（由调用者指定任务）
     fn wake_up(&mut self, task: SharedTask);
     /// 任务终止（由调用者指定任务）
