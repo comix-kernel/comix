@@ -18,6 +18,7 @@ use crate::{
     arch::trap::{self, TrapFrame, restore},
     kernel::{
         cpu::current_cpu,
+        schedule,
         scheduler::{SCHEDULER, Scheduler},
         task::task_manager::TaskManager,
     },
@@ -47,10 +48,11 @@ lazy_static! {
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let entry_addr = entry_point as usize;
     let tid = TASK_MANAGER.lock().allocate_tid();
-    let ppid = {
+    let (pid, ppid) = {
         let cur_cpu = current_cpu().lock();
         let cur_task = cur_cpu.current_task.as_ref().unwrap();
-        cur_task.lock().pid
+        let cur_task = cur_task.lock();
+        (cur_task.pid, cur_task.ppid)
     };
     let kstack_tracker =
         physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
@@ -58,16 +60,57 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
 
     // 分配 Task 结构体和内核栈
-    let task = TaskStruct::ktask_create(tid, ppid, kstack_tracker, trap_frame_tracker, entry_addr);
+    let task = TaskStruct::ktask_create(
+        tid,
+        pid,
+        ppid,
+        kstack_tracker,
+        trap_frame_tracker,
+        entry_addr,
+    );
     let tid = task.tid;
     let task = into_shared(task);
 
     // 将任务加入调度器和任务管理器
     TASK_MANAGER.lock().add_task(task.clone());
-    // 将任务加入全局任务队列
     SCHEDULER.lock().add_task(task);
 
     tid
+}
+
+/// 等待指定 tid 的任务结束
+/// 该函数会阻塞调用者直到目标任务状态变为 Stopped
+/// 如果目标任务不存在则立即返回错误码
+/// 任务结束后会将其从任务管理器中移除
+/// 并将其返回值写入调用者提供的指针地址
+/// # 参数
+/// * `tid`: 目标任务的任务 ID
+/// * `return_value_ptr`: 用于存放目标任务返回值的指针
+/// # 返回值
+/// 成功返回 0，失败返回 -1
+pub fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
+    loop {
+        let task_opt = TASK_MANAGER.lock().get_task(tid);
+        if let Some(task) = task_opt {
+            let t = task.lock();
+            if t.state == TaskState::Stopped {
+                if let Some(rv) = t.return_value {
+                    unsafe {
+                        if let Some(ptr) = return_value_ptr {
+                            let ptr = ptr as *mut usize;
+                            ptr.write_volatile(rv);
+                        }
+                    }
+                }
+                TASK_MANAGER.lock().remove_task(tid);
+                return 0; // 成功结束
+            }
+        } else {
+            return -1; // 任务不存在，直接返回
+        }
+        // 暂时的忙等待
+        hint::spin_loop();
+    }
 }
 
 /// 把已初始化的 TaskStruct 包装为共享任务句柄
@@ -76,21 +119,11 @@ pub fn into_shared(task: TaskStruct) -> SharedTask {
 }
 
 fn a() {
-    loop {
-        for _ in 0..1000 {
-            core::hint::spin_loop();
-        }
-        print!("A");
-    }
+    print!("A");
 }
 
 fn b() {
-    loop {
-        for _ in 0..1000 {
-            core::hint::spin_loop();
-        }
-        print!("B");
-    }
+    print!("B");
 }
 
 /// 内核初始化后将第一个任务(kinit)放到 CPU 上运行
@@ -102,6 +135,7 @@ pub fn kinit_entry() {
     let trap_frame_tracker =
         physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
     let task = into_shared(TaskStruct::ktask_create(
+        tid,
         tid,
         0,
         kstack_tracker,
@@ -139,21 +173,19 @@ pub fn kinit_entry() {
 /// TODO: 现在只是一个空循环
 fn kinit() {
     trap::init();
-    kthread_spawn(a);
-    kthread_spawn(b);
-    // unsafe { intr::enable_interrupts() };
+    let tid_a = kthread_spawn(a);
+    let tid_b = kthread_spawn(b);
+    kthread_join(tid_b, None);
+    kthread_join(tid_a, None);
+    print!("C");
     loop {
-        for _ in 0..1000 {
-            core::hint::spin_loop();
-        }
-        print!("C");
         hint::spin_loop();
     }
 }
 
 /// 新创建的线程发生第一次调度时会从 forkret 开始执行
-#[allow(dead_code)]
-pub fn forkret() {
+/// 该函数负责恢复任务的陷阱帧，从而进入任务的实际执行上下文
+pub(crate) fn forkret() {
     let fp: *mut TrapFrame;
     {
         let cpu = current_cpu().lock();
@@ -161,4 +193,34 @@ pub fn forkret() {
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
     unsafe { restore(&*fp) };
+}
+
+/// 在任务结束时调用的函数
+/// 任务正常地执行完毕后通过创建时预先设置的寄存器跳转到该函数
+/// 该函数不会返回，负责清理任务资源并切换到下一个任务
+pub(crate) fn terminate_task(return_value: usize) -> ! {
+    let task = {
+        let cpu = current_cpu().lock();
+        let task = cpu.current_task.as_ref().unwrap().clone();
+        task
+    };
+
+    {
+        let mut t = task.lock();
+        // 设置退出码和返回值
+        // 对于进程，设置 exit_code；对于线程，设置 return_value
+        let (t_exit_code, t_return_value) = if t.is_process() {
+            (Some(return_value as i32), None)
+        } else {
+            (None, Some(return_value))
+        };
+        // 不必将task移出cpu,在schedule时会处理
+        t.state = TaskState::Stopped;
+        t.exit_code = t_exit_code;
+        t.return_value = t_return_value;
+        // println!("terminate_task: task {} terminated, exit_code={:?}, return_value={:?}", t.tid, t.exit_code, t.return_value);
+    }
+    drop(task);
+    schedule();
+    unreachable!("terminate_task: should not return after scheduled out terminated task");
 }

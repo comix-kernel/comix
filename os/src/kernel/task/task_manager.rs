@@ -48,7 +48,7 @@ impl TaskManager {
     /// 根据任务 ID 获取对应的任务
     /// 参数:
     /// * `tid`: 需要获取的任务 ID
-    /// 返回值: 如果找到对应任务则返回 Some(SharedTask)，否则返回 None
+    ///   返回值: 如果找到对应任务则返回 Some(SharedTask)，否则返回 None
     pub fn get_task(&self, tid: u32) -> Option<SharedTask> {
         self.tasks.get(&tid).cloned()
     }
