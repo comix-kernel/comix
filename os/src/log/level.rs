@@ -1,17 +1,48 @@
+//! Log level definitions
+//!
+//! This module defines the eight log levels used by the kernel logging system,
+//! matching Linux kernel's `printk` levels.
+
+/// Log level enumeration
+///
+/// Defines eight priority levels from Emergency (highest priority) to Debug (lowest).
+/// The levels are compatible with Linux kernel's `KERN_*` constants.
+///
+/// # Level Semantics
+///
+/// - **Emergency**: System is unusable
+/// - **Alert**: Action must be taken immediately
+/// - **Critical**: Critical conditions
+/// - **Error**: Error conditions
+/// - **Warning**: Warning conditions
+/// - **Notice**: Normal but significant condition
+/// - **Info**: Informational messages
+/// - **Debug**: Debug-level messages
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
-    Emergency = 0, // KERN_EMERG
-    Alert = 1,     // KERN_ALERT
-    Critical = 2,  // KERN_CRIT
-    Error = 3,     // KERN_ERR
-    Warning = 4,   // KERN_WARNING
-    Notice = 5,    // KERN_NOTICE
-    Info = 6,      // KERN_INFO
-    Debug = 7,     // KERN_DEBUG
+    /// System is unusable
+    Emergency = 0,
+    /// Action must be taken immediately
+    Alert = 1,
+    /// Critical conditions
+    Critical = 2,
+    /// Error conditions
+    Error = 3,
+    /// Warning conditions
+    Warning = 4,
+    /// Normal but significant condition
+    Notice = 5,
+    /// Informational messages
+    Info = 6,
+    /// Debug-level messages
+    Debug = 7,
 }
 
 impl LogLevel {
+    /// Returns the string representation of the log level
+    ///
+    /// Returns a short tag like `[ERR]`, `[INFO]`, etc.
     pub(super) const fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Emergency => "[EMERG]",
@@ -25,6 +56,16 @@ impl LogLevel {
         }
     }
 
+    /// Returns the ANSI color code for this log level
+    ///
+    /// # Color Mapping
+    ///
+    /// - Emergency/Alert/Critical: Bright red
+    /// - Error: Red
+    /// - Warning: Yellow
+    /// - Notice: Bright white
+    /// - Info: White
+    /// - Debug: Gray
     pub(super) const fn color_code(&self) -> &'static str {
         match self {
             Self::Emergency | Self::Alert | Self::Critical => "\x1b[1;31m",
@@ -36,10 +77,14 @@ impl LogLevel {
         }
     }
 
+    /// Returns the ANSI color reset code
     pub(super) const fn reset_color_code(&self) -> &'static str {
         "\x1b[0m"
     }
 
+    /// Converts a u8 value to a log level
+    ///
+    /// Returns the default log level if the value is invalid.
     pub(super) fn from_u8(level: u8) -> Self {
         match level {
             0 => Self::Emergency,
