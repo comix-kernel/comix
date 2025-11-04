@@ -1,5 +1,6 @@
 //! 任务结构体定义
 //! 包含任务的核心信息，如上下文、状态、内存空间等
+#![allow(dead_code)]
 use core::{
     ptr,
     sync::atomic::{AtomicPtr, Ordering},
@@ -10,7 +11,7 @@ use riscv::register::sstatus;
 
 use crate::{
     arch::{kernel::context::Context, trap::TrapFrame},
-    kernel::task::{forkret, task_state::TaskState},
+    kernel::task::{forkret, task_state::TaskState, terminate_task},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
         frame_allocator::{FrameRangeTracker, FrameTracker},
@@ -55,13 +56,21 @@ pub struct Task {
     /// 对于内核任务，该字段为 None
     pub memory_space: Option<Arc<MemorySpace>>,
     /// 退出码
+    /// 存储任务退出时的状态码，通常用于表示任务的执行结果
+    /// 由 exit 接口设置
+    /// 对应于 waitpid 的 exit_status
     pub exit_code: Option<i32>,
+    /// 返回值
+    /// 存储线程函数的返回值，通常是一个指针大小的值 (usize)
+    /// 对应于 pthread_join 的 void*
+    pub return_value: Option<usize>,
 }
 
 impl Task {
     /// 为内核线程初始化任务上下文
     /// # 参数
     /// * `tid`: 任务ID
+    /// * `pid`: 进程ID
     /// * `ppid`: 父任务ID
     /// * `kstack_tracker`: 内核栈的帧跟踪器
     /// * `trap_frame_tracker`: TrapFrame 的帧跟踪器
@@ -70,12 +79,13 @@ impl Task {
     /// 新创建的任务
     pub fn ktask_create(
         tid: u32,
+        pid: u32,
         ppid: u32,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         entry: usize,
     ) -> Self {
-        let mut task = Self::new(tid, ppid, kstack_tracker, trap_frame_tracker, None);
+        let mut task = Self::new(tid, pid, ppid, kstack_tracker, trap_frame_tracker, None);
         let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
         let mut sstatus = sstatus::read();
         sstatus.set_sie(false);
@@ -84,12 +94,14 @@ impl Task {
         task.context.sp = task.kstack_base;
         task.context.ra = forkret as usize;
         unsafe {
+            // 暂时用tp寄存器保存pid
             (*tf).x4_tp = task.pid as usize;
             (*tf).sepc = entry;
             (*tf).sstatus = sstatus.bits();
             // 内核线程的栈指针初始化为内核栈顶
             (*tf).x2_sp = task.kstack_base;
             (*tf).kernel_sp = task.kstack_base;
+            (*tf).x1_ra = terminate_task as usize;
         }
         task
         // debug 输出任务创建信息
@@ -111,6 +123,7 @@ impl Task {
     /// 新创建的任务
     pub fn utask_create(
         tid: u32,
+        pid: u32,
         ppid: u32,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
@@ -118,6 +131,7 @@ impl Task {
     ) -> Self {
         Self::new(
             tid,
+            pid,
             ppid,
             kstack_tracker,
             trap_frame_tracker,
@@ -154,8 +168,15 @@ impl Task {
         self.memory_space.is_none()
     }
 
+    /// 判断该任务是否为进程
+    /// 对于进程，其 pid 等于 tid
+    pub fn is_process(&self) -> bool {
+        self.pid == self.tid
+    }
+
     fn new(
         tid: u32,
+        pid: u32,
         ppid: u32,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
@@ -183,7 +204,8 @@ impl Task {
             processor_id: 0,
             state: TaskState::Running,
             tid,
-            pid: tid,
+            // pid: tid,
+            pid,
             ppid,
             kstack_base,
             kstack_tracker,
@@ -191,10 +213,16 @@ impl Task {
             trap_frame_ptr: AtomicPtr::new(trap_frame_ptr as *mut TrapFrame),
             memory_space,
             exit_code: None,
+            return_value: None,
         }
     }
 }
 
+impl Drop for Task {
+    fn drop(&mut self) {
+        println!("Dropping Task {}", self.tid);
+    }
+}
 // /// 关于任务的管理信息
 // /// 存放与调度器、任务状态、队列相关的、需要高频访问和修改的数据。
 // /// 主要由调度器子系统使用。
@@ -222,7 +250,7 @@ mod tests {
             physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
         let trap_frame_tracker =
             physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
-        let t = Task::ktask_create(1, 0, kstack_tracker, trap_frame_tracker, 0x1000);
+        let t = Task::ktask_create(1, 1, 0, kstack_tracker, trap_frame_tracker, 0x1000);
         // tid/ pid 应有效且相等
         kassert!(t.tid != 0);
         kassert!(t.pid == t.tid);
