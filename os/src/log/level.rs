@@ -39,4 +39,19 @@ impl LogLevel {
     pub const fn reset_color_code(&self) -> &'static str {
         "\x1b[0m"
     }
+
+    pub fn from_u8(level: u8) -> Self {
+        match level {
+            0 => Self::Emergency,
+            1 => Self::Alert,
+            2 => Self::Critical,
+            3 => Self::Error,
+            4 => Self::Warning,
+            5 => Self::Notice,
+            6 => Self::Info,
+            7 => Self::Debug,
+
+            _ => super::config::DEFAULT_LOG_LEVEL,
+        }
+    }
 }
