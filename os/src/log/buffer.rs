@@ -28,6 +28,31 @@ impl<T> DerefMut for CachePadded64<T> {
     }
 }
 
+/// Glaobal Log Buffer
+/// 
+/// We don't need a lock (like Mutex) or `Lazy` (like OnceCell) because:
+///
+/// 1.  **No `Mutex` (lock) is needed:** `GlobalLogBuffer` is inherently thread-safe.
+///     It is designed with "interior mutability" using `AtomicUsize` fields.
+///     Since all its methods (`write`, `read`) operate on a shared reference (`&self`)
+///     and all internal mutation is handled safely by atomics, the entire
+///     struct is `Sync`. We don't need to wrap an already thread-safe
+///     type in *another* lock.
+///
+/// 2.  **No `Lazy` or `OnceCell` is needed:** The `GlobalLogBuffer::new()`
+///     function is a `const fn`. This means it is executed at **compile-time**,
+///     not at run-time. The entire, fully-initialized `GlobalLogBuffer`
+///     instance is baked directly into the kernel's data segment (`.data` or `.bss`)
+///     when the kernel is compiled.
+///
+///     There is no run-time initialization step, and therefore no "first-init"
+///     race condition that `Lazy` is designed to solve. The buffer exists
+///     in memory, fully initialized, from the very first CPU instruction.
+///
+/// This pattern results in a zero-cost, lock-free, and data-race-free
+/// global static instance.
+static GLOBAL_LOG_BUFFER: GlobalLogBuffer = GlobalLogBuffer::new();
+
 #[repr(C)]
 pub struct GlobalLogBuffer {
     writer_data: CachePadded64<WriterData>,
@@ -44,7 +69,6 @@ pub struct WriterData {
 pub struct ReaderData {
     read_seq: AtomicUsize,
     dropped: AtomicUsize,
-    initialized: AtomicBool,
 }
 
 impl GlobalLogBuffer {
@@ -60,7 +84,6 @@ impl GlobalLogBuffer {
                 inner: ReaderData {
                     read_seq: AtomicUsize::new(1),
                     dropped: AtomicUsize::new(0),
-                    initialized: AtomicBool::new(false),
                 },
             },
             buffer: [EMPTY; MAX_LOG_ENTRIES],
