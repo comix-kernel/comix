@@ -12,7 +12,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    pub const fn as_str(&self) -> &'static str {
+    pub(super) const fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Emergency => "[EMERG]",
             LogLevel::Alert => "[ALERT]",
@@ -25,7 +25,7 @@ impl LogLevel {
         }
     }
 
-    pub const fn color_code(&self) -> &'static str {
+    pub(super) const fn color_code(&self) -> &'static str {
         match self {
             Self::Emergency | Self::Alert | Self::Critical => "\x1b[1;31m",
             Self::Error => "\x1b[31m",
@@ -36,11 +36,11 @@ impl LogLevel {
         }
     }
 
-    pub const fn reset_color_code(&self) -> &'static str {
+    pub(super) const fn reset_color_code(&self) -> &'static str {
         "\x1b[0m"
     }
 
-    pub fn from_u8(level: u8) -> Self {
+    pub(super) fn from_u8(level: u8) -> Self {
         match level {
             0 => Self::Emergency,
             1 => Self::Alert,

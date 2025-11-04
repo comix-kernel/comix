@@ -2,13 +2,13 @@
 #![allow(unused)]
 
 /// Global log buffer size
-pub const GLOBAL_LOG_BUFFER_SIZE: usize = 16 * 1024; // 16KB
+pub(super) const GLOBAL_LOG_BUFFER_SIZE: usize = 16 * 1024; // 16KB
 
 /// Maximum length of a single log message
-pub const MAX_LOG_MESSAGE_LENGTH: usize = 256;
+pub(super) const MAX_LOG_MESSAGE_LENGTH: usize = 256;
 
 /// Default log level
-pub const DEFAULT_LOG_LEVEL: super::level::LogLevel = super::level::LogLevel::Info;
+pub(super) const DEFAULT_LOG_LEVEL: super::level::LogLevel = super::level::LogLevel::Info;
 
 /// Default console level
-pub const DEFAULT_CONSOLE_LEVEL: super::level::LogLevel = super::level::LogLevel::Warning;
+pub(super) const DEFAULT_CONSOLE_LEVEL: super::level::LogLevel = super::level::LogLevel::Warning;

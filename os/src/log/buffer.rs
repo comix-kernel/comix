@@ -5,7 +5,7 @@ use super::config::GLOBAL_LOG_BUFFER_SIZE;
 use super::entry::LogEntry;
 
 const LOG_ENTRY_SIZE: usize = core::mem::size_of::<LogEntry>();
-pub const MAX_LOG_ENTRIES: usize = GLOBAL_LOG_BUFFER_SIZE / LOG_ENTRY_SIZE;
+pub(crate) const MAX_LOG_ENTRIES: usize = GLOBAL_LOG_BUFFER_SIZE / LOG_ENTRY_SIZE;
 
 #[repr(C, align(64))]
 struct CachePadded64<T> {
@@ -54,25 +54,25 @@ impl<T> DerefMut for CachePadded64<T> {
 static GLOBAL_LOG_BUFFER: GlobalLogBuffer = GlobalLogBuffer::new();
 
 #[repr(C)]
-pub struct GlobalLogBuffer {
+struct GlobalLogBuffer {
     writer_data: CachePadded64<WriterData>,
     reader_data: CachePadded64<ReaderData>,
     buffer: [LogEntry; MAX_LOG_ENTRIES],
 }
 
 #[repr(C)]
-pub struct WriterData {
+struct WriterData {
     write_seq: AtomicUsize,
 }
 
 #[repr(C)]
-pub struct ReaderData {
+struct ReaderData {
     read_seq: AtomicUsize,
     dropped: AtomicUsize,
 }
 
 impl GlobalLogBuffer {
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         const EMPTY: LogEntry = LogEntry::empty();
         Self {
             writer_data: CachePadded64 {
@@ -90,7 +90,7 @@ impl GlobalLogBuffer {
         }
     }
 
-    pub fn write(&self, entry: &LogEntry) {
+    fn write(&self, entry: &LogEntry) {
         // step1: Atomically claim a unique sequence number (ticket)
         let seq = self.writer_data.write_seq.fetch_add(1, Ordering::Relaxed);
 
@@ -142,7 +142,7 @@ impl GlobalLogBuffer {
         }
     }
 
-    pub fn read(&self) -> Option<LogEntry> {
+    fn read(&self) -> Option<LogEntry> {
         let read_seq = self.reader_data.read_seq.load(Ordering::Acquire);
 
         let slot = read_seq % MAX_LOG_ENTRIES;
@@ -164,19 +164,19 @@ impl GlobalLogBuffer {
         Some(entry_data)
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         let write = self.writer_data.write_seq.load(Ordering::Relaxed);
         let read = self.reader_data.read_seq.load(Ordering::Relaxed);
         write.saturating_sub(read)
     }
 
-    pub fn dropped_count(&self) -> usize {
+    fn dropped_count(&self) -> usize {
         self.reader_data.dropped.load(Ordering::Relaxed)
     }
 }
 
 #[inline]
-pub fn write_log(entry: &LogEntry) {
+pub(super) fn write_log(entry: &LogEntry) {
     GLOBAL_LOG_BUFFER.write(entry);
 }
 

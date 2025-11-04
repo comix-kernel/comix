@@ -29,29 +29,7 @@ impl LogEntry {
         }
     }
 
-    pub fn new(
-        level: LogLevel,
-        cpu_id: usize,
-        task_id: u32,
-        timestamp: usize,
-        message: &str,
-    ) -> Self {
-        let bytes = message.as_bytes();
-        let length = min(bytes.len(), MAX_LOG_MESSAGE_LENGTH);
-        let mut message = [0; MAX_LOG_MESSAGE_LENGTH];
-        message[..length].copy_from_slice(&bytes[..length]);
-        Self {
-            seq: AtomicUsize::new(0),
-            level,
-            cpu_id,
-            length,
-            task_id,
-            timestamp,
-            message,
-        }
-    }
-
-    pub fn from_args(
+    pub(super) fn from_args(
         level: LogLevel,
         cpu_id: usize,
         task_id: u32,

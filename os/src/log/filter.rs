@@ -7,6 +7,7 @@ static GLOBAL_LOG_LEVEL: AtomicU8 = AtomicU8::new(DEFAULT_LOG_LEVEL as u8);
 static CONSOLE_LEVEL: AtomicU8 = AtomicU8::new(DEFAULT_CONSOLE_LEVEL as u8);
 
 #[inline(always)]
+#[doc(hidden)]
 pub fn is_level_enabled(level: LogLevel) -> bool {
     let global_level = GLOBAL_LOG_LEVEL.load(Ordering::Relaxed);
     level as u8 <= global_level
@@ -22,7 +23,7 @@ pub fn get_global_level() -> LogLevel {
 }
 
 #[inline(always)]
-pub fn is_console_level(level: LogLevel) -> bool {
+pub(super) fn is_console_level(level: LogLevel) -> bool {
     let console_level = CONSOLE_LEVEL.load(Ordering::Relaxed);
     level as u8 <= console_level
 }

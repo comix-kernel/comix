@@ -1,15 +1,26 @@
-pub mod buffer;
-pub mod config;
-pub mod context;
-pub mod entry;
-pub mod filter;
-pub mod level;
+mod buffer;
+mod config;
+mod context;
+mod entry;
+mod filter;
+mod level;
 pub mod macros;
 
 pub use entry::LogEntry;
 pub use level::LogLevel;
 
-/// Implementation of the log function (for temporary use)
+// Re-export public APIs for reading logs
+pub use buffer::{log_dropped_count, log_len, read_log};
+
+// Re-export public APIs for configuring log levels
+pub use filter::{get_console_level, get_global_level, set_console_level, set_global_level};
+
+// Re-export for internal use by macros (hidden from docs)
+#[doc(hidden)]
+pub use filter::is_level_enabled;
+
+/// Implementation of the log function (for internal use by macros)
+#[doc(hidden)]
 pub fn log_impl(level: LogLevel, args: core::fmt::Arguments) {
     let log_context = context::collect_context();
     let (cpu_id, task_id, timestamp) = (
