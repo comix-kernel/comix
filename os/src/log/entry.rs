@@ -210,7 +210,7 @@ impl<'a> MessageWriter<'a> {
     }
 }
 
-impl<'a> Write for MessageWriter<'a> {
+impl Write for MessageWriter<'_> {
     /// Writes a string slice to the buffer, truncating if necessary
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let bytes = s.as_bytes();

@@ -4,7 +4,7 @@
 //! ring buffer using atomic operations for synchronization.
 
 use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::config::GLOBAL_LOG_BUFFER_SIZE;
 use super::entry::LogEntry;
@@ -72,7 +72,7 @@ static GLOBAL_LOG_BUFFER: GlobalLogBuffer = GlobalLogBuffer::new();
 /// - Multiple CPUs can concurrently write logs without blocking
 /// - A single consumer thread reads logs sequentially
 #[repr(C)]
-struct GlobalLogBuffer {
+pub(super) struct GlobalLogBuffer {
     /// Writer-side data (updated by producers)
     writer_data: CachePadded64<WriterData>,
     /// Reader-side data (updated by consumer)
@@ -99,7 +99,7 @@ struct ReaderData {
 
 impl GlobalLogBuffer {
     /// Creates a new global log buffer at compile time
-    const fn new() -> Self {
+    pub(super) const fn new() -> Self {
         const EMPTY: LogEntry = LogEntry::empty();
         Self {
             writer_data: CachePadded64 {
@@ -125,7 +125,7 @@ impl GlobalLogBuffer {
     /// 3. Handles buffer overflow by advancing read pointer if needed
     /// 4. Copies log data to the slot
     /// 5. Publishes the entry with a Release memory barrier
-    fn write(&self, entry: &LogEntry) {
+    pub(super) fn write(&self, entry: &LogEntry) {
         // step1: Atomically claim a unique sequence number (ticket)
         let seq = self.writer_data.write_seq.fetch_add(1, Ordering::Relaxed);
 
@@ -191,7 +191,7 @@ impl GlobalLogBuffer {
     /// Returns `None` if no entries are available. This is a lock-free
     /// single-consumer operation that uses Acquire memory ordering to ensure
     /// proper synchronization with producers.
-    fn read(&self) -> Option<LogEntry> {
+    pub(super) fn read(&self) -> Option<LogEntry> {
         let read_seq = self.reader_data.read_seq.load(Ordering::Acquire);
 
         let slot = read_seq % MAX_LOG_ENTRIES;
@@ -214,14 +214,14 @@ impl GlobalLogBuffer {
     }
 
     /// Returns the number of unread log entries in the buffer
-    fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         let write = self.writer_data.write_seq.load(Ordering::Relaxed);
         let read = self.reader_data.read_seq.load(Ordering::Relaxed);
         write.saturating_sub(read)
     }
 
     /// Returns the total number of dropped logs due to buffer overflow
-    fn dropped_count(&self) -> usize {
+    pub(super) fn dropped_count(&self) -> usize {
         self.reader_data.dropped.load(Ordering::Relaxed)
     }
 }

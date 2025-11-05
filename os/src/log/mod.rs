@@ -8,8 +8,8 @@
 //! - [`buffer`]: Lock-free ring buffer for log storage
 //! - [`config`]: Configuration constants (buffer size, message length limits)
 //! - [`context`]: Context collection (CPU ID, task ID, timestamp)
+//! - [`core`]: Core logging implementation (LogCore)
 //! - [`entry`]: Log entry structure and serialization
-//! - [`filter`]: Two-tier log level filtering
 //! - [`level`]: Log level definitions (Emergency to Debug)
 //! - [`macros`]: User-facing logging macros (`pr_info!`, `pr_err!`, etc.)
 //!
@@ -70,85 +70,71 @@
 mod buffer;
 mod config;
 mod context;
+mod log_core;
 mod entry;
-mod filter;
 mod level;
 pub mod macros;
 
 pub use entry::LogEntry;
 pub use level::LogLevel;
 
-// Re-export public APIs for reading logs
-pub use buffer::{log_dropped_count, log_len, read_log};
+// ========== Global Singleton ==========
 
-// Re-export public APIs for configuring log levels
-pub use filter::{get_console_level, get_global_level, set_console_level, set_global_level};
+/// Global logging system instance
+///
+/// Initialized at compile time using const fn, zero runtime overhead.
+/// All logging macros and public APIs delegate to this instance.
+static GLOBAL_LOG: log_core::LogCore = log_core::LogCore::default();
 
-// Re-export for internal use by macros (hidden from docs)
-#[doc(hidden)]
-pub use filter::is_level_enabled;
+// ========== Public API (thin wrappers) ==========
 
-/// Core logging implementation called by all logging macros
-///
-/// This function:
-/// 1. Collects context information (CPU ID, task ID, timestamp)
-/// 2. Creates a log entry from the format arguments
-/// 3. Immediately prints to console if the log meets console level threshold
-/// 4. Writes the log to the ring buffer for later consumption
-///
-/// # Parameters
-///
-/// * `level` - The log level (Emergency, Error, Info, etc.)
-/// * `args` - Formatted arguments from `format_args!` macro
+/// Core logging implementation (called by macros)
 #[doc(hidden)]
 pub fn log_impl(level: LogLevel, args: core::fmt::Arguments) {
-    // Collect context information
-    let log_context = context::collect_context();
-    let (cpu_id, task_id, timestamp) = (
-        log_context.cpu_id,
-        log_context.task_id,
-        log_context.timestamp,
-    );
-
-    // Create log entry
-    let entry = LogEntry::from_args(level, cpu_id, task_id, timestamp, args);
-
-    // Immediate console output for urgent logs
-    if filter::is_console_level(level) {
-        direct_print_entry(&entry);
-    }
-
-    // Always buffer the log for later retrieval
-    buffer::write_log(&entry);
+    GLOBAL_LOG._log(level, args);
 }
 
-/// Prints a log entry directly to the console with ANSI color codes
-fn direct_print_entry(entry: &LogEntry) {
-    // Important!: must lock console here to prevent:
-    // garbled (interleaved) output from concurrent calls.
-    //
-    // This function is the single "choke point" for all physical
-    // console I/O and can be called concurrently from 2 different sources:
-    //
-    // 1. **Urgent Logs:** Multiple CPUs hitting high-priority logs (e.g., `pr_err!`).
-    // 2. **Async Consumer:** The `console_flush_thread` printing buffered logs.
-    //
-    // A global `CONSOLE_LOCK` (SpinLock) must be acquired before these
-    // `write!` operations to serialize all access to the (e.g.) UART hardware.
-    //
-    // let _guard = CONSOLE_LOCK.lock(); // <-- lock here
-
-    use crate::console::Stdout;
-    use core::fmt::Write;
-
-    let mut stdout = Stdout;
-    let _ = write!(
-        stdout,
-        "{}{} ",
-        entry.level().color_code(),
-        entry.level().as_str()
-    );
-    let _ = stdout.write_str(entry.message());
-    let _ = write!(stdout, "{}", entry.level().reset_color_code());
-    let _ = writeln!(stdout);
+/// Checks if a log level is enabled (called by macros)
+#[doc(hidden)]
+pub fn is_level_enabled(level: LogLevel) -> bool {
+    level as u8 <= GLOBAL_LOG._get_global_level() as u8
 }
+
+/// Reads the next log entry from the buffer
+pub fn read_log() -> Option<LogEntry> {
+    GLOBAL_LOG._read_log()
+}
+
+/// Returns the number of unread log entries
+pub fn log_len() -> usize {
+    GLOBAL_LOG._log_len()
+}
+
+/// Returns the count of dropped logs
+pub fn log_dropped_count() -> usize {
+    GLOBAL_LOG._log_dropped_count()
+}
+
+/// Sets the global log level threshold
+pub fn set_global_level(level: LogLevel) {
+    GLOBAL_LOG._set_global_level(level);
+}
+
+/// Gets the current global log level
+pub fn get_global_level() -> LogLevel {
+    GLOBAL_LOG._get_global_level()
+}
+
+/// Sets the console output level threshold
+pub fn set_console_level(level: LogLevel) {
+    GLOBAL_LOG._set_console_level(level);
+}
+
+/// Gets the current console output level
+pub fn get_console_level() -> LogLevel {
+    GLOBAL_LOG._get_console_level()
+}
+
+// ========== Test module ==========
+#[cfg(test)]
+mod tests;
