@@ -1,7 +1,7 @@
 // os/src/log/tests/mod.rs
 
-use super::log_core::LogCore;
 use super::level::LogLevel;
+use super::log_core::LogCore;
 
 // ========== Test Helper Macros ==========
 
@@ -17,5 +17,5 @@ macro_rules! test_log {
 // ========== Sub-modules ==========
 mod basic;
 mod filter;
-mod overflow;
 mod format;
+mod overflow;

@@ -70,9 +70,9 @@
 mod buffer;
 mod config;
 mod context;
-mod log_core;
 mod entry;
 mod level;
+mod log_core;
 pub mod macros;
 
 pub use entry::LogEntry;
