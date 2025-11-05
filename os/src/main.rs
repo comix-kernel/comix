@@ -29,6 +29,7 @@ use crate::kernel::task::kinit_entry;
 use crate::sbi::shutdown;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
+use crate::test::run_early_tests;
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
 #[cfg(test)]
@@ -70,6 +71,8 @@ global_asm!(include_str!("entry.asm"));
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> ! {
     clear_bss();
+
+    run_early_tests();
 
     // Initialize memory management (frame allocator + heap + kernel page table)
     mm::init();
@@ -121,4 +124,9 @@ fn clear_bss() {
 #[cfg(test)]
 test_case!(trivial_assertion, {
     kassert!(0 != 1);
+});
+
+#[cfg(test)]
+early_test!(exampe_early_test, {
+    kassert!(1 == 1);
 });
