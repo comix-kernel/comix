@@ -5,13 +5,13 @@ use super::*;
 test_case!(test_message_truncation, {
     let log = LogCore::new(LogLevel::Debug, LogLevel::Warning);
 
-    // 创建超长消息（>256 字节）
+    // Create a long message (>256 bytes)
     let long_msg = alloc::format!("{}", "a".repeat(300));
     test_log!(log, LogLevel::Info, "{}", long_msg);
 
     let entry = log._read_log().unwrap();
 
-    // 应该截断到 256 字节
+    // Should be truncated to 256 bytes
     kassert!(entry.message().len() <= 256);
 });
 
