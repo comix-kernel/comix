@@ -16,10 +16,12 @@ extern crate alloc;
 mod console;
 mod arch;
 mod config;
+mod fs;
 mod kernel;
 mod mm;
 mod sbi;
 mod sync;
+mod vfs;
 #[macro_use]
 mod test;
 #[macro_use]
