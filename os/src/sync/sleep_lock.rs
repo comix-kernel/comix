@@ -29,7 +29,8 @@ impl SleepLock {
             let current_task = current_cpu().lock().current_task.as_ref().unwrap().clone();
             // 在 enqueue 之前仍然持有 guard 是合理的，确保 wait queue 与 locked 字段的原子性
             self.queue.sleep(current_task);
-            // 释放 guard，然后睡眠；被唤醒后再次循环，重新获取 guard
+
+            // 释放 guard，然后让出 CPU
             drop(_g);
             yield_task();
         }
