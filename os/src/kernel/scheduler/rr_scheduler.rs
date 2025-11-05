@@ -1,11 +1,9 @@
-use alloc::sync::Arc;
-
 use crate::{
     arch::kernel::context::Context,
     kernel::{
         TaskState,
         cpu::current_cpu,
-        scheduler::{Scheduler, SwitchPlan, schedule, task_queue::TaskQueue},
+        scheduler::{Scheduler, SwitchPlan, TaskQueue},
         task::SharedTask,
     },
 };
@@ -24,8 +22,6 @@ const DEFAULT_TIME_SLICE: usize = usize::MAX; // HACK: 测试时禁用调度
 pub struct RRScheduler {
     // 运行队列
     run_queue: TaskQueue,
-    // 等待队列
-    wait_queue: TaskQueue,
     // 时间片长度（以时钟中断滴答数为单位）
     time_slice: usize,
     // 当前时间片剩余时间
@@ -52,7 +48,6 @@ impl Scheduler for RRScheduler {
     fn new() -> Self {
         RRScheduler {
             run_queue: TaskQueue::new(),
-            wait_queue: TaskQueue::new(),
             time_slice: DEFAULT_TIME_SLICE,
             current_slice: DEFAULT_TIME_SLICE,
         }
@@ -111,17 +106,13 @@ impl Scheduler for RRScheduler {
                 self.run_queue.add_task(task);
             }
             _ => {
-                self.wait_queue.add_task(task);
+                panic!("RRScheduler: can only add running tasks to scheduler");
             }
         }
     }
 
     fn next_task(&mut self) -> Option<SharedTask> {
         self.run_queue.pop_task()
-    }
-
-    fn yield_task(&mut self) {
-        schedule();
     }
 
     fn sleep_task(&mut self, task: SharedTask, receive_signal: bool) {
@@ -134,59 +125,24 @@ impl Scheduler for RRScheduler {
                 TaskState::Uninterruptible
             };
         }
-
-        if !self.wait_queue.contains(&task) {
-            self.wait_queue.add_task(task.clone());
-        }
-
-        let mut cpu = current_cpu().lock();
-        if let Some(cur) = &mut cpu.current_task {
-            if Arc::ptr_eq(cur, &task) {
-                cpu.current_task = None;
-                // schedule 不会返回
-                drop(cpu);
-                schedule();
-            }
-        }
     }
 
     fn wake_up(&mut self, task: SharedTask) {
-        self.wait_queue.remove_task(&task);
-
         {
             task.lock().state = TaskState::Running;
         }
 
         if !self.run_queue.contains(&task) {
-            self.run_queue.add_task(task.clone());
+            self.run_queue.add_task(task);
         }
     }
 
     fn exit_task(&mut self, task: SharedTask, code: i32) {
-        let state: TaskState;
         {
             let mut t = task.lock();
-            state = t.state;
             t.exit_code = Some(code);
             t.state = TaskState::Stopped;
         }
-        match state {
-            TaskState::Running => {
-                self.run_queue.remove_task(&task);
-            }
-            _ => {
-                self.wait_queue.remove_task(&task);
-            }
-        }
-
-        let mut cpu = current_cpu().lock();
-        if let Some(cur) = &mut cpu.current_task {
-            if Arc::ptr_eq(cur, &task) {
-                cpu.current_task = None;
-                // schedule 不会返回
-                drop(cpu);
-                schedule();
-            }
-        }
+        self.run_queue.remove_task(&task);
     }
 }
