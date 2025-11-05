@@ -11,6 +11,8 @@ use crate::config::NUM_CPU;
 use crate::sync::spin_lock::SpinLock;
 
 pub use scheduler::SCHEDULER;
+pub use scheduler::TaskQueue;
+pub use scheduler::WaitQueue;
 pub use scheduler::schedule;
 pub use task::TaskState;
 
