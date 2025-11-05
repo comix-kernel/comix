@@ -5,14 +5,14 @@ use super::*;
 test_case!(test_global_level_filtering, {
     let log = LogCore::new(LogLevel::Warning, LogLevel::Warning);
 
-    // 写入不同级别的日志
-    test_log!(log, LogLevel::Emergency, "emergency");  // 0 <= 4，缓冲
-    test_log!(log, LogLevel::Error, "error");          // 3 <= 4，缓冲
-    test_log!(log, LogLevel::Warning, "warning");      // 4 <= 4，缓冲
-    test_log!(log, LogLevel::Info, "info");            // 6 > 4，过滤
-    test_log!(log, LogLevel::Debug, "debug");          // 7 > 4，过滤
+    // Write logs at different levels
+    test_log!(log, LogLevel::Emergency, "emergency");  // 0 <= 4, buffered
+    test_log!(log, LogLevel::Error, "error");          // 3 <= 4, buffered
+    test_log!(log, LogLevel::Warning, "warning");      // 4 <= 4, buffered
+    test_log!(log, LogLevel::Info, "info");            // 6 > 4, filtered
+    test_log!(log, LogLevel::Debug, "debug");          // 7 > 4, filtered
 
-    // 验证只有 3 条被缓冲
+    // Verify that only 3 logs are buffered
     kassert!(log._log_len() == 3);
 
     kassert!(log._read_log().unwrap().message() == "emergency");
@@ -24,13 +24,13 @@ test_case!(test_global_level_filtering, {
 test_case!(test_level_boundary, {
     let log = LogCore::new(LogLevel::Info, LogLevel::Warning);
 
-    // 边界测试：Info (6) == 6
+    // Boundary test: Info (6) == 6
     test_log!(log, LogLevel::Info, "boundary");
     kassert!(log._log_len() == 1);
 
-    // Debug (7) > 6，过滤
+    // Debug (7) > 6, filtered
     test_log!(log, LogLevel::Debug, "filtered");
-    kassert!(log._log_len() == 1);  // 仍然是 1
+    kassert!(log._log_len() == 1);  // Still 1
 
     kassert!(log._read_log().unwrap().message() == "boundary");
 });
@@ -38,16 +38,16 @@ test_case!(test_level_boundary, {
 test_case!(test_dynamic_level_change, {
     let log = LogCore::new(LogLevel::Info, LogLevel::Warning);
 
-    test_log!(log, LogLevel::Debug, "debug1");  // 过滤
-    test_log!(log, LogLevel::Info, "info1");    // 缓冲
+    test_log!(log, LogLevel::Debug, "debug1");  // Filtered
+    test_log!(log, LogLevel::Info, "info1");    // Buffered
 
     kassert!(log._log_len() == 1);
 
-    // 切换到 Debug
+    // Switch to Debug
     log._set_global_level(LogLevel::Debug);
 
-    test_log!(log, LogLevel::Debug, "debug2");  // 现在缓冲
-    test_log!(log, LogLevel::Info, "info2");    // 缓冲
+    test_log!(log, LogLevel::Debug, "debug2");  // Now buffered
+    test_log!(log, LogLevel::Info, "info2");    // Buffered
 
     kassert!(log._log_len() == 3);
 
@@ -59,7 +59,7 @@ test_case!(test_dynamic_level_change, {
 test_case!(test_all_levels, {
     let log = LogCore::new(LogLevel::Debug, LogLevel::Warning);
 
-    // 写入所有级别
+    // Write all levels
     test_log!(log, LogLevel::Emergency, "emerg");
     test_log!(log, LogLevel::Alert, "alert");
     test_log!(log, LogLevel::Critical, "crit");
