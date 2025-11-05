@@ -103,3 +103,70 @@ macro_rules! test_case {
         }
     };
 }
+
+/// 此宏用于在内存管理器（`mm::init()`）初始化之前运行的测试。
+/// 它通过将函数指针放入一个自定义的链接器段（`.early_test_entry`）来工作。
+/// 这些测试不能使用堆分配或依赖已初始化的子系统。
+///
+/// # Examples
+/// ignore
+/// early_test!(my_early_test, {
+///     assert_eq!(1 + 1, 2);
+/// });
+///
+#[macro_export]
+macro_rules! early_test {
+    // 匹配一个函数名和一个代码块
+    ($func_name:ident,$body:block) => {
+        // 使用 paste::paste! 来组合标识符，确保函数名唯一
+        // 你需要在 Cargo.toml 中添加 `paste = "1.0"` 依赖
+        paste::paste! {
+            // 生成一个内部函数，避免命名冲突
+            #[doc = concat!("Early test case: ", stringify!($func_name))]
+            #[allow(dead_code)] // 函数不是直接调用的，所以允许未使用
+            fn [<early_test_ $func_name>]() {
+                // 打印测试开始信息，此时 console 应该已经可以工作
+                println!("\x1b[36m[early_test] Running: {}\x1b[0m\n", stringify!($func_name));
+                $body
+                println!("\x1b[36m[early_test] Passed: {}\x1b[0m\n", stringify!($func_name));
+            }
+
+            // 将函数指针放入自定义的链接器段
+            #[used] // 确保编译器不会优化掉这个静态变量
+            #[unsafe(link_section = ".early_test_entry")]
+            static [<EARLY_TEST_ENTRY_ $func_name>]: fn() = [<early_test_$func_name>];
+        }
+    };
+}
+
+
+pub fn run_early_tests() {
+    // 从链接器脚本中定义的符号获取段的起始和结束地址
+    unsafe extern "C" {
+        static __early_test_start: extern "C" fn();
+        static __early_test_end: extern "C" fn();
+    }
+
+    // 创建一个指向函数指针的切片
+    // 安全性：我们假设链接器脚本正确创建了这些符号，并且它们对齐了函数指针。
+    // 段中的每个项都是一个 `fn()` 类型的指针。
+    let start = unsafe { &__early_test_start as *const _ as *const extern "C" fn() };
+    let end = unsafe { &__early_test_end as *const _ as *const extern "C" fn() };
+
+    // 计算测试数量
+    let count = unsafe { end.offset_from(start) } as usize;
+    if count == 0 {
+        println!("\x1b[36m[early_test] No early tests to run.\x1b[0m");
+        return;
+    }
+
+    println!("\n\x1b[36m--- Running {} early tests (pre-mm) ---\x1b[0m", count);
+
+    // 遍历并执行所有测试函数
+    for i in 0..count {
+        let test_fn = unsafe { *start.add(i) };
+        test_fn();
+    }
+
+    println!("\x1b[36m--- Early tests finished ---\x1b[0m\n");
+}

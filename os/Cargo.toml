@@ -15,7 +15,7 @@ once_cell = { version = "1.21.3", default-features = false, features = [
     "race",
 ] }
 xmas-elf = "0.9"
-
+paste = "1.0"
 
 [lints.rustdoc]
 broken_intra_doc_links = "deny"
