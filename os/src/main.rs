@@ -27,9 +27,9 @@ use crate::arch::timer;
 use crate::arch::trap;
 use crate::kernel::task::kinit_entry;
 use crate::sbi::shutdown;
+use crate::test::run_early_tests;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
-use crate::test::run_early_tests;
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
 #[cfg(test)]

@@ -139,7 +139,6 @@ macro_rules! early_test {
     };
 }
 
-
 pub fn run_early_tests() {
     // 从链接器脚本中定义的符号获取段的起始和结束地址
     unsafe extern "C" {
@@ -160,7 +159,10 @@ pub fn run_early_tests() {
         return;
     }
 
-    println!("\n\x1b[36m--- Running {} early tests (pre-mm) ---\x1b[0m", count);
+    println!(
+        "\n\x1b[36m--- Running {} early tests (pre-mm) ---\x1b[0m",
+        count
+    );
 
     // 遍历并执行所有测试函数
     for i in 0..count {
