@@ -19,7 +19,7 @@ lazy_static! {
 }
 
 /// 上下文切换计划结构体
-pub struct SwitchPlan {
+pub(crate) struct SwitchPlan {
     pub old: *mut Context,
     pub new: *const Context,
 }
