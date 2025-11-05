@@ -15,7 +15,7 @@ test_case!(test_buffer_overflow, {
     let buffered = log._log_len();
     let dropped = log._log_dropped_count();
 
-    kassert!(dropped > 0);  // Should have dropped logs
+    kassert!(dropped > 0); // Should have dropped logs
     kassert!(buffered + dropped == TOTAL);
 });
 
