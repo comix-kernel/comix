@@ -1,0 +1,22 @@
+[package]
+name = "hello"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lib = { path = "../lib" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+# 启用链接时优化 (LTO)，允许链接器移除所有未使用的代码
+lto = true
+# 启用最高级别的优化
+codegen-units = 1
+# 移除所有符号表和调试信息 (这是文件大小减小的最大贡献者)
+debug = false
+# 尽量减小代码大小的优化级别
+opt-level = "z"
+# 移除 panic 时的栈回退支持 (裸机环境不需要)
+panic = "abort"
