@@ -20,6 +20,14 @@ SECTIONS
     }
 
     . = ALIGN(4K);
+    .early_test_entry :
+        {
+            __early_test_start = .; /* 定义段起始符号 */
+            KEEP(*(.early_test_entry)) /* KEEP 防止链接器优化掉未使用的段 */
+            __early_test_end = .;   /* 定义段结束符号 */
+        }
+
+    . = ALIGN(4K);
     etext = .;
     srodata = .;
     .rodata : AT(PHYSICAL_BASE + (srodata - VIRTUAL_BASE)) {
