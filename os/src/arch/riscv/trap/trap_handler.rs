@@ -3,8 +3,10 @@
 use core::sync::atomic::Ordering;
 
 use riscv::register::scause::{self, Trap};
+use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sstatus};
 
+use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::TIMER_TICKS;
 use crate::arch::trap::restore;
 use crate::kernel::{SCHEDULER, schedule};
@@ -53,14 +55,23 @@ pub struct TrapFrame {
                         // pub kernel_hartid: usize, // 280(sp)
 }
 
-// XXX: CSR可能因调度或中断被修改？
-/// 内核陷阱处理程序
-/// 从 kernelvec 跳转到这里时，
-/// 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 kerneltrap，
-/// 在这里，trap_frame 指向了栈上保存的 KernelTrapFrame 结构体。
-/// 此外，在通过 stvec 跳转到 kernelvec 时，SSIE 被自动清除，
+/// 陷阱处理程序
+/// 从中断处理入口跳转到这里时，
+/// 陷阱帧的地址（sp）被隐式地作为参数 a0 传递给了 trap_handler 函数。
+/// 在这里，trap_frame 指向了保存的 TrapFrame 结构体。
+/// 此外，在通过 stvec 跳转到中断处理入口时，SSIE 被自动清除，
 /// 因此在内核陷阱处理程序开始时，中断是被禁用的。
-/// 必须从这个函数正常返回后，通过 kernelvec 中的 sret 指令才能正确恢复中断状态。
+/// 必须从这个函数正常返回后，通过 restore 中的 sret 指令才能正确恢复中断状态。
+///
+/// # 警告:
+/// - 不要在中断处理中调用任何可能引起内存分配或阻塞的函数，
+///   因为这可能会导致死锁或不可预测的行为。
+/// - 确保在中断处理程序中正确保存和恢复所有必要的寄存器状态，
+///   以避免破坏正在运行的进程的状态。
+/// - 注意陷阱处理程序的执行时间，
+///   避免长时间占用 CPU，影响系统的响应性。
+///
+/// XXX: CSR可能因调度或中断被修改？
 #[unsafe(no_mangle)]
 pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     // 保存进入中断时的状态
@@ -68,6 +79,44 @@ pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     let sepc_old = sepc::read();
     let scause = scause::read();
 
+    match sstatus_old.spp() {
+        SPP::User => user_trap(scause, sepc_old, sstatus_old, trap_frame),
+        SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old),
+    }
+
+    restore(trap_frame);
+}
+
+/// 处理来自用户态的陷阱（系统调用、中断、异常）
+pub fn user_trap(
+    scause: scause::Scause,
+    sepc_old: usize,
+    sstatus_old: sstatus::Sstatus,
+    trap_frame: &mut TrapFrame,
+) {
+    match scause.cause() {
+        Trap::Exception(8) => {
+            // 处理系统调用
+            dispatch_syscall(trap_frame);
+            // 设置返回地址为下一个指令
+            trap_frame.sepc = sepc_old.wrapping_add(4);
+        }
+        Trap::Interrupt(5) => {
+            // 处理时钟中断
+            crate::arch::timer::set_next_trigger();
+            check_timer();
+        }
+        _ => panic!(
+            "Unexpected trap in user mode: {:?}, sepc = {:#x}, sstatus = {:#x}",
+            scause.cause(),
+            sepc_old,
+            sstatus_old.bits()
+        ),
+    }
+}
+
+/// 处理来自内核态的陷阱（中断、异常）
+pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus::Sstatus) {
     match scause.cause() {
         Trap::Interrupt(5) => {
             // 处理时钟中断
@@ -87,19 +136,6 @@ pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             sstatus_old.bits()
         ),
     }
-
-    restore(trap_frame);
-}
-
-/// 处理来自用户态的陷阱（系统调用、中断、异常）
-#[allow(dead_code)]
-pub fn user_trap() {
-    unimplemented!()
-}
-
-#[allow(dead_code)]
-pub fn kernel_trap() {
-    unimplemented!()
 }
 
 /// 处理时钟中断

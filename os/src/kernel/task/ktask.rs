@@ -4,6 +4,7 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::trap,
+    fs::smfs::SimpleMemoryFileSystem,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
@@ -148,6 +149,11 @@ fn kinit() {
     kthread_join(tid_b, None);
     kthread_join(tid_a, None);
     print!("C");
+    let fs = SimpleMemoryFileSystem::init();
+    for f in fs.list_all() {
+        println!("file: {}", f);
+        println!("size: {}", fs.lookup(&f).unwrap().len());
+    }
     loop {
         hint::spin_loop();
     }
