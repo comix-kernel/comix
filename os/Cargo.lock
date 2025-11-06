@@ -52,6 +52,7 @@ dependencies = [
  "lazy_static",
  "lock_api",
  "once_cell",
+ "paste",
  "riscv",
  "sbi-rt",
  "talc",
