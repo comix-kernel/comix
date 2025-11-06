@@ -3,6 +3,8 @@ pub mod task;
 mod cpu;
 mod scheduler;
 
+pub mod syscall;
+
 use core::array;
 use cpu::Cpu;
 use lazy_static::lazy_static;
