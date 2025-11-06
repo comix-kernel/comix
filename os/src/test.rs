@@ -273,11 +273,13 @@ impl InterruptGuard {
     ///
     /// 调用者必须确保此时启用中断是安全的。例如，不能在持有自旋锁时调用。
     #[inline(always)]
-    pub  fn new() -> Self {
+    pub fn new() -> Self {
         // 读取当前中断状态,保存，如果是禁用的drop时会重新禁用
         let was_enabled = are_interrupts_enabled();
         // 启用中断
-        unsafe { enable_interrupts(); }
+        unsafe {
+            enable_interrupts();
+        }
         Self { was_enabled }
     }
 }
