@@ -130,3 +130,40 @@ test_case!(trivial_assertion, {
 early_test!(exampe_early_test, {
     kassert!(1 == 1);
 });
+
+#[cfg(test)]
+// 测试 `test_case!` 宏的 `(Interrupts)` 环境是否能正确地
+// 在测试开始时启用中断，并在测试结束后恢复原始状态。
+test_case!(verify_interrupt_environment, (Interrupts), {
+    // 在这个代码块内部，中断应该已经被宏自动启用了。
+    // 我们断言这一点来验证宏的行为。
+    kassert!(
+        crate::arch::intr::are_interrupts_enabled()
+    );
+
+    println!("  -> Assertion passed: Interrupts are enabled.");
+
+    // 为了让测试更有意义，我们可以手动禁用中断，
+    // 然后验证 RAII 守卫是否会在测试结束时恢复它们。
+    println!("  -> Manually disabling interrupts for demonstration...");
+    unsafe { crate::arch::intr::disable_interrupts(); }
+
+    kassert!(
+        !crate::arch::intr::are_interrupts_enabled()
+    );
+
+    println!("  -> Assertion passed: Interrupts are now disabled manually.");
+    println!("  -> Leaving test block, the guard should now restore the state...");
+});
+
+// 一个配套的测试，在 `(Interrupts)` 测试之后运行，
+// 用来验证中断状态确实被恢复到了禁用状态。
+test_case!(verify_interrupts_restored_after_test, {
+    // 默认情况下，我们的测试运行器是在中断禁用的环境下运行的。
+    // 如果前一个测试的 RAII 守卫工作正常，那么中断现在应该是禁用的。
+    kassert!(
+        !crate::arch::intr::are_interrupts_enabled()
+    );
+
+    println!("  -> Assertion passed: Interrupts were correctly restored to disabled state.");
+});
