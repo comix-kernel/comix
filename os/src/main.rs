@@ -22,6 +22,8 @@ mod sbi;
 mod sync;
 #[macro_use]
 mod test;
+#[macro_use]
+mod log;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
