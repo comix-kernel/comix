@@ -121,18 +121,18 @@ pub mod syscall_numbers {
     pub const SYS_EXEC: usize = 10;
     // 其他系统调用号可以在这里继续添加
 }
-    
+
 /// 封装的系统调用接口
 mod syscalls {
     use crate::__syscall;
     use crate::syscall_numbers;
-    use core::ffi::c_void;
 
     /// 退出进程
     /// # 参数
     /// - code: 退出状态码
-    pub fn exit(code: i32) {
+    pub fn exit(code: i32) -> ! {
         syscall!(syscall_numbers::SYS_EXIT, code);
+        unreachable!()
     }
 
     /// 写入数据到控制台
@@ -144,7 +144,7 @@ mod syscalls {
     /// 写入的字节数，失败时返回负值
     /// # Safety
     /// 调用者必须确保 `buf` 指针有效且指向至少 `count` 字节的数据
-    pub unsafe fn write(fd: usize, buf: *const c_void, count: usize) -> isize {
-        syscall!(syscall_numbers::SYS_WRITE, fd, buf, count)
+    pub unsafe fn write(fd: usize, buf: &[u8], count: usize) -> isize {
+        syscall!(syscall_numbers::SYS_WRITE, fd, buf.as_ptr(), count)
     }
 }

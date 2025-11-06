@@ -22,20 +22,20 @@ pub struct SimpleMemoryFileSystem {
 
 // 用 include_bytes! 宏将编译好的用户程序嵌入到这里
 // const INIT: &[u8] = include_bytes!("../../user/init/init.elf");
-// const HELLO: &[u8] = include_bytes!("../../user/hello/hello.elf");
+const HELLO: &[u8] = include_bytes!("../../../user/hello.elf");
 
 /// 静态文件列表：这是 MemFS 的核心存储
-static STATIC_FILES: [FileEntry; 0] = [
+static STATIC_FILES: [FileEntry; 1] = [
     // FileEntry {
     //     name: "init",
     //     data: INIT,
     //     size: INIT.len(),
     // },
-    // FileEntry {
-    //     name: "hello",
-    //     data: HELLO,
-    //     size: HELLO.len(),
-    // },
+    FileEntry {
+        name: "hello",
+        data: HELLO,
+        size: HELLO.len(),
+    },
 ];
 
 impl SimpleMemoryFileSystem {
