@@ -1,5 +1,6 @@
 use core::{hint, sync::atomic::Ordering};
 
+use alloc::alloc::handle_alloc_error;
 use riscv::register::sscratch;
 
 use crate::{
@@ -11,7 +12,10 @@ use crate::{
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, into_shared},
     },
-    mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+    mm::{
+        frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+        memory_space::memory_space::MemorySpace,
+    },
 };
 
 /// 创建一个新的内核线程并返回其 Arc 包装
@@ -154,6 +158,8 @@ fn kinit() {
         println!("file: {}", f);
         println!("size: {}", fs.lookup(&f).unwrap().len());
     }
+    let data = fs.lookup("hello").unwrap();
+    let (space, entry, sp) = MemorySpace::from_elf(data).unwrap();
     loop {
         hint::spin_loop();
     }
