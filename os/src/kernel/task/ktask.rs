@@ -1,17 +1,22 @@
 use core::{hint, sync::atomic::Ordering};
 
+use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
-    arch::trap,
-    fs::smfs::SimpleMemoryFileSystem,
+    arch::trap::{self, restore},
+    fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, into_shared},
     },
-    mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+    mm::{
+        activate,
+        frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+        memory_space::MemorySpace,
+    },
 };
 
 /// 创建一个新的内核线程并返回其 Arc 包装
@@ -97,6 +102,41 @@ pub fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
     }
 }
 
+/// 在内核任务中执行 execve，加载并运行指定路径的 ELF 可执行文件
+/// 该函数不会返回，执行成功后会切换到新程序的入口点
+/// # 参数
+/// * `path`: ELF 可执行文件的路径
+/// * `argv`: 传递给新程序的参数列表
+/// * `envp`: 传递给新程序的环境变量列表
+pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
+    let data = ROOT_FS
+        .load_elf(path)
+        .expect("kernel_execve: file not found");
+
+    let (mut space, entry, sp) =
+        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+    MemorySpace::map_kernel(&mut space);
+    let space: Arc<MemorySpace> = Arc::new(space);
+    // 换掉当前任务的地址空间，e.g. 切换 satp
+    activate(space.root_ppn());
+
+    let cpu = current_cpu().lock();
+    let task = cpu.current_task.as_ref().unwrap().clone();
+
+    {
+        let mut t = task.lock();
+        t.execve(space, entry, sp, argv, envp);
+    }
+
+    let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    // sscratch 将在__restore中恢复，指向当前任务的 TrapFrame
+    // 直接按 trapframe 状态恢复并 sret 到用户态
+    unsafe {
+        restore(&*tfp);
+    }
+    unreachable!("kernel_execve: should not return");
+}
+
 /// 内核初始化后将第一个任务(kinit)放到 CPU 上运行
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
 pub fn kinit_entry() {
@@ -149,10 +189,9 @@ fn kinit() {
     kthread_join(tid_b, None);
     kthread_join(tid_a, None);
     print!("C");
-    let fs = SimpleMemoryFileSystem::init();
-    for f in fs.list_all() {
+    for f in ROOT_FS.list_all() {
         println!("file: {}", f);
-        println!("size: {}", fs.lookup(&f).unwrap().len());
+        println!("size: {}", ROOT_FS.lookup(&f).unwrap().len());
     }
     loop {
         hint::spin_loop();

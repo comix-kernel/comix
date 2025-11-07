@@ -6,16 +6,16 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use riscv::register::sstatus;
 
 use crate::{
-    arch::{kernel::context::Context, trap::TrapFrame},
+    arch::{constant::STACK_ALIGN_MASK, kernel::context::Context, trap::TrapFrame},
     kernel::task::{forkret, task_state::TaskState, terminate_task},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
         frame_allocator::{FrameRangeTracker, FrameTracker},
-        memory_space::memory_space::MemorySpace,
+        memory_space::MemorySpace,
     },
 };
 
@@ -137,6 +137,177 @@ impl Task {
             trap_frame_tracker,
             Some(memory_space),
         )
+    }
+
+    /// 执行 execve 操作，替换当前任务的内存空间和上下文
+    /// # 参数
+    /// * `new_memory_space`: 新的内存空间
+    /// * `entry_point`: 新程序的入口地址
+    /// * `sp`: 新程序的栈指针
+    /// * `argv`: 传递给新程序的参数列表
+    /// * `envp`: 传递给新程序的环境变量列表
+    // （高地址 - 栈底）
+    // +-----------------------+
+    // | ...                   |
+    // +-----------------------+
+    // | "USER=john"           | <-- envp[2] 指向这里
+    // +-----------------------+
+    // | "HOME=/home/john"     | <-- envp[1] 指向这里
+    // +-----------------------+
+    // | "SHELL=/bin/bash"     | <-- envp[0] 指向这里
+    // +-----------------------+
+    // | "hello world"         | <-- argv[3] 指向这里
+    // +-----------------------+
+    // | "arg2"                | <-- argv[2] 指向这里
+    // +-----------------------+
+    // | "arg1"                | <-- argv[1] 指向这里
+    // +-----------------------+
+    // | "./stack_layout"      | <-- argv[0] 指向这里
+    // +-----------------------+     <--- 字符串存储区域开始
+    // | ...                   |
+    // +-----------------------+     <--- 进入 main 时的栈指针 (sp) 附近
+    // | char* envp[0] (NULL)  |
+    // +-----------------------+
+    // | char* envp[2]         | --> 指向上面的 "USER=john"
+    // | char* envp[1]         | --> 指向上面的 "HOME=/home/john"
+    // | char* envp[0]         | --> 指向上面的 "SHELL=/bin/bash"
+    // +-----------------------+
+    // | char* argv[argc] (NULL)|
+    // +-----------------------+
+    // | char* argv[3]         | --> 指向上面的 "hello world"
+    // | char* argv[2]         | --> 指向上面的 "arg2"
+    // | char* argv[1]         | --> 指向上面的 "arg1"
+    // | char* argv[0]         | --> 指向上面的 "./stack_layout"
+    // +-----------------------+
+    // | int argc              | // 实际上在 a0 寄存器中
+    // +-----------------------+
+    // | Return Address        |
+    // +-----------------------+     <--- main 函数的栈帧开始
+    // （低地址 - 栈顶）
+    pub fn execve(
+        &mut self,
+        new_memory_space: Arc<MemorySpace>,
+        entry_point: usize,
+        sp_high: usize, // 新栈的最高地址
+        argv: &[&str],
+        envp: &[&str],
+    ) {
+        // 1. 准备返回到 U 模式
+        let mut sstatus_val = sstatus::read();
+        sstatus_val.set_spp(sstatus::SPP::User);
+        sstatus_val.set_sie(false);
+        sstatus_val.set_spie(true);
+
+        // 2. 切换任务的地址空间对象
+        self.memory_space = Some(new_memory_space);
+
+        let tf_ptr = self.trap_frame_ptr.load(Ordering::SeqCst);
+
+        let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
+        let mut env_ptrs: Vec<usize> = Vec::with_capacity(envp.len());
+        let mut current_sp = sp_high;
+
+        // 注意：以下拷贝时对sp进行的操作均要求已经可以访问用户栈空间
+        //      也就是说，new_memory_space 已经被激活（切换 satp）
+        //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
+
+        // --- 拷贝字符串数据 (从高地址向低地址压栈) ---
+
+        // 环境变量 (envp)
+        for &env in envp.iter().rev() {
+            let bytes = env.as_bytes();
+            current_sp -= bytes.len() + 1; // 预留 NUL
+            unsafe {
+                ptr::copy_nonoverlapping(bytes.as_ptr(), current_sp as *mut u8, bytes.len());
+                (current_sp as *mut u8).add(bytes.len()).write(0); // NUL 终止符
+            }
+            env_ptrs.push(current_sp); // 存储字符串的地址
+        }
+
+        // 命令行参数 (argv)
+        for &arg in argv.iter().rev() {
+            let bytes = arg.as_bytes();
+            current_sp -= bytes.len() + 1; // 预留 NUL
+            unsafe {
+                ptr::copy_nonoverlapping(bytes.as_ptr(), current_sp as *mut u8, bytes.len());
+                (current_sp as *mut u8).add(bytes.len()).write(0); // NUL 终止符
+            }
+            arg_ptrs.push(current_sp); // 存储字符串的地址
+        }
+
+        // --- 对齐到字大小 (确保指针数组从对齐的地址开始) ---
+        current_sp &= !(size_of::<usize>() - 1);
+
+        // --- 构建 argc, argv, envp 数组 (ABI 标准布局: [argc] -> [argv] -> [NULL] -> [envp] -> [NULL]) ---
+        // 注意：栈向下增长，所以压栈顺序是从 envp NULL 往回压到 argc
+
+        // 1. 写入 envp NULL 终止符
+        current_sp -= size_of::<usize>();
+        unsafe {
+            ptr::write(current_sp as *mut usize, 0);
+        }
+
+        // 2. 写入 envp 指针数组（逆序写入，使 envp[0] 处于最低地址）
+        // env_ptrs 已经是逆序 (envp[n-1] ... envp[0])
+        for &p in env_ptrs.iter() {
+            current_sp -= size_of::<usize>();
+            unsafe {
+                ptr::write(current_sp as *mut usize, p);
+            }
+        }
+        let envp_vec_ptr = current_sp; // envp 数组的起始地址 (envp[0] 的地址)
+
+        // 3. 写入 argv NULL 终止符
+        current_sp -= size_of::<usize>();
+        unsafe {
+            ptr::write(current_sp as *mut usize, 0);
+        }
+
+        // 4. 写入 argv 指针数组（逆序写入，使 argv[0] 处于最低地址）
+        // arg_ptrs 已经是逆序 (argv[n-1] ... argv[0])
+        for &p in arg_ptrs.iter() {
+            current_sp -= size_of::<usize>();
+            unsafe {
+                ptr::write(current_sp as *mut usize, p);
+            }
+        }
+        let argv_vec_ptr = current_sp; // argv 数组的起始地址 (argv[0] 的地址)
+
+        // 5. 写入 argc
+        let argc = argv.len();
+        current_sp -= size_of::<usize>();
+        unsafe {
+            ptr::write(current_sp as *mut usize, argc);
+        }
+
+        // 6. 最终 16 字节对齐（应用到最终栈指针 current_sp）
+        current_sp &= !STACK_ALIGN_MASK;
+
+        // 4. 配置 TrapFrame (新的上下文)
+        unsafe {
+            // 清零整个 TrapFrame，避免旧值泄漏到用户态
+            core::ptr::write_bytes(tf_ptr, 0, 1);
+
+            // 设置用户陷入内核时使用的内核栈指针
+            (*tf_ptr).kernel_sp = self.kstack_base;
+
+            // 设置程序执行的入口地址 (PC)
+            (*tf_ptr).sepc = entry_point;
+
+            // 设置权限状态 SSTATUS
+            (*tf_ptr).sstatus = sstatus_val.bits();
+
+            // 用户栈指针 (最终的 16 字节对齐地址)
+            (*tf_ptr).x2_sp = current_sp;
+
+            // main(argc, argv, envp) 约定：a0=argc, a1=argv, a2=envp
+            (*tf_ptr).x10_a0 = argc;
+            (*tf_ptr).x11_a1 = argv_vec_ptr;
+            (*tf_ptr).x12_a2 = envp_vec_ptr;
+
+            // 清零 ra，避免意外返回路径，用户态程序应通过正常的退出机制结束
+            (*tf_ptr).x1_ra = 0;
+        }
     }
 
     /// FIXME: 检查寄存器设置
