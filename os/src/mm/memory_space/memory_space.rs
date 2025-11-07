@@ -199,16 +199,21 @@ impl MemorySpace {
         }
     }
 
-    /// Creates the kernel memory space
+    /// Creates a new kernel memory space with kernel mappings
     pub fn new_kernel() -> Self {
         let mut space = MemorySpace::new();
+        Self::map_kernel(&mut space);
+        space
+    }
 
+    /// Maps the kernel memory space into the given MemorySpace
+    pub fn map_kernel(space: &mut MemorySpace) {
         // 0. Map trampoline (must be first, before any kernel sections)
         space.map_trampoline().expect("Failed to map trampoline");
 
         // 1. Map kernel text segment (.text) - read + execute
         Self::map_kernel_section(
-            &mut space,
+            space,
             stext as usize,
             etext as usize,
             AreaType::KernelText,
@@ -218,7 +223,7 @@ impl MemorySpace {
 
         // 2. Map kernel read-only data segment (.rodata)
         Self::map_kernel_section(
-            &mut space,
+            space,
             srodata as usize,
             erodata as usize,
             AreaType::KernelRodata,
@@ -228,7 +233,7 @@ impl MemorySpace {
 
         // 3. Map kernel data segment (.data)
         Self::map_kernel_section(
-            &mut space,
+            space,
             sdata as usize,
             edata as usize,
             AreaType::KernelData,
@@ -239,7 +244,7 @@ impl MemorySpace {
         // 4a. Map kernel boot stack (.bss.stack section)
         // Note: .bss.stack is placed BEFORE sbss in linker.ld
         Self::map_kernel_section(
-            &mut space,
+            space,
             edata as usize, // .bss.stack starts at edata
             sbss as usize,  // .bss.stack ends at sbss
             AreaType::KernelStack,
@@ -249,7 +254,7 @@ impl MemorySpace {
 
         // 4b. Map kernel BSS segment (actual .bss data)
         Self::map_kernel_section(
-            &mut space,
+            space,
             sbss as usize,
             ebss as usize,
             AreaType::KernelBss,
@@ -259,7 +264,7 @@ impl MemorySpace {
 
         // 4c. Map kernel heap (defined in linker.ld between ebss and ekernel)
         Self::map_kernel_section(
-            &mut space,
+            space,
             ebss as usize,    // sheap (from linker.ld)
             ekernel as usize, // eheap (from linker.ld)
             AreaType::KernelHeap,
@@ -299,8 +304,6 @@ impl MemorySpace {
         //             .expect("Failed to map MMIO device");
         //     }
         // }
-
-        space
     }
 
     /// Helper: Maps a kernel section
