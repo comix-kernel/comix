@@ -280,18 +280,16 @@ impl MemorySpace {
         flags: UniversalPTEFlag,
         data: Option<&[u8]>,
     ) -> Result<(), PagingError> {
-        let mut area = MappingArea::new(vpn_range, area_type, MapType::Framed, flags);
+        let area = MappingArea::new(vpn_range, area_type, MapType::Framed, flags);
 
-        // Map pages
-        area.map(&mut self.page_table)?;
+        // Check overlap and insert (insert_area will map the pages)
+        self.insert_area(area)?;
 
-        // Copy data if provided
+        // Copy data if provided (access the newly added area from self.areas)
         if let Some(data) = data {
+            let area = self.areas.last_mut().unwrap();
             area.copy_data(&mut self.page_table, data);
         }
-
-        // Check overlap and insert
-        self.insert_area(area)?;
 
         Ok(())
     }
