@@ -24,16 +24,24 @@ pub struct SimpleMemoryFileSystem {
 #[repr(align(8))]
 struct Align8<const N: usize>([u8; N]);
 
-// 用 include_bytes! 宏将编译好的用户程序嵌入到这里（8 字节对齐）
-static HELLO_ALIGNED: Align8<{ include_bytes!("../../../user/hello.elf").len() }> =
+// 用 include_bytes! 宏将编译好的用户程序嵌入到这里
+// const INIT: &[u8] = include_bytes!("../../user/init/init.elf");
+static HELLO: Align8<{ include_bytes!("../../../user/hello.elf").len() }> =
     Align8(*include_bytes!("../../../user/hello.elf"));
 
 /// 静态文件列表：这是 MemFS 的核心存储
-static STATIC_FILES: [FileEntry; 1] = [FileEntry {
-    name: "hello",
-    data: &HELLO_ALIGNED.0, // 零拷贝，且已 8 字节对齐
-    size: HELLO_ALIGNED.0.len(),
-}];
+static STATIC_FILES: [FileEntry; 1] = [
+    // FileEntry {
+    //     name: "init",
+    //     data: INIT,
+    //     size: INIT.len(),
+    // },
+    FileEntry {
+        name: "hello",
+        data: &HELLO.0,
+        size: HELLO.0.len(),
+    },
+];
 
 impl SimpleMemoryFileSystem {
     /// # 函数：init

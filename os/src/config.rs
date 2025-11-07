@@ -18,7 +18,7 @@ pub const USER_STACK_SIZE: usize = 4 * 1024 * 1024; // 4MB
 // [USER_DATA]
 // [USER_TEXT]
 
-pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
+pub const TRAMPOLINE: usize = SV39_BOT_HALF_TOP - PAGE_SIZE + 1;
 pub const TRAP_CONTEXT: usize = TRAMPOLINE - 2 * PAGE_SIZE; // leave one guard page
 pub const USER_STACK_TOP: usize = TRAP_CONTEXT - PAGE_SIZE; // leave another guard page
 
@@ -34,4 +34,5 @@ pub const NUM_CPU: usize = 4;
 // TODO: fetch it form device tree in the future(after/while implemented devices feature)
 pub const MEMORY_END: usize = 0x88000000; // 128MB for QEMU RISC-V virt
 
+use crate::arch::constant::SV39_BOT_HALF_TOP;
 pub use crate::arch::platform::qemu::*;

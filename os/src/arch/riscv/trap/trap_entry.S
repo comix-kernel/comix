@@ -10,9 +10,6 @@ trap_entry:
 
         # 交换 sscratch 和 a0
         csrrw a0, sscratch, a0
-        # 转到内核栈
-        # TODO: 内核进程可以不切换栈，但是用户进程必须切换栈  
-        # ld sp, 264(a0)              # 约束: kernel_sp已经提前设置好
 
         # 保存所有通用寄存器
         sd ra, 8(a0)
@@ -57,6 +54,18 @@ trap_entry:
         csrr t0, sstatus
         sd t0, 256(a0)
 
+        # 转到内核栈
+        # 内核进程不切换栈，用户进程必须切换栈  
+        
+        # 检查是否是内核态中断
+
+        # 如果是用户态中断，切换到内核栈
+        csrr t0, sstatus
+        li t1, 0x100    # SPP 位掩码
+        and t0, t0, t1
+        bnez t0, .L1    # 如果 SPP=1，说明是内核态中断，跳过切换栈
+        ld sp, 264(a0)
+.L1:
         j trap_handler
 
 __restore:

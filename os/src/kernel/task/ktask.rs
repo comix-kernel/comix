@@ -1,11 +1,11 @@
 use core::{hint, sync::atomic::Ordering};
 
-use alloc::alloc::handle_alloc_error;
+use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
-    arch::trap,
-    fs::smfs::SimpleMemoryFileSystem,
+    arch::trap::{self, restore},
+    fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
@@ -13,8 +13,9 @@ use crate::{
         task::{TASK_MANAGER, TaskStruct, into_shared},
     },
     mm::{
+        activate,
         frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
-        memory_space::memory_space::MemorySpace,
+        memory_space::MemorySpace,
     },
 };
 
@@ -101,9 +102,43 @@ pub fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
     }
 }
 
-/// 内核初始化后将第一个任务(kinit)放到 CPU 上运行
+/// 在内核任务中执行 execve，加载并运行指定路径的 ELF 可执行文件
+/// 该函数不会返回，执行成功后会切换到新程序的入口点
+/// # 参数
+/// * `path`: ELF 可执行文件的路径
+/// * `argv`: 传递给新程序的参数列表
+/// * `envp`: 传递给新程序的环境变量列表
+pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
+    let data = ROOT_FS
+        .load_elf(path)
+        .expect("kernel_execve: file not found");
+
+    let (space, entry, sp) =
+        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+    let space: Arc<MemorySpace> = Arc::new(space);
+    // 换掉当前任务的地址空间，e.g. 切换 satp
+    activate(space.root_ppn());
+
+    let cpu = current_cpu().lock();
+    let task = cpu.current_task.as_ref().unwrap().clone();
+
+    {
+        let mut t = task.lock();
+        t.execve(space, entry, sp, argv, envp);
+    }
+
+    let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    // sscratch 将在__restore中恢复，指向当前任务的 TrapFrame
+    // 直接按 trapframe 状态恢复并 sret 到用户态
+    unsafe {
+        restore(&*tfp);
+    }
+    unreachable!("kernel_execve: should not return");
+}
+
+/// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
-pub fn kinit_entry() {
+pub fn rest_init() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker =
         physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
@@ -115,8 +150,8 @@ pub fn kinit_entry() {
         0,
         kstack_tracker,
         trap_frame_tracker,
-        kinit as usize,
-    )); // kinit 没有父任务
+        init as usize,
+    )); // init 没有父任务
 
     let (ra, sp) = {
         let g = task.lock();
@@ -144,31 +179,41 @@ pub fn kinit_entry() {
 }
 
 /// 内核的第一个任务
-/// 在初始化完成后由调度器运行
-/// TODO: 现在只是一个空循环
-fn kinit() {
+/// PID = 1
+/// 负责进行剩余的初始化工作
+/// 创建 kthreadd 任务
+/// 并在一切结束后转化为第一个用户态任务
+fn init() {
     trap::init();
-    let tid_a = kthread_spawn(a);
-    let tid_b = kthread_spawn(b);
-    kthread_join(tid_b, None);
-    kthread_join(tid_a, None);
-    print!("C");
-    let fs = SimpleMemoryFileSystem::init();
-    for f in fs.list_all() {
-        println!("file: {}", f);
-        println!("size: {}", fs.lookup(&f).unwrap().len());
-    }
-    let data = fs.lookup("hello").unwrap();
-    let (space, entry, sp) = MemorySpace::from_elf(data).unwrap();
+    create_kthreadd();
+    kernel_execve("hello", &["hello"], &[]);
+}
+
+/// 内核守护线程
+/// PID = 2
+/// 负责创建内核任务，回收僵尸任务等工作
+fn kthreadd() {
     loop {
         hint::spin_loop();
     }
 }
 
-fn a() {
-    print!("A");
-}
+/// 创建内核守护线程 kthreadd
+fn create_kthreadd() {
+    let tid = TASK_MANAGER.lock().allocate_tid();
+    let kstack_tracker =
+        physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
+    let trap_frame_tracker =
+        physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
+    let task = into_shared(TaskStruct::ktask_create(
+        tid,
+        tid,
+        0,
+        kstack_tracker,
+        trap_frame_tracker,
+        kthreadd as usize,
+    )); // kthreadd 没有父任务
 
-fn b() {
-    print!("B");
+    TASK_MANAGER.lock().add_task(task.clone());
+    SCHEDULER.lock().add_task(task);
 }

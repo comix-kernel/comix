@@ -20,10 +20,11 @@ pub mod page_table;
 
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
-pub use memory_space::memory_space::with_kernel_space;
 
 use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
+use crate::mm::address::Ppn;
+use crate::mm::memory_space::with_kernel_space;
 
 unsafe extern "C" {
     fn ekernel();
@@ -45,8 +46,12 @@ pub fn init() {
     // 3. Create and activate kernel address space (lazy_static will auto-initialize)
     #[cfg(target_arch = "riscv64")]
     {
-        use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
         let root_ppn = with_kernel_space(|space| space.root_ppn());
-        crate::arch::mm::PageTableInner::activate(root_ppn);
+        activate(root_ppn);
     }
+}
+
+pub fn activate(root_ppn: Ppn) {
+    use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
+    crate::arch::mm::PageTableInner::activate(root_ppn);
 }
