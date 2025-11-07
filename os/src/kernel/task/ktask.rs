@@ -114,9 +114,8 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         .load_elf(path)
         .expect("kernel_execve: file not found");
 
-    let (mut space, entry, sp) =
+    let (space, entry, sp) =
         MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
-    MemorySpace::map_kernel(&mut space);
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
