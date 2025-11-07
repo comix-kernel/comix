@@ -186,7 +186,6 @@ pub fn rest_init() {
 fn init() {
     trap::init();
     create_kthreadd();
-    println!("Z");
     kernel_execve("hello", &["hello"], &[]);
 }
 
@@ -194,15 +193,6 @@ fn init() {
 /// PID = 2
 /// 负责创建内核任务，回收僵尸任务等工作
 fn kthreadd() {
-    let tid_a = kthread_spawn(a);
-    let tid_b = kthread_spawn(b);
-    kthread_join(tid_b, None);
-    kthread_join(tid_a, None);
-    println!("C");
-    for f in ROOT_FS.list_all() {
-        println!("file: {}", f);
-        println!("size: {}", ROOT_FS.lookup(&f).unwrap().len());
-    }
     loop {
         hint::spin_loop();
     }
@@ -226,12 +216,4 @@ fn create_kthreadd() {
 
     TASK_MANAGER.lock().add_task(task.clone());
     SCHEDULER.lock().add_task(task);
-}
-
-fn a() {
-    println!("A");
-}
-
-fn b() {
-    println!("B");
 }

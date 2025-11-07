@@ -2,6 +2,8 @@
 //! 提供系统调用的实现
 #![allow(dead_code)]
 
+use riscv::register::sstatus;
+
 use crate::impl_syscall;
 
 /// 关闭系统调用
@@ -16,10 +18,12 @@ fn exit(_code: i32) -> ! {
 
 fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     if fd == 1 {
+        unsafe { sstatus::set_sum() };
         for i in 0..count {
             let c = unsafe { *buf.add(i) };
             crate::sbi::console_putchar(c as usize);
         }
+        unsafe { sstatus::clear_sum() };
         count as isize
     } else {
         -1 // 不支持其他文件描述符
