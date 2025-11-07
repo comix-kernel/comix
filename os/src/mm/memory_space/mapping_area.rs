@@ -167,11 +167,11 @@ impl MappingArea {
     }
 
     /// Copy data to the mapped area
-    pub fn copy_data(&self, page_table: &mut ActivePageTableInner, data: &[u8]) {
+    pub fn copy_data(&self, page_table: &mut ActivePageTableInner, data: &[u8], offset: usize) {
         let mut copied = 0;
         let total_len = data.len();
 
-        for vpn in self.vpn_range {
+        for (i, vpn) in self.vpn_range.iter().enumerate() {
             if copied >= total_len {
                 break;
             }
@@ -181,6 +181,11 @@ impl MappingArea {
             let paddr = page_table
                 .translate(vaddr)
                 .expect("failed to translate virtual address");
+            let paddr = if i == 0 {
+                paddr.as_usize().checked_add(offset).unwrap()
+            } else {
+                paddr.as_usize()
+            };
 
             // Calculate how much to copy for this page
             let remaining = total_len - copied;
@@ -188,7 +193,7 @@ impl MappingArea {
 
             // Copy data to the physical page
             unsafe {
-                let dst_va = paddr_to_vaddr(paddr.as_usize());
+                let dst_va = paddr_to_vaddr(paddr);
                 let dst = dst_va as *mut u8;
                 let src = data.as_ptr().add(copied);
                 core::ptr::copy_nonoverlapping(src, dst, to_copy);

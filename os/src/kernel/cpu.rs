@@ -1,9 +1,6 @@
 use alloc::sync::Arc;
 
-use crate::{
-    kernel::task::SharedTask, mm::memory_space::memory_space::MemorySpace,
-    sync::spin_lock::SpinLock,
-};
+use crate::{kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::spin_lock::SpinLock};
 
 /// CPU 结构体
 #[allow(dead_code)]

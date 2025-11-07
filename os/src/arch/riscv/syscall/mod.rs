@@ -1,4 +1,4 @@
-use crate::arch::syscall::syscall_number::{SYS_SHUTDOWN, SYS_WRITE};
+use crate::arch::syscall::syscall_number::{SYS_EXIT, SYS_SHUTDOWN, SYS_WRITE};
 use crate::kernel::syscall::*;
 
 mod syscall_number;
@@ -6,11 +6,13 @@ mod syscall_number;
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
     match frame.x17_a7 {
         SYS_SHUTDOWN => sys_shutdown(frame),
+        SYS_EXIT => sys_exit(frame),
         SYS_WRITE => sys_write(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
             println!("Unknown syscall: {}", frame.x17_a7);
+            panic!("Unknown syscall");
         }
     }
 }

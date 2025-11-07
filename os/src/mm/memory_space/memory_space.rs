@@ -288,7 +288,30 @@ impl MemorySpace {
         // Copy data if provided (access the newly added area from self.areas)
         if let Some(data) = data {
             let area = self.areas.last_mut().unwrap();
-            area.copy_data(&mut self.page_table, data);
+            area.copy_data(&mut self.page_table, data, 0);
+        }
+
+        Ok(())
+    }
+
+    /// Inserts a framed area with optional data copying
+    pub fn insert_framed_area_with_offset(
+        &mut self,
+        vpn_range: VpnRange,
+        area_type: AreaType,
+        flags: UniversalPTEFlag,
+        data: Option<&[u8]>,
+        offset: usize,
+    ) -> Result<(), PagingError> {
+        let area = MappingArea::new(vpn_range, area_type, MapType::Framed, flags);
+
+        // Check overlap and insert (insert_area will map the pages)
+        self.insert_area(area)?;
+
+        // Copy data if provided (access the newly added area from self.areas)
+        if let Some(data) = data {
+            let area = self.areas.last_mut().unwrap();
+            area.copy_data(&mut self.page_table, data, offset);
         }
 
         Ok(())
@@ -481,7 +504,13 @@ impl MemorySpace {
             };
 
             // Insert area (will check overlap internally)
-            space.insert_framed_area(vpn_range, area_type, flags, data)?;
+            space.insert_framed_area_with_offset(
+                vpn_range,
+                area_type,
+                flags,
+                data,
+                ph.offset() as usize,
+            )?;
         }
 
         // 3. Initialize heap (starts at ELF end, page-aligned)

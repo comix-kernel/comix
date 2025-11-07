@@ -5,7 +5,7 @@ use lib::{exit, write};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    let buf = b"Hello, user space!\n";
+    let buf = b"Hello, world!\n";
     let count = buf.len();
     unsafe { write(1, buf, count) };
     exit(0)
