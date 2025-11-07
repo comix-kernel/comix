@@ -213,9 +213,7 @@ impl Task {
 
         // --- 拷贝字符串数据 (从高地址向低地址压栈) ---
 
-        println!("current_sp before copy: {:#x}", current_sp);
         // 在S态写用户页前，临时开启 SUM
-        let prev_sum = sstatus::read().sum();
         unsafe {
             // 若 riscv crate 提供该API，请使用它；否则参见下面的内联汇编备选
             sstatus::set_sum();
@@ -295,7 +293,6 @@ impl Task {
 
         // 6. 最终 16 字节对齐（应用到最终栈指针 current_sp）
         current_sp &= !STACK_ALIGN_MASK;
-        println!("current_sp after copy: {:#x}", current_sp);
         // 4. 配置 TrapFrame (新的上下文)
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
