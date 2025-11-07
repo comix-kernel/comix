@@ -11,6 +11,7 @@ use crate::{
         cpu::current_cpu,
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, into_shared},
+        yield_task,
     },
     mm::{
         activate,
@@ -137,9 +138,9 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     unreachable!("kernel_execve: should not return");
 }
 
-/// 内核初始化后将第一个任务(kinit)放到 CPU 上运行
+/// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
-pub fn kinit_entry() {
+pub fn rest_init() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker =
         physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
@@ -151,8 +152,8 @@ pub fn kinit_entry() {
         0,
         kstack_tracker,
         trap_frame_tracker,
-        kinit as usize,
-    )); // kinit 没有父任务
+        init as usize,
+    )); // init 没有父任务
 
     let (ra, sp) = {
         let g = task.lock();
@@ -180,15 +181,26 @@ pub fn kinit_entry() {
 }
 
 /// 内核的第一个任务
-/// 在初始化完成后由调度器运行
-/// TODO: 现在只是一个空循环
-fn kinit() {
+/// PID = 1
+/// 负责进行剩余的初始化工作
+/// 创建 kthreadd 任务
+/// 并在一切结束后转化为第一个用户态任务
+fn init() {
     trap::init();
+    create_kthreadd();
+    println!("Z");
+    kernel_execve("hello", &["hello"], &[]);
+}
+
+/// 内核守护线程
+/// PID = 2
+/// 负责创建内核任务，回收僵尸任务等工作
+fn kthreadd() {
     let tid_a = kthread_spawn(a);
     let tid_b = kthread_spawn(b);
     kthread_join(tid_b, None);
     kthread_join(tid_a, None);
-    print!("C");
+    println!("C");
     for f in ROOT_FS.list_all() {
         println!("file: {}", f);
         println!("size: {}", ROOT_FS.lookup(&f).unwrap().len());
@@ -198,10 +210,30 @@ fn kinit() {
     }
 }
 
+/// 创建内核守护线程 kthreadd
+fn create_kthreadd() {
+    let tid = TASK_MANAGER.lock().allocate_tid();
+    let kstack_tracker =
+        physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
+    let trap_frame_tracker =
+        physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
+    let task = into_shared(TaskStruct::ktask_create(
+        tid,
+        tid,
+        0,
+        kstack_tracker,
+        trap_frame_tracker,
+        kthreadd as usize,
+    )); // kthreadd 没有父任务
+
+    TASK_MANAGER.lock().add_task(task.clone());
+    SCHEDULER.lock().add_task(task);
+}
+
 fn a() {
-    print!("A");
+    println!("A");
 }
 
 fn b() {
-    print!("B");
+    println!("B");
 }

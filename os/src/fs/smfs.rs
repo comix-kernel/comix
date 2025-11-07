@@ -20,9 +20,14 @@ pub struct SimpleMemoryFileSystem {
     files: &'static [FileEntry],
 }
 
+// 对齐包装类型：将嵌入的字节数组强制为 8 字节对齐
+#[repr(align(8))]
+struct Align8<const N: usize>([u8; N]);
+
 // 用 include_bytes! 宏将编译好的用户程序嵌入到这里
 // const INIT: &[u8] = include_bytes!("../../user/init/init.elf");
-const HELLO: &[u8] = include_bytes!("../../../user/hello.elf");
+static HELLO: Align8<{ include_bytes!("../../../user/hello.elf").len() }> =
+    Align8(*include_bytes!("../../../user/hello.elf"));
 
 /// 静态文件列表：这是 MemFS 的核心存储
 static STATIC_FILES: [FileEntry; 1] = [
@@ -33,8 +38,8 @@ static STATIC_FILES: [FileEntry; 1] = [
     // },
     FileEntry {
         name: "hello",
-        data: HELLO,
-        size: HELLO.len(),
+        data: &HELLO.0,
+        size: HELLO.0.len(),
     },
 ];
 
