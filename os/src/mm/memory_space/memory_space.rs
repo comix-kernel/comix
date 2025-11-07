@@ -129,6 +129,128 @@ impl MemorySpace {
         Ok(())
     }
 
+    /// Maps kernel space (shared across all address spaces)
+    ///
+    /// This method implements the core logic of Scheme 2 (Shared Page Table):
+    /// Every user process's page table contains both user space mappings (private)
+    /// and kernel space mappings (shared). This design enables zero-overhead
+    /// user/kernel mode switching without changing the `satp` register.
+    ///
+    /// # Arguments
+    /// - `include_trampoline`: Whether to include trampoline mapping with kernel permissions (U=0)
+    ///
+    /// # Mapping Contents
+    /// All mappings use Direct mode (VA = PA + VADDR_START) and have U=0 flag:
+    /// - Trampoline page (optional): R+X, Direct mapping
+    /// - Kernel .text segment: R+X, Direct mapping
+    /// - Kernel .rodata segment: R, Direct mapping
+    /// - Kernel .data segment: R+W, Direct mapping
+    /// - Kernel .bss.stack segment: R+W, Direct mapping
+    /// - Kernel .bss segment: R+W, Direct mapping
+    /// - Kernel heap: R+W, Direct mapping
+    /// - Physical memory: R+W, Direct mapping
+    ///
+    /// # Security
+    /// All kernel mappings have the U (User Accessible) flag set to 0, ensuring
+    /// that user mode cannot access kernel memory despite it being present in the
+    /// page table. This is enforced by hardware.
+    ///
+    /// # Architecture
+    /// Current implementation targets RISC-V SV39. Other architectures need to
+    /// adjust address ranges accordingly.
+    fn map_kernel_space(&mut self, include_trampoline: bool) -> Result<(), PagingError> {
+        unsafe extern "C" {
+            fn stext();
+            fn etext();
+            fn srodata();
+            fn erodata();
+            fn sdata();
+            fn edata();
+            fn sbss();
+            fn ebss();
+            fn ekernel();
+            fn strampoline();
+        }
+
+        // 0. Map trampoline (optional, with kernel permissions)
+        if include_trampoline {
+            self.map_trampoline()?;
+        }
+
+        // 1. Map kernel .text segment (read + execute)
+        Self::map_kernel_section(
+            self,
+            stext as usize,
+            etext as usize,
+            AreaType::KernelText,
+            UniversalPTEFlag::kernel_rx(),
+        )?;
+
+        // 2. Map kernel .rodata segment (read-only)
+        Self::map_kernel_section(
+            self,
+            srodata as usize,
+            erodata as usize,
+            AreaType::KernelRodata,
+            UniversalPTEFlag::kernel_r(),
+        )?;
+
+        // 3. Map kernel .data segment (read-write)
+        Self::map_kernel_section(
+            self,
+            sdata as usize,
+            edata as usize,
+            AreaType::KernelData,
+            UniversalPTEFlag::kernel_rw(),
+        )?;
+
+        // 4a. Map kernel boot stack (.bss.stack section)
+        Self::map_kernel_section(
+            self,
+            edata as usize, // .bss.stack starts at edata
+            sbss as usize,  // .bss.stack ends at sbss
+            AreaType::KernelStack,
+            UniversalPTEFlag::kernel_rw(),
+        )?;
+
+        // 4b. Map kernel .bss segment
+        Self::map_kernel_section(
+            self,
+            sbss as usize,
+            ebss as usize,
+            AreaType::KernelBss,
+            UniversalPTEFlag::kernel_rw(),
+        )?;
+
+        // 4c. Map kernel heap
+        Self::map_kernel_section(
+            self,
+            ebss as usize,    // sheap
+            ekernel as usize, // eheap
+            AreaType::KernelHeap,
+            UniversalPTEFlag::kernel_rw(),
+        )?;
+
+        // 5. Map physical memory (direct mapping from ekernel to MEMORY_END)
+        let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
+        let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
+        let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
+
+        let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_start_vaddr));
+        let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_end_vaddr));
+        let mut phys_mem_area = MappingArea::new(
+            VpnRange::new(phys_mem_start, phys_mem_end),
+            AreaType::KernelHeap,
+            MapType::Direct,
+            UniversalPTEFlag::kernel_rw(),
+        );
+
+        phys_mem_area.map(&mut self.page_table)?;
+        self.areas.push(phys_mem_area);
+
+        Ok(())
+    }
+
     /// Inserts a new mapping area with overlap detection
     ///
     /// # Errors
@@ -199,111 +321,20 @@ impl MemorySpace {
         }
     }
 
-    /// Creates a new kernel memory space with kernel mappings
+    /// Creates the kernel memory space
+    ///
+    /// This creates a complete kernel address space including trampoline,
+    /// kernel segments (.text, .rodata, .data, .bss, heap), and direct-mapped
+    /// physical memory. Used by kernel threads and during system initialization.
     pub fn new_kernel() -> Self {
         let mut space = MemorySpace::new();
-        Self::map_kernel(&mut space);
+
+        // Map all kernel space (including trampoline with kernel permissions)
         space
-    }
+            .map_kernel_space(true)
+            .expect("Failed to map kernel space");
 
-    /// Maps the kernel memory space into the given MemorySpace
-    pub fn map_kernel(space: &mut MemorySpace) {
-        // 0. Map trampoline (must be first, before any kernel sections)
-        space.map_trampoline().expect("Failed to map trampoline");
-
-        // 1. Map kernel text segment (.text) - read + execute
-        Self::map_kernel_section(
-            space,
-            stext as usize,
-            etext as usize,
-            AreaType::KernelText,
-            UniversalPTEFlag::kernel_r() | UniversalPTEFlag::EXECUTABLE,
-        )
-        .expect("Failed to map kernel text");
-
-        // 2. Map kernel read-only data segment (.rodata)
-        Self::map_kernel_section(
-            space,
-            srodata as usize,
-            erodata as usize,
-            AreaType::KernelRodata,
-            UniversalPTEFlag::kernel_r(),
-        )
-        .expect("Failed to map kernel rodata");
-
-        // 3. Map kernel data segment (.data)
-        Self::map_kernel_section(
-            space,
-            sdata as usize,
-            edata as usize,
-            AreaType::KernelData,
-            UniversalPTEFlag::kernel_rw(),
-        )
-        .expect("Failed to map kernel data");
-
-        // 4a. Map kernel boot stack (.bss.stack section)
-        // Note: .bss.stack is placed BEFORE sbss in linker.ld
-        Self::map_kernel_section(
-            space,
-            edata as usize, // .bss.stack starts at edata
-            sbss as usize,  // .bss.stack ends at sbss
-            AreaType::KernelStack,
-            UniversalPTEFlag::kernel_rw(),
-        )
-        .expect("Failed to map kernel stack");
-
-        // 4b. Map kernel BSS segment (actual .bss data)
-        Self::map_kernel_section(
-            space,
-            sbss as usize,
-            ebss as usize,
-            AreaType::KernelBss,
-            UniversalPTEFlag::kernel_rw(),
-        )
-        .expect("Failed to map kernel bss");
-
-        // 4c. Map kernel heap (defined in linker.ld between ebss and ekernel)
-        Self::map_kernel_section(
-            space,
-            ebss as usize,    // sheap (from linker.ld)
-            ekernel as usize, // eheap (from linker.ld)
-            AreaType::KernelHeap,
-            UniversalPTEFlag::kernel_rw(),
-        )
-        .expect("Failed to map kernel heap");
-
-        // 5. Map physical memory (using 4KB pages, direct mapping)
-        // Map from ekernel onwards to avoid conflict with kernel segments
-        let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
-        let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
-        let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
-
-        let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_start_vaddr));
-        let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_end_vaddr));
-        let mut phys_mem_area = MappingArea::new(
-            VpnRange::new(phys_mem_start, phys_mem_end),
-            AreaType::KernelHeap,
-            MapType::Direct,
-            UniversalPTEFlag::kernel_rw(),
-        );
-
-        phys_mem_area
-            .map(&mut space.page_table)
-            .expect("Failed to map physical memory");
-        space.areas.push(phys_mem_area);
-
-        // 6. Map MMIO devices
-        // TODO: MMIO mapping not yet implemented, commenting out for now
-        // #[cfg(target_arch = "riscv64")]
-        // {
-        //     use crate::config::MMIO;
-        //     for (addr, size) in MMIO {
-        //         // MMIO addresses are physical addresses, convert to virtual
-        //         let mmio_vaddr = paddr_to_vaddr(*addr);
-        //         Self::map_mmio_region(&mut space, mmio_vaddr, *size)
-        //             .expect("Failed to map MMIO device");
-        //     }
-        // }
+        space
     }
 
     /// Helper: Maps a kernel section
@@ -352,7 +383,24 @@ impl MemorySpace {
 
     /// Creates a user memory space from an ELF file
     ///
-    /// Returns (space, entry_point, user_stack_top)
+    /// This method implements Scheme 2 (Shared Page Table) by creating a page table
+    /// that contains both user space mappings (process-private) and kernel space
+    /// mappings (shared across all processes).
+    ///
+    /// The resulting page table enables zero-overhead user/kernel mode switching:
+    /// when a user process traps into the kernel, the kernel code is already mapped
+    /// and accessible without changing `satp`.
+    ///
+    /// # Returns
+    /// Returns `Ok((space, entry_point, user_stack_top))` on success:
+    /// - `space`: The constructed memory space with user + kernel mappings
+    /// - `entry_point`: The program entry address (from ELF header)
+    /// - `user_stack_top`: The top of the user stack
+    ///
+    /// # Errors
+    /// - ELF parsing failed
+    /// - Architecture mismatch (not RISC-V)
+    /// - Segment overlaps with reserved areas
     pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
         use xmas_elf::program::{SegmentData, Type};
@@ -366,14 +414,23 @@ impl MemorySpace {
 
         let mut space = MemorySpace::new();
 
-        // 0. Map trampoline (user space needs user access permission)
+        // ========== Scheme 2: Map kernel space first ==========
+        // 0. Map kernel space (all processes share the same kernel mappings)
+        //    - Excludes trampoline (will be mapped with U=1 below)
+        //    - All kernel pages have U=0, so user mode cannot access them
+        space
+            .map_kernel_space(false)
+            .expect("Failed to map kernel space for user process");
+        // ======================================================
+
+        // 1. Map trampoline (user space needs user access permission U=1)
         space
             .map_trampoline_user()
             .expect("Failed to map trampoline in user space");
 
         let mut max_end_vpn = Vpn::from_usize(0);
 
-        // 1. Parse and map ELF segments
+        // 2. Parse and map ELF segments
         for ph in elf.program_iter() {
             if ph.get_type() != Ok(Type::Load) {
                 continue;
@@ -429,10 +486,10 @@ impl MemorySpace {
             space.insert_framed_area(vpn_range, area_type, flags, data)?;
         }
 
-        // 2. Initialize heap (starts at ELF end, page-aligned)
+        // 3. Initialize heap (starts at ELF end, page-aligned)
         space.heap_top = Some(max_end_vpn);
 
-        // 3. Map user stack (with guard pages)
+        // 4. Map user stack (with guard pages)
         let user_stack_bottom =
             Vpn::from_addr_floor(Vaddr::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
         let user_stack_top = Vpn::from_addr_ceil(Vaddr::from_usize(USER_STACK_TOP));
@@ -444,7 +501,7 @@ impl MemorySpace {
             None,
         )?;
 
-        // 4. Map trap context page
+        // 5. Map trap context page
         let trap_cx_vpn = Vpn::from_addr_floor(Vaddr::from_usize(TRAP_CONTEXT));
         space.insert_framed_area(
             VpnRange::from_start_len(trap_cx_vpn, 1),
@@ -452,8 +509,6 @@ impl MemorySpace {
             UniversalPTEFlag::user_rw(),
             None,
         )?;
-
-        // 5. Trampoline page mapping will be handled by global kernel space
 
         let entry_point = elf.header.pt2.entry_point() as usize;
 
