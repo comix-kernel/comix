@@ -404,6 +404,8 @@ impl MemorySpace {
         use xmas_elf::program::{SegmentData, Type};
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
+        println!("ELF file parsed successfully");
+        println!("ELF headers: {:?}", elf.header.pt2);
 
         // Check architecture
         if elf.header.pt2.machine().as_machine() != xmas_elf::header::Machine::RISC_V {
@@ -436,6 +438,7 @@ impl MemorySpace {
 
             let start_va = ph.virtual_addr() as usize;
             let end_va = (ph.virtual_addr() + ph.mem_size()) as usize;
+            println!("Mapping segment: va {:#x} - {:#x}", start_va, end_va);
 
             // Check if segment overlaps with stack/trap area
             if start_va >= USER_STACK_TOP - USER_STACK_SIZE {
