@@ -55,6 +55,11 @@ impl UniversalPTEFlag {
     pub const fn kernel_r() -> Self {
         Self::VALID.union(Self::READABLE)
     }
+
+    /// constructs a flag set for kernel read-execute access
+    pub const fn kernel_rx() -> Self {
+        Self::VALID.union(Self::READABLE).union(Self::EXECUTABLE)
+    }
 }
 
 pub trait UniversalConvertableFlag {
