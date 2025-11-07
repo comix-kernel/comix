@@ -11,7 +11,6 @@ use crate::{
         cpu::current_cpu,
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, into_shared},
-        yield_task,
     },
     mm::{
         activate,
