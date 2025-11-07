@@ -288,7 +288,30 @@ impl MemorySpace {
         // Copy data if provided (access the newly added area from self.areas)
         if let Some(data) = data {
             let area = self.areas.last_mut().unwrap();
-            area.copy_data(&mut self.page_table, data);
+            area.copy_data(&mut self.page_table, data, 0);
+        }
+
+        Ok(())
+    }
+
+    /// Inserts a framed area with optional data copying
+    pub fn insert_framed_area_with_offset(
+        &mut self,
+        vpn_range: VpnRange,
+        area_type: AreaType,
+        flags: UniversalPTEFlag,
+        data: Option<&[u8]>,
+        offset: usize,
+    ) -> Result<(), PagingError> {
+        let area = MappingArea::new(vpn_range, area_type, MapType::Framed, flags);
+
+        // Check overlap and insert (insert_area will map the pages)
+        self.insert_area(area)?;
+
+        // Copy data if provided (access the newly added area from self.areas)
+        if let Some(data) = data {
+            let area = self.areas.last_mut().unwrap();
+            area.copy_data(&mut self.page_table, data, offset);
         }
 
         Ok(())
@@ -404,8 +427,6 @@ impl MemorySpace {
         use xmas_elf::program::{SegmentData, Type};
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
-        println!("ELF file parsed successfully");
-        println!("ELF headers: {:?}", elf.header.pt2);
 
         // Check architecture
         if elf.header.pt2.machine().as_machine() != xmas_elf::header::Machine::RISC_V {
@@ -438,7 +459,6 @@ impl MemorySpace {
 
             let start_va = ph.virtual_addr() as usize;
             let end_va = (ph.virtual_addr() + ph.mem_size()) as usize;
-            println!("Mapping segment: va {:#x} - {:#x}", start_va, end_va);
 
             // Check if segment overlaps with stack/trap area
             if start_va >= USER_STACK_TOP - USER_STACK_SIZE {
@@ -484,7 +504,13 @@ impl MemorySpace {
             };
 
             // Insert area (will check overlap internally)
-            space.insert_framed_area(vpn_range, area_type, flags, data)?;
+            space.insert_framed_area_with_offset(
+                vpn_range,
+                area_type,
+                flags,
+                data,
+                ph.offset() as usize,
+            )?;
         }
 
         // 3. Initialize heap (starts at ELF end, page-aligned)
