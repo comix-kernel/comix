@@ -1,3 +1,5 @@
+    # trap_entry.S - RISC-V Trap Entry and Restore Routines
+    # 保存和恢复上下文的汇编代码
     .text
     .globl trap_entry
     .globl trap_handler

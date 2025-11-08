@@ -9,7 +9,7 @@ use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
 use crate::mm::page_table::{
     ActivePageTableInner, PageSize, PageTableInner, PagingError, UniversalPTEFlag,
 };
-use crate::sync::spin_lock::SpinLock;
+use crate::sync::SpinLock;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 
