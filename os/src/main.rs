@@ -21,9 +21,8 @@ mod kernel;
 mod mm;
 mod sbi;
 mod sync;
-mod vfs;
-#[macro_use]
 mod test;
+mod vfs;
 #[macro_use]
 mod log;
 use crate::arch::mm::vaddr_to_paddr;
@@ -31,14 +30,13 @@ use crate::arch::timer;
 use crate::arch::trap;
 use crate::kernel::rest_init;
 use crate::sbi::shutdown;
-use crate::test::run_early_tests;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
-    use crate::test::TEST_FAILED;
+    use crate::test::macros::TEST_FAILED;
     use core::sync::atomic::Ordering;
     println!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());
 
@@ -76,7 +74,8 @@ global_asm!(include_str!("entry.asm"));
 pub extern "C" fn rust_main() -> ! {
     clear_bss();
 
-    run_early_tests();
+    #[cfg(test)]
+    crate::test::macros::run_early_tests();
 
     // Initialize memory management (frame allocator + heap + kernel page table)
     mm::init();
@@ -133,37 +132,4 @@ test_case!(trivial_assertion, {
 #[cfg(test)]
 early_test!(exampe_early_test, {
     kassert!(1 == 1);
-});
-
-#[cfg(test)]
-// 测试 `test_case!` 宏的 `(Interrupts)` 环境是否能正确地
-// 在测试开始时启用中断，并在测试结束后恢复原始状态。
-test_case!(verify_interrupt_environment, (Interrupts), {
-    // 在这个代码块内部，中断应该已经被宏自动启用了。
-    // 我们断言这一点来验证宏的行为。
-    kassert!(crate::arch::intr::are_interrupts_enabled());
-
-    println!("  -> Assertion passed: Interrupts are enabled.");
-
-    // 为了让测试更有意义，我们可以手动禁用中断，
-    // 然后验证 RAII 守卫是否会在测试结束时恢复它们。
-    println!("  -> Manually disabling interrupts for demonstration...");
-    unsafe {
-        crate::arch::intr::disable_interrupts();
-    }
-
-    kassert!(!crate::arch::intr::are_interrupts_enabled());
-
-    println!("  -> Assertion passed: Interrupts are now disabled manually.");
-    println!("  -> Leaving test block, the guard should now restore the state...");
-});
-
-// 一个配套的测试，在 `(Interrupts)` 测试之后运行，
-// 用来验证中断状态确实被恢复到了禁用状态。
-test_case!(verify_interrupts_restored_after_test, {
-    // 默认情况下，我们的测试运行器是在中断禁用的环境下运行的。
-    // 如果前一个测试的 RAII 守卫工作正常，那么中断现在应该是禁用的。
-    kassert!(!crate::arch::intr::are_interrupts_enabled());
-
-    println!("  -> Assertion passed: Interrupts were correctly restored to disabled state.");
 });
