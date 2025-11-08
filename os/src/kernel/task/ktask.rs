@@ -225,24 +225,33 @@ mod tests {
     // use alloc::vec::Vec;
 
     use super::*;
-    use crate::{kassert, kernel::task::TASK_MANAGER, test_case};
+    use crate::{
+        kassert,
+        kernel::task::{SharedTask, TASK_MANAGER},
+        test_case,
+    };
     // use core::sync::atomic::Ordering;
 
     // 创建一个简单的空函数作为 kernel 线程入口
     fn dummy_thread() {}
 
+    fn mk_task(tid: u32) -> SharedTask {
+        let t = TaskStruct::new_dummy_task(tid);
+        into_shared(t)
+    }
+
     // 测试 kthread_spawn：应分配 tid 并放入任务管理器
-    // test_case!(test_kthread_spawn_basic, {
-    //
-    //     let tid = kthread_spawn(dummy_thread);
-    //     kassert!(tid != 0);
-    //     let task_opt = TASK_MANAGER.lock().get_task(tid);
-    //     kassert!(task_opt.is_some());
-    //     let t = task_opt.unwrap();
-    //     let g = t.lock();
-    //     kassert!(g.tid == tid);
-    //     kassert!(g.is_kernel_thread());
-    // });
+    test_case!(test_kthread_spawn_basic, {
+        current_cpu().lock().current_task = Some(mk_task(1));
+        let tid = kthread_spawn(dummy_thread);
+        kassert!(tid != 0);
+        let task_opt = TASK_MANAGER.lock().get_task(tid);
+        kassert!(task_opt.is_some());
+        let t = task_opt.unwrap();
+        let g = t.lock();
+        kassert!(g.tid == tid);
+        kassert!(g.is_kernel_thread());
+    });
 
     // 测试 kthread_join 成功路径：预置一个 Stopped 状态的任务与返回值
     // test_case!(test_kthread_join_success, {
@@ -288,28 +297,28 @@ mod tests {
     });
 
     // 测试 create_kthreadd：应创建一个任务并加入 TASK_MANAGER
-    // test_case!(test_create_kthreadd, {
-    //     // 记录当前已有任务数量
-    //     let before_count = {
-    //         let mgr = TASK_MANAGER.lock();
-    //         mgr.task_count()
-    //     };
-    //     create_kthreadd();
-    //     // 找到新增的任务（PID=tid，入口=kthreadd）
-    //     let after_count = {
-    //         let mgr = TASK_MANAGER.lock();
-    //         mgr.task_count()
-    //     };
-    //     kassert!(after_count == before_count + 1);
-    //     // 查找新 tid
-    //     let new_tid = after_count as u32; // 简单假设 tid 连续分配
-    //     let task = TASK_MANAGER.lock().get_task(new_tid).expect("task missing");
-    //     let g = task.lock();
-    //     kassert!(g.tid == new_tid);
-    //     kassert!(g.pid == new_tid); // kthreadd 设 pid=tid
-    //     kassert!(g.context.ra == kthreadd as usize);
-    //     kassert!(g.trap_frame_ptr.load(Ordering::SeqCst) as usize != 0);
-    // });
+    test_case!(test_create_kthreadd, {
+        // 记录当前已有任务数量
+        let before_count = {
+            let mgr = TASK_MANAGER.lock();
+            mgr.task_count()
+        };
+        create_kthreadd();
+        // 找到新增的任务（PID=tid，入口=kthreadd）
+        let after_count = {
+            let mgr = TASK_MANAGER.lock();
+            mgr.task_count()
+        };
+        kassert!(after_count == before_count + 1);
+        // 查找新 tid
+        let new_tid = after_count as u32; // 简单假设 tid 连续分配
+        let task = TASK_MANAGER.lock().get_task(new_tid).expect("task missing");
+        let g = task.lock();
+        let tf = g.trap_frame_ptr.load(Ordering::SeqCst);
+        kassert!(g.tid == new_tid);
+        kassert!(g.pid == new_tid); // kthreadd 设 pid=tid
+        kassert!(unsafe { (*tf).sepc } as usize == kthreadd as usize);
+    });
 
     // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
     // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
