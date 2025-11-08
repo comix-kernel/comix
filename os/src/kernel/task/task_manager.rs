@@ -52,4 +52,56 @@ impl TaskManager {
     pub fn get_task(&self, tid: u32) -> Option<SharedTask> {
         self.tasks.get(&tid).cloned()
     }
+
+    #[cfg(test)]
+    /// 获取当前任务数量（仅用于测试）
+    /// 返回值: 当前任务数量
+    pub fn task_count(&self) -> usize {
+        self.tasks.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{kassert, kernel::task::TaskStruct, sync::spin_lock::SpinLock, test_case};
+
+    // 通过 TaskManager 分配 tid：应从 1 开始递增
+    test_case!(test_task_manager_allocate_sequence, {
+        let mut tm = TaskManager::new();
+        let t1 = tm.allocate_tid();
+        let t2 = tm.allocate_tid();
+        let t3 = tm.allocate_tid();
+        kassert!(t1 == 1);
+        kassert!(t2 == 2);
+        kassert!(t3 == 3);
+    });
+
+    // 对不存在的 tid 进行查询与删除：不应崩溃，查询为 None
+    test_case!(test_task_manager_get_remove_nonexistent, {
+        let mut tm = TaskManager::new();
+        // 查询不存在的任务
+        kassert!(tm.get_task(42).is_none());
+
+        // 删除不存在的任务（应为 no-op）
+        tm.remove_task(42);
+        kassert!(tm.get_task(42).is_none());
+    });
+
+    // 关于 add_task/get_task 的正向测试
+    test_case!(test_task_manager_add_get_remove, {
+        let mut tm = TaskManager::new();
+        let tid = tm.allocate_tid();
+        let task = new_dummy_task(tid);
+        tm.add_task(task.clone());
+        kassert!(tm.get_task(tid).is_some());
+        tm.remove_task(tid);
+        kassert!(tm.get_task(tid).is_none());
+    });
+
+    fn new_dummy_task(tid: u32) -> SharedTask {
+        use alloc::sync::Arc;
+        let task = TaskStruct::new_dummy_task(tid);
+        Arc::new(SpinLock::new(task))
+    }
 }
