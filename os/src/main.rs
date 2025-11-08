@@ -29,7 +29,7 @@ mod log;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
-use crate::kernel::task::rest_init;
+use crate::kernel::rest_init;
 use crate::sbi::shutdown;
 use crate::test::run_early_tests;
 use core::arch::global_asm;
