@@ -46,6 +46,20 @@ pub unsafe fn read_and_disable_interrupts() -> usize {
     old
 }
 
+///读取并启用中断
+pub unsafe fn read_and_enable_interrupts() -> usize {
+    // SIE 在 sstatus 的位 1
+    let sie_mask: usize = 1 << 1;
+    let old: usize;
+    // 原子地设置 sstatus 中的 SIE 位，并返回旧的 sstatus 值
+    core::arch::asm!(
+    "csrrs {old}, sstatus, {mask}",
+    old = out(reg) old,
+    mask = in(reg) sie_mask,
+    options(nomem, nostack)
+    );
+    old
+}
 /// 恢复中断状态
 pub unsafe fn restore_interrupts(flags: usize) {
     // XXX: 与 read_and_disable_interrupts 配合使用时，中断禁用期间其它并发可能会改变寄存器状态，此时要恢复它们吗？
