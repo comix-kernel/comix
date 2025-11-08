@@ -8,11 +8,7 @@ use crate::{
     },
 };
 
-#[cfg(not(test))]
 const DEFAULT_TIME_SLICE: usize = 5; // 默认时间片长度
-
-#[cfg(test)]
-const DEFAULT_TIME_SLICE: usize = usize::MAX; // HACK: 测试时禁用调度
 
 /// 简单的轮转调度器实现
 /// 每个任务按顺序轮流获得 CPU 时间片

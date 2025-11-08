@@ -1,4 +1,5 @@
-#![allow(dead_code)]
+//！ 调度器模块
+//！ 定义了调度器接口和相关功能
 mod rr_scheduler;
 mod task_queue;
 mod wait_queue;
@@ -8,7 +9,7 @@ use lazy_static::lazy_static;
 use crate::{
     arch::kernel::{context::Context, switch},
     kernel::{scheduler::rr_scheduler::RRScheduler, task::SharedTask},
-    sync::spin_lock::SpinLock,
+    sync::SpinLock,
 };
 
 pub use task_queue::TaskQueue;
@@ -67,18 +68,26 @@ pub fn yield_task() {
 
 /// 任务阻塞
 /// 修改任务状态并从运行队列中移除
+/// 参数:
+/// * `task`: 需要阻塞的任务
+/// * `receive_signal`: 是否可被信号中断
 pub fn sleep_task(task: SharedTask, receive_signal: bool) {
     SCHEDULER.lock().sleep_task(task, receive_signal);
 }
 
 /// 唤醒任务
 /// 修改任务状态并将其添加到运行队列
+/// 参数:
+/// * `task`: 需要唤醒的任务
 pub fn wake_up(task: SharedTask) {
     SCHEDULER.lock().wake_up(task);
 }
 
 /// 任务终止
 /// 修改任务状态并从调度器中移除
+/// 参数:
+/// * `task`: 需要终止的任务
+/// * `code`: 任务的退出代码
 pub fn exit_task(task: SharedTask, code: i32) {
     SCHEDULER.lock().exit_task(task, code);
 }

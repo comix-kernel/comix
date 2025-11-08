@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, PpnRange, UsizeConvert};
-use crate::sync::spin_lock::SpinLock;
+use crate::sync::SpinLock;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 
