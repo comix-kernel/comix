@@ -1,3 +1,4 @@
+//! RISC-V 架构相关模块
 pub mod constant;
 pub mod intr;
 pub mod kernel;

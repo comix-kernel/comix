@@ -1,4 +1,3 @@
-#![allow(unused)]
 use crate::sync::intr_guard::IntrGuard;
 use core::{
     hint,
@@ -53,6 +52,8 @@ impl RawSpinLock {
     }
 
     /// 检查锁是否被占用 (仅用于调试/测试)
+    /// 返回值：锁是否被占用
+    #[cfg(test)]
     pub fn is_locked(&self) -> bool {
         self.lock.load(Ordering::Relaxed)
     }
@@ -86,7 +87,7 @@ mod tests {
     // 模拟一个共享资源，必须用 RawSpinLock 保护
     static COUNTER: AtomicBool = AtomicBool::new(false);
 
-    /// 测试锁的初始化状态和基本锁定/解锁功能
+    // 测试锁的初始化状态和基本锁定/解锁功能
     test_case!(test_raw_spin_lock_basic_lock_unlock, {
         let lock = RawSpinLock::new();
         kassert!(!lock.is_locked());
@@ -99,7 +100,7 @@ mod tests {
         kassert!(!lock.is_locked());
     });
 
-    /// 测试 RAII 行为 (自动释放)
+    // 测试 RAII 行为 (自动释放)
     test_case!(test_raw_spin_lock_raii_release, {
         let lock = RawSpinLock::new();
 
@@ -111,7 +112,7 @@ mod tests {
         kassert!(!lock.is_locked());
     });
 
-    /// 测试互斥性 (只能获取一次)
+    // 测试互斥性 (只能获取一次)
     test_case!(test_raw_spin_lock_mutual_exclusion, {
         let lock = RawSpinLock::new();
 
@@ -123,7 +124,7 @@ mod tests {
         // 在这里我们依赖测试框架的单线程执行来简单检查 is_locked 状态
 
         // 模拟多线程获取失败的场景：
-        let mut second_lock_failed = false;
+        let second_lock_failed;
 
         // 临时释放，让第二次获取成功
         drop(guard1);
@@ -144,7 +145,7 @@ mod tests {
     // 中断保护测试
     // -----------------------------------------------------------
 
-    /// 测试 lock() 是否禁用了中断
+    // 测试 lock() 是否禁用了中断
     test_case!(test_interrupt_disable, {
         // 1. 确保中断最初是启用的
         let initial_flags = unsafe { read_and_disable_interrupts() };
