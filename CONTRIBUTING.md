@@ -104,7 +104,7 @@ unsafe { ptr::copy_nonoverlapping(src, dst, len); }
 
 ### 2.8 模式与泛型
 - 优先组合（struct 包含）而非继承 / 深层 trait 对象。
-- trait 用于抽象可替换组件（如：调度器、页分配器）。
+- trait 用于抽象可替换组件（如：调度器、页分配器），尤其是内核中使用到的全局对象。
 - 不引入复杂宏元编程；保持简单、展开后可读。
 
 ### 2.9 性能考虑
@@ -135,7 +135,7 @@ unsafe { ptr::copy_nonoverlapping(src, dst, len); }
 禁止反向依赖：高层不得让底层引用其内部结构（例：`mm` 不应引用 `Task`）。
 
 ### 3.2 目录与文件
-- 每个子系统一个 `mod.rs` 汇总公共接口。
+- 除arch模块外，采用扁平化的组织方式。每个子系统一个 `mod.rs` 汇总导出公共接口。
 - 文件命名语义化：`trap_handler.rs`, `frame_allocator.rs`, `task_manager.rs`。
 - 超过 ~800 行的文件需拆分（例如：页表操作与入口管理）。
 - 宏放置：单独 `macros.rs` 或靠近使用处，避免全局污染。
