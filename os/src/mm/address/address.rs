@@ -217,7 +217,7 @@ where
         Self { start, end }
     }
 
-    /// create an address range from a Range<T>
+    /// create an address range from a `Range<T>`
     pub fn from_range(range: Range<T>) -> Self {
         Self {
             start: range.start,
