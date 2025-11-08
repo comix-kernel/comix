@@ -14,7 +14,6 @@ const MSEC_PER_SEC: usize = 1000;
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
 
 // 获取当前tick数的
-#[allow(dead_code)]
 pub fn get_ticks() -> usize {
     TIMER_TICKS.load(Ordering::Relaxed)
 }
@@ -25,7 +24,6 @@ pub fn get_time() -> usize {
 }
 
 /// 获取当前时间（以毫秒为单位）
-#[allow(dead_code)]
 pub fn get_time_ms() -> usize {
     time::read() * MSEC_PER_SEC / CLOCK_FREQ
 }
@@ -39,6 +37,7 @@ pub fn set_next_trigger() {
 /// 初始化定时器
 pub fn init() {
     set_next_trigger();
+    // Safe: 只在内核初始化阶段调用，确保唯一性
     unsafe { crate::arch::intr::enable_timer_interrupt() };
 }
 
