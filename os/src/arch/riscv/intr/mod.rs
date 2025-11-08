@@ -60,6 +60,20 @@ pub unsafe fn read_and_disable_interrupts() -> usize {
     old
 }
 
+///读取并启用中断
+pub unsafe fn read_and_enable_interrupts() -> usize {
+    // SIE 在 sstatus 的位 1
+    let sie_mask: usize = 1 << 1;
+    let old: usize;
+    // 原子地设置 sstatus 中的 SIE 位，并返回旧的 sstatus 值
+    core::arch::asm!(
+    "csrrs {old}, sstatus, {mask}",
+    old = out(reg) old,
+    mask = in(reg) sie_mask,
+    options(nomem, nostack)
+    );
+    old
+}
 /// 恢复中断状态
 /// 参数: flags - 之前的 sstatus 寄存器值
 /// 安全性: 该函数直接操作 CPU 寄存器，恢复中断状态可能会引发竞态条件或不一致状态。
