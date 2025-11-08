@@ -110,3 +110,75 @@ unsafe impl lock_api::RawMutex for RawSpinLockWithoutGuard {
 // (though in a single-core kernel, this is less relevant)
 unsafe impl Send for RawSpinLockWithoutGuard {}
 unsafe impl Sync for RawSpinLockWithoutGuard {}
+
+#[cfg(test)]
+mod tests {
+    use lock_api::RawMutex;
+
+    use super::*;
+    use crate::{kassert, test_case};
+
+    // 使用 lock_api::Mutex 包装进行基本功能测试
+    test_case!(test_mutex_wrapper_guard_basic, {
+        let m = lock_api::Mutex::<RawSpinLockWithoutGuard, usize>::new(0);
+
+        {
+            let mut g = m.lock();
+            *g = 42;
+        } // guard drop -> 解锁
+
+        {
+            let g = m.lock();
+            kassert!(*g == 42);
+        }
+    });
+
+    // try_lock 成功/失败与解锁后的可重入获取
+    test_case!(test_try_lock_and_unlock_roundtrip, {
+        let raw = RawSpinLockWithoutGuard::new();
+
+        // 第一次尝试应成功
+        let ok = raw.try_lock();
+        kassert!(ok);
+
+        // 持有锁时第二次尝试应失败
+        let fail = raw.try_lock();
+        kassert!(!fail);
+
+        // 解锁
+        unsafe {
+            raw.unlock();
+        }
+
+        // 解锁后应可再次获取
+        let ok2 = raw.try_lock();
+        kassert!(ok2);
+
+        // 再次解锁，避免影响其他用例
+        unsafe {
+            raw.unlock();
+        }
+    });
+
+    // lock() 获取（在未持锁情况下不应阻塞），随后解锁
+    test_case!(test_lock_then_unlock, {
+        let raw = RawSpinLockWithoutGuard::new();
+
+        // 未持锁情况下 lock() 应立即返回并持有锁
+        raw.lock();
+
+        // 此时 try_lock 应失败
+        let fail = raw.try_lock();
+        kassert!(!fail);
+
+        // 解锁后应可再次获取
+        unsafe {
+            raw.unlock();
+        }
+        let ok = raw.try_lock();
+        kassert!(ok);
+        unsafe {
+            raw.unlock();
+        }
+    });
+}

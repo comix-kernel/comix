@@ -52,6 +52,11 @@ mod tests {
     });
 
     // test_case!(test_timer_ticks_increment, {
+    //     crate::arch::trap::init_boot_trap();
+    //     unsafe {
+    //         crate::arch::intr::enable_interrupts();
+    //         crate::arch::intr::enable_timer_interrupt();
+    //     }
     //     let initial_ticks = TIMER_TICKS.load(Ordering::Relaxed);
     //     // 模拟等待一段时间以触发定时器中断
     //     let mut i = 0;
@@ -62,6 +67,10 @@ mod tests {
     //     }
     //     let later_ticks = TIMER_TICKS.load(Ordering::Relaxed);
     //     kassert!(later_ticks > initial_ticks);
+    //     unsafe {
+    //         crate::arch::intr::disable_timer_interrupt();
+    //         crate::arch::intr::disable_interrupts();
+    //     }
     // });
 
     test_case!(test_get_time, {

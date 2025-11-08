@@ -365,12 +365,6 @@ impl Task {
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
-        // let kstack_top = kstack_tracker.start_ppn().start_addr().to_vaddr().as_usize();
-        // let trap_end = trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize();
-        // println!(
-        //     "Task::new: tid={}, ppid={}, kstack: [{:#x} - {:#x}], trap_frame: [{:#x} - {:#x}]",
-        //     tid, ppid, kstack_top, kstack_base, trap_frame_ptr, trap_end
-        // );
         // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
         unsafe {
             let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize()
@@ -396,6 +390,17 @@ impl Task {
             exit_code: None,
             return_value: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_dummy_task(tid: u32) -> Self {
+        use crate::mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous};
+
+        let kstack_tracker =
+            physical_page_alloc_contiguous(1).expect("new_dummy_task: failed to alloc kstack");
+        let trap_frame_tracker =
+            physical_page_alloc().expect("new_dummy_task: failed to alloc trap_frame");
+        Self::new(tid, tid, 0, kstack_tracker, trap_frame_tracker, None)
     }
 }
 
@@ -423,21 +428,89 @@ mod tests {
         mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
         test_case,
     };
+    use core::mem::size_of;
 
     // 创建内核任务的基本属性检查
     test_case!(test_ktask_create, {
-        println!("Testing: test_ktask_create");
         let kstack_tracker =
             physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
         let trap_frame_tracker =
             physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
         let t = Task::ktask_create(1, 1, 0, kstack_tracker, trap_frame_tracker, 0x1000);
-        // tid/ pid 应有效且相等
-        kassert!(t.tid != 0);
+        kassert!(t.tid == 1);
         kassert!(t.pid == t.tid);
-        // 默认创建为内核线程（memory_space == None）
         kassert!(t.is_kernel_thread());
-        // 内核栈基址应非零
+        kassert!(t.is_process());
         kassert!(t.kstack_base != 0);
+        kassert!(t.trap_frame_ptr.load(Ordering::SeqCst) as usize != 0);
     });
+
+    // new_dummy_task：应为内核线程，pid=tid，初始状态为 Running
+    test_case!(test_dummy_task_basic, {
+        let t = Task::new_dummy_task(7);
+        kassert!(t.tid == 7);
+        kassert!(t.pid == 7);
+        kassert!(t.is_kernel_thread());
+        kassert!(t.is_process());
+        kassert!(matches!(t.state, TaskState::Running));
+    });
+
+    // is_process 与 is_kernel_thread 区分：人为创建一个“线程” pid!=tid
+    test_case!(test_is_process_vs_thread, {
+        let kstack_tracker = physical_page_alloc_contiguous(2).expect("alloc kstack");
+        let trap_frame_tracker = physical_page_alloc().expect("alloc trap_frame");
+        // 传入 pid 与 tid 不同模拟同进程内的线程
+        let t = Task::ktask_create(10, 5, 5, kstack_tracker, trap_frame_tracker, 0x2000);
+        kassert!(t.tid == 10);
+        kassert!(t.pid == 5);
+        kassert!(!t.is_process());
+        kassert!(t.is_kernel_thread()); // 仍是内核线程（没有用户地址空间）
+    });
+
+    // init_user_trapframe_and_context：验证重新定位 trap_frame 指针与入口设置
+    test_case!(test_init_user_trapframe_and_context, {
+        let mut t = Task::new_dummy_task(3);
+        let original_tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst) as usize;
+        let user_entry = 0x5555_8888usize;
+        let trampoline = 0xFFFF_FFC0_8020_9000usize;
+        unsafe {
+            t.init_user_trapframe_and_context(user_entry, trampoline);
+        }
+        let new_tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst) as usize;
+        // 新 trap_frame 应位于内核栈顶下方 size_of::<TrapFrame>()
+        let expect_ptr = t.kstack_base - size_of::<TrapFrame>();
+        kassert!(new_tf_ptr == expect_ptr);
+        kassert!(new_tf_ptr != original_tf_ptr);
+        // 校验写入的 sepc
+        let tf = unsafe { &*t.trap_frame_ptr.load(Ordering::SeqCst) };
+        kassert!(tf.sepc == user_entry);
+        // Context 设置
+        kassert!(t.context.sp == t.kstack_base);
+        kassert!(t.context.ra == trampoline);
+    });
+
+    // // execve 前后的 TrapFrame 基本字段（不访问用户空间，只验证写入逻辑）
+    // test_case!(test_execve_basic_trapframe_setup, {
+    //     // 构造内核任务再模拟成为用户任务：直接插入一个空的 MemorySpace（若出现 API 变化需调整）
+    //     // 使用 zeroed MemorySpace 仅用于测试 trap_frame 字段写入，不触发实际页表操作
+    //     let mut t = Task::new_dummy_task(11);
+    //     // 伪造用户地址空间（测试目的：Some 即视为用户进程）
+    //     // SAFETY: 仅在测试中使用，MemorySpace 零值不会被真正激活
+    //     let dummy_space: Arc<MemorySpace> = unsafe { core::mem::zeroed() };
+    //     t.memory_space = Some(dummy_space);
+
+    //     let tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst);
+    //     let entry = 0x1234_5678usize;
+    //     let user_sp_high = t.kstack_base & !0xFF; // 构造一个“高地址”作为栈顶
+    //     let argv = ["prog", "arg1"];
+    //     let envp = ["KEY=VALUE"];
+    //     // 调用 execve（由于 dummy_space 不会映射，不能访问用户页，仅验证不崩溃及字段设置）
+    //     // 为避免实际用户页访问，这里将字符串数组长度设小，且不真正触发用户空间写（dummy 空页表会使 SUM 写失败时 panic，若失败则跳过此测试）
+    //     // 如果出现页错误，可根据真实 MemorySpace API 替换为可映射测试空间。
+    //     t.execve(unsafe { core::mem::zeroed() }, entry, user_sp_high, &argv, &envp);
+    //     let tf_after = unsafe { &*tf_ptr };
+    //     kassert!(tf_after.sepc == entry);
+    //     kassert!(tf_after.x10_a0 == argv.len());
+    //     kassert!(tf_after.x1_ra == 0);
+    // });
 }
