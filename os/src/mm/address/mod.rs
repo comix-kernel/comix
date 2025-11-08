@@ -8,18 +8,18 @@
 //!
 //! # Address Types
 //!
-//! - [`Address`]: Trait for representing memory addresses (physical or virtual)
+//! - `Address`: Trait for representing memory addresses (physical or virtual)
 //! - [`Paddr`]: Physical address type
 //! - [`Vaddr`]: Virtual address type
 //! - [`ConvertablePaddr`]: Trait for converting physical addresses to virtual addresses
-//! - [`ConvertableVaddr`]: Trait for converting virtual addresses to physical addresses
+//! - `ConvertableVaddr`: Trait for converting virtual addresses to physical addresses
 //!
 //! # Address Ranges
 //!
-//! - [`AddressRange`]: Generic range of addresses
-//! - [`PaddrRange`]: Type alias for physical address range
-//! - [`VaddrRange`]: Type alias for virtual address range
-//! - [`AddressRangeIterator`]: Iterator for address ranges
+//! - `AddressRange`: Generic range of addresses
+//! - `PaddrRange`: Type alias for physical address range
+//! - `VaddrRange`: Type alias for virtual address range
+//! - `AddressRangeIterator`: Iterator for address ranges
 //!
 //! # Page Numbers
 //!
@@ -29,18 +29,18 @@
 //!
 //! # Page Number Ranges
 //!
-//! - [`PageNumRange`]: Generic range of page numbers
+//! - `PageNumRange`: Generic range of page numbers
 //! - [`PpnRange`]: Type alias for physical page number range
 //! - [`VpnRange`]: Type alias for virtual page number range
-//! - [`PageNumRangeIterator`]: Iterator for page number ranges
+//! - `PageNumRangeIterator`: Iterator for page number ranges
 //!
 //! # Operations
 //!
 //! The module provides three key trait categories:
 //!
 //! - [`UsizeConvert`]: Convert between types and usize
-//! - [`CalcOps`]: Arithmetic and bitwise operations
-//! - [`AlignOps`]: Address alignment operations
+//! - `CalcOps`: Arithmetic and bitwise operations
+//! - `AlignOps`: Address alignment operations
 
 mod address;
 mod operations;
