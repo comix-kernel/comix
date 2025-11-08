@@ -1,5 +1,6 @@
 //! RISC-V 架构的陷阱处理模块
 //! 包含陷阱处理程序的实现
+mod trap_frame;
 mod trap_handler;
 
 use core::arch::global_asm;
@@ -8,7 +9,7 @@ use riscv::register::{
     stvec::{self, Stvec},
 };
 
-pub use crate::arch::trap::trap_handler::TrapFrame;
+pub use trap_frame::TrapFrame;
 
 global_asm!(include_str!("trap_entry.S"));
 global_asm!(include_str!("boot_trap_entry.S"));
@@ -24,17 +25,21 @@ pub fn init() {
 }
 
 /// 恢复到陷阱前的上下文
-pub fn restore(trap_frame: &TrapFrame) {
+/// # Safety
+/// 该函数涉及直接操作处理器状态，必须确保传入的 TrapFrame 是有效且正确的。
+pub unsafe fn restore(trap_frame: &TrapFrame) {
     unsafe { __restore(trap_frame) };
 }
 
 fn set_trap_entry() {
+    // Safe: 仅在内核初始化阶段调用，确保唯一性
     unsafe {
         stvec::write(Stvec::new(trap_entry as usize, TrapMode::Direct));
     }
 }
 
 fn set_boot_trap_entry() {
+    // Safe: 仅在内核初始化阶段调用，确保唯一性
     unsafe {
         stvec::write(Stvec::new(boot_trap_entry as usize, TrapMode::Direct));
     }

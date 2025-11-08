@@ -1,2 +1,2 @@
-//! Platform-specific code for RISC-V architecture.
+//! 平台相关模块
 pub mod qemu;

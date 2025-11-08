@@ -5,22 +5,32 @@ use riscv::register::{
     sstatus::{self, Sstatus},
 };
 
+use crate::arch::constant::SSTATUS_SIE;
+
 /// 启用定时器中断
+/// 安全性: 该函数直接操作 CPU 寄存器，启用中断可能会引发竞态条件或不一致状态。
+/// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。
 pub unsafe fn enable_timer_interrupt() {
     unsafe { sie::set_stimer() };
 }
 
 /// 禁用定时器中断
+/// 安全性: 该函数直接操作 CPU 寄存器，禁用中断可能会引发竞态条件或不一致状态。
+/// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。
 pub unsafe fn disable_timer_interrupt() {
     unsafe { sie::clear_stimer() };
 }
 
 /// 启用中断
+/// 安全性: 该函数直接操作 CPU 寄存器，启用中断可能会引发竞态条件或不一致状态。
+/// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。
 pub unsafe fn enable_interrupts() {
     unsafe { sstatus::set_sie() };
 }
 
 /// 禁用中断
+/// 安全性: 该函数直接操作 CPU 寄存器，禁用中断可能会引发竞态条件或不一致状态。
+/// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。
 pub unsafe fn disable_interrupts() {
     unsafe { sstatus::clear_sie() };
 }
@@ -31,6 +41,9 @@ pub fn are_interrupts_enabled() -> bool {
 }
 
 /// 读取并禁用中断，返回之前的中断状态
+/// 返回值: 之前的 sstatus 寄存器值
+/// 安全性: 该函数直接操作 CPU 寄存器，禁用中断可能会引发竞态条件或不一致状态。
+/// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。
 pub unsafe fn read_and_disable_interrupts() -> usize {
     // SIE 在 sstatus 的位 1
     let sie_mask: usize = 1 << 1;
@@ -48,7 +61,12 @@ pub unsafe fn read_and_disable_interrupts() -> usize {
 }
 
 /// 恢复中断状态
+/// 参数: flags - 之前的 sstatus 寄存器值
+/// 安全性: 该函数直接操作 CPU 寄存器，恢复中断状态可能会引发竞态条件或不一致状态。
+/// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。
 pub unsafe fn restore_interrupts(flags: usize) {
-    // XXX: 与 read_and_disable_interrupts 配合使用时，中断禁用期间其它并发可能会改变寄存器状态，此时要恢复它们吗？
-    unsafe { sstatus::write(Sstatus::from_bits(flags)) };
+    let spie: usize = flags & SSTATUS_SIE;
+    if spie != 0 {
+        unsafe { sstatus::set_sie() };
+    }
 }
