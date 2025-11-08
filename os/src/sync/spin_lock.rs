@@ -22,6 +22,7 @@ pub struct SpinLock<T> {
 }
 
 impl<T> SpinLock<T> {
+    /// 创建一个新的 SpinLock 实例，初始化内部数据。
     pub const fn new(data: T) -> Self {
         SpinLock {
             raw_lock: RawSpinLock::new(),
@@ -29,6 +30,7 @@ impl<T> SpinLock<T> {
         }
     }
 
+    /// 获取自旋锁，并返回一个 RAII 保护器，用于访问和修改内部数据。
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         let _raw_guard = self.raw_lock.lock();
         SpinLockGuard {
@@ -37,12 +39,16 @@ impl<T> SpinLock<T> {
         }
     }
 
-    #[allow(dead_code)]
+    /// 检查锁是否被占用 (仅用于调试/测试)
+    /// 返回值：锁是否被占用
+    #[cfg(test)]
     pub fn is_locked(&self) -> bool {
         self.raw_lock.is_locked()
     }
 }
 
+/// SpinLock 的 RAII 保护器，提供对锁定数据的访问。
+/// 当保护器离开作用域时，自动释放锁。
 pub struct SpinLockGuard<'a, T> {
     _raw_guard: RawSpinLockGuard<'a>,
     data: &'a mut T,
@@ -62,6 +68,8 @@ impl<T> core::ops::DerefMut for SpinLockGuard<'_, T> {
     }
 }
 
+// Safety: SpinLock 可以在线程间安全共享，
+// 因为它通过 RawSpinLock 保证了对数据的互斥访问。
 unsafe impl<T: Send> Send for SpinLock<T> {}
 unsafe impl<T: Send> Sync for SpinLock<T> {}
 

@@ -18,7 +18,7 @@ pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule, task::task_manager::TaskManager},
-    sync::spin_lock::SpinLock,
+    sync::SpinLock,
 };
 
 lazy_static! {

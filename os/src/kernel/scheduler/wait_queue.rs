@@ -1,6 +1,6 @@
 use crate::kernel::task::SharedTask;
 use crate::kernel::{TaskQueue, sleep_task, wake_up};
-use crate::sync::raw_spin_lock::RawSpinLock;
+use crate::sync::RawSpinLock;
 use alloc::vec::Vec;
 
 pub struct WaitQueue {

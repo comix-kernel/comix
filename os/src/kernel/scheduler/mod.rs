@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use crate::{
     arch::kernel::{context::Context, switch},
     kernel::{scheduler::rr_scheduler::RRScheduler, task::SharedTask},
-    sync::spin_lock::SpinLock,
+    sync::SpinLock,
 };
 
 pub use task_queue::TaskQueue;
