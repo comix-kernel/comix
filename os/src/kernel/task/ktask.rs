@@ -10,7 +10,7 @@ use crate::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
         scheduler::Scheduler,
-        task::{TASK_MANAGER, TaskStruct, into_shared},
+        task::{TASK_MANAGER, TaskStruct, into_shared, task_manager::TaskManagerTrait},
     },
     mm::{
         activate,
