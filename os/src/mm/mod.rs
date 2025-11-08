@@ -8,7 +8,7 @@
 //!
 //! - [`address`]: Address and page number abstractions
 //! - [`frame_allocator`]: Physical frame allocation
-//! - [`global_allocator`]: Global heap allocator
+//! - [`mod@global_allocator`]: Global heap allocator
 //! - [`memory_space`]: Memory space management
 //! - [`page_table`]: Page table abstractions and implementations(arch-independent)
 

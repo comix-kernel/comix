@@ -11,9 +11,9 @@
 //! - [`FrameRangeTracker`]: RAII wrapper for ranges of allocated frames
 //! - [`init_frame_allocator`]: Initialize the global frame allocator
 //! - [`alloc_frame`]: Allocate a single frame
-//! - [`alloc_frames`]: Allocate multiple (non-contiguous) frames
-//! - [`alloc_contig_frames`]: Allocate multiple contiguous frames
-//! - [`alloc_contig_frames_aligned`]: Allocate multiple contiguous frames with alignment
+//! - `alloc_frames`: Allocate multiple (non-contiguous) frames
+//! - `alloc_contig_frames`: Allocate multiple contiguous frames
+//! - `alloc_contig_frames_aligned`: Allocate multiple contiguous frames with alignment
 
 mod frame_allocator;
 mod physmem;

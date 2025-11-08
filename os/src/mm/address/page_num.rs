@@ -110,7 +110,7 @@ where
         Self { start, end }
     }
 
-    /// create a page number range from a Range<T>
+    /// create a page number range from a `Range<T>`
     pub fn from_range(range: Range<T>) -> Self {
         Self {
             start: range.start,
