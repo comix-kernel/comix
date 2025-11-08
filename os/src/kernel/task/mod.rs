@@ -1,7 +1,9 @@
+//! 任务模块
+//! 包含任务的创建、调度、终止等功能
+//! 并由任务管理器维护所有任务的信息
 use core::sync::atomic::Ordering;
 
 use alloc::sync::Arc;
-use lazy_static::lazy_static;
 
 mod ktask;
 mod task_manager;
@@ -10,6 +12,7 @@ mod task_struct;
 mod tid_allocator;
 
 pub use ktask::*;
+pub use task_manager::TASK_MANAGER;
 pub use task_state::TaskState;
 pub use task_struct::Task as TaskStruct;
 
@@ -17,15 +20,14 @@ pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 
 use crate::{
     arch::trap::{TrapFrame, restore},
-    kernel::{cpu::current_cpu, schedule, task::task_manager::TaskManager},
+    kernel::{cpu::current_cpu, schedule},
     sync::SpinLock,
 };
 
-lazy_static! {
-    static ref TASK_MANAGER: SpinLock<TaskManager> = SpinLock::new(TaskManager::new());
-}
-
 /// 把已初始化的 TaskStruct 包装为共享任务句柄
+/// 参数:
+/// * `task`: 已初始化的 TaskStruct 实例
+/// 返回值: 包装后的 SharedTask
 pub fn into_shared(task: TaskStruct) -> SharedTask {
     Arc::new(SpinLock::new(task))
 }
@@ -45,6 +47,8 @@ pub(crate) fn forkret() {
 /// 在任务结束时调用的函数
 /// 任务正常地执行完毕后通过创建时预先设置的寄存器跳转到该函数
 /// 该函数不会返回，负责清理任务资源并切换到下一个任务
+/// 参数:
+/// * `return_value`: 任务的返回值
 pub(crate) fn terminate_task(return_value: usize) -> ! {
     let task = {
         let cpu = current_cpu().lock();
@@ -65,7 +69,6 @@ pub(crate) fn terminate_task(return_value: usize) -> ! {
         t.state = TaskState::Stopped;
         t.exit_code = t_exit_code;
         t.return_value = t_return_value;
-        // println!("terminate_task: task {} terminated, exit_code={:?}, return_value={:?}", t.tid, t.exit_code, t.return_value);
     }
     drop(task);
     schedule();

@@ -3,12 +3,25 @@ use crate::kernel::{TaskQueue, sleep_task, wake_up};
 use crate::sync::RawSpinLock;
 use alloc::vec::Vec;
 
+/// 等待队列结构体
+/// 用于管理等待某些事件的任务列表
+/// 提供将任务加入等待队列、从队列中唤醒任务等功能
+/// 内部使用任务队列和自旋锁来保证线程安全
+/// 使用示例：
+/// ```ignore
+/// let mut wait_queue = WaitQueue::new();
+/// wait_queue.sleep(task); // 将任务加入等待队列并阻塞
+/// wait_queue.wake_up(&task); // 唤醒指定任务
+/// wait_queue.wake_up_one(); // 唤醒队首任务
+/// wait_queue.wake_up_all(); // 唤醒所有任务
+/// ```
 pub struct WaitQueue {
     tasks: TaskQueue,
     lock: RawSpinLock,
 }
 
 impl WaitQueue {
+    /// 创建一个新的等待队列实例
     pub fn new() -> Self {
         WaitQueue {
             tasks: TaskQueue::new(),
@@ -21,7 +34,6 @@ impl WaitQueue {
         {
             let _g = self.lock.lock();
             self.tasks.add_task(task.clone());
-            // 在临界区内完成数据结构修改后立即释放 _g（leave scope）
         }
         // 在没有持有 wait-queue 锁的情况下调用调度相关操作
         sleep_task(task, true);
@@ -69,5 +81,8 @@ impl WaitQueue {
     }
 }
 
+// 安全性说明：
+// WaitQueue 内部使用 RawSpinLock 来保护任务队列的并发访问
+// 因此 WaitQueue 本身是线程安全的，可以在多线程环境中共享
 unsafe impl Send for WaitQueue {}
 unsafe impl Sync for WaitQueue {}

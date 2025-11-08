@@ -1,21 +1,15 @@
-pub mod task;
+//! 内核模块
+//! 包含任务调度、系统调用等功能
+//! 以及与 CPU 相关的操作
+//! 实现内核的核心功能
 
 mod cpu;
 mod scheduler;
+mod task;
 
 pub mod syscall;
-
-use core::array;
-use cpu::Cpu;
-use lazy_static::lazy_static;
-
-use crate::config::NUM_CPU;
-use crate::sync::SpinLock;
 
 pub use cpu::current_cpu;
 pub use scheduler::*;
 pub use task::TaskState;
-
-lazy_static! {
-    pub static ref CPUS: [SpinLock<Cpu>; NUM_CPU] = array::from_fn(|_| SpinLock::new(Cpu::new()));
-}
+pub use task::rest_init;
