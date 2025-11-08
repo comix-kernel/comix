@@ -30,6 +30,7 @@ fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     }
 }
 
+// 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
 impl_syscall!(sys_exit, exit, noreturn, (i32));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));

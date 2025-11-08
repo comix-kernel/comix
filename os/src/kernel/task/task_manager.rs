@@ -2,6 +2,13 @@ use alloc::collections::btree_map::BTreeMap;
 
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
+use crate::sync::SpinLock;
+
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref TASK_MANAGER: SpinLock<TaskManager> = SpinLock::new(TaskManager::new());
+}
 
 /// 任务管理器，负责管理所有任务的生命周期和调度
 /// 包括任务的创建、销毁和查找等功能
