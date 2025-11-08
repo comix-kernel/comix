@@ -1,8 +1,10 @@
-use crate::arch::syscall::syscall_number::{SYS_EXIT, SYS_SHUTDOWN, SYS_WRITE};
+//! RISC-V 架构的系统调用分发模块
+use crate::arch::syscall::syscall_number::*;
 use crate::kernel::syscall::*;
 
 mod syscall_number;
 
+/// 分发系统调用
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
     match frame.x17_a7 {
         SYS_SHUTDOWN => sys_shutdown(frame),

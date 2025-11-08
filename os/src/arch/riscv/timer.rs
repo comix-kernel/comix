@@ -1,3 +1,5 @@
+//! RISC-V 架构的定时器实现
+//! 包含定时器初始化、时间获取和定时器中断设置等功能
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::config::CLOCK_FREQ;
