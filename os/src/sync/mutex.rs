@@ -4,21 +4,32 @@ use crate::{
     sync::raw_spin_lock::RawSpinLock,
 };
 
-pub struct SleepLock {
+/// 提供基本的互斥锁功能的结构体。
+/// 使用睡眠等待的方式实现互斥锁，适用于可能长时间持有锁的场景。
+/// 使用示例：
+/// ```ignore
+/// let mut mutex = Mutex::new();
+/// mutex.lock(); // 获取锁
+/// // 访问临界区
+/// mutex.unlock(); // 释放锁
+/// ```
+pub struct Mutex {
     locked: bool,
     guard: RawSpinLock,
     queue: WaitQueue,
 }
 
-impl SleepLock {
+impl Mutex {
+    /// 创建一个新的未锁定的 Mutex 实例。
     pub fn new() -> Self {
-        SleepLock {
+        Mutex {
             locked: false,
             guard: RawSpinLock::new(),
             queue: WaitQueue::new(),
         }
     }
 
+    /// 获取锁。如果锁已被其他线程持有，则当前线程将进入睡眠状态，直到锁可用。
     pub fn lock(&mut self) {
         loop {
             let _g = self.guard.lock();
@@ -36,6 +47,7 @@ impl SleepLock {
         }
     }
 
+    /// 释放锁，并唤醒等待队列中的一个线程（如果有的话）。
     pub fn unlock(&mut self) {
         let _g = self.guard.lock();
         self.locked = false;

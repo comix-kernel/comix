@@ -8,7 +8,7 @@
 //! - Heap memory region defined by linker symbols
 //! - Initialization function to set up the heap
 
-use crate::sync::raw_spin_lock_without_guard::RawSpinLockWithoutGuard;
+use crate::sync::RawSpinLockWithoutGuard;
 use talc::{Span, Talc, Talck};
 
 /// Global heap allocator instance

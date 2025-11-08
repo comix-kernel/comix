@@ -22,27 +22,14 @@
 use crate::arch::intr::{read_and_disable_interrupts, restore_interrupts};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// Raw spin lock for Global Allocator, implementing `lock_api::RawMutex`
-///
-/// This lock combines spin-lock mechanism with interrupt protection,
-/// storing the interrupt state internally for restoration on unlock.
-///
-/// # Usage
-///
-/// This type is specifically designed for use with `talc::Talck`:
-/// ```ignore
-/// use talc::{Talc, Talck};
-/// static ALLOCATOR: Talck<RawSpinLockWithoutGuard, ClaimOnOom> = ...;
-/// ```
+/// 自旋锁结构体，不返回 Guard，集成了中断状态保存与恢复功能。
 pub struct RawSpinLockWithoutGuard {
     locked: AtomicBool,
-    /// Stores the interrupt flags from the CPU when the lock was acquired
-    /// Used to restore interrupt state on unlock
     saved_intr_flags: AtomicUsize,
 }
 
 impl RawSpinLockWithoutGuard {
-    /// Create a new unlocked spin lock
+    /// 创建一个新的 RawSpinLockWithoutGuard 实例。
     pub const fn new() -> Self {
         Self {
             locked: AtomicBool::new(false),
@@ -57,8 +44,9 @@ unsafe impl lock_api::RawMutex for RawSpinLockWithoutGuard {
 
     type GuardMarker = lock_api::GuardNoSend;
 
+    /// 获取锁，禁用中断并保存状态。
     fn lock(&self) {
-        // 1. Disable interrupts and save the flags
+        // 1. Disabldde interrupts and save the flags
         let flags = unsafe { read_and_disable_interrupts() };
 
         // 2. Spin until we acquire the lock
@@ -74,6 +62,7 @@ unsafe impl lock_api::RawMutex for RawSpinLockWithoutGuard {
         self.saved_intr_flags.store(flags, Ordering::Release);
     }
 
+    /// 尝试获取锁，成功则禁用中断并保存状态。
     fn try_lock(&self) -> bool {
         // 1. Disable interrupts and save the flags
         let flags = unsafe { read_and_disable_interrupts() };
@@ -94,6 +83,7 @@ unsafe impl lock_api::RawMutex for RawSpinLockWithoutGuard {
         }
     }
 
+    /// 释放锁，恢复之前的中断状态。
     unsafe fn unlock(&self) {
         // 1. Load the saved interrupt flags
         let flags = self.saved_intr_flags.load(Ordering::Acquire);
@@ -106,8 +96,7 @@ unsafe impl lock_api::RawMutex for RawSpinLockWithoutGuard {
     }
 }
 
-// Safety: RawSpinLockWithoutGuard can be shared between threads
-// (though in a single-core kernel, this is less relevant)
+// Safety: 锁的使用保证了多线程环境下的正确性
 unsafe impl Send for RawSpinLockWithoutGuard {}
 unsafe impl Sync for RawSpinLockWithoutGuard {}
 
