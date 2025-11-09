@@ -3,6 +3,7 @@ pub mod boot;
 pub mod constant;
 pub mod intr;
 pub mod kernel;
+pub mod lib;
 pub mod mm;
 pub mod platform;
 pub mod syscall;

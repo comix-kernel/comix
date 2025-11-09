@@ -4,6 +4,8 @@
 //! `LogCore` struct that can be instantiated independently for testing
 //! while maintaining the same lock-free, zero-allocation design.
 
+use crate::arch::lib::console::Stdout;
+
 use super::buffer::GlobalLogBuffer;
 use super::config::{DEFAULT_CONSOLE_LEVEL, DEFAULT_LOG_LEVEL};
 use super::context;
@@ -192,7 +194,6 @@ impl LogCore {
 
     /// Prints a log entry directly to the console with ANSI colors
     fn direct_print_entry(&self, entry: &LogEntry) {
-        use crate::console::Stdout;
         use core::fmt::Write;
 
         let mut stdout = Stdout;

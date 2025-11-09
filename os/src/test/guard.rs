@@ -1,4 +1,6 @@
 use core::sync::atomic::{AtomicPtr, Ordering};
+
+use crate::println;
 static MOCK_HANDLER: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 pub enum TestEnvironment {

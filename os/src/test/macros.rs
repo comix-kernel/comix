@@ -1,7 +1,10 @@
 #![allow(dead_code)]
-use crate::arch::intr::{
-    are_interrupts_enabled, disable_interrupts, enable_interrupts, read_and_enable_interrupts,
-    restore_interrupts,
+use crate::{
+    arch::intr::{
+        are_interrupts_enabled, disable_interrupts, enable_interrupts, read_and_enable_interrupts,
+        restore_interrupts,
+    },
+    println,
 };
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -128,8 +131,8 @@ macro_rules! test_case {
         #[doc = concat!("Test case: ", stringify!($func_name))]
         #[test_case]
         fn $func_name() {
-            println!("\x1b[33m=======================================\x1b[0m");
-            println!(
+            $crate::println!("\x1b[33m=======================================\x1b[0m");
+            $crate::println!(
                 "\x1b[33mRunning test: {}::{}\x1b[0m",
                 module_path!(),
                 stringify!($func_name)
@@ -145,7 +148,7 @@ macro_rules! test_case {
             unsafe {
                 for i in failed_before..$crate::test::macros::FAILED_INDEX {
                     if let Some(fail) = $crate::test::macros::FAILED_LIST[i] {
-                        println!(
+                        $crate::println!(
                             "\x1b[31mFailed assertion: {} at {}:{}\x1b[0m",
                             fail.cond, fail.file, fail.line
                         );
@@ -154,9 +157,9 @@ macro_rules! test_case {
             }
 
             if failed_count == 0 {
-                println!("\x1b[32m[ok] Test passed\x1b[0m\n");
+                $crate::println!("\x1b[32m[ok] Test passed\x1b[0m\n");
             } else {
-                println!(
+                $crate::println!(
                     "\x1b[91m[failed] Test failed with {} failed assertions\x1b[0m\n",
                     failed_count
                 );
