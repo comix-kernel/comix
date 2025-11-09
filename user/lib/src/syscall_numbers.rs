@@ -1,5 +1,5 @@
-//! 系统调用号定义
-#![allow(dead_code)]
+//! 定义系统调用号
+
 /// 关闭系统
 pub const SYS_SHUTDOWN: usize = 0;
 /// 退出进程

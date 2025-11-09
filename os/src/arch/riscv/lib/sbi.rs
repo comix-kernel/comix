@@ -4,8 +4,8 @@ pub fn console_putchar(c: usize) {
     sbi_rt::legacy::console_putchar(c);
 }
 
-/// use sbi call to getchar from console (qemu uart handler)
-#[allow(dead_code)]
+/// 使用 sbi 调用从控制台获取字符(qemu uart handler)
+/// 返回值：字符的 ASCII 码
 pub fn console_getchar() -> usize {
     #[allow(deprecated)]
     sbi_rt::legacy::console_getchar()
