@@ -240,12 +240,10 @@ impl Task {
 
     #[cfg(test)]
     pub fn new_dummy_task(tid: u32) -> Self {
-        use crate::mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous};
-
+        use crate::mm::frame_allocator::{alloc_contig_frames, alloc_frame};
         let kstack_tracker =
-            physical_page_alloc_contiguous(1).expect("new_dummy_task: failed to alloc kstack");
-        let trap_frame_tracker =
-            physical_page_alloc().expect("new_dummy_task: failed to alloc trap_frame");
+            alloc_contig_frames(1).expect("new_dummy_task: failed to alloc kstack");
+        let trap_frame_tracker = alloc_frame().expect("new_dummy_task: failed to alloc trap_frame");
         Self::new(tid, tid, 0, kstack_tracker, trap_frame_tracker, None)
     }
 }
@@ -271,17 +269,14 @@ mod tests {
     use super::*;
     use crate::{
         kassert,
-        mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+        mm::frame_allocator::{alloc_contig_frames, alloc_frame},
         test_case,
     };
-    use core::mem::size_of;
 
     // 创建内核任务的基本属性检查
     test_case!(test_ktask_create, {
-        let kstack_tracker =
-            physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
-        let trap_frame_tracker =
-            physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
+        let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
+        let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
         let t = Task::ktask_create(1, 1, 0, kstack_tracker, trap_frame_tracker, 0x1000);
         kassert!(t.tid == 1);
         kassert!(t.pid == t.tid);
@@ -303,8 +298,8 @@ mod tests {
 
     // is_process 与 is_kernel_thread 区分：人为创建一个“线程” pid!=tid
     test_case!(test_is_process_vs_thread, {
-        let kstack_tracker = physical_page_alloc_contiguous(2).expect("alloc kstack");
-        let trap_frame_tracker = physical_page_alloc().expect("alloc trap_frame");
+        let kstack_tracker = alloc_contig_frames(2).expect("alloc kstack");
+        let trap_frame_tracker = alloc_frame().expect("alloc trap_frame");
         // 传入 pid 与 tid 不同模拟同进程内的线程
         let t = Task::ktask_create(10, 5, 5, kstack_tracker, trap_frame_tracker, 0x2000);
         kassert!(t.tid == 10);

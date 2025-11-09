@@ -1,41 +1,38 @@
-//! Logging macros
+//! 日志宏
 //!
-//! This module provides Linux kernel-style logging macros (`pr_*`) for easy logging
-//! at different priority levels.
+//! 该模块提供了 **Linux 内核风格的日志宏** (`pr_*`)，用于以不同优先级级别进行轻松日志记录。
 //!
-//! # Usage
+//! # 用法
 //!
 //! ```rust
 //! use crate::pr_info;
 //! use crate::pr_err;
 //!
-//! pr_info!("System initialized");
-//! pr_err!("Failed to allocate {} bytes", size);
-//! pr_warn!("Memory usage at {}%", percent);
-//! pr_debug!("Variable x = {}", x);
+//! pr_info!("系统已初始化");
+//! pr_err!("分配 {} 字节失败", size);
+//! pr_warn!("内存使用率为 {}%", percent);
+//! pr_debug!("变量 x = {}", x);
 //! ```
 //!
-//! # Macro List
+//! # 宏列表
 //!
-//! - `pr_emerg!` - Emergency level (system unusable)
-//! - `pr_alert!` - Alert level (immediate action required)
-//! - `pr_crit!` - Critical level (critical conditions)
-//! - `pr_err!` - Error level (error conditions)
-//! - `pr_warn!` - Warning level (warning conditions)
-//! - `pr_notice!` - Notice level (normal but significant)
-//! - `pr_info!` - Info level (informational messages)
-//! - `pr_debug!` - Debug level (debug messages)
+//! - `pr_emerg!` - 紧急级别（系统不可用）
+//! - `pr_alert!` - 警报级别（需要立即采取行动）
+//! - `pr_crit!` - 关键级别（关键状况）
+//! - `pr_err!` - 错误级别（错误状况）
+//! - `pr_warn!` - 警告级别（警告状况）
+//! - `pr_notice!` - 通知级别（正常但重要）
+//! - `pr_info!` - 信息级别（信息性消息）
+//! - `pr_debug!` - 调试级别（调试消息）
 //!
-//! # Performance
+//! # 性能
 //!
-//! All macros check the global log level at macro expansion time. If a log level
-//! is disabled, the format string is never evaluated, making disabled logs
-//! essentially zero-cost.
+//! 所有宏都在**宏展开时检查全局日志级别**。如果某个日志级别被禁用，则永远不会评估格式字符串，这使得**禁用的日志开销基本上为零**。
 
-/// Internal implementation macro with level filtering
+/// 带有级别过滤的内部实现宏
 ///
-/// Checks if the log level is enabled before calling the logging implementation.
-/// This early check avoids unnecessary format string evaluation for disabled levels.
+/// 在调用日志记录实现之前，**检查日志级别是否启用**。
+/// 这种早期检查避免了对禁用级别进行不必要的格式化字符串评估。
 #[macro_export]
 macro_rules! __log_impl_filtered {
     ($level:expr, $args:expr) => {
@@ -45,35 +42,34 @@ macro_rules! __log_impl_filtered {
     };
 }
 
-/// Logs a message at the EMERGENCY level
+/// 以 **EMERGENCY (紧急)** 级别记录消息
 ///
-/// Emergency logs indicate the system is unusable. These are always printed
-/// to console (if console output is available) and stored in the buffer.
+/// 紧急日志表示系统不可用。这些日志始终会打印到控制台（如果控制台输出可用）并存储在缓冲区中。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_emerg!("Kernel panic: {}", reason);
-/// pr_emerg!("System halt");
+/// pr_emerg!("内核恐慌: {}", reason);
+/// pr_emerg!("系统中止");
 /// ```
 #[macro_export]
 macro_rules! pr_emerg {
-    ($($arg:tt)*) => {
-        $crate::__log_impl_filtered!(
-            $crate::log::LogLevel::Emergency,
-            format_args!($($arg)*)
-        )
-    }
+($($arg:tt)*) => {
+$crate::__log_impl_filtered!(
+$crate::log::LogLevel::Emergency,
+format_args!($($arg)*)
+)
+}
 }
 
-/// Logs a message at the ALERT level
+/// 以 **ALERT (警报)** 级别记录消息
 ///
-/// Alert logs indicate action must be taken immediately.
+/// 警报日志表示必须立即采取行动。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_alert!("Critical hardware failure detected");
+/// pr_alert!("检测到关键硬件故障");
 /// ```
 #[macro_export]
 macro_rules! pr_alert {
@@ -85,14 +81,14 @@ macro_rules! pr_alert {
     }
 }
 
-/// Logs a message at the CRITICAL level
+/// 以 **CRITICAL (关键)** 级别记录消息
 ///
-/// Critical logs indicate critical conditions that need attention.
+/// 关键日志表示需要关注的关键状况。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_crit!("Temperature threshold exceeded");
+/// pr_crit!("温度阈值已超出");
 /// ```
 #[macro_export]
 macro_rules! pr_crit {
@@ -104,15 +100,15 @@ macro_rules! pr_crit {
     }
 }
 
-/// Logs a message at the ERROR level
+/// 以 **ERROR (错误)** 级别记录消息
 ///
-/// Error logs indicate error conditions that occurred during operation.
+/// 错误日志表示在操作过程中发生的错误状况。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_err!("Failed to allocate {} bytes", size);
-/// pr_err!("Device initialization failed: {}", error);
+/// pr_err!("分配 {} 字节失败", size);
+/// pr_err!("设备初始化失败: {}", error);
 /// ```
 #[macro_export]
 macro_rules! pr_err {
@@ -124,16 +120,15 @@ macro_rules! pr_err {
     }
 }
 
-/// Logs a message at the WARNING level
+/// 以 **WARNING (警告)** 级别记录消息
 ///
-/// Warning logs indicate conditions that should be reviewed but don't prevent
-/// normal operation.
+/// 警告日志表示应审查但不妨碍正常操作的状况。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_warn!("Memory usage at {}%", percent);
-/// pr_warn!("Deprecated feature used");
+/// pr_warn!("内存使用率为 {}%", percent);
+/// pr_warn!("使用了已弃用的功能");
 /// ```
 #[macro_export]
 macro_rules! pr_warn {
@@ -145,14 +140,14 @@ macro_rules! pr_warn {
     }
 }
 
-/// Logs a message at the NOTICE level
+/// 以 **NOTICE (通知)** 级别记录消息
 ///
-/// Notice logs indicate normal but significant conditions.
+/// 通知日志表示正常但重要的状况。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_notice!("Device {} connected", device_name);
+/// pr_notice!("设备 {} 已连接", device_name);
 /// ```
 #[macro_export]
 macro_rules! pr_notice {
@@ -164,15 +159,15 @@ macro_rules! pr_notice {
     }
 }
 
-/// Logs a message at the INFO level
+/// 以 **INFO (信息)** 级别记录消息
 ///
-/// Info logs provide informational messages about normal system operation.
+/// 信息日志提供有关正常系统操作的信息性消息。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_info!("Kernel initialized");
-/// pr_info!("Starting subsystem {}", name);
+/// pr_info!("内核已初始化");
+/// pr_info!("正在启动子系统 {}", name);
 /// ```
 #[macro_export]
 macro_rules! pr_info {
@@ -184,16 +179,16 @@ macro_rules! pr_info {
     }
 }
 
-/// Logs a message at the DEBUG level
+/// 以 **DEBUG (调试)** 级别记录消息
 ///
-/// Debug logs provide detailed diagnostic information for troubleshooting.
-/// These are typically disabled in production builds.
+/// 调试日志提供详细的诊断信息，用于故障排除。
+/// 这些日志通常在生产版本中被禁用。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```rust
-/// pr_debug!("Function called with x = {}", x);
-/// pr_debug!("State transition: {} -> {}", old_state, new_state);
+/// pr_debug!("调用函数时 x = {}", x);
+/// pr_debug!("状态转换: {} -> {}", old_state, new_state);
 /// ```
 #[macro_export]
 macro_rules! pr_debug {

@@ -18,7 +18,7 @@ use crate::{
     },
     mm::{
         activate,
-        frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+        frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
 };
@@ -47,10 +47,8 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         let cur_task = cur_task.lock();
         (cur_task.pid, cur_task.ppid)
     };
-    let kstack_tracker =
-        physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
-    let trap_frame_tracker =
-        physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
+    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
+    let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
 
     // 分配 Task 结构体和内核栈
     let task = TaskStruct::ktask_create(
