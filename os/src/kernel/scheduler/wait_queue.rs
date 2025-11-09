@@ -1,3 +1,6 @@
+//! 等待队列模块
+//!
+//! 定义了等待队列结构体及其相关操作
 use crate::kernel::task::SharedTask;
 use crate::kernel::{TaskQueue, sleep_task, wake_up};
 use crate::sync::RawSpinLock;
@@ -81,7 +84,7 @@ impl WaitQueue {
     }
 }
 
-// 安全性说明：
+// SAFETY:
 // WaitQueue 内部使用 RawSpinLock 来保护任务队列的并发访问
 // 因此 WaitQueue 本身是线程安全的，可以在多线程环境中共享
 unsafe impl Send for WaitQueue {}

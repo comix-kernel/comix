@@ -1,3 +1,5 @@
+//! 任务状态定义
+
 /// 任务状态
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskState {
