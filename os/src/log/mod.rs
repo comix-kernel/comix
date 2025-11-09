@@ -4,13 +4,13 @@
 //!
 //! # 组件
 //!
-//! - [`buffer`]: 用于日志存储的无锁环形缓冲区
-//! - [`config`]: 配置常量（缓冲区大小、消息长度限制）
-//! - [`context`]: 上下文信息收集（CPU ID、任务 ID、时间戳）
-//! - [`core`]: 核心日志实现 (LogCore)
-//! - [`entry`]: 日志条目结构和序列化
-//! - [`level`]: 日志级别定义（从 Emergency 到 Debug）
-//! - [`macros`]: 面向用户的日志宏 (`pr_info!`, `pr_err!`, 等)
+//! - [`buffer`] - 用于日志存储的无锁环形缓冲区
+//! - [`config`] - 配置常量（缓冲区大小、消息长度限制）
+//! - [`context`] - 上下文信息收集（CPU ID、任务 ID、时间戳）
+//! - [`log_core`] - 核心日志实现 (LogCore)
+//! - [`entry`] - 日志条目结构和序列化
+//! - [`level`] - 日志级别定义（从 Emergency 到 Debug）
+//! - [`macros`] - 面向用户的日志宏 (`pr_info!`, `pr_err!`, 等)
 //!
 //! # 设计概览
 //!
@@ -48,12 +48,12 @@
 //! pr_err!("分配 {} 字节失败", size);
 //!
 //! // 配置日志级别
-//! set_global_level(LogLevel::Debug);  // 记录所有级别
+//! set_global_level(LogLevel::Debug);  // 记录所有级别
 //! set_console_level(LogLevel::Error); // 只打印错误及以上的级别
 //!
 //! // 读取缓冲的日志
 //! while let Some(entry) = read_log() {
-//!     // 处理日志条目
+//!     // 处理日志条目
 //! }
 //! ```
 
