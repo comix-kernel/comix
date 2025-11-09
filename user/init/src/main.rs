@@ -1,14 +1,10 @@
 #![no_std]
 #![no_main]
 
-use lib::{exit, io::{print, read_line}};
+use lib::exit;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    print(b"Hello, world!");
-    let mut line = [0u8; 128];
-    read_line(&mut line);
-    print(&line);
     exit(0)
 }
 
@@ -17,3 +13,4 @@ pub extern "C" fn _start() -> ! {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     exit(-1)
 }
+

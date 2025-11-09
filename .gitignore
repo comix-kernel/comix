@@ -22,3 +22,5 @@ target
 
 # mdBook build output
 book/
+# 用户可执行文件
+user/bin/**

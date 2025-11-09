@@ -64,6 +64,12 @@ Cargo.toml             构建定义
 ### 构建 & 运行
 
 ```bash
+# 编译user文件夹下的所有用户程序并将可执行文件置于user/bin/
+cd user
+make
+```
+
+```bash
 cd os
 make run
 ```
