@@ -1,37 +1,37 @@
-//! Global allocator module
+//! 全局分配器模块
 //!
-//! This module provides dynamic heap memory allocation functionality using the talc allocator.
+//! 本模块使用 **talc** 分配器提供动态堆内存分配功能。
 //!
-//! # Components
+//! # 模块组成
 //!
-//! - Global heap allocator based on talc::Talck
-//! - Heap memory region defined by linker symbols
-//! - Initialization function to set up the heap
+//! - 基于 **talc::Talck** 的全局堆分配器。
+//! - 由链接器符号定义的堆内存区域。
+//! - 用于设置堆的初始化函数。
 
 use crate::{println, sync::RawSpinLockWithoutGuard};
 use talc::{Span, Talc, Talck};
 
-/// Global heap allocator instance
+/// 全局堆分配器实例
 ///
-/// Uses talc's lock-based allocator (Talck) with our custom `RawSpinLockWithoutGuard`.
-/// This lock implements `lock_api::RawMutex` and provides interrupt protection
-/// to prevent deadlocks when interrupt handlers allocate memory.
+/// 使用 talc 的基于锁的分配器 (**Talck**) 和我们自定义的 **`RawSpinLockWithoutGuard`**。
+/// 此锁实现了 `lock_api::RawMutex` 并提供了中断保护，
+/// 以防止当中断处理程序尝试分配内存时发生死锁。
 ///
-/// Initialized with an empty span; actual memory will be claimed in init_heap().
+/// 初始化时使用一个空范围 (**Span::empty()**)；实际内存将在 `init_heap()` 中声明。
 #[global_allocator]
 static ALLOCATOR: Talck<RawSpinLockWithoutGuard, talc::ClaimOnOom> =
     Talc::new(unsafe { talc::ClaimOnOom::new(Span::empty()) }).lock();
 
-/// Initialize the heap allocator with the heap memory region defined in linker script
+/// 使用链接器脚本中定义的堆内存区域初始化堆分配器
 ///
-/// This function must be called early in the boot process, after BSS clearing
-/// but before any heap allocations are attempted.
+/// 此函数必须在启动过程的早期调用，即在 BSS 清零之后，
+/// 且在任何堆分配尝试之前。
 ///
-/// # Safety
+/// # 安全性
 ///
-/// - Must be called exactly once during boot
-/// - Must be called before any heap allocations
-/// - Heap region defined by linker symbols (sheap, eheap) must be valid
+/// - 在启动过程中必须且只能调用一次。
+/// - 必须在进行任何堆分配之前调用。
+/// - 由链接器符号 (`sheap`, `eheap`) 定义的堆区域必须有效。
 pub fn init_heap() {
     unsafe extern "C" {
         fn sheap();

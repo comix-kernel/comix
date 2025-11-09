@@ -1,16 +1,15 @@
 #![allow(dead_code)]
-//! Memory management module
+//! 内存管理模块
 //!
-//! This module provides architecture-independent memory management abstractions
-//! and implementations for the kernel.
+//! 本模块为内核提供与体系结构无关的内存管理抽象和实现。
 //!
-//! # Components
+//! # 模块组成
 //!
-//! - [`address`]: Address and page number abstractions
-//! - [`frame_allocator`]: Physical frame allocation
-//! - [`mod@global_allocator`]: Global heap allocator
-//! - [`memory_space`]: Memory space management
-//! - [`page_table`]: Page table abstractions and implementations(arch-independent)
+//! - [`address`]：地址和页号抽象。
+//! - [`frame_allocator`]：物理帧分配。
+//! - [`mod@global_allocator`]：全局堆分配器。
+//! - [`memory_space`]：内存空间管理。
+//! - [`page_table`]：页表抽象和实现（与架构无关）。
 
 pub mod address;
 pub mod frame_allocator;
@@ -27,31 +26,53 @@ use crate::mm::address::Ppn;
 use crate::mm::memory_space::with_kernel_space;
 
 unsafe extern "C" {
+    // 链接器脚本中定义的内核结束地址
     fn ekernel();
 }
 
-/// Initializes the memory management subsystem
+/// 初始化内存管理子系统
+///
+/// 此函数执行所有内存管理组件的初始化工作：
+/// 1. 初始化物理帧分配器。
+/// 2. 初始化内核堆分配器。
+/// 3. 创建并激活内核地址空间。
 pub fn init() {
-    // 1. Initialize frame allocator
-    // ekernel is a virtual address, need to convert to physical address
+    // 1. 初始化物理帧分配器
+
+    // ekernel 是一个虚拟地址，需要转换为物理地址，以确定可分配物理内存的起始点。
     let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
-    let start = ekernel_paddr.div_ceil(PAGE_SIZE) * PAGE_SIZE; // Page-aligned
+
+    // 计算页对齐后的物理内存起始地址。
+    // 分配器将管理 [start, end) 范围内的内存。
+    let start = ekernel_paddr.div_ceil(PAGE_SIZE) * PAGE_SIZE; // 页对齐
     let end = MEMORY_END;
 
+    // 初始化物理帧分配器
     init_frame_allocator(start, end);
 
-    // 2. Initialize heap
+    // 2. 初始化堆分配器
     init_heap();
 
-    // 3. Create and activate kernel address space (lazy_static will auto-initialize)
+    // 3. 创建并激活内核地址空间 (内核地址空间通过 lazy_static 自动初始化)
     #[cfg(target_arch = "riscv64")]
     {
+        // 获取内核地址空间根页表（Page Table Root）的物理页号（Ppn）。
         let root_ppn = with_kernel_space(|space| space.root_ppn());
+        // 激活内核地址空间
         activate(root_ppn);
     }
 }
 
+/// 激活指定的地址空间
+///
+/// 通过将根页表（Page Table Root）的物理页号写入特定的寄存器，
+/// 从而切换当前 CPU 使用的地址空间。
+///
+/// # 参数
+///
+/// * `root_ppn` - 新地址空间的根页表的物理页号。
 pub fn activate(root_ppn: Ppn) {
     use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
+    // 调用特定架构的页表激活函数，例如在 RISC-V 上设置 SATP 寄存器。
     crate::arch::mm::PageTableInner::activate(root_ppn);
 }
