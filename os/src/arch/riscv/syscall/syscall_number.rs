@@ -1,6 +1,6 @@
 //! 系统调用号定义
 #![allow(dead_code)]
-/// 关机
+/// 关闭系统
 pub const SYS_SHUTDOWN: usize = 0;
 /// 退出进程
 pub const SYS_EXIT: usize = 1;
@@ -22,3 +22,10 @@ pub const SYS_SLEEP: usize = 8;
 pub const SYS_KILL: usize = 9;
 /// 执行新程序
 pub const SYS_EXEC: usize = 10;
+/// 打开文件
+pub const SYS_OPEN: usize = 11;
+/// 关闭文件
+pub const SYS_CLOSE: usize = 12;
+/// 读取目录项
+pub const SYS_GETDENTS: usize = 13;
+// 其他系统调用号可以在这里继续添加
