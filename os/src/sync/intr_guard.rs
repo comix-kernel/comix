@@ -23,6 +23,8 @@ impl IntrGuard {
     /// 原子地禁用中断并返回一个 IntrGuard 实例。
     /// 该实例在离开作用域时会自动恢复中断状态。
     pub fn new() -> Self {
+        // SAFETY: 调用者必须确保在创建 IntrGuard 实例时，
+        // 没有其他代码会修改中断状态，从而保证不可重入性。
         let flags = unsafe { read_and_disable_interrupts() };
         IntrGuard { flags }
     }
@@ -38,6 +40,8 @@ impl IntrGuard {
 impl Drop for IntrGuard {
     /// 当 IntrGuard 离开作用域时，自动恢复中断状态。
     fn drop(&mut self) {
+        // SAFETY: flags 是在创建 IntrGuard 时保存的，
+        // 因此恢复操作是安全的。
         unsafe { restore_interrupts(self.flags) };
     }
 }
@@ -46,7 +50,7 @@ impl Drop for IntrGuard {
 mod tests {
     use super::*;
 
-    use crate::{arch::intr::*, kassert, test_case};
+    use crate::{arch::intr::*, kassert, println, test_case};
 
     // 测试 IntrGuard::new() 是否成功禁用中断，并检查 was_enabled
     test_case!(test_guard_disables_interrupts, {

@@ -5,11 +5,17 @@ use core::{hint, sync::atomic::Ordering};
 use riscv::register::sscratch;
 
 use crate::{
+    arch::{intr, mm::vaddr_to_paddr, timer, trap},
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, into_shared,
         kernel_execve,
     },
-    mm::frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+    mm::{
+        self,
+        frame_allocator::{physical_page_alloc, physical_page_alloc_contiguous},
+    },
+    println,
+    test::run_early_tests,
 };
 /// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
@@ -42,6 +48,7 @@ pub fn rest_init() {
     current_cpu().lock().current_task = Some(task);
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
+    // SAFETY: 在 Task 创建时已正确初始化 ra 和 sp
     unsafe {
         core::arch::asm!(
             "mv sp, {sp}",
@@ -131,4 +138,43 @@ mod tests {
 
     // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
     // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
+}
+
+pub fn main() {
+    clear_bss();
+
+    run_early_tests();
+
+    // Initialize memory management (frame allocator + heap + kernel page table)
+    mm::init();
+    println!("Hello, world!");
+
+    #[cfg(test)]
+    crate::test_main();
+
+    // 初始化工作
+    trap::init_boot_trap();
+    timer::init();
+    unsafe { intr::enable_interrupts() };
+
+    rest_init();
+}
+
+/// 清除 BSS 段，将其全部置零
+/// BSS 段包含所有未初始化的静态变量
+/// 在进入 Rust 代码之前调用此函数非常重要
+fn clear_bss() {
+    unsafe extern "C" {
+        fn sbss();
+        fn ebss();
+    }
+
+    let sbss_paddr = unsafe { vaddr_to_paddr(sbss as usize) };
+    let ebss_paddr = unsafe { vaddr_to_paddr(ebss as usize) };
+
+    (sbss_paddr..ebss_paddr).for_each(|a| unsafe {
+        // 访问物理地址需要通过 paddr_to_vaddr 转换
+        let va = crate::arch::mm::paddr_to_vaddr(a);
+        (va as *mut u8).write_volatile(0)
+    });
 }

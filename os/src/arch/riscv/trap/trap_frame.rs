@@ -1,7 +1,5 @@
 use riscv::register::sstatus;
 
-use crate::arch::kernel;
-
 /// 陷阱帧结构体，保存寄存器状态
 #[repr(C)] // 确保 Rust 不会重新排列字段
 #[derive(Debug, Clone, Copy)]

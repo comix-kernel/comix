@@ -1,4 +1,4 @@
-//! constants for the operating system (platform-independent)
+//! 平台无关的常量
 #![allow(unused)]
 
 // about memory management
