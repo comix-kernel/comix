@@ -20,4 +20,13 @@ impl Context {
             s: [0; 12],
         }
     }
+
+    /// 设置内核线程的初始上下文
+    /// 参数:
+    /// * `entry`: 线程入口地址
+    /// * `kstack_top`: 内核栈顶地址
+    pub fn set_kernel_thread_context(&mut self, entry: usize, kstack_top: usize) {
+        self.sp = kstack_top;
+        self.ra = entry;
+    }
 }

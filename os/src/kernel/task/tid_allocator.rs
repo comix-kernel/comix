@@ -1,3 +1,5 @@
+//! 简单的任务ID分配器实现
+
 use core::sync::atomic::AtomicU32;
 
 /// 简单的任务ID分配器。
