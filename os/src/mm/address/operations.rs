@@ -54,7 +54,7 @@ pub trait CalcOps:
 {
 }
 
-/// [impl_calc_ops!] 宏
+/// `impl_calc_ops!` 宏
 /// ---------------------
 /// 快速为给定类型实现所有 [CalcOps] 所需的 Trait 方法。
 /// 这些实现通过先转换为 usize 进行计算，然后将结果转回类型来完成。
