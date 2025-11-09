@@ -25,10 +25,10 @@ mod test;
 mod vfs;
 #[macro_use]
 mod log;
+use crate::arch::boot::rest_init;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::arch::timer;
 use crate::arch::trap;
-use crate::kernel::rest_init;
 use crate::sbi::shutdown;
 use core::arch::global_asm;
 use core::panic::PanicInfo;

@@ -1,3 +1,11 @@
+//! 任务管理器模块
+//!
+//! 该模块定义了任务管理器的接口和实现
+//! 任务管理器负责管理系统中的所有任务
+//! 包括任务的创建、销毁和查找等功能
+//! 内部维护一个任务映射表，使用任务 ID 作为键
+//! 并提供分配唯一任务 ID 的功能
+//! 注意：该模块的实例应当被包装在适当的同步原语中以确保线程安全
 use alloc::collections::btree_map::BTreeMap;
 
 use crate::kernel::task::SharedTask;
@@ -10,6 +18,8 @@ lazy_static! {
     pub static ref TASK_MANAGER: SpinLock<TaskManager> = SpinLock::new(TaskManager::new());
 }
 
+/// 任务管理器接口
+/// 定义了任务管理器应实现的基本功能
 pub trait TaskManagerTrait {
     /// 创建一个新的任务管理器实例
     /// 返回值: TaskManager 结构体

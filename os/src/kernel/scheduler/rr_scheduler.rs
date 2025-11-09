@@ -1,3 +1,6 @@
+//! 轮转调度器模块
+//!
+//! 实现了一个简单的轮转调度器（Round-Robin Scheduler）
 use crate::{
     arch::kernel::context::Context,
     kernel::{

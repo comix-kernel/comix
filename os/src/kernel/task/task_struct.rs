@@ -1,4 +1,5 @@
 //! 任务结构体定义
+//!
 //! 包含任务的核心信息，如上下文、状态、内存空间等
 #![allow(dead_code)]
 use core::{
@@ -6,11 +7,13 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use alloc::{sync::Arc, vec::Vec};
-use riscv::register::sstatus;
+use alloc::sync::Arc;
 
 use crate::{
-    arch::{constant::STACK_ALIGN_MASK, kernel::context::Context, trap::TrapFrame},
+    arch::{
+        kernel::{context::Context, task::setup_stack_layout},
+        trap::TrapFrame,
+    },
     kernel::task::{forkret, task_state::TaskState, terminate_task},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
@@ -23,7 +26,6 @@ use crate::{
 /// 存放任务的核心信息
 /// OPTIMIZE: 简单起见目前的设计中，Task 结构体包含了所有信息，包括调度相关的信息和资源管理相关的信息。
 ///           未来可以考虑将其拆分为 TaskInfo 和 TaskStruct 两个部分，以提高访问效率和模块化程度。
-/// TODO: 任务的更多字段和方法待实现，由于部分相关子系统尚未实现，暂时留空
 #[derive(Debug)]
 pub struct Task {
     /// 任务的上下文信息，用于任务切换
@@ -46,10 +48,6 @@ pub struct Task {
     pub ppid: u32,
     /// 内核栈基址
     pub kstack_base: usize,
-    /// 内核栈跟踪器
-    pub kstack_tracker: FrameRangeTracker,
-    /// 任务的 TrapFrame 跟踪器
-    pub trap_frame_tracker: FrameTracker,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
     pub trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 任务的内存空间
@@ -64,6 +62,10 @@ pub struct Task {
     /// 存储线程函数的返回值，通常是一个指针大小的值 (usize)
     /// 对应于 pthread_join 的 void*
     pub return_value: Option<usize>,
+    /// 内核栈跟踪器
+    kstack_tracker: FrameRangeTracker,
+    /// 任务的 TrapFrame 跟踪器
+    trap_frame_tracker: FrameTracker,
 }
 
 impl Task {
@@ -87,32 +89,13 @@ impl Task {
     ) -> Self {
         let mut task = Self::new(tid, pid, ppid, kstack_tracker, trap_frame_tracker, None);
         let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
-        let mut sstatus = sstatus::read();
-        sstatus.set_sie(false);
-        sstatus.set_spie(true);
-        sstatus.set_spp(sstatus::SPP::Supervisor);
-        task.context.sp = task.kstack_base;
-        task.context.ra = forkret as usize;
+        task.context
+            .set_kernel_thread_context(forkret as usize, task.kstack_base);
+        // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
         unsafe {
-            // 暂时用tp寄存器保存pid
-            (*tf).x4_tp = task.pid as usize;
-            (*tf).sepc = entry;
-            (*tf).sstatus = sstatus.bits();
-            // 内核线程的栈指针初始化为内核栈顶
-            (*tf).x2_sp = task.kstack_base;
-            (*tf).kernel_sp = task.kstack_base;
-            (*tf).x1_ra = terminate_task as usize;
+            (*tf).set_kernel_trap_frame(entry, terminate_task as usize, task.kstack_base);
         }
         task
-        // debug 输出任务创建信息
-        // println!(
-        //     "Task {}: init_kernel_thread_context: stack_base={:#x},
-        //     stack.end={:#x}, tf={:#?}",
-        //     self.tid,
-        //     self.kstack_base,
-        //     self.context.sp,
-        //     unsafe { *tf }
-        // );
     }
 
     /// 创建一个新的用户任务
@@ -146,203 +129,64 @@ impl Task {
     /// * `sp`: 新程序的栈指针
     /// * `argv`: 传递给新程序的参数列表
     /// * `envp`: 传递给新程序的环境变量列表
-    // （高地址 - 栈底）
-    // +-----------------------+
-    // | ...                   |
-    // +-----------------------+
-    // | "USER=john"           | <-- envp[2] 指向这里
-    // +-----------------------+
-    // | "HOME=/home/john"     | <-- envp[1] 指向这里
-    // +-----------------------+
-    // | "SHELL=/bin/bash"     | <-- envp[0] 指向这里
-    // +-----------------------+
-    // | "hello world"         | <-- argv[3] 指向这里
-    // +-----------------------+
-    // | "arg2"                | <-- argv[2] 指向这里
-    // +-----------------------+
-    // | "arg1"                | <-- argv[1] 指向这里
-    // +-----------------------+
-    // | "./stack_layout"      | <-- argv[0] 指向这里
-    // +-----------------------+     <--- 字符串存储区域开始
-    // | ...                   |
-    // +-----------------------+     <--- 进入 main 时的栈指针 (sp) 附近
-    // | char* envp[0] (NULL)  |
-    // +-----------------------+
-    // | char* envp[2]         | --> 指向上面的 "USER=john"
-    // | char* envp[1]         | --> 指向上面的 "HOME=/home/john"
-    // | char* envp[0]         | --> 指向上面的 "SHELL=/bin/bash"
-    // +-----------------------+
-    // | char* argv[argc] (NULL)|
-    // +-----------------------+
-    // | char* argv[3]         | --> 指向上面的 "hello world"
-    // | char* argv[2]         | --> 指向上面的 "arg2"
-    // | char* argv[1]         | --> 指向上面的 "arg1"
-    // | char* argv[0]         | --> 指向上面的 "./stack_layout"
-    // +-----------------------+
-    // | int argc              | // 实际上在 a0 寄存器中
-    // +-----------------------+
-    // | Return Address        |
-    // +-----------------------+     <--- main 函数的栈帧开始
-    // （低地址 - 栈顶）
     pub fn execve(
         &mut self,
         new_memory_space: Arc<MemorySpace>,
         entry_point: usize,
-        sp_high: usize, // 新栈的最高地址
+        sp_high: usize,
         argv: &[&str],
         envp: &[&str],
     ) {
-        // 1. 准备返回到 U 模式
-        let mut sstatus_val = sstatus::read();
-        sstatus_val.set_spp(sstatus::SPP::User);
-        sstatus_val.set_sie(false);
-        sstatus_val.set_spie(true);
-
-        // 2. 切换任务的地址空间对象
+        // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
 
         let tf_ptr = self.trap_frame_ptr.load(Ordering::SeqCst);
 
-        let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
-        let mut env_ptrs: Vec<usize> = Vec::with_capacity(envp.len());
-        let mut current_sp = sp_high;
-
         // 注意：以下拷贝时对sp进行的操作均要求已经可以访问用户栈空间
         //      也就是说，new_memory_space 已经被激活（切换 satp）
         //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
+        // 2. 设置用户栈布局，包含命令行参数和环境变量
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(sp_high, argv, envp);
 
-        // --- 拷贝字符串数据 (从高地址向低地址压栈) ---
-
-        // 在S态写用户页前，临时开启 SUM
-        unsafe {
-            // 若 riscv crate 提供该API，请使用它；否则参见下面的内联汇编备选
-            sstatus::set_sum();
-        }
-
-        // 环境变量 (envp)
-        for &env in envp.iter().rev() {
-            let bytes = env.as_bytes();
-            current_sp -= bytes.len() + 1; // 预留 NUL
-            unsafe {
-                ptr::copy_nonoverlapping(bytes.as_ptr(), current_sp as *mut u8, bytes.len());
-                (current_sp as *mut u8).add(bytes.len()).write(0); // NUL 终止符
-            }
-            env_ptrs.push(current_sp); // 存储字符串的地址
-        }
-
-        // 命令行参数 (argv)
-        for &arg in argv.iter().rev() {
-            let bytes = arg.as_bytes();
-            current_sp -= bytes.len() + 1; // 预留 NUL
-            unsafe {
-                ptr::copy_nonoverlapping(bytes.as_ptr(), current_sp as *mut u8, bytes.len());
-                (current_sp as *mut u8).add(bytes.len()).write(0); // NUL 终止符
-            }
-            arg_ptrs.push(current_sp); // 存储字符串的地址
-        }
-
-        // --- 对齐到字大小 (确保指针数组从对齐的地址开始) ---
-        current_sp &= !(size_of::<usize>() - 1);
-
-        // --- 构建 argc, argv, envp 数组 (ABI 标准布局: [argc] -> [argv] -> [NULL] -> [envp] -> [NULL]) ---
-        // 注意：栈向下增长，所以压栈顺序是从 envp NULL 往回压到 argc
-
-        // 1. 写入 envp NULL 终止符
-        current_sp -= size_of::<usize>();
-        unsafe {
-            ptr::write(current_sp as *mut usize, 0);
-        }
-
-        // 2. 写入 envp 指针数组（逆序写入，使 envp[0] 处于最低地址）
-        // env_ptrs 已经是逆序 (envp[n-1] ... envp[0])
-        for &p in env_ptrs.iter() {
-            current_sp -= size_of::<usize>();
-            unsafe {
-                ptr::write(current_sp as *mut usize, p);
-            }
-        }
-        let envp_vec_ptr = current_sp; // envp 数组的起始地址 (envp[0] 的地址)
-
-        // 3. 写入 argv NULL 终止符
-        current_sp -= size_of::<usize>();
-        unsafe {
-            ptr::write(current_sp as *mut usize, 0);
-        }
-
-        // 4. 写入 argv 指针数组（逆序写入，使 argv[0] 处于最低地址）
-        // arg_ptrs 已经是逆序 (argv[n-1] ... argv[0])
-        for &p in arg_ptrs.iter() {
-            current_sp -= size_of::<usize>();
-            unsafe {
-                ptr::write(current_sp as *mut usize, p);
-            }
-        }
-        let argv_vec_ptr = current_sp; // argv 数组的起始地址 (argv[0] 的地址)
-
-        // 5. 写入 argc
-        let argc = argv.len();
-        current_sp -= size_of::<usize>();
-        unsafe {
-            ptr::write(current_sp as *mut usize, argc);
-        }
-
-        // 拷贝完成，恢复 SUM
-        unsafe {
-            sstatus::clear_sum();
-        }
-
-        // 6. 最终 16 字节对齐（应用到最终栈指针 current_sp）
-        current_sp &= !STACK_ALIGN_MASK;
-        // 4. 配置 TrapFrame (新的上下文)
+        // 3. 配置 TrapFrame (新的上下文)
+        // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
-
-            // 设置用户陷入内核时使用的内核栈指针
-            (*tf_ptr).kernel_sp = self.kstack_base;
-
-            // 设置程序执行的入口地址 (PC)
-            (*tf_ptr).sepc = entry_point;
-
-            // 设置权限状态 SSTATUS
-            (*tf_ptr).sstatus = sstatus_val.bits();
-
-            // 用户栈指针 (最终的 16 字节对齐地址)
-            (*tf_ptr).x2_sp = current_sp;
-
-            // main(argc, argv, envp) 约定：a0=argc, a1=argv, a2=envp
-            (*tf_ptr).x10_a0 = argc;
-            (*tf_ptr).x11_a1 = argv_vec_ptr;
-            (*tf_ptr).x12_a2 = envp_vec_ptr;
-
-            // 清零 ra，避免意外返回路径，用户态程序应通过正常的退出机制结束
-            (*tf_ptr).x1_ra = 0;
+            (*tf_ptr).set_user_trap_frame(
+                entry_point,
+                new_sp,
+                self.kstack_base,
+                argc,
+                argv_vec_ptr,
+                envp_vec_ptr,
+            );
         }
     }
 
-    /// FIXME: 检查寄存器设置
-    /// 为用户进程在其内核栈上构造初始 TrapFrame，并设置 Context 指向 trampoline
-    /// # 参数
-    /// * `user_entry`: 用户态入口地址
-    /// * `trampoline`: 内核态恢复到用户态的 trampoline 函数地址
-    pub unsafe fn init_user_trapframe_and_context(&mut self, user_entry: usize, trampoline: usize) {
-        let kstack_top = self.kstack_base;
-        let tf_size = size_of::<TrapFrame>();
-        let tf_ptr = (kstack_top - tf_size) as *mut TrapFrame;
+    // /// FIXME: 检查寄存器设置
+    // /// 为用户进程在其内核栈上构造初始 TrapFrame，并设置 Context 指向 trampoline
+    // /// # 参数
+    // /// * `user_entry`: 用户态入口地址
+    // /// * `trampoline`: 内核态恢复到用户态的 trampoline 函数地址
+    // pub unsafe fn init_user_trapframe_and_context(&mut self, user_entry: usize, trampoline: usize) {
+    //     let kstack_top = self.kstack_base;
+    //     let tf_size = size_of::<TrapFrame>();
+    //     let tf_ptr = (kstack_top - tf_size) as *mut TrapFrame;
 
-        // 用零化的 TrapFrame 起始值，然后设置 epc（用户PC）等必要字段
-        let mut tf: TrapFrame = unsafe { core::mem::zeroed() };
-        tf.sepc = user_entry;
-        // 如果需要，可在这里设置初始用户寄存器 a0/a1 等
-        unsafe { ptr::write(tf_ptr, tf) };
+    //     // 用零化的 TrapFrame 起始值，然后设置 epc（用户PC）等必要字段
+    //     let mut tf: TrapFrame = unsafe { core::mem::zeroed() };
+    //     tf.sepc = user_entry;
+    //     // 如果需要，可在这里设置初始用户寄存器 a0/a1 等
+    //     unsafe { ptr::write(tf_ptr, tf) };
 
-        // 记录 TrapFrame 指针（可用 AtomicPtr，也可以省略并按约定计算）
-        self.trap_frame_ptr.store(tf_ptr, Ordering::SeqCst);
+    //     // 记录 TrapFrame 指针（可用 AtomicPtr，也可以省略并按约定计算）
+    //     self.trap_frame_ptr.store(tf_ptr, Ordering::SeqCst);
 
-        // 为调度器准备最小 Context：sp 指向栈顶，ra 指向 trampoline（trampoline 会从 tf_ptr 恢复并返回用户态）
-        self.context.sp = kstack_top;
-        self.context.ra = trampoline;
-    }
+    //     // 为调度器准备最小 Context：sp 指向栈顶，ra 指向 trampoline（trampoline 会从 tf_ptr 恢复并返回用户态）
+    //     self.context.sp = kstack_top;
+    //     self.context.ra = trampoline;
+    // }
 
     /// 判断该任务是否为内核线程
     pub fn is_kernel_thread(&self) -> bool {
@@ -366,6 +210,7 @@ impl Task {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
         // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
+        // Safety: 该内存页已被分配且可写
         unsafe {
             let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize()
                 - size_of::<u8>()
@@ -467,27 +312,27 @@ mod tests {
         kassert!(t.is_kernel_thread()); // 仍是内核线程（没有用户地址空间）
     });
 
-    // init_user_trapframe_and_context：验证重新定位 trap_frame 指针与入口设置
-    test_case!(test_init_user_trapframe_and_context, {
-        let mut t = Task::new_dummy_task(3);
-        let original_tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst) as usize;
-        let user_entry = 0x5555_8888usize;
-        let trampoline = 0xFFFF_FFC0_8020_9000usize;
-        unsafe {
-            t.init_user_trapframe_and_context(user_entry, trampoline);
-        }
-        let new_tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst) as usize;
-        // 新 trap_frame 应位于内核栈顶下方 size_of::<TrapFrame>()
-        let expect_ptr = t.kstack_base - size_of::<TrapFrame>();
-        kassert!(new_tf_ptr == expect_ptr);
-        kassert!(new_tf_ptr != original_tf_ptr);
-        // 校验写入的 sepc
-        let tf = unsafe { &*t.trap_frame_ptr.load(Ordering::SeqCst) };
-        kassert!(tf.sepc == user_entry);
-        // Context 设置
-        kassert!(t.context.sp == t.kstack_base);
-        kassert!(t.context.ra == trampoline);
-    });
+    // // init_user_trapframe_and_context：验证重新定位 trap_frame 指针与入口设置
+    // test_case!(test_init_user_trapframe_and_context, {
+    //     let mut t = Task::new_dummy_task(3);
+    //     let original_tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst) as usize;
+    //     let user_entry = 0x5555_8888usize;
+    //     let trampoline = 0xFFFF_FFC0_8020_9000usize;
+    //     unsafe {
+    //         t.init_user_trapframe_and_context(user_entry, trampoline);
+    //     }
+    //     let new_tf_ptr = t.trap_frame_ptr.load(Ordering::SeqCst) as usize;
+    //     // 新 trap_frame 应位于内核栈顶下方 size_of::<TrapFrame>()
+    //     let expect_ptr = t.kstack_base - size_of::<TrapFrame>();
+    //     kassert!(new_tf_ptr == expect_ptr);
+    //     kassert!(new_tf_ptr != original_tf_ptr);
+    //     // 校验写入的 sepc
+    //     let tf = unsafe { &*t.trap_frame_ptr.load(Ordering::SeqCst) };
+    //     kassert!(tf.sepc == user_entry);
+    //     // Context 设置
+    //     kassert!(t.context.sp == t.kstack_base);
+    //     kassert!(t.context.ra == trampoline);
+    // });
 
     // // execve 前后的 TrapFrame 基本字段（不访问用户空间，只验证写入逻辑）
     // test_case!(test_execve_basic_trapframe_setup, {
