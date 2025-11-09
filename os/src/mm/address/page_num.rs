@@ -100,7 +100,7 @@ pub trait PageNum:
     }
 }
 
-/// [impl_page_num!] 宏
+/// `impl_page_num!` 宏
 /// ---------------------
 /// 快速为给定类型实现 `UsizeConvert` 和 `PageNum` Trait。
 ///

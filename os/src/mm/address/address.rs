@@ -103,7 +103,7 @@ pub trait Address:
     }
 }
 
-/// [impl_address!] 宏
+/// `impl_address!` 宏
 /// ---------------------
 /// 快速为地址类型实现所有必需的 Trait: [UsizeConvert], [CalcOps], [AlignOps], [Address]。
 ///
