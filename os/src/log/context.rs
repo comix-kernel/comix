@@ -1,31 +1,30 @@
-//! Log context collection
+//! 日志上下文收集
 //!
-//! This module collects contextual information (CPU ID, task ID, timestamp)
-//! for each log entry.
+//! 该模块为每个日志条目收集**上下文信息**（CPU ID、任务 ID、时间戳）。
 
 use crate::arch::timer;
 
-/// Contextual information for a log entry
+/// 日志条目的上下文信息
 pub(super) struct LogContext {
-    /// ID of the CPU that generated the log
+    /// 生成此日志的 CPU ID
     pub(super) cpu_id: usize,
-    /// ID of the task/process that generated the log
+    /// 生成此日志的任务/进程 ID
     pub(super) task_id: u32,
-    /// Timestamp when the log was created
+    /// 创建日志时的时间戳
     pub(super) timestamp: usize,
 }
 
-/// Collects context information for a new log entry
+/// 为新的日志条目收集上下文信息
 ///
-/// # Implementation Status
+/// # 实现状态
 ///
-/// - **Timestamp**: Implemented via `arch::timer::get_time()`
-/// - **CPU ID**: TODO - needs multi-core support implementation
-/// - **Task ID**: TODO - needs task management integration
+/// - **时间戳**: 已通过 `arch::timer::get_time()` 实现
+/// - **CPU ID**: 待办事项 (TODO) - 需要多核支持实现
+/// - **任务 ID**: 待办事项 (TODO) - 需要任务管理集成
 pub(super) fn collect_context() -> LogContext {
     LogContext {
-        cpu_id: 0,  // TODO: replace with current cpu id
-        task_id: 0, // TODO: replace with current task id
+        cpu_id: 0,  // TODO: 替换为当前 CPU ID
+        task_id: 0, // TODO: 替换为当前任务 ID
         timestamp: timer::get_time(),
     }
 }

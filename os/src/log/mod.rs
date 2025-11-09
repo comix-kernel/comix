@@ -1,72 +1,63 @@
-//! Kernel logging subsystem
+//! 内核日志子系统
 //!
-//! This module provides a Linux kernel-style logging system with lock-free
-//! ring buffer implementation for bare-metal environments.
+//! 该模块提供了一个类似 **Linux 内核风格的日志系统**，并在裸机环境中实现了**无锁环形缓冲区**。
 //!
-//! # Components
+//! # 组件
 //!
-//! - [`buffer`]: Lock-free ring buffer for log storage
-//! - [`config`]: Configuration constants (buffer size, message length limits)
-//! - [`context`]: Context collection (CPU ID, task ID, timestamp)
-//! - [`core`]: Core logging implementation (LogCore)
-//! - [`entry`]: Log entry structure and serialization
-//! - [`level`]: Log level definitions (Emergency to Debug)
-//! - [`macros`]: User-facing logging macros (`pr_info!`, `pr_err!`, etc.)
+//! - [`buffer`]: 用于日志存储的无锁环形缓冲区
+//! - [`config`]: 配置常量（缓冲区大小、消息长度限制）
+//! - [`context`]: 上下文信息收集（CPU ID、任务 ID、时间戳）
+//! - [`core`]: 核心日志实现 (LogCore)
+//! - [`entry`]: 日志条目结构和序列化
+//! - [`level`]: 日志级别定义（从 Emergency 到 Debug）
+//! - [`macros`]: 面向用户的日志宏 (`pr_info!`, `pr_err!`, 等)
 //!
-//! # Design Overview
+//! # 设计概览
 //!
-//! ## Dual-Output Strategy
+//! ## 双输出策略
 //!
-//! The logging system employs a two-tier approach:
+//! 日志系统采用两层方法：
 //!
-//! 1. **Immediate Console Output**: Logs meeting the console level threshold
-//!    (default: Warning and above) are printed directly to the console for
-//!    urgent visibility.
-//! 2. **Ring Buffer Storage**: All logs meeting the global level threshold
-//!    (default: Info and above) are written to a lock-free ring buffer for
-//!    asynchronous consumption or post-mortem analysis.
+//! 1. **即时控制台输出**：达到控制台级别阈值（默认：Warning 及以上）的日志会**直接打印到控制台**，以实现紧急可见性。
+//! 2. **环形缓冲区存储**：所有达到全局级别阈值（默认：Info 及以上）的日志都会被写入**无锁环形缓冲区**，用于异步消费或事后分析。
 //!
-//! ## Performance Characteristics
+//! ## 性能特点
 //!
-//! - **Lock-Free Concurrency**: Uses atomic operations (fetch_add, CAS) instead
-//!   of mutexes, enabling multi-producer logging without blocking.
-//! - **Early Filtering**: Log level checks occur at macro expansion time,
-//!   avoiding format string evaluation for disabled levels.
-//! - **Fixed-Size Allocation**: No dynamic memory allocation; all structures
-//!   use compile-time-known sizes suitable for bare-metal environments.
-//! - **Cache Optimization**: Reader/writer data structures are cache-line
-//!   padded (64 bytes) to prevent false sharing on multi-core systems.
-//! - **Zero-Copy Where Possible**: Log entries are constructed in-place when
-//!   feasible to minimize memory operations.
+//! - **无锁并发**：使用原子操作（fetch_add, CAS）而非互斥锁，支持多生产者日志记录而**不会阻塞**。
+//! - **早期过滤**：日志级别检查在宏展开时发生，避免对禁用级别的日志进行格式化字符串评估。
+//! - **固定大小分配**：**没有动态内存分配**；所有结构体使用编译时已知的大小，适用于裸机环境。
+//! - **缓存优化**：读写器数据结构经过缓存行填充（64 字节），以防止多核系统上的**伪共享**。
+//! - **尽可能零拷贝**：在可行的情况下，日志条目是**就地构造**的，以最大限度地减少内存操作。
 //!
-//! ## Architecture-Specific Integration
+//! ## 架构特定集成
 //!
-//! The logging system integrates with architecture-specific components:
+//! 日志系统与架构特定组件集成：
 //!
-//! - **Timer**: Timestamp collection via `arch::timer::get_time()`
-//! - **Console**: Output via `console::Stdout` (typically UART)
-//! - **CPU ID**: Multi-core support (TODO: implement `arch::cpu::current_cpu_id()`)
-//! - **Task ID**: Task tracking (TODO: implement task management integration)
+//! - **定时器**：通过 `arch::timer::get_time()` 收集时间戳
+//! - **控制台**：通过 `console::Stdout` 输出（通常是 UART）
+//! - **CPU ID**：多核支持（TODO: 实现 `arch::cpu::current_cpu_id()`）
+//! - **任务 ID**：任务跟踪（TODO: 实现任务管理集成）
 //!
-//! # Usage Example
+//! # 使用示例
 //!
 //! ```rust
 //! use crate::log::*;
 //!
-//! // Basic logging
-//! pr_info!("Kernel initialized");
-//! pr_err!("Failed to allocate {} bytes", size);
+//! // 基本日志记录
+//! pr_info!("内核已初始化");
+//! pr_err!("分配 {} 字节失败", size);
 //!
-//! // Configure log levels
-//! set_global_level(LogLevel::Debug);  // Record all levels
-//! set_console_level(LogLevel::Error); // Only print errors and above
+//! // 配置日志级别
+//! set_global_level(LogLevel::Debug);  // 记录所有级别
+//! set_console_level(LogLevel::Error); // 只打印错误及以上的级别
 //!
-//! // Read buffered logs
+//! // 读取缓冲的日志
 //! while let Some(entry) = read_log() {
-//!     // Process log entry
+//!     // 处理日志条目
 //! }
 //! ```
 
+#![allow(unused)]
 mod buffer;
 mod config;
 mod context;
@@ -78,63 +69,63 @@ pub mod macros;
 pub use entry::LogEntry;
 pub use level::LogLevel;
 
-// ========== Global Singleton ==========
+// ========== 全局单例 ==========
 
-/// Global logging system instance
+/// 全局日志系统实例
 ///
-/// Initialized at compile time using const fn, zero runtime overhead.
-/// All logging macros and public APIs delegate to this instance.
+/// 使用 const fn 在编译时初始化，零运行时开销。
+/// 所有日志宏和公共 API 都委托给此实例。
 static GLOBAL_LOG: log_core::LogCore = log_core::LogCore::default();
 
-// ========== Public API (thin wrappers) ==========
+// ========== 公共 API (精简封装) ==========
 
-/// Core logging implementation (called by macros)
+/// 核心日志实现（由宏调用）
 #[doc(hidden)]
 pub fn log_impl(level: LogLevel, args: core::fmt::Arguments) {
     GLOBAL_LOG._log(level, args);
 }
 
-/// Checks if a log level is enabled (called by macros)
+/// 检查日志级别是否启用（由宏调用）
 #[doc(hidden)]
 pub fn is_level_enabled(level: LogLevel) -> bool {
     level as u8 <= GLOBAL_LOG._get_global_level() as u8
 }
 
-/// Reads the next log entry from the buffer
+/// 从缓冲区读取下一个日志条目
 pub fn read_log() -> Option<LogEntry> {
     GLOBAL_LOG._read_log()
 }
 
-/// Returns the number of unread log entries
+/// 返回未读日志条目的数量
 pub fn log_len() -> usize {
     GLOBAL_LOG._log_len()
 }
 
-/// Returns the count of dropped logs
+/// 返回已丢弃日志的计数
 pub fn log_dropped_count() -> usize {
     GLOBAL_LOG._log_dropped_count()
 }
 
-/// Sets the global log level threshold
+/// 设置全局日志级别阈值
 pub fn set_global_level(level: LogLevel) {
     GLOBAL_LOG._set_global_level(level);
 }
 
-/// Gets the current global log level
+/// 获取当前全局日志级别
 pub fn get_global_level() -> LogLevel {
     GLOBAL_LOG._get_global_level()
 }
 
-/// Sets the console output level threshold
+/// 设置控制台输出级别阈值
 pub fn set_console_level(level: LogLevel) {
     GLOBAL_LOG._set_console_level(level);
 }
 
-/// Gets the current console output level
+/// 获取当前控制台输出级别
 pub fn get_console_level() -> LogLevel {
     GLOBAL_LOG._get_console_level()
 }
 
-// ========== Test module ==========
+// ========== 测试模块 ==========
 #[cfg(test)]
 mod tests;

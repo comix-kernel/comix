@@ -1,8 +1,7 @@
-//! Log system core implementation
+//! 日志系统核心实现
 //!
-//! This module encapsulates all logging state and logic into a single
-//! `LogCore` struct that can be instantiated independently for testing
-//! while maintaining the same lock-free, zero-allocation design.
+//! 该模块将所有日志状态和逻辑封装到一个单独的 `LogCore` 结构体中，
+//! 可以在保持**无锁、零分配**设计的同时，独立实例化用于测试。
 
 use crate::arch::lib::console::Stdout;
 
@@ -14,40 +13,40 @@ use super::level::LogLevel;
 use core::fmt;
 use core::sync::atomic::{AtomicU8, Ordering};
 
-/// Core logging system
+/// 核心日志系统
 ///
-/// Encapsulates the ring buffer and filtering state. Can be instantiated
-/// for testing or used as a global singleton in production.
+/// 封装了环形缓冲区和过滤状态。可以为测试目的而实例化，
+/// 或在生产环境中用作全局单例。
 ///
-/// # Thread Safety
+/// # 线程安全性
 ///
-/// All methods use atomic operations for synchronization, making the entire
-/// struct safe to share across threads without external locking.
+/// 所有方法都使用原子操作进行同步，使得整个结构体在
+/// 线程之间安全共享，无需外部加锁。
 pub struct LogCore {
-    /// Lock-free ring buffer for log storage
+    /// 用于日志存储的无锁环形缓冲区
     buffer: GlobalLogBuffer,
 
-    /// Global log level threshold (controls buffering)
+    /// 全局日志级别阈值（控制日志是否缓冲）
     global_level: AtomicU8,
 
-    /// Console output level threshold (controls immediate printing)
+    /// 控制台输出级别阈值（控制是否立即打印）
     console_level: AtomicU8,
 }
 
 impl LogCore {
-    /// Creates a new LogCore instance with default log levels
+    /// 使用默认日志级别创建新的 LogCore 实例
     ///
-    /// This is a `const fn` that can be evaluated at compile time,
-    /// allowing for zero-cost static initialization.
+    /// 这是一个 `const fn`，可以在编译时进行评估，
+    /// 从而实现零开销的静态初始化。
     ///
-    /// Uses default levels from config:
-    /// - Global level: Info (logs Debug are filtered)
-    /// - Console level: Warning (only warnings and errors printed)
+    /// 使用配置中的默认级别：
+    /// - 全局级别: Info (Debug 级别的日志将被过滤)
+    /// - 控制台级别: Warning (只打印 Warning 和 Error 级别的日志)
     ///
-    /// # Examples
+    /// # 示例
     ///
     /// ```rust
-    /// // Global singleton (compile-time init)
+    /// // 全局单例 (编译时初始化)
     /// static GLOBAL_LOG: LogCore = LogCore::default();
     /// ```
     pub const fn default() -> Self {
@@ -58,23 +57,23 @@ impl LogCore {
         }
     }
 
-    /// Creates a new LogCore instance with custom log levels
+    /// 使用自定义日志级别创建新的 LogCore 实例
     ///
-    /// This constructor allows specifying both global and console log levels
-    /// at creation time, which is particularly useful for testing.
+    /// 此构造函数允许在创建时指定全局和控制台日志级别，
+    /// 这对于测试尤其有用。
     ///
-    /// # Parameters
+    /// # 参数
     ///
-    /// * `global_level` - Minimum level for logs to be buffered
-    /// * `console_level` - Minimum level for logs to be printed to console
+    /// * `global_level` - 日志被缓冲的最低级别
+    /// * `console_level` - 日志被打印到控制台的最低级别
     ///
-    /// # Examples
+    /// # 示例
     ///
     /// ```rust
-    /// // Test instance with Debug level enabled
+    /// // 启用 Debug 级别的测试实例
     /// let test_log = LogCore::new(LogLevel::Debug, LogLevel::Warning);
     ///
-    /// // Production instance with custom levels
+    /// // 使用自定义级别的生产实例
     /// let log = LogCore::new(LogLevel::Info, LogLevel::Error);
     /// ```
     pub fn new(global_level: LogLevel, console_level: LogLevel) -> Self {
@@ -85,34 +84,33 @@ impl LogCore {
         }
     }
 
-    /// Core logging implementation
+    /// 核心日志记录实现
     ///
-    /// This method is called by both production macros (via GLOBAL_LOG)
-    /// and test code (via local instances).
+    /// 此方法由生产宏（通过 GLOBAL_LOG）和测试代码（通过本地实例）调用。
     ///
-    /// # Lock-Free Operation
+    /// # 无锁操作
     ///
-    /// 1. Atomic read of global_level (Acquire)
-    /// 2. Early return if filtered
-    /// 3. Collect context (timestamp, CPU ID, task ID)
-    /// 4. Create log entry (stack allocation)
-    /// 5. Atomic buffer write (lock-free)
-    /// 6. Optional console output (if meets console_level)
+    /// 1. 原子读取 global_level (Acquire)
+    /// 2. 如果被过滤，则提前返回
+    /// 3. 收集上下文 (时间戳、CPU ID、任务 ID)
+    /// 4. 创建日志条目 (栈分配)
+    /// 5. 原子缓冲区写入 (无锁)
+    /// 6. 可选的控制台输出 (如果满足 console_level)
     ///
-    /// # Parameters
+    /// # 参数
     ///
-    /// * `level` - Log level (Emergency to Debug)
-    /// * `args` - Format arguments from `format_args!`
+    /// * `level` - 日志级别 (Emergency 到 Debug)
+    /// * `args` - 来自 `format_args!` 的格式化参数
     pub fn _log(&self, level: LogLevel, args: fmt::Arguments) {
-        // 1. Early filtering (global level)
+        // 1. 早期过滤 (全局级别)
         if !self.is_level_enabled(level) {
             return;
         }
 
-        // 2. Collect context
+        // 2. 收集上下文
         let log_context = context::collect_context();
 
-        // 3. Create log entry
+        // 3. 创建日志条目
         let entry = LogEntry::from_args(
             level,
             log_context.cpu_id,
@@ -121,78 +119,78 @@ impl LogCore {
             args,
         );
 
-        // 4. Write to buffer (lock-free)
+        // 4. 写入缓冲区 (无锁)
         self.buffer.write(&entry);
 
-        // 5. Optional immediate console output
+        // 5. 可选的即时控制台输出
         if self.is_console_level(level) {
             self.direct_print_entry(&entry);
         }
     }
 
-    /// Reads the next log entry from the buffer
+    /// 从缓冲区读取下一个日志条目
     ///
-    /// Returns `None` if no entries are available. This is a lock-free
-    /// single-consumer operation.
+    /// 如果没有可用条目，则返回 `None`。这是一个**无锁**的
+    /// 单消费者操作。
     pub fn _read_log(&self) -> Option<LogEntry> {
         self.buffer.read()
     }
 
-    /// Returns the number of unread log entries
+    /// 返回未读日志条目的数量
     pub fn _log_len(&self) -> usize {
         self.buffer.len()
     }
 
-    /// Returns the count of logs dropped due to buffer overflow
+    /// 返回由于缓冲区溢出而丢弃的日志计数
     pub fn _log_dropped_count(&self) -> usize {
         self.buffer.dropped_count()
     }
 
-    /// Sets the global log level threshold
+    /// 设置全局日志级别阈值
     ///
-    /// Logs with level > threshold will be discarded.
+    /// 级别 > 阈值的日志将被丢弃。
     ///
-    /// # Memory Ordering
+    /// # 内存顺序
     ///
-    /// Uses Release ordering to ensure the new level is visible to all cores.
+    /// 使用 Release 顺序以确保新级别对所有核心可见。
     pub fn _set_global_level(&self, level: LogLevel) {
         self.global_level.store(level as u8, Ordering::Release);
     }
 
-    /// Gets the current global log level
+    /// 获取当前全局日志级别
     pub fn _get_global_level(&self) -> LogLevel {
         let level = self.global_level.load(Ordering::Acquire);
         LogLevel::from_u8(level)
     }
 
-    /// Sets the console output level threshold
+    /// 设置控制台输出级别阈值
     ///
-    /// Only logs with level <= threshold will be immediately printed.
+    /// 只有级别 <= 阈值的日志才会立即打印。
     pub fn _set_console_level(&self, level: LogLevel) {
         self.console_level.store(level as u8, Ordering::Release);
     }
 
-    /// Gets the current console output level
+    /// 获取当前控制台输出级别
     pub fn _get_console_level(&self) -> LogLevel {
         let level = self.console_level.load(Ordering::Acquire);
         LogLevel::from_u8(level)
     }
 
-    // ========== Internal helpers ==========
+    // ========== 内部辅助函数 ==========
 
-    /// Checks if a log level is enabled (global filter)
+    /// 检查日志级别是否启用 (全局过滤器)
     #[inline(always)]
     fn is_level_enabled(&self, level: LogLevel) -> bool {
         level as u8 <= self.global_level.load(Ordering::Acquire)
     }
 
-    /// Checks if a log should be printed to console
+    /// 检查日志是否应该打印到控制台
     #[inline(always)]
     fn is_console_level(&self, level: LogLevel) -> bool {
         level as u8 <= self.console_level.load(Ordering::Acquire)
     }
 
-    /// Prints a log entry directly to the console with ANSI colors
+    /// 使用 ANSI 颜色直接将日志条目打印到控制台
     fn direct_print_entry(&self, entry: &LogEntry) {
         use core::fmt::Write;
 
@@ -209,5 +207,5 @@ impl LogCore {
     }
 }
 
-// Mark as Sync to allow use in static
+// 标记为 Sync 允许在 static 中使用
 unsafe impl Sync for LogCore {}

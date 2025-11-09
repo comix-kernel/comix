@@ -1,30 +1,30 @@
-//! Logging system configuration constants
+//! 日志系统配置常量
 //!
-//! This module defines compile-time configuration parameters for the logging system.
+//! 该模块定义了日志系统的**编译时配置参数**。
 
 #![allow(unused)]
 
-/// Total size of the global log buffer in bytes
+/// 全局日志缓冲区（以字节为单位）的总大小
 ///
-/// The buffer is implemented as a fixed-size ring buffer. When full, new logs
-/// overwrite the oldest entries. With a 16KB buffer and typical entry sizes,
-/// this can store approximately 50-60 log entries.
+/// 缓冲区实现为**固定大小的环形缓冲区**。当缓冲区满时，新日志将
+/// 覆盖最旧的条目。对于一个 16KB 的缓冲区和典型的条目大小，
+/// 大约可以存储 50-60 个日志条目。
 pub(super) const GLOBAL_LOG_BUFFER_SIZE: usize = 16 * 1024; // 16KB
 
-/// Maximum length of a single log message in bytes
+/// 单个日志消息的最大长度（以字节为单位）
 ///
-/// Messages exceeding this length will be truncated. This limit prevents
-/// individual logs from consuming excessive buffer space.
+/// 超过此长度的消息将被**截断**。此限制可防止单个日志占用
+/// 过多的缓冲区空间。
 pub(super) const MAX_LOG_MESSAGE_LENGTH: usize = 256;
 
-/// Default global log level
+/// 默认全局日志级别
 ///
-/// Logs at this level or higher priority will be recorded to the buffer.
-/// Default is `Info`, meaning Debug logs are filtered out by default.
+/// 处于此级别或更高优先级的日志将被记录到缓冲区中。
+/// 默认值为 `Info`，意味着 Debug 日志默认会被过滤掉。
 pub(super) const DEFAULT_LOG_LEVEL: super::level::LogLevel = super::level::LogLevel::Info;
 
-/// Default console output level
+/// 默认控制台输出级别
 ///
-/// Logs at this level or higher priority will be immediately printed to console.
-/// Default is `Warning`, meaning only warnings and errors appear on console by default.
+/// 处于此级别或更高优先级的日志将**立即打印到控制台**。
+/// 默认值为 `Warning`，意味着默认情况下只有警告和错误才会出现在控制台上。
 pub(super) const DEFAULT_CONSOLE_LEVEL: super::level::LogLevel = super::level::LogLevel::Warning;
