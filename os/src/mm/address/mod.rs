@@ -1,47 +1,46 @@
 // HACK: 在一个模块目录/文件的顶层又声明了一个同名子模块，这会造成 “module inception”。
 // 虽然功能上可行，但会引起 API/模块层次混淆，Clippy 建议消除这种重复。
 #![allow(clippy::module_inception)]
-//! Address module
+//! 地址模块
 //!
-//! This module provides abstractions for working with physical and virtual addresses,
-//! as well as page numbers in a memory management system.
+//! 此模块提供了用于处理物理地址和虚拟地址，
+//! 以及内存管理系统中的页码的抽象。
 //!
-//! # Address Types
+//! # 地址类型
 //!
-//! - `Address`: Trait for representing memory addresses (physical or virtual)
-//! - [`Paddr`]: Physical address type
-//! - [`Vaddr`]: Virtual address type
-//! - [`ConvertablePaddr`]: Trait for converting physical addresses to virtual addresses
-//! - `ConvertableVaddr`: Trait for converting virtual addresses to physical addresses
+//! - Address: 表示内存地址（物理或虚拟）的 Trait
+//! - [Paddr]: 物理地址类型
+//! - [Vaddr]: 虚拟地址类型
+//! - [ConvertablePaddr]: 将物理地址转换为虚拟地址的 Trait
+//! - ConvertableVaddr: 将虚拟地址转换为物理地址的 Trait
 //!
-//! # Address Ranges
+//! # 地址范围
 //!
-//! - `AddressRange`: Generic range of addresses
-//! - `PaddrRange`: Type alias for physical address range
-//! - `VaddrRange`: Type alias for virtual address range
-//! - `AddressRangeIterator`: Iterator for address ranges
+//! - AddressRange: 泛型地址范围
+//! - PaddrRange: 物理地址范围的类型别名
+//! - VaddrRange: 虚拟地址范围的类型别名
+//! - AddressRangeIterator: 地址范围的迭代器
 //!
-//! # Page Numbers
+//! # 页码
 //!
-//! - [`PageNum`]: Trait for representing page numbers
-//! - [`Ppn`]: Physical page number
-//! - [`Vpn`]: Virtual page number
+//! - [PageNum]: 表示页码的 Trait
+//! - [Ppn]: 物理页码（Physical Page Number）
+//! - [Vpn]: 虚拟页码（Virtual Page Number）
 //!
-//! # Page Number Ranges
+//! # 页码范围
 //!
-//! - `PageNumRange`: Generic range of page numbers
-//! - [`PpnRange`]: Type alias for physical page number range
-//! - [`VpnRange`]: Type alias for virtual page number range
-//! - `PageNumRangeIterator`: Iterator for page number ranges
+//! - PageNumRange: 泛型页码范围
+//! - [PpnRange]: 物理页码范围的类型别名
+//! - [VpnRange]: 虚拟页码范围的类型别名
+//! - PageNumRangeIterator: 页码范围的迭代器
 //!
-//! # Operations
+//! # 操作
 //!
-//! The module provides three key trait categories:
+//! 此模块提供了三个关键的 Trait 类别：
 //!
-//! - [`UsizeConvert`]: Convert between types and usize
-//! - `CalcOps`: Arithmetic and bitwise operations
-//! - `AlignOps`: Address alignment operations
-
+//! - [UsizeConvert]: 在类型和 usize 之间进行转换
+//! - CalcOps: 算术和位操作
+//! - AlignOps: 地址对齐操作
 mod address;
 mod operations;
 mod page_num;

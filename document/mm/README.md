@@ -121,19 +121,15 @@ Comix 采用**高半核（Higher Half Kernel）**设计，虚拟地址空间分�
         |
 0xFFFF_FFC0_8020_0000 ← VIRTUAL_BASE (内核加载地址)
         |
-0xFFFF_FFC0_0000_0000 ← VADDR_START (内核空间基址)
+地址上半底部 ← VADDR_START (内核空间基址)
 
 物理地址映射: vaddr = paddr | 0xFFFF_FFC0_0000_0000
 
 ═══════════════════════════════════════════════════════════════════
                          低半核（用户空间）
 ═══════════════════════════════════════════════════════════════════
-0xFFFF_FFFF_FFFF_FFFF
+地址下半顶部
         |
-[TRAMPOLINE]              ← usize::MAX - PAGE_SIZE + 1
-[GUARD_PAGE]              ← 未映射的保护页
-[TRAP_CONTEXT]            ← TRAMPOLINE - 2 * PAGE_SIZE
-[GUARD_PAGE]              ← 未映射的保护页
 [USER_STACK]              ← 用户栈区域 (4MB)
         |
         ... (动态扩展空间)
@@ -154,9 +150,7 @@ Comix 采用**高半核（Higher Half Kernel）**设计，虚拟地址空间分�
 - `MEMORY_END = 0x8800_0000` - 物理内存结束地址（128MB，QEMU virt）
 
 *用户空间*：
-- `TRAMPOLINE = usize::MAX - PAGE_SIZE + 1` - 跳板页地址
-- `TRAP_CONTEXT = TRAMPOLINE - 2 * PAGE_SIZE` - 陷阱上下文地址
-- `USER_STACK_TOP = TRAP_CONTEXT - PAGE_SIZE` - 用户栈顶
+- `USER_STACK_TOP - 用户栈顶
 
 **地址转换规则**（RISC-V SV39）：
 - 物理地址 → 虚拟地址：`vaddr = paddr | VADDR_START`
