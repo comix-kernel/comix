@@ -137,7 +137,8 @@ unsafe { ptr::copy_nonoverlapping(src, dst, len); }
 禁止反向依赖：高层不得让底层引用其内部结构（例：`mm` 不应引用 `Task`）。
 
 ### 3.2 目录与文件
-- 除arch模块外，采用扁平化的组织方式。每个子系统一个 `mod.rs` 汇总导出公共接口。
+- 除 `arch` 模块外，采用扁平化的组织方式，mod路径不超过三层（例如，`crate::kernel::task）。
+- 过大的模块单独使用一个 `mod.rs` 汇总导出公共接口。
 - 文件命名语义化：`trap_handler.rs`, `frame_allocator.rs`, `task_manager.rs`。
 - 超过 ~800 行的文件需拆分（例如：页表操作与入口管理）。
 - 宏放置：单独 `macros.rs` 或靠近使用处，避免全局污染。
