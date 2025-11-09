@@ -1,9 +1,9 @@
 //! RISC-V 架构的定时器实现
+//!
 //! 包含定时器初始化、时间获取和定时器中断设置等功能
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::config::CLOCK_FREQ;
-use crate::sbi::set_timer;
+use crate::{arch::lib::sbi::set_timer, config::CLOCK_FREQ};
 use riscv::register::time;
 
 const TICKS_PER_SEC: usize = 100;
@@ -44,7 +44,7 @@ pub fn init() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{kassert, test_case};
+    use crate::{kassert, println, test_case};
     test_case!(test_set_next_trigger, {
         let current_time = get_time();
         set_next_trigger();

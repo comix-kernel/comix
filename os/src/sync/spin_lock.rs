@@ -76,7 +76,7 @@ unsafe impl<T: Send> Sync for SpinLock<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{kassert, test_case};
+    use crate::{kassert, println, test_case};
 
     // 基本功能：获取锁、修改数据、释放后检查值与锁状态
     test_case!(test_spinlock_basic, {

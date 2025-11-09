@@ -1,10 +1,14 @@
+//! 内核任务相关功能实现
+//!
+//! 包括内核线程创建、等待、执行用户程序等功能
+//! 内核任务不具备用户态任务的内存空间和权限
+//! 仅在内核态运行
 use core::{hint, sync::atomic::Ordering};
 
 use alloc::sync::Arc;
-use riscv::register::sscratch;
 
 use crate::{
-    arch::trap::{self, restore},
+    arch::trap::restore,
     fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
@@ -77,13 +81,16 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
 /// * `return_value_ptr`: 用于存放目标任务返回值的指针
 /// # 返回值
 /// 成功返回 0，失败返回 -1
-pub fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
+/// # 安全性
+/// 调用者必须保证 `return_value_ptr` 指向的内存是合法可写的
+pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
     loop {
         let task_opt = TASK_MANAGER.lock().get_task(tid);
         if let Some(task) = task_opt {
             let t = task.lock();
             if t.state == TaskState::Stopped {
                 if let Some(rv) = t.return_value {
+                    // SAFETY: 调用者保证了 return_value_ptr 指向的内存是合法可写的
                     unsafe {
                         if let Some(ptr) = return_value_ptr {
                             let ptr = ptr as *mut usize;
@@ -128,94 +135,12 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     }
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
-    // sscratch 将在__restore中恢复，指向当前任务的 TrapFrame
+    // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态
     unsafe {
         restore(&*tfp);
     }
     unreachable!("kernel_execve: should not return");
-}
-
-/// 内核的第一个任务启动函数
-/// 并且当这个函数结束时，应该切换到第一个任务的上下文
-pub fn rest_init() {
-    let tid = TASK_MANAGER.lock().allocate_tid();
-    let kstack_tracker =
-        physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
-    let trap_frame_tracker =
-        physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
-    let task = into_shared(TaskStruct::ktask_create(
-        tid,
-        tid,
-        0,
-        kstack_tracker,
-        trap_frame_tracker,
-        init as usize,
-    )); // init 没有父任务
-
-    let (ra, sp) = {
-        let g = task.lock();
-        let ra = g.context.ra;
-        let sp = g.context.sp;
-        (ra, sp)
-    };
-
-    let ptr = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
-    unsafe {
-        sscratch::write(ptr as usize);
-    }
-    current_cpu().lock().current_task = Some(task);
-
-    // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
-    unsafe {
-        core::arch::asm!(
-            "mv sp, {sp}",
-            "jr {ra}",
-            sp = in(reg) sp,
-            ra = in(reg) ra,
-            options(noreturn)
-        );
-    }
-}
-
-/// 内核的第一个任务
-/// PID = 1
-/// 负责进行剩余的初始化工作
-/// 创建 kthreadd 任务
-/// 并在一切结束后转化为第一个用户态任务
-fn init() {
-    trap::init();
-    create_kthreadd();
-    kernel_execve("hello", &["hello"], &[]);
-}
-
-/// 内核守护线程
-/// PID = 2
-/// 负责创建内核任务，回收僵尸任务等工作
-fn kthreadd() {
-    loop {
-        hint::spin_loop();
-    }
-}
-
-/// 创建内核守护线程 kthreadd
-fn create_kthreadd() {
-    let tid = TASK_MANAGER.lock().allocate_tid();
-    let kstack_tracker =
-        physical_page_alloc_contiguous(4).expect("kthread_spawn: failed to alloc kstack");
-    let trap_frame_tracker =
-        physical_page_alloc().expect("kthread_spawn: failed to alloc trap_frame");
-    let task = into_shared(TaskStruct::ktask_create(
-        tid,
-        tid,
-        0,
-        kstack_tracker,
-        trap_frame_tracker,
-        kthreadd as usize,
-    )); // kthreadd 没有父任务
-
-    TASK_MANAGER.lock().add_task(task.clone());
-    SCHEDULER.lock().add_task(task);
 }
 
 #[cfg(test)]
@@ -292,34 +217,7 @@ mod tests {
         // 选择一个极小概率已存在的高 tid（或先确保不存在）
         let missing_tid = 0xFFFF_FFFFu32;
         kassert!(TASK_MANAGER.lock().get_task(missing_tid).is_none());
-        let rc = kthread_join(missing_tid, None);
+        let rc = unsafe { kthread_join(missing_tid, None) };
         kassert!(rc == -1);
     });
-
-    // 测试 create_kthreadd：应创建一个任务并加入 TASK_MANAGER
-    test_case!(test_create_kthreadd, {
-        // 记录当前已有任务数量
-        let before_count = {
-            let mgr = TASK_MANAGER.lock();
-            mgr.task_count()
-        };
-        create_kthreadd();
-        // 找到新增的任务（PID=tid，入口=kthreadd）
-        let after_count = {
-            let mgr = TASK_MANAGER.lock();
-            mgr.task_count()
-        };
-        kassert!(after_count == before_count + 1);
-        // 查找新 tid
-        let new_tid = after_count as u32; // 简单假设 tid 连续分配
-        let task = TASK_MANAGER.lock().get_task(new_tid).expect("task missing");
-        let g = task.lock();
-        let tf = g.trap_frame_ptr.load(Ordering::SeqCst);
-        kassert!(g.tid == new_tid);
-        kassert!(g.pid == new_tid); // kthreadd 设 pid=tid
-        kassert!(unsafe { (*tf).sepc } as usize == kthreadd as usize);
-    });
-
-    // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
-    // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
 }

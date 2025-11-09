@@ -1,3 +1,5 @@
+//! RISC-V 架构的上下文切换相关功能
+
 /// 在发生调度时保存的上下文信息
 /// 相较于TrapFrame只保存切换所需的最少量寄存器
 #[repr(C)]
@@ -19,5 +21,14 @@ impl Context {
             sp: 0,
             s: [0; 12],
         }
+    }
+
+    /// 设置内核线程的初始上下文
+    /// 参数:
+    /// * `entry`: 线程入口地址
+    /// * `kstack_top`: 内核栈顶地址
+    pub fn set_kernel_thread_context(&mut self, entry: usize, kstack_top: usize) {
+        self.sp = kstack_top;
+        self.ra = entry;
     }
 }

@@ -1,4 +1,5 @@
 //! 任务模块
+//!
 //! 包含任务的创建、调度、终止等功能
 //! 并由任务管理器维护所有任务的信息
 use core::sync::atomic::Ordering;
@@ -12,7 +13,7 @@ mod task_struct;
 mod tid_allocator;
 
 pub use ktask::*;
-pub use task_manager::TASK_MANAGER;
+pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
 pub use task_state::TaskState;
 pub use task_struct::Task as TaskStruct;
 
@@ -41,6 +42,7 @@ pub(crate) fn forkret() {
         let task = cpu.current_task.as_ref().unwrap();
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
+    // SAFETY: fp 指向的内存已经被分配且由当前任务拥有
     unsafe { restore(&*fp) };
 }
 
