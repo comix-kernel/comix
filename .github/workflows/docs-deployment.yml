@@ -41,7 +41,9 @@ jobs:
           sudo mv mdbook /usr/local/bin/
 
       - name: 构建 mdBook 文档
-        run: mdbook build
+        run: |
+          python3 scripts/rewrite_links.py document/
+          mdbook build
 
       - name: 构建 Rust API 文档
         run: |
