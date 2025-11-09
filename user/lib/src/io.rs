@@ -37,22 +37,23 @@ pub fn read_line(buffer: &mut [u8]) -> usize {
         let result = unsafe {
             read(fd, &mut byte, 1)
         };
-
-        if result < 0 {
-            return 0;
+        
+        if result < 0 { 
+            return 0; 
         }
 
-        if result == 0 {
+        if result == 0 { 
             // 遇到 EOF (文件末尾)
+            break; 
+        }
+
+        // readline不读取换行符
+        if byte[0] == b'\n' || byte[0] == b'\r' {
             break;
         }
 
         buffer[current_pos] = byte[0];
         current_pos += 1;
-
-        if byte[0] == b'\n' {
-            break;
-        }
     }
 
     // 返回实际读取的字节总数
