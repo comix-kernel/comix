@@ -4,8 +4,11 @@
 
 #![no_std]
 #![allow(non_snake_case)]
+mod syscall;
+pub mod syscall_numbers;
+pub mod io;
 
-pub use crate::syscalls::*;
+pub use crate::syscall::*;
 use core::arch::global_asm;
 
 global_asm!(include_str!("syscall.S"));
@@ -95,56 +98,4 @@ macro_rules! syscall {
             __syscall(__sys_nr, __sys_arg1, __sys_arg2, __sys_arg3, __sys_arg4, __sys_arg5, __sys_arg6)
         }
     });
-}
-
-/// 系统调用号定义
-pub mod syscall_numbers {
-    /// 退出进程
-    pub const SYS_EXIT: usize = 1;
-    /// 打印字符串到控制台
-    pub const SYS_WRITE: usize = 2;
-    /// 读取数据从控制台
-    pub const SYS_READ: usize = 3;
-    /// 创建子进程
-    pub const SYS_FORK: usize = 4;
-    /// 等待子进程结束
-    pub const SYS_WAITPID: usize = 5;
-    /// 获取当前进程ID
-    pub const SYS_GETPID: usize = 6;
-    /// 扩展数据段（堆）
-    pub const SYS_SBRK: usize = 7;
-    /// 休眠指定时间（毫秒）
-    pub const SYS_SLEEP: usize = 8;
-    /// 发送信号到进程
-    pub const SYS_KILL: usize = 9;
-    /// 执行新程序
-    pub const SYS_EXEC: usize = 10;
-    // 其他系统调用号可以在这里继续添加
-}
-
-/// 封装的系统调用接口
-mod syscalls {
-    use crate::__syscall;
-    use crate::syscall_numbers;
-
-    /// 退出进程
-    /// # 参数
-    /// - code: 退出状态码
-    pub fn exit(code: i32) -> ! {
-        syscall!(syscall_numbers::SYS_EXIT, code);
-        unreachable!()
-    }
-
-    /// 写入数据到控制台
-    /// # 参数
-    /// - fd: 文件描述符（通常为1表示标准输出）
-    /// - buf: 指向要写入的数据缓冲区的指针
-    /// - count: 要写入的字节数
-    /// # 返回值
-    /// 写入的字节数，失败时返回负值
-    /// # Safety
-    /// 调用者必须确保 `buf` 指针有效且指向至少 `count` 字节的数据
-    pub unsafe fn write(fd: usize, buf: &[u8], count: usize) -> isize {
-        syscall!(syscall_numbers::SYS_WRITE, fd, buf.as_ptr(), count)
-    }
 }
