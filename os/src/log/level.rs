@@ -1,48 +1,48 @@
-//! Log level definitions
+//! 日志级别定义
 //!
-//! This module defines the eight log levels used by the kernel logging system,
-//! matching Linux kernel's `printk` levels.
+//! 该模块定义了内核日志系统使用的**八个日志级别**，
+//! 与 Linux 内核的 `printk` 级别相匹配。
 
-/// Log level enumeration
+/// 日志级别枚举
 ///
-/// Defines eight priority levels from Emergency (highest priority) to Debug (lowest).
-/// The levels are compatible with Linux kernel's `KERN_*` constants.
+/// 定义了从 Emergency (最高优先级) 到 Debug (最低优先级) 的八个优先级。
+/// 这些级别与 Linux 内核的 `KERN_*` 常量兼容。
 ///
-/// # Level Semantics
+/// # 级别语义
 ///
-/// - **Emergency**: System is unusable
-/// - **Alert**: Action must be taken immediately
-/// - **Critical**: Critical conditions
-/// - **Error**: Error conditions
-/// - **Warning**: Warning conditions
-/// - **Notice**: Normal but significant condition
-/// - **Info**: Informational messages
-/// - **Debug**: Debug-level messages
+/// - **Emergency (紧急)**: 系统不可用
+/// - **Alert (警报)**: 必须立即采取行动
+/// - **Critical (关键)**: 关键状况
+/// - **Error (错误)**: 错误状况
+/// - **Warning (警告)**: 警告状况
+/// - **Notice (通知)**: 正常但重要的状况
+/// - **Info (信息)**: 信息性消息
+/// - **Debug (调试)**: 调试级别的消息
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
-    /// System is unusable
+    /// 系统不可用
     Emergency = 0,
-    /// Action must be taken immediately
+    /// 必须立即采取行动
     Alert = 1,
-    /// Critical conditions
+    /// 关键状况
     Critical = 2,
-    /// Error conditions
+    /// 错误状况
     Error = 3,
-    /// Warning conditions
+    /// 警告状况
     Warning = 4,
-    /// Normal but significant condition
+    /// 正常但重要的状况
     Notice = 5,
-    /// Informational messages
+    /// 信息性消息
     Info = 6,
-    /// Debug-level messages
+    /// 调试级别的消息
     Debug = 7,
 }
 
 impl LogLevel {
-    /// Returns the string representation of the log level
+    /// 返回日志级别的字符串表示形式
     ///
-    /// Returns a short tag like `[ERR]`, `[INFO]`, etc.
+    /// 返回一个简短的标签，如 `[ERR]`、`[INFO]` 等。
     pub(super) const fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Emergency => "[EMERG]",
@@ -56,16 +56,16 @@ impl LogLevel {
         }
     }
 
-    /// Returns the ANSI color code for this log level
+    /// 返回此日志级别对应的 ANSI 颜色代码
     ///
-    /// # Color Mapping
+    /// # 颜色映射
     ///
-    /// - Emergency/Alert/Critical: Bright red
-    /// - Error: Red
-    /// - Warning: Yellow
-    /// - Notice: Bright white
-    /// - Info: White
-    /// - Debug: Gray
+    /// - Emergency/Alert/Critical: 亮红色
+    /// - Error: 红色
+    /// - Warning: 黄色
+    /// - Notice: 亮白色
+    /// - Info: 白色
+    /// - Debug: 灰色
     pub(super) const fn color_code(&self) -> &'static str {
         match self {
             Self::Emergency | Self::Alert | Self::Critical => "\x1b[1;31m",
@@ -77,14 +77,14 @@ impl LogLevel {
         }
     }
 
-    /// Returns the ANSI color reset code
+    /// 返回 ANSI 颜色重置代码
     pub(super) const fn reset_color_code(&self) -> &'static str {
         "\x1b[0m"
     }
 
-    /// Converts a u8 value to a log level
+    /// 将 u8 值转换为日志级别
     ///
-    /// Returns the default log level if the value is invalid.
+    /// 如果该值无效，则返回默认日志级别。
     pub(super) fn from_u8(level: u8) -> Self {
         match level {
             0 => Self::Emergency,

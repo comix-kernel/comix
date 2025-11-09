@@ -1,3 +1,7 @@
+//! 页表内部结构模块
+//!
+//! 本模块定义了页表的内部接口，供不同架构的页表实现使用。
+//! 通过该接口，可以实现对页表的创建、映射、解除映射、翻译等操作。
 #![allow(dead_code)]
 use super::{PageSize, PageTableEntry, PagingResult, UniversalPTEFlag};
 use crate::mm::address::{Paddr, Ppn, Vaddr, Vpn};
