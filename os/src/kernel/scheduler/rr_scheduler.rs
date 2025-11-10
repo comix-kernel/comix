@@ -140,7 +140,7 @@ impl Scheduler for RRScheduler {
         {
             let mut t = task.lock();
             t.exit_code = Some(code);
-            t.state = TaskState::Stopped;
+            t.state = TaskState::Zombie;
         }
         self.run_queue.remove_task(&task);
     }
@@ -151,16 +151,12 @@ mod tests {
     use super::*;
     use crate::{
         kassert,
-        kernel::{
-            cpu::current_cpu,
-            task::{TaskStruct, into_shared},
-        },
+        kernel::{cpu::current_cpu, task::TaskStruct},
         test_case,
     };
 
     fn mk_task(tid: u32) -> SharedTask {
-        let t = TaskStruct::new_dummy_task(tid);
-        into_shared(t)
+        TaskStruct::new_dummy_task(tid).into_shared()
     }
 
     // // 基础轮转：current=T0，队列[T1,T2]，三次切换应依次运行 T1 -> T2 -> T0
@@ -256,7 +252,7 @@ mod tests {
         {
             let g = t.lock();
             kassert!(g.exit_code == Some(123));
-            kassert!(matches!(g.state, TaskState::Stopped));
+            kassert!(matches!(g.state, TaskState::Zombie));
         }
         kassert!(!rr.run_queue.contains(&t));
     });

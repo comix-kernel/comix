@@ -2,29 +2,44 @@
 //!
 //! 包含任务的核心信息，如上下文、状态、内存空间等
 #![allow(dead_code)]
-use core::{
-    ptr,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::sync::atomic::{AtomicPtr, Ordering};
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
         kernel::{context::Context, task::setup_stack_layout},
         trap::TrapFrame,
     },
-    kernel::task::{forkret, task_state::TaskState, terminate_task},
+    kernel::task::{forkret, task_state::TaskState},
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
         frame_allocator::{FrameRangeTracker, FrameTracker},
         memory_space::MemorySpace,
     },
     println,
+    sync::SpinLock,
 };
+
+/// 共享任务句柄
+/// 用于在多个地方引用同一个任务实例
+pub type SharedTask = Arc<SpinLock<Task>>;
 
 /// 任务
 /// 存放任务的核心信息
+/// 其中的信息可以分为几大类：
+/// 1. 调度运行相关的信息，如上下文、状态、优先级等
+/// 2. 任务标识信息，如 tid、pid、ppid、子任务等
+/// 3. 任务资源信息，如内核栈、TrapFrame、内存空间等
+/// 表示进程的任务与表示线程的任务由本结构体统一表征
+/// 其区别仅在于：
+/// 1. 进程的 pid 等于 tid，线程的 pid 不等于 tid
+/// 2. 进程的返回值通过 exit_code 字段传递，线程的返回值通过 return_value 字段传递
+/// 3. 对于所有3.类信息，均通过引用计数共享。创建时任务，进程需传入新的Arc<T>，而线程则共享父任务的资源。
+/// 注意：线程拥有自己独立的运行栈，和一套寄存器上下文。
+///      TrapFrame，Context结构可以保证所有线程切换时保存和恢复寄存器状态。
+///      每个任务的内核栈独立分配，互不干扰。内核线程只使用内核栈。
+///      但是上层必须自己保证创建的用户线程在用户态运行时拥有独立的用户栈空间。
 /// OPTIMIZE: 简单起见目前的设计中，Task 结构体包含了所有信息，包括调度相关的信息和资源管理相关的信息。
 ///           未来可以考虑将其拆分为 TaskInfo 和 TaskStruct 两个部分，以提高访问效率和模块化程度。
 #[derive(Debug)]
@@ -32,11 +47,11 @@ pub struct Task {
     /// 任务的上下文信息，用于任务切换
     pub context: Context,
     /// 任务的抢占计数器，表示当前任务被禁止抢占的次数
-    /// 当该值大于0时，表示任务处于不可抢占状态
+    /// 当该值大于0时，表示任务处于不可抢占状态。暂未使用
     pub preempt_count: usize,
-    /// 任务的优先级，数值越小优先级越高
+    /// 任务的优先级，数值越小优先级越高。暂未使用
     pub priority: u8,
-    /// 任务所在的处理器id
+    /// 任务所在的处理器id。暂未使用
     pub processor_id: usize,
     /// 任务当前的状态
     pub state: TaskState,
@@ -47,6 +62,8 @@ pub struct Task {
     pub pid: u32,
     /// 父任务的id
     pub ppid: u32,
+    /// 任务的子任务列表
+    pub children: Arc<SpinLock<Vec<SharedTask>>>,
     /// 内核栈基址
     pub kstack_base: usize,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
@@ -80,22 +97,26 @@ impl Task {
     /// * `entry`: 任务的入口地址
     /// # 返回值
     /// 新创建的任务
+    /// 注意：调用者必须自己初始化TrapFrame内容
     pub fn ktask_create(
         tid: u32,
         pid: u32,
         ppid: u32,
+        children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
-        entry: usize,
     ) -> Self {
-        let mut task = Self::new(tid, pid, ppid, kstack_tracker, trap_frame_tracker, None);
-        let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+        let mut task = Self::new(
+            tid,
+            pid,
+            ppid,
+            children,
+            kstack_tracker,
+            trap_frame_tracker,
+            None,
+        );
         task.context
-            .set_kernel_thread_context(forkret as usize, task.kstack_base);
-        // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
-        unsafe {
-            (*tf).set_kernel_trap_frame(entry, terminate_task as usize, task.kstack_base);
-        }
+            .set_init_context(forkret as usize, task.kstack_base);
         task
     }
 
@@ -105,22 +126,28 @@ impl Task {
     /// * `memory_space`: 任务的内存空间
     /// # 返回值
     /// 新创建的任务
+    /// 注意：调用者必须自己初始化TrapFrame内容
     pub fn utask_create(
         tid: u32,
         pid: u32,
         ppid: u32,
+        children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         memory_space: Arc<MemorySpace>,
     ) -> Self {
-        Self::new(
+        let mut task = Self::new(
             tid,
             pid,
             ppid,
+            children,
             kstack_tracker,
             trap_frame_tracker,
             Some(memory_space),
-        )
+        );
+        task.context
+            .set_init_context(forkret as usize, task.kstack_base);
+        task
     }
 
     /// 执行 execve 操作，替换当前任务的内存空间和上下文
@@ -154,7 +181,7 @@ impl Task {
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
-            (*tf_ptr).set_user_trap_frame(
+            (*tf_ptr).set_exec_trap_frame(
                 entry_point,
                 new_sp,
                 self.kstack_base,
@@ -165,59 +192,41 @@ impl Task {
         }
     }
 
-    // /// FIXME: 检查寄存器设置
-    // /// 为用户进程在其内核栈上构造初始 TrapFrame，并设置 Context 指向 trampoline
-    // /// # 参数
-    // /// * `user_entry`: 用户态入口地址
-    // /// * `trampoline`: 内核态恢复到用户态的 trampoline 函数地址
-    // pub unsafe fn init_user_trapframe_and_context(&mut self, user_entry: usize, trampoline: usize) {
-    //     let kstack_top = self.kstack_base;
-    //     let tf_size = size_of::<TrapFrame>();
-    //     let tf_ptr = (kstack_top - tf_size) as *mut TrapFrame;
-
-    //     // 用零化的 TrapFrame 起始值，然后设置 epc（用户PC）等必要字段
-    //     let mut tf: TrapFrame = unsafe { core::mem::zeroed() };
-    //     tf.sepc = user_entry;
-    //     // 如果需要，可在这里设置初始用户寄存器 a0/a1 等
-    //     unsafe { ptr::write(tf_ptr, tf) };
-
-    //     // 记录 TrapFrame 指针（可用 AtomicPtr，也可以省略并按约定计算）
-    //     self.trap_frame_ptr.store(tf_ptr, Ordering::SeqCst);
-
-    //     // 为调度器准备最小 Context：sp 指向栈顶，ra 指向 trampoline（trampoline 会从 tf_ptr 恢复并返回用户态）
-    //     self.context.sp = kstack_top;
-    //     self.context.ra = trampoline;
-    // }
-
     /// 判断该任务是否为内核线程
     pub fn is_kernel_thread(&self) -> bool {
         self.memory_space.is_none()
     }
 
-    /// 判断该任务是否为进程
+    /// 判断该任务是否为进程 / 主线程
     /// 对于进程，其 pid 等于 tid
     pub fn is_process(&self) -> bool {
         self.pid == self.tid
+    }
+
+    /// 把已初始化的 TaskStruct 包装为共享任务句柄
+    /// 返回值: 包装后的 SharedTask
+    pub fn into_shared(self) -> SharedTask {
+        Arc::new(SpinLock::new(self))
+    }
+
+    /// 返回一个空的子任务列表
+    /// 用于创建新任务时初始化 children 字段
+    pub fn empty_children() -> Arc<SpinLock<Vec<SharedTask>>> {
+        Arc::new(SpinLock::new(Vec::new()))
     }
 
     fn new(
         tid: u32,
         pid: u32,
         ppid: u32,
+        children: Arc<SpinLock<Vec<SharedTask>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         memory_space: Option<Arc<MemorySpace>>,
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
-        // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
-        // Safety: 该内存页已被分配且可写
-        unsafe {
-            let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize()
-                - size_of::<u8>()
-                - 1) as *mut u8;
-            ptr.write_volatile(0xFF);
-        };
+
         Task {
             context: Context::zero_init(),
             preempt_count: 0,
@@ -228,6 +237,7 @@ impl Task {
             // pid: tid,
             pid,
             ppid,
+            children,
             kstack_base,
             kstack_tracker,
             trap_frame_tracker,
@@ -244,7 +254,15 @@ impl Task {
         let kstack_tracker =
             alloc_contig_frames(1).expect("new_dummy_task: failed to alloc kstack");
         let trap_frame_tracker = alloc_frame().expect("new_dummy_task: failed to alloc trap_frame");
-        Self::new(tid, tid, 0, kstack_tracker, trap_frame_tracker, None)
+        Self::new(
+            tid,
+            tid,
+            0,
+            Task::empty_children(),
+            kstack_tracker,
+            trap_frame_tracker,
+            None,
+        )
     }
 }
 
@@ -277,7 +295,14 @@ mod tests {
     test_case!(test_ktask_create, {
         let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
         let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
-        let t = Task::ktask_create(1, 1, 0, kstack_tracker, trap_frame_tracker, 0x1000);
+        let t = Task::ktask_create(
+            1,
+            1,
+            0,
+            Task::empty_children(),
+            kstack_tracker,
+            trap_frame_tracker,
+        );
         kassert!(t.tid == 1);
         kassert!(t.pid == t.tid);
         kassert!(t.is_kernel_thread());
@@ -301,7 +326,14 @@ mod tests {
         let kstack_tracker = alloc_contig_frames(2).expect("alloc kstack");
         let trap_frame_tracker = alloc_frame().expect("alloc trap_frame");
         // 传入 pid 与 tid 不同模拟同进程内的线程
-        let t = Task::ktask_create(10, 5, 5, kstack_tracker, trap_frame_tracker, 0x2000);
+        let t = Task::ktask_create(
+            10,
+            5,
+            5,
+            Task::empty_children(),
+            kstack_tracker,
+            trap_frame_tracker,
+        );
         kassert!(t.tid == 10);
         kassert!(t.pid == 5);
         kassert!(!t.is_process());

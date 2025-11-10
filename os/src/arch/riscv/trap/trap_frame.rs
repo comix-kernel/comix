@@ -106,14 +106,15 @@ impl TrapFrame {
         sstatus.set_spie(true);
         self.sepc = entry;
         self.sstatus = sstatus.bits();
+        self.kernel_sp = kernel_sp;
         self.x1_ra = terminal;
         self.x2_sp = kernel_sp;
-        self.kernel_sp = kernel_sp;
         // self.kernel_satp = kernel_satp;
         // self.kernel_hartid = kernel_hartid;
     }
 
     /// 设置用户态的 TrapFrame
+    /// 用于execve新程序
     /// 参数:
     /// * `entry`: 用户程序入口地址
     /// * `user_sp`: 用户栈顶地址
@@ -121,7 +122,7 @@ impl TrapFrame {
     /// * `argc`: 命令行参数个数
     /// * `argv`: 命令行参数指针数组地址
     /// * `envp`: 环境变量指针数组地址
-    pub fn set_user_trap_frame(
+    pub fn set_exec_trap_frame(
         &mut self,
         entry: usize,
         user_sp: usize,
@@ -143,5 +144,31 @@ impl TrapFrame {
         self.x12_a2 = envp;
         // 清零 ra，避免意外返回路径，用户态程序应通过正常的退出机制结束
         self.x1_ra = 0;
+    }
+
+    /// 设置 fork 后子进程的 TrapFrame
+    /// # 参数:
+    /// * `tpr`: 父进程的 TrapFrame 引用
+    /// # 安全性
+    /// - `parent_frame` 必须指向一个完全初始化的、有效的 `TrapFrame`
+    /// - `parent_frame` 必须在整个复制期间保持有效
+    /// - `self` 必须指向一个可写的内存区域，大小至少为 `size_of::<TrapFrame>()`
+    /// - `self` 和 `parent_frame` 不能内存重叠
+    /// - 调用后 `self` 将包含 `parent_frame` 的精确副本（除了修改的字段）
+    pub unsafe fn set_fork_trap_frame(&mut self, parent_frame: &TrapFrame) {
+        // SAFETY: 调用者确保：
+        // 1. parent_frame 有效且可读
+        // 2. self 有效且可写
+        // 3. 两者不重叠
+        // 4. 两者都正确对齐
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                parent_frame as *const _ as *const u8,
+                self as *mut _ as *mut u8,
+                core::mem::size_of::<TrapFrame>(),
+            );
+        }
+        // 子进程返回值为0
+        self.x10_a0 = 0;
     }
 }

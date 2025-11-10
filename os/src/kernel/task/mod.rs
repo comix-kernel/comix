@@ -4,8 +4,6 @@
 //! 并由任务管理器维护所有任务的信息
 use core::sync::atomic::Ordering;
 
-use alloc::sync::Arc;
-
 mod ktask;
 mod task_manager;
 mod task_state;
@@ -15,23 +13,13 @@ mod tid_allocator;
 pub use ktask::*;
 pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
 pub use task_state::TaskState;
+pub use task_struct::SharedTask;
 pub use task_struct::Task as TaskStruct;
-
-pub type SharedTask = Arc<SpinLock<TaskStruct>>;
 
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
-    sync::SpinLock,
 };
-
-/// 把已初始化的 TaskStruct 包装为共享任务句柄
-/// 参数:
-/// * `task`: 已初始化的 TaskStruct 实例
-/// 返回值: 包装后的 SharedTask
-pub fn into_shared(task: TaskStruct) -> SharedTask {
-    Arc::new(SpinLock::new(task))
-}
 
 /// 新创建的线程发生第一次调度时会从 forkret 开始执行
 /// 该函数负责恢复任务的陷阱帧，从而进入任务的实际执行上下文
@@ -68,7 +56,7 @@ pub(crate) fn terminate_task(return_value: usize) -> ! {
             (None, Some(return_value))
         };
         // 不必将task移出cpu,在schedule时会处理
-        t.state = TaskState::Stopped;
+        t.state = TaskState::Zombie;
         t.exit_code = t_exit_code;
         t.return_value = t_return_value;
     }
