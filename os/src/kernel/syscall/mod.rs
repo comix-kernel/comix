@@ -7,7 +7,7 @@ use riscv::register::sstatus;
 
 use crate::{
     arch::lib::{console::stdin, sbi::console_putchar},
-    impl_syscall, println,
+    impl_syscall,
 };
 
 /// 关闭系统调用

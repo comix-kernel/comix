@@ -68,7 +68,7 @@ pub(crate) fn terminate_task(return_value: usize) -> ! {
             (None, Some(return_value))
         };
         // 不必将task移出cpu,在schedule时会处理
-        t.state = TaskState::Stopped;
+        t.state = TaskState::Zombie;
         t.exit_code = t_exit_code;
         t.return_value = t_return_value;
     }
