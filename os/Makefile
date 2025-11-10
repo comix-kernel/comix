@@ -49,3 +49,62 @@ debug:
 	@echo "QEMU 正在等待 GDB 连接..."
 	@echo "======================================================="
 	@$(QEMU_RUNNER) $(PROJECT_DIR) gdb
+# ===============================================
+# 测试目标
+# ===============================================
+.PHONY: test test-qemu test-gdb clean-test
+
+# 目标 1: 运行测试
+test: clean-test
+	@echo "Building tests with 'cargo test --no-run'..."
+	@cargo test --no-run
+	@TEST_ELF=$$(find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*" ! -name "*.d" ! -name "*.bin" -type f -executable -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-); \
+	if [ -z "$$TEST_ELF" ]; then \
+		echo "Error: Could not find any test executable after build."; \
+		exit 1; \
+	fi; \
+	echo "Found latest test executable: $$TEST_ELF"; \
+	echo "Running tests in QEMU..."; \
+	$(QEMU_RUNNER) $$TEST_ELF run
+
+# 目标 2: 调试测试 (第一步)
+test-qemu: clean-test
+	@echo "Building tests with 'cargo test --no-run'..."
+	@cargo test --no-run
+	@# 关键修复：把所有逻辑都放在一个 shell 进程中执行
+	@TEST_ELF=$$(find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*" ! -name "*.d" ! -name "*.bin" -type f -executable -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-); \
+	if [ -z "$$TEST_ELF" ]; then \
+		echo "Error: Could not find test executable after build."; \
+		exit 1; \
+	fi; \
+	echo "Found test executable for debugging: $$TEST_ELF"; \
+	echo "======================================================="; \
+	echo "在新的终端窗口中运行 'make test-gdb' 来连接到 QEMU。"; \
+	echo "QEMU 正在等待 GDB 连接..."; \
+	echo "======================================================="; \
+	$(QEMU_RUNNER) $$TEST_ELF gdb
+
+# 目标 3: 调试测试 (第二步)
+test-gdb:
+	@TEST_ELF=$$(find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*" ! -name "*.d" ! -name "*.bin" -type f -executable -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-); \
+	if [ -z "$$TEST_ELF" ]; then \
+		echo "Error: Could not find test executable. Did you run 'make test-qemu' first?"; \
+		exit 1; \
+	fi; \
+	echo "Connecting GDB to debug test: $$TEST_ELF"; \
+	$(GDB_BIN) \
+		-ex "file $$TEST_ELF" \
+		-ex "target remote :1234" \
+		-ex "set arch riscv:rv64" \
+		-ex "b *0x80200000" \
+		-ex "c"
+
+# ===============================================
+# 清理目标
+# ===============================================
+#会删除所有旧的测试可执行文件和 .bin 文件
+clean-test:
+	@echo "Cleaning old test artifacts (executables and .bin files)..."
+	@find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*.bin" -type f -delete 2>/dev/null || true
+	@find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*" ! -name "*.d" -type f -executable -delete 2>/dev/null || true
+	@echo "Old test artifacts cleaned."
