@@ -3,11 +3,25 @@
 //! 提供系统调用的实现
 #![allow(dead_code)]
 
+use core::sync::atomic::Ordering;
+
+use alloc::{string::String, sync::Arc, vec::Vec};
 use riscv::register::sstatus;
 
 use crate::{
-    arch::lib::{console::stdin, sbi::console_putchar},
-    impl_syscall, println,
+    arch::{
+        lib::{console::stdin, sbi::console_putchar},
+        trap::restore,
+    },
+    fs::ROOT_FS,
+    impl_syscall,
+    kernel::{TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu},
+    mm::{
+        activate,
+        frame_allocator::{alloc_contig_frames, alloc_frame},
+        memory_space::MemorySpace,
+    },
+    tool::copy_cstr_to_string,
 };
 
 /// 关闭系统调用
@@ -20,6 +34,7 @@ fn exit(_code: i32) -> ! {
     crate::shutdown(false);
 }
 
+/// 向文件描述符写入数据
 fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     if fd == 1 {
         unsafe { sstatus::set_sum() };
@@ -34,6 +49,7 @@ fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     }
 }
 
+/// 从文件描述符读取数据
 fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
     if fd == 0 {
         unsafe { sstatus::set_sum() };
@@ -51,8 +67,113 @@ fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
     -1 // 不支持其他文件描述符
 }
 
+/// 创建当前任务的子任务（fork）
+fn fork() -> usize {
+    let tid = { TASK_MANAGER.lock().allocate_tid() };
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let ppid = task.lock().pid;
+    let memory_space = task
+        .lock()
+        .memory_space
+        .clone()
+        .expect("fork: Can only call fork on user task.")
+        .clone_for_fork()
+        .expect("fork: clone memory space failed.");
+    let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
+    let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
+    let child_task = super::TaskStruct::utask_create(
+        tid,
+        tid,
+        ppid,
+        TaskStruct::empty_children(),
+        kstack_tracker,
+        trap_frame_tracker,
+        Arc::new(memory_space),
+    );
+    let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
+    let ptf = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    unsafe {
+        (*tf).set_fork_trap_frame(&*ptf);
+    }
+    let child_task = child_task.into_shared();
+    task.lock().children.lock().push(child_task.clone());
+    tid as usize
+}
+
+/// 执行一个新程序（execve）
+fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> isize {
+    let path_str = unsafe {
+        match copy_cstr_to_string(path) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+    let data = ROOT_FS
+        .load_elf(&path_str)
+        .expect("kernel_execve: file not found");
+
+    let (space, entry, sp) =
+        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+    let space: Arc<MemorySpace> = Arc::new(space);
+    // 换掉当前任务的地址空间，e.g. 切换 satp
+    activate(space.root_ppn());
+
+    // --- 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str> ---
+    const MAX_ARGV: usize = 256;
+    // 把 NULL 终止的指针数组拷贝为 Vec<String>
+    unsafe fn ptr_array_to_vec_strings(ptrs: *const *const u8) -> Result<Vec<String>, ()> {
+        let mut out: Vec<String> = Vec::new();
+        if ptrs.is_null() {
+            return Ok(out);
+        }
+        for i in 0..MAX_ARGV {
+            let p = unsafe { *ptrs.add(i) };
+            if p.is_null() {
+                break;
+            }
+            match unsafe { crate::tool::copy_cstr_to_string(p) } {
+                Ok(s) => out.push(s),
+                Err(_) => return Err(()),
+            }
+        }
+        Ok(out)
+    }
+
+    // 转换 argv / envp，转换失败返回错误
+    let argv_strings = match unsafe { ptr_array_to_vec_strings(argv) } {
+        Ok(v) => v,
+        Err(_) => return -1,
+    };
+    let envp_strings = match unsafe { ptr_array_to_vec_strings(envp) } {
+        Ok(v) => v,
+        Err(_) => return -1,
+    };
+    // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
+    let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
+    let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
+
+    let task = {
+        let cpu = current_cpu().lock();
+        cpu.current_task.as_ref().unwrap().clone()
+    };
+
+    {
+        let mut t = task.lock();
+        t.execve(space, entry, sp, &argv_refs, &envp_refs);
+    }
+
+    let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
+    // 直接按 trapframe 状态恢复并 sret 到用户态
+    unsafe {
+        restore(&*tfp);
+    }
+    -1
+}
+
 // 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
 impl_syscall!(sys_exit, exit, noreturn, (i32));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
+impl_syscall!(sys_fork, fork, ());

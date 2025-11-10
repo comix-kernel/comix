@@ -15,6 +15,7 @@ use core::{
 ///   // 临界区代码
 /// } // 离开作用域，自动释放锁并恢复中断状态
 /// ```
+#[derive(Debug)]
 pub struct RawSpinLock {
     lock: AtomicBool,
 }
