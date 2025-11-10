@@ -5,7 +5,7 @@
 
 use core::sync::atomic::Ordering;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use riscv::register::sstatus;
 
 use crate::{
@@ -21,7 +21,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    tool::copy_cstr_to_string,
+    tool::{copy_cstr_to_string, ptr_array_to_vec_strings},
 };
 
 /// 关闭系统调用
@@ -30,11 +30,17 @@ fn shutdown() -> ! {
 }
 
 /// TODO: 进程退出系统调用
+/// # 参数
+/// - `code`: 退出代码
 fn exit(_code: i32) -> ! {
     crate::shutdown(false);
 }
 
 /// 向文件描述符写入数据
+/// # 参数
+/// - `fd`: 文件描述符
+/// - `buf`: 要写入的数据缓冲区
+/// - `count`: 要写入的字节数
 fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     if fd == 1 {
         unsafe { sstatus::set_sum() };
@@ -50,6 +56,10 @@ fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 }
 
 /// 从文件描述符读取数据
+/// # 参数
+/// - `fd`: 文件描述符
+/// - `buf`: 存储读取数据的缓冲区
+/// - `count`: 要读取的字节数
 fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
     if fd == 0 {
         unsafe { sstatus::set_sum() };
@@ -101,6 +111,10 @@ fn fork() -> usize {
 }
 
 /// 执行一个新程序（execve）
+/// # 参数
+/// - `path`: 可执行文件路径
+/// - `argv`: 命令行参数
+/// - `envp`: 环境变量
 fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> isize {
     let path_str = unsafe {
         match copy_cstr_to_string(path) {
@@ -118,28 +132,7 @@ fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> is
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
 
-    // --- 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str> ---
-    const MAX_ARGV: usize = 256;
-    // 把 NULL 终止的指针数组拷贝为 Vec<String>
-    unsafe fn ptr_array_to_vec_strings(ptrs: *const *const u8) -> Result<Vec<String>, ()> {
-        let mut out: Vec<String> = Vec::new();
-        if ptrs.is_null() {
-            return Ok(out);
-        }
-        for i in 0..MAX_ARGV {
-            let p = unsafe { *ptrs.add(i) };
-            if p.is_null() {
-                break;
-            }
-            match unsafe { crate::tool::copy_cstr_to_string(p) } {
-                Ok(s) => out.push(s),
-                Err(_) => return Err(()),
-            }
-        }
-        Ok(out)
-    }
-
-    // 转换 argv / envp，转换失败返回错误
+    // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
     let argv_strings = match unsafe { ptr_array_to_vec_strings(argv) } {
         Ok(v) => v,
         Err(_) => return -1,
@@ -177,3 +170,8 @@ impl_syscall!(sys_exit, exit, noreturn, (i32));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
 impl_syscall!(sys_fork, fork, ());
+impl_syscall!(
+    sys_execve,
+    execve,
+    (*const u8, *const *const u8, *const *const u8)
+);
