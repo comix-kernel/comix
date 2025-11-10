@@ -32,8 +32,9 @@
 | **1**| `TASK_MANAGER` 全局锁            | 全局任务列表 `tasks` 和 `tid_allocator`                               | 最高级别的锁，用于任务的创建和全局查找。应极力缩短持有时间。                                     |
 | **2**| `SCHEDULER` 全局锁               | 调度器的运行队列 `run_queue` 和其他调度状态                             | 负责任务的调度、睡眠和唤醒。持有此锁时可以修改任务状态。                                         |
 | **3**| `CPU` 本地数据锁 (`current_cpu().lock()`) | `Cpu` 结构，主要是 `current_task` 指针                                | 用于安全地获取或修改当前CPU正在运行的任务。                                                      |
-| **4**| 单个 `Task` 实例锁 (`task.lock()`) | `Task` 结构体的内部字段（如 `state`, `context`）                      | 用于修改单个任务的内部状态。                                                                     |
-| **5**| `WaitQueue` 内部锁 (`queue.lock`) | `WaitQueue` 中的任务队列 `tasks`                                      | `SleepLock` 的底层构件，用于将任务原子地加入等待队列。                                           |
+| **4**| 单个 `Task` 实例锁 (`task.lock()`) | `Task` 结构体的独占内部字段（如 `state`, `context`）                      | 用于修改单个任务的内部状态。                                                                     |
+| **5**| `Task` 字段锁 (`children.lock`) | `Task` 中的可变共享字段 `tasks`                                      | 用于修改线程间共享的状态。     
+| **6**| `WaitQueue` 内部锁 (`queue.lock`) | `WaitQueue` 中的任务队列 `tasks`                                      | `SleepLock` 的底层构件，用于将任务原子地加入等待队列。                                           |
 
 ### 核心规则详解
 

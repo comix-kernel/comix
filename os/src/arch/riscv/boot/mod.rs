@@ -2,13 +2,12 @@
 
 use core::{hint, sync::atomic::Ordering};
 
-use alloc::{sync::Arc, vec::Vec};
 use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, timer, trap},
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, into_shared,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         kernel_execve,
     },
     mm::{
@@ -28,7 +27,7 @@ pub fn rest_init() {
         tid,
         tid,
         0,
-        Arc::new(Vec::new()),
+        TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
     ); // init 没有父任务
@@ -45,7 +44,7 @@ pub fn rest_init() {
     unsafe {
         sscratch::write(ptr as usize);
     }
-    current_cpu().lock().current_task = Some(into_shared(task));
+    current_cpu().lock().current_task = Some(task.into_shared());
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
     // SAFETY: 在 Task 创建时已正确初始化 ra 和 sp
@@ -89,7 +88,7 @@ fn create_kthreadd() {
         tid,
         tid,
         0,
-        Arc::new(Vec::new()),
+        TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
     ); // kthreadd 没有父任务
@@ -99,7 +98,7 @@ fn create_kthreadd() {
     unsafe {
         (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
     }
-    let task = into_shared(task);
+    let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
     SCHEDULER.lock().add_task(task);
 }

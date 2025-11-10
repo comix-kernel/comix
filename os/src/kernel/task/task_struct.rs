@@ -18,7 +18,12 @@ use crate::{
         memory_space::MemorySpace,
     },
     println,
+    sync::SpinLock,
 };
+
+/// 共享任务句柄
+/// 用于在多个地方引用同一个任务实例
+pub type SharedTask = Arc<SpinLock<Task>>;
 
 /// 任务
 /// 存放任务的核心信息
@@ -58,7 +63,7 @@ pub struct Task {
     /// 父任务的id
     pub ppid: u32,
     /// 任务的子任务列表
-    pub children: Arc<Vec<Arc<super::SharedTask>>>,
+    pub children: Arc<SpinLock<Vec<SharedTask>>>,
     /// 内核栈基址
     pub kstack_base: usize,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
@@ -97,7 +102,7 @@ impl Task {
         tid: u32,
         pid: u32,
         ppid: u32,
-        children: Arc<Vec<Arc<super::SharedTask>>>,
+        children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
     ) -> Self {
@@ -126,7 +131,7 @@ impl Task {
         tid: u32,
         pid: u32,
         ppid: u32,
-        children: Arc<Vec<Arc<super::SharedTask>>>,
+        children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         memory_space: Arc<MemorySpace>,
@@ -198,11 +203,23 @@ impl Task {
         self.pid == self.tid
     }
 
+    /// 把已初始化的 TaskStruct 包装为共享任务句柄
+    /// 返回值: 包装后的 SharedTask
+    pub fn into_shared(self) -> SharedTask {
+        Arc::new(SpinLock::new(self))
+    }
+
+    /// 返回一个空的子任务列表
+    /// 用于创建新任务时初始化 children 字段
+    pub fn empty_children() -> Arc<SpinLock<Vec<SharedTask>>> {
+        Arc::new(SpinLock::new(Vec::new()))
+    }
+
     fn new(
         tid: u32,
         pid: u32,
         ppid: u32,
-        children: Arc<Vec<Arc<super::SharedTask>>>,
+        children: Arc<SpinLock<Vec<SharedTask>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         memory_space: Option<Arc<MemorySpace>>,
@@ -241,7 +258,7 @@ impl Task {
             tid,
             tid,
             0,
-            Arc::new(Vec::new()),
+            Task::empty_children(),
             kstack_tracker,
             trap_frame_tracker,
             None,
@@ -282,7 +299,7 @@ mod tests {
             1,
             1,
             0,
-            Arc::new(Vec::new()),
+            Task::empty_children(),
             kstack_tracker,
             trap_frame_tracker,
         );
@@ -313,7 +330,7 @@ mod tests {
             10,
             5,
             5,
-            Arc::new(Vec::new()),
+            Task::empty_children(),
             kstack_tracker,
             trap_frame_tracker,
         );

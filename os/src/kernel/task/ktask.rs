@@ -5,7 +5,7 @@
 //! 仅在内核态运行
 use core::{hint, sync::atomic::Ordering};
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 
 use crate::{
     arch::trap::restore,
@@ -14,7 +14,7 @@ use crate::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
         scheduler::Scheduler,
-        task::{TASK_MANAGER, TaskStruct, into_shared, task_manager::TaskManagerTrait},
+        task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
     },
     mm::{
         activate,
@@ -37,12 +37,6 @@ use crate::{
 ///
 /// # 返回值
 /// Task id
-///
-// ///                 let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
-//         // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
-//         unsafe {
-//             (*tf).set_fork_trap_frame(entry, 0, task.kstack_base, 0, 0, 0);
-//         }
 #[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tid = TASK_MANAGER.lock().allocate_tid();
@@ -60,7 +54,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         tid,
         pid,
         ppid,
-        Arc::new(Vec::new()),
+        TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
     );
@@ -75,7 +69,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         );
     }
     let tid = task.tid;
-    let task = into_shared(task);
+    let task = task.into_shared();
 
     // 将任务加入调度器和任务管理器
     TASK_MANAGER.lock().add_task(task.clone());
@@ -176,8 +170,7 @@ mod tests {
     fn dummy_thread() {}
 
     fn mk_task(tid: u32) -> SharedTask {
-        let t = TaskStruct::new_dummy_task(tid);
-        into_shared(t)
+        TaskStruct::new_dummy_task(tid).into_shared()
     }
 
     // 测试 kthread_spawn：应分配 tid 并放入任务管理器

@@ -151,16 +151,12 @@ mod tests {
     use super::*;
     use crate::{
         kassert,
-        kernel::{
-            cpu::current_cpu,
-            task::{TaskStruct, into_shared},
-        },
+        kernel::{cpu::current_cpu, task::TaskStruct},
         test_case,
     };
 
     fn mk_task(tid: u32) -> SharedTask {
-        let t = TaskStruct::new_dummy_task(tid);
-        into_shared(t)
+        TaskStruct::new_dummy_task(tid).into_shared()
     }
 
     // // 基础轮转：current=T0，队列[T1,T2]，三次切换应依次运行 T1 -> T2 -> T0
