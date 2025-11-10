@@ -5,7 +5,7 @@
 //! 仅在内核态运行
 use core::{hint, sync::atomic::Ordering};
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     arch::trap::restore,
@@ -37,9 +37,14 @@ use crate::{
 ///
 /// # 返回值
 /// Task id
+///
+// ///                 let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+//         // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
+//         unsafe {
+//             (*tf).set_fork_trap_frame(entry, 0, task.kstack_base, 0, 0, 0);
+//         }
 #[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
-    let entry_addr = entry_point as usize;
     let tid = TASK_MANAGER.lock().allocate_tid();
     let (pid, ppid) = {
         let cur_cpu = current_cpu().lock();
@@ -55,10 +60,20 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         tid,
         pid,
         ppid,
+        Arc::new(Vec::new()),
         kstack_tracker,
         trap_frame_tracker,
-        entry_addr,
     );
+
+    let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+    // SAFETY: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
+    unsafe {
+        (*tf).set_kernel_trap_frame(
+            entry_point as usize,
+            super::terminate_task as usize,
+            task.kstack_base,
+        );
+    }
     let tid = task.tid;
     let task = into_shared(task);
 
@@ -86,7 +101,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
         let task_opt = TASK_MANAGER.lock().get_task(tid);
         if let Some(task) = task_opt {
             let t = task.lock();
-            if t.state == TaskState::Stopped {
+            if t.state == TaskState::Zombie {
                 if let Some(rv) = t.return_value {
                     // SAFETY: 调用者保证了 return_value_ptr 指向的内存是合法可写的
                     unsafe {

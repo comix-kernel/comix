@@ -140,7 +140,7 @@ impl Scheduler for RRScheduler {
         {
             let mut t = task.lock();
             t.exit_code = Some(code);
-            t.state = TaskState::Stopped;
+            t.state = TaskState::Zombie;
         }
         self.run_queue.remove_task(&task);
     }
@@ -256,7 +256,7 @@ mod tests {
         {
             let g = t.lock();
             kassert!(g.exit_code == Some(123));
-            kassert!(matches!(g.state, TaskState::Stopped));
+            kassert!(matches!(g.state, TaskState::Zombie));
         }
         kassert!(!rr.run_queue.contains(&t));
     });
