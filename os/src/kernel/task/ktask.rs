@@ -124,8 +124,10 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
 
-    let cpu = current_cpu().lock();
-    let task = cpu.current_task.as_ref().unwrap().clone();
+    let task = {
+        let cpu = current_cpu().lock();
+        cpu.current_task.as_ref().unwrap().clone()
+    };
 
     {
         let mut t = task.lock();
