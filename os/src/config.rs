@@ -6,6 +6,8 @@ pub const PAGE_SIZE: usize = 4096;
 pub const KERNEL_HEAP_SIZE: usize = 16 * 1024 * 1024; // 16MB
 pub const USER_STACK_SIZE: usize = 4 * 1024 * 1024; // 4MB
 
+pub const MAX_ARGV: usize = 256;
+
 // User space memory layout constants
 // Memory layout (from high to low address):
 // [USER_STACK]          <--

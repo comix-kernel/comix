@@ -8,7 +8,7 @@ use core::{hint, sync::atomic::Ordering};
 use alloc::sync::Arc;
 
 use crate::{
-    arch::trap::restore,
+    arch::{intr::disable_interrupts, trap::restore},
     fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
@@ -105,7 +105,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
                         }
                     }
                 }
-                TASK_MANAGER.lock().remove_task(tid);
+                TASK_MANAGER.lock().release_task(tid);
                 return 0; // 成功结束
             }
         } else {
@@ -137,7 +137,11 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         let cpu = current_cpu().lock();
         cpu.current_task.as_ref().unwrap().clone()
     };
-
+    // 在restore之前不可发生中断
+    // execve伪造进程上下文用的trapframe和当前进程的是同一个
+    // 这时候发生中断会破坏创建到一半/创建好的的上下文
+    // 不必显式恢复中断，它会在restore中由sret指令自动恢复
+    unsafe { disable_interrupts() };
     {
         let mut t = task.lock();
         t.execve(space, entry, sp, argv, envp);
