@@ -7,6 +7,7 @@ use crate::kernel::task::SharedTask;
 
 /// 任务队列
 /// 用于存放任务
+#[derive(Debug)]
 pub struct TaskQueue {
     queue: Vec<SharedTask>,
 }
