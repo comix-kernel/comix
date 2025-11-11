@@ -11,7 +11,10 @@ use crate::{
         kernel::{context::Context, task::setup_stack_layout},
         trap::TrapFrame,
     },
-    kernel::task::{forkret, task_state::TaskState},
+    kernel::{
+        WaitQueue,
+        task::{forkret, task_state::TaskState},
+    },
     mm::{
         address::{ConvertablePaddr, PageNum, UsizeConvert},
         frame_allocator::{FrameRangeTracker, FrameTracker},
@@ -64,6 +67,8 @@ pub struct Task {
     pub ppid: u32,
     /// 任务的子任务列表
     pub children: Arc<SpinLock<Vec<SharedTask>>>,
+    /// 任务的等待队列
+    pub wait_child: WaitQueue,
     /// 内核栈基址
     pub kstack_base: usize,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
@@ -192,6 +197,32 @@ impl Task {
         }
     }
 
+    /// 等待子进程状态变化，目前只有退出
+    pub fn wait_for_child(&mut self) -> (u32, i32) {
+        loop {
+            for child in self.children.lock().iter() {
+                if child.lock().state == TaskState::Zombie {
+                    let c = child.lock();
+                    return (c.tid, c.exit_code.unwrap());
+                }
+            }
+            let current_task = {
+                use crate::kernel::cpu::current_cpu;
+                current_cpu()
+                    .lock()
+                    .current_task
+                    .as_ref()
+                    .expect("wait_for_child: no current task")
+                    .clone()
+            };
+            self.wait_child.sleep(current_task);
+        }
+    }
+
+    pub fn notify_child_exit(&mut self) {
+        self.wait_child.wake_up_one();
+    }
+
     /// 判断该任务是否为内核线程
     pub fn is_kernel_thread(&self) -> bool {
         self.memory_space.is_none()
@@ -238,6 +269,7 @@ impl Task {
             pid,
             ppid,
             children,
+            wait_child: WaitQueue::new(),
             kstack_base,
             kstack_tracker,
             trap_frame_tracker,

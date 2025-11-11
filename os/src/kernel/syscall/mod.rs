@@ -33,11 +33,18 @@ fn shutdown() -> ! {
 /// # 参数
 /// - `code`: 退出代码
 fn exit(code: i32) -> ! {
-    let tid = {
+    let (tid, ppid) = {
         let cpu = current_cpu().lock();
-        cpu.current_task.as_ref().unwrap().lock().tid
+        let task = cpu.current_task.as_ref().unwrap().lock();
+        (task.tid, task.ppid)
     };
     TASK_MANAGER.lock().exit_task(tid, code);
+    TASK_MANAGER
+        .lock()
+        .get_task(ppid)
+        .unwrap()
+        .lock()
+        .notify_child_exit();
     schedule();
     unreachable!("exit: exit_task should not return.");
 }
@@ -170,6 +177,18 @@ fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> is
     -1
 }
 
+/// 等待子进程状态变化
+/// TODO: 目前只支持等待退出且只有阻塞模式
+fn wait(wstatus: *mut i32) -> isize {
+    // 阻塞当前任务，直到指定的子任务结束
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let (tid, exit_code) = task.lock().wait_for_child();
+    unsafe {
+        *wstatus = exit_code;
+    }
+    tid as isize
+}
+
 // 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
 impl_syscall!(sys_exit, exit, noreturn, (i32));
@@ -181,3 +200,4 @@ impl_syscall!(
     execve,
     (*const u8, *const *const u8, *const *const u8)
 );
+impl_syscall!(sys_wait, wait, (*mut i32));
