@@ -18,6 +18,7 @@ use alloc::vec::Vec;
 /// wait_queue.wake_up_one(); // 唤醒队首任务
 /// wait_queue.wake_up_all(); // 唤醒所有任务
 /// ```
+#[derive(Debug)]
 pub struct WaitQueue {
     tasks: TaskQueue,
     lock: RawSpinLock,

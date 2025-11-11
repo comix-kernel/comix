@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 
 use crate::{
     arch::kernel::{context::Context, switch},
-    kernel::{scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    kernel::{current_cpu, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     sync::SpinLock,
 };
 
@@ -87,7 +87,19 @@ pub fn yield_task() {
 /// * `task`: 需要阻塞的任务
 /// * `receive_signal`: 是否可被信号中断
 pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
-    SCHEDULER.lock().sleep_task(task, receive_signal);
+    SCHEDULER.lock().sleep_task(task.clone(), receive_signal);
+    if current_cpu()
+        .lock()
+        .current_task
+        .as_ref()
+        .unwrap()
+        .lock()
+        .tid
+        == task.lock().tid
+    {
+        // 如果阻塞的是当前任务，则进行调度
+        schedule();
+    }
 }
 
 /// 唤醒任务
