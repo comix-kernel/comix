@@ -105,7 +105,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
                         }
                     }
                 }
-                TASK_MANAGER.lock().remove_task(tid);
+                TASK_MANAGER.lock().release_task(tid);
                 return 0; // 成功结束
             }
         } else {
