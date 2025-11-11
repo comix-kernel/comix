@@ -41,10 +41,12 @@ pub fn rest_init() {
     let ra = task.context.ra;
     let sp = task.context.sp;
     let ptr = task.trap_frame_ptr.load(Ordering::SeqCst);
+    let task = task.into_shared();
     unsafe {
         sscratch::write(ptr as usize);
     }
-    current_cpu().lock().current_task = Some(task.into_shared());
+    TASK_MANAGER.lock().add_task(task.clone());
+    current_cpu().lock().current_task = Some(task);
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
     // SAFETY: 在 Task 创建时已正确初始化 ra 和 sp
