@@ -15,7 +15,7 @@ use crate::{
     },
     fs::ROOT_FS,
     impl_syscall,
-    kernel::{TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu},
+    kernel::{TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, schedule},
     mm::{
         activate,
         frame_allocator::{alloc_contig_frames, alloc_frame},
@@ -32,8 +32,14 @@ fn shutdown() -> ! {
 /// TODO: 进程退出系统调用
 /// # 参数
 /// - `code`: 退出代码
-fn exit(_code: i32) -> ! {
-    crate::shutdown(false);
+fn exit(code: i32) -> ! {
+    let tid = {
+        let cpu = current_cpu().lock();
+        cpu.current_task.as_ref().unwrap().lock().tid
+    };
+    TASK_MANAGER.lock().exit_task(tid, code);
+    schedule();
+    unreachable!("exit: exit_task should not return.");
 }
 
 /// 向文件描述符写入数据

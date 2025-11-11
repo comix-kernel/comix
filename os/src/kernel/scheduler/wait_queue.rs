@@ -2,7 +2,7 @@
 //!
 //! 定义了等待队列结构体及其相关操作
 use crate::kernel::task::SharedTask;
-use crate::kernel::{TaskQueue, sleep_task, wake_up};
+use crate::kernel::{TaskQueue, sleep_task_with_block, wake_up_with_block};
 use crate::sync::RawSpinLock;
 use alloc::vec::Vec;
 
@@ -39,7 +39,7 @@ impl WaitQueue {
             self.tasks.add_task(task.clone());
         }
         // 在没有持有 wait-queue 锁的情况下调用调度相关操作
-        sleep_task(task, true);
+        sleep_task_with_block(task, true);
     }
 
     /// 从等待队列中移除指定任务并在锁释放后唤醒
@@ -54,7 +54,7 @@ impl WaitQueue {
             }
         };
         if should_wake {
-            wake_up(task.clone());
+            wake_up_with_block(task.clone());
         }
     }
 
@@ -65,7 +65,7 @@ impl WaitQueue {
             self.tasks.pop_task()
         };
         if let Some(t) = maybe_task {
-            wake_up(t);
+            wake_up_with_block(t);
         }
     }
 
@@ -79,7 +79,7 @@ impl WaitQueue {
             }
         }
         for t in to_wake {
-            wake_up(t);
+            wake_up_with_block(t);
         }
     }
 }

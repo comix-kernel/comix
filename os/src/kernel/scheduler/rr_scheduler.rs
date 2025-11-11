@@ -52,12 +52,12 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn prepare_switch(&mut self) -> Option<SwitchPlan> {
+    fn next_task(&mut self) -> Option<SwitchPlan> {
         // 取出当前任务，避免在下面赋值时被 Drop 掉
         let prev_task_opt = current_cpu().lock().current_task.take();
 
         // 选择下一个可运行任务（或返回/转 idle）
-        let next_task = match self.next_task() {
+        let next_task = match self.run_queue.pop_task() {
             Some(t) => t,
             None => {
                 // 没有可运行任务：恢复 current 并返回
@@ -110,13 +110,7 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn next_task(&mut self) -> Option<SharedTask> {
-        self.run_queue.pop_task()
-    }
-
     fn sleep_task(&mut self, task: SharedTask, receive_signal: bool) {
-        self.run_queue.remove_task(&task);
-
         {
             task.lock().state = if receive_signal {
                 TaskState::Interruptible
@@ -124,6 +118,8 @@ impl Scheduler for RRScheduler {
                 TaskState::Uninterruptible
             };
         }
+
+        self.run_queue.remove_task(&task);
     }
 
     fn wake_up(&mut self, task: SharedTask) {
@@ -136,12 +132,11 @@ impl Scheduler for RRScheduler {
         }
     }
 
-    fn exit_task(&mut self, task: SharedTask, code: i32) {
+    fn exit_task(&mut self, task: SharedTask) {
         {
-            let mut t = task.lock();
-            t.exit_code = Some(code);
-            t.state = TaskState::Zombie;
+            task.lock().state = TaskState::Zombie;
         }
+
         self.run_queue.remove_task(&task);
     }
 }
@@ -240,7 +235,7 @@ mod tests {
         kassert!(rr.run_queue.contains(&t));
     });
 
-    // 任务退出：应设置退出码、状态为 Stopped，并从队列移除
+    // 任务退出：应设置状态为 Zombie，并从队列移除
     test_case!(test_rr_exit_task, {
         current_cpu().lock().current_task = Some(mk_task(40));
 
@@ -248,10 +243,9 @@ mod tests {
         let t = mk_task(41);
         rr.add_task(t.clone());
 
-        rr.exit_task(t.clone(), 123);
+        rr.exit_task(t.clone());
         {
             let g = t.lock();
-            kassert!(g.exit_code == Some(123));
             kassert!(matches!(g.state, TaskState::Zombie));
         }
         kassert!(!rr.run_queue.contains(&t));

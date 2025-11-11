@@ -27,33 +27,44 @@ pub(crate) struct SwitchPlan {
 }
 
 /// 调度器接口定义
+/// 调度器负责决策和准备下一个任务的运行。
+/// 具体来说，它负责以下几项工作：
+/// 1. 决策： 根据优先级、时间片、调度策略等算法，从运行队列中选择下一个要执行的任务。
+/// 2. 队列维护： 维护任务的运行队列（Run Queue）。
 pub trait Scheduler {
     /// 构造函数
     fn new() -> Self;
-    /// 准备一次上下文切换，返回切换计划
-    /// HACK: 因为现在如果在 Scheduler 中直接 switch 会导致 SCHEDULER 的锁不能释放
-    ///       有没有更好的方法？
-    fn prepare_switch(&mut self) -> Option<SwitchPlan>;
     /// 添加任务到调度器
+    /// 参数:
+    /// * `task`: 需要添加的任务
     fn add_task(&mut self, task: SharedTask);
     /// 选择下一个要运行的任务
-    fn next_task(&mut self) -> Option<SharedTask>;
+    /// # 返回值
+    /// 如果要切换到下一个任务，返回切换计划 SwitchPlan；否则返回 None
+    fn next_task(&mut self) -> Option<SwitchPlan>;
     /// 任务阻塞
     /// 修改任务状态并从运行队列中移除
+    /// 参数:
+    /// * `task`: 需要阻塞的任务
+    /// * `receive_signal`: 是否可被信号中断
     fn sleep_task(&mut self, task: SharedTask, receive_signal: bool);
     /// 唤醒任务
     /// 修改任务状态并将其添加到运行队列
+    /// 参数:
+    /// * `task`: 需要唤醒的任务
     fn wake_up(&mut self, task: SharedTask);
     /// 任务终止
     /// 修改任务状态并从调度器中移除
-    fn exit_task(&mut self, task: SharedTask, code: i32);
+    /// 参数:
+    /// * `task`: 需要终止的任务
+    fn exit_task(&mut self, task: SharedTask);
 }
 
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
     let plan = {
         let mut sched = SCHEDULER.lock();
-        sched.prepare_switch()
+        sched.next_task()
     };
 
     if let Some(plan) = plan {
@@ -64,6 +75,8 @@ pub fn schedule() {
 }
 
 /// 主动放弃 CPU
+/// 切换到下一个任务
+/// 如果调用该函数的任务仍可运行，将被放回运行队列末尾，等待下一次调度
 pub fn yield_task() {
     schedule();
 }
@@ -73,7 +86,7 @@ pub fn yield_task() {
 /// 参数:
 /// * `task`: 需要阻塞的任务
 /// * `receive_signal`: 是否可被信号中断
-pub fn sleep_task(task: SharedTask, receive_signal: bool) {
+pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
     SCHEDULER.lock().sleep_task(task, receive_signal);
 }
 
@@ -81,7 +94,7 @@ pub fn sleep_task(task: SharedTask, receive_signal: bool) {
 /// 修改任务状态并将其添加到运行队列
 /// 参数:
 /// * `task`: 需要唤醒的任务
-pub fn wake_up(task: SharedTask) {
+pub fn wake_up_with_block(task: SharedTask) {
     SCHEDULER.lock().wake_up(task);
 }
 
@@ -89,7 +102,6 @@ pub fn wake_up(task: SharedTask) {
 /// 修改任务状态并从调度器中移除
 /// 参数:
 /// * `task`: 需要终止的任务
-/// * `code`: 任务的退出代码
-pub fn exit_task(task: SharedTask, code: i32) {
-    SCHEDULER.lock().exit_task(task, code);
+pub fn exit_task_with_block(task: SharedTask) {
+    SCHEDULER.lock().exit_task(task);
 }
