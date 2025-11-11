@@ -155,7 +155,7 @@ fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> is
         let cpu = current_cpu().lock();
         cpu.current_task.as_ref().unwrap().clone()
     };
-
+    // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {
         let mut t = task.lock();
         t.execve(space, entry, sp, &argv_refs, &envp_refs);
