@@ -1,0 +1,144 @@
+use crate::sync::SpinLock;
+use crate::vfs::inode::Inode;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::sync::{Arc, Weak};
+
+/// 目录项（Dentry）
+///
+/// 表示路径中的一个组件，缓存文件名到 inode 的映射
+pub struct Dentry {
+    /// 文件名（不含路径）
+    pub name: String,
+
+    /// 关联的 inode
+    pub inode: Arc<dyn Inode>,
+
+    /// 父目录 dentry（弱引用避免循环）
+    parent: SpinLock<Weak<Dentry>>,
+
+    /// 子 dentry 映射（文件名 -> dentry）
+    children: SpinLock<BTreeMap<String, Arc<Dentry>>>,
+}
+
+impl Dentry {
+    /// 创建新的 dentry
+    pub fn new(name: String, inode: Arc<dyn Inode>) -> Arc<Self> {
+        Arc::new(Self {
+            name,
+            inode,
+            parent: SpinLock::new(Weak::new()),
+            children: SpinLock::new(BTreeMap::new()),
+        })
+    }
+
+    /// 设置父 dentry
+    pub fn set_parent(&self, parent: &Arc<Dentry>) {
+        *self.parent.lock() = Arc::downgrade(parent);
+    }
+
+    /// 获取父 dentry
+    pub fn parent(&self) -> Option<Arc<Dentry>> {
+        self.parent.lock().upgrade()
+    }
+
+    /// 查找子 dentry
+    pub fn lookup_child(&self, name: &str) -> Option<Arc<Dentry>> {
+        self.children.lock().get(name).cloned()
+    }
+
+    /// 添加子 dentry
+    pub fn add_child(&self, child: Arc<Dentry>) {
+        // 设置父指针
+        child.set_parent(
+            &(unsafe {
+                // SAFETY: self 指针有效，我们立即将其包装为 Arc
+                Arc::from_raw(self as *const _ as *const Dentry)
+            }),
+        );
+
+        // 添加到子列表
+        self.children.lock().insert(child.name.clone(), child);
+    }
+
+    /// 删除子 dentry
+    pub fn remove_child(&self, name: &str) -> Option<Arc<Dentry>> {
+        self.children.lock().remove(name)
+    }
+
+    /// 获取完整路径
+    pub fn full_path(&self) -> String {
+        let mut components = alloc::vec::Vec::new();
+        let mut current: *const Dentry = self;
+
+        // 向上遍历到根
+        loop {
+            let dentry = unsafe { &*current };
+
+            // 根目录的名字是 "/"
+            if dentry.name == "/" {
+                break;
+            }
+
+            components.push(dentry.name.clone());
+
+            // 获取父节点
+            match dentry.parent() {
+                Some(parent) => current = Arc::as_ptr(&parent),
+                None => break, // 到达根或孤立节点
+            }
+        }
+
+        // 反转（从根到当前）
+        components.reverse();
+
+        if components.is_empty() {
+            String::from("/")
+        } else {
+            String::from("/") + &components.join("/")
+        }
+    }
+}
+
+// 全局 dentry 缓存实例
+lazy_static::lazy_static! {
+    pub static ref DENTRY_CACHE: DentryCache = DentryCache::new();
+}
+
+/// 全局 Dentry 缓存
+pub struct DentryCache {
+    /// 路径 -> dentry 的弱引用映射
+    cache: SpinLock<BTreeMap<String, Weak<Dentry>>>,
+}
+
+impl DentryCache {
+    /// 创建新的缓存
+    pub const fn new() -> Self {
+        Self {
+            cache: SpinLock::new(BTreeMap::new()),
+        }
+    }
+
+    /// 从缓存中查找 dentry
+    pub fn lookup(&self, path: &str) -> Option<Arc<Dentry>> {
+        let cache = self.cache.lock();
+        let weak = cache.get(path)?;
+        weak.upgrade()
+    }
+
+    /// 插入 dentry 到缓存
+    pub fn insert(&self, dentry: &Arc<Dentry>) {
+        let path = dentry.full_path();
+        self.cache.lock().insert(path, Arc::downgrade(dentry));
+    }
+
+    /// 从缓存中移除
+    pub fn remove(&self, path: &str) {
+        self.cache.lock().remove(path);
+    }
+
+    /// 清空缓存
+    pub fn clear(&self) {
+        self.cache.lock().clear();
+    }
+}
