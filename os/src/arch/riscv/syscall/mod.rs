@@ -32,7 +32,7 @@ macro_rules! impl_syscall {
     // noreturn, 6 args
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) -> ! {
+        pub fn $sys_name(frame: &mut $crate::trap::TrapFrame) -> ! {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;
@@ -59,7 +59,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) -> ! {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) -> ! {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             $kernel(a0, a1)
@@ -67,7 +67,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) -> ! {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) -> ! {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;
@@ -76,7 +76,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty, $t3:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) -> ! {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) -> ! {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;
@@ -86,7 +86,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) -> ! {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) -> ! {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;
@@ -99,7 +99,7 @@ macro_rules! impl_syscall {
     // returning, 6 args
     ($sys_name:ident, $kernel:path, ($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;
@@ -114,14 +114,14 @@ macro_rules! impl_syscall {
     // returning, 0..5 args (expanded)
     ($sys_name:ident, $kernel:path, ()) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) {
             let ret = $kernel();
             frame.x10_a0 = ret as isize as usize;
         }
     };
     ($sys_name:ident, $kernel:path, ($t0:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) {
             let a0 = frame.x10_a0 as $t0;
             let ret = $kernel(a0);
             frame.x10_a0 = ret as isize as usize;
@@ -129,7 +129,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, ($t0:ty, $t1:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let ret = $kernel(a0, a1);
@@ -148,7 +148,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, ($t0:ty, $t1:ty, $t2:ty, $t3:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;
@@ -159,7 +159,7 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, ($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut super::trap::TrapFrame) {
+        pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) {
             let a0 = frame.x10_a0 as $t0;
             let a1 = frame.x11_a1 as $t1;
             let a2 = frame.x12_a2 as $t2;

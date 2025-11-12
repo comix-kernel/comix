@@ -7,7 +7,7 @@ use riscv::register::sscratch;
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, timer, trap},
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, into_shared,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         kernel_execve,
     },
     mm::{
@@ -23,26 +23,29 @@ pub fn rest_init() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
-    let task = into_shared(TaskStruct::ktask_create(
+    let task = TaskStruct::ktask_create(
         tid,
         tid,
         0,
+        TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        init as usize,
-    )); // init 没有父任务
+    ); // init 没有父任务
 
-    let (ra, sp) = {
-        let g = task.lock();
-        let ra = g.context.ra;
-        let sp = g.context.sp;
-        (ra, sp)
-    };
+    let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+    // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
+    unsafe {
+        (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base);
+    }
 
-    let ptr = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    let ra = task.context.ra;
+    let sp = task.context.sp;
+    let ptr = task.trap_frame_ptr.load(Ordering::SeqCst);
+    let task = task.into_shared();
     unsafe {
         sscratch::write(ptr as usize);
     }
+    TASK_MANAGER.lock().add_task(task.clone());
     current_cpu().lock().current_task = Some(task);
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
@@ -83,15 +86,21 @@ fn create_kthreadd() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
-    let task = into_shared(TaskStruct::ktask_create(
+    let task = TaskStruct::ktask_create(
         tid,
         tid,
         0,
+        TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        kthreadd as usize,
-    )); // kthreadd 没有父任务
+    ); // kthreadd 没有父任务
 
+    let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+    // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
+    unsafe {
+        (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
+    }
+    let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
     SCHEDULER.lock().add_task(task);
 }

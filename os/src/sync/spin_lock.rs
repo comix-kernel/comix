@@ -16,6 +16,7 @@ use crate::sync::raw_spin_lock::{RawSpinLock, RawSpinLockGuard};
 /// 当持有锁时，尝试再次获取锁将导致死锁。
 /// 确保在同一线程中不会嵌套调用 SpinLock::lock()。
 /// 此外，SpinLock 通过禁用中断来保护临界区，因此在持有锁时应避免长时间运行的操作，以防止影响系统响应性。
+#[derive(Debug)]
 pub struct SpinLock<T> {
     raw_lock: RawSpinLock,
     data: UnsafeCell<T>,

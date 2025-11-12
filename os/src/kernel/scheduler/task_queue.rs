@@ -7,6 +7,7 @@ use crate::kernel::task::SharedTask;
 
 /// 任务队列
 /// 用于存放任务
+#[derive(Debug)]
 pub struct TaskQueue {
     queue: Vec<SharedTask>,
 }
@@ -55,16 +56,11 @@ impl TaskQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        kassert,
-        kernel::task::{TaskStruct, into_shared},
-        test_case,
-    };
+    use crate::{kassert, kernel::task::TaskStruct, test_case};
     use alloc::sync::Arc;
 
     fn mk_task(tid: u32) -> SharedTask {
-        let t = TaskStruct::new_dummy_task(tid);
-        into_shared(t)
+        TaskStruct::new_dummy_task(tid).into_shared()
     }
 
     // 基础：新增后应存在于队列，队列非空
