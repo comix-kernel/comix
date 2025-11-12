@@ -1,5 +1,8 @@
-mod dentry;
-mod error;
-mod fd_table;
-mod file;
-mod inode;
+pub mod dentry;
+pub mod error;
+pub mod fd_table;
+pub mod file;
+pub mod inode;
+
+pub use error::FsError;
+pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType, TimeSpec};
