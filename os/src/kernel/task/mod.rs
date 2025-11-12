@@ -23,6 +23,7 @@ use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
     sync::SpinLock,
+    vfs::{FDTable, File, FsError},
 };
 
 /// 把已初始化的 TaskStruct 包装为共享任务句柄
@@ -75,4 +76,26 @@ pub(crate) fn terminate_task(return_value: usize) -> ! {
     drop(task);
     schedule();
     unreachable!("terminate_task: should not return after scheduled out terminated task");
+}
+
+/// 获取当前task
+///
+/// 获取后须手动lock
+pub fn current_task() -> SharedTask {
+    current_cpu()
+        .lock()
+        .current_task
+        .as_ref()
+        .expect("current_task: CPU has no current task")
+        .clone()
+}
+
+/// 获取当前任务的文件描述符表
+pub fn current_fd_table() -> Arc<FDTable> {
+    current_task().lock().fd_table.clone()
+}
+
+/// 从当前任务的 FD 表中获取文件
+pub fn get_file(fd: usize) -> Result<Arc<File>, FsError> {
+    current_fd_table().get(fd)
 }

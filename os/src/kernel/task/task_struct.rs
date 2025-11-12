@@ -21,6 +21,7 @@ use crate::{
         memory_space::MemorySpace,
     },
     println,
+    vfs::{FDTable, Dentry, create_stdio_files},
 };
 
 /// 任务
@@ -67,6 +68,17 @@ pub struct Task {
     kstack_tracker: FrameRangeTracker,
     /// 任务的 TrapFrame 跟踪器
     trap_frame_tracker: FrameTracker,
+
+    // === 文件系统 ===
+
+    /// 文件描述符表
+    pub fd_table: Arc<FDTable>,
+
+    /// 当前工作目录
+    pub cwd: Option<Arc<Dentry>>,
+
+    /// 根目录（用于 chroot）
+    pub root: Option<Arc<Dentry>>,
 }
 
 impl Task {
@@ -218,6 +230,15 @@ impl Task {
                 - 1) as *mut u8;
             ptr.write_volatile(0xFF);
         };
+
+        // 创建文件描述符表
+        let fd_table = Arc::new(FDTable::new());
+
+        // 初始化标准 I/O (FD 0/1/2)
+        let (stdin, stdout, stderr) = create_stdio_files();
+        fd_table.install_at(0, stdin).expect("Failed to install stdin");
+        fd_table.install_at(1, stdout).expect("Failed to install stdout");
+        fd_table.install_at(2, stderr).expect("Failed to install stderr");
         Task {
             context: Context::zero_init(),
             preempt_count: 0,
@@ -235,6 +256,10 @@ impl Task {
             memory_space,
             exit_code: None,
             return_value: None,
+
+            fd_table: fd_table,
+            cwd: None, // TODO: 临时设置为none
+            root: None, // TODO: 临时设置为none
         }
     }
 

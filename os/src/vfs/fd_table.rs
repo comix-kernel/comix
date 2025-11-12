@@ -3,6 +3,7 @@ use crate::sync::SpinLock;
 use crate::vfs::{File, FsError};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::fmt;
 
 /// 文件描述符表
 ///
@@ -14,6 +15,18 @@ pub struct FDTable {
 
     /// 最大文件描述符数量
     max_fds: usize,
+}
+
+impl fmt::Debug for FDTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let files = self.files.lock();
+        let used = files.iter().filter(|slot| slot.is_some()).count();
+        f.debug_struct("FDTable")
+            .field("max_fds", &self.max_fds)
+            .field("slots", &files.len())
+            .field("used", &used)
+            .finish()
+    }
 }
 
 impl FDTable {
