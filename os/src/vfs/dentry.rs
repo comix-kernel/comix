@@ -3,6 +3,7 @@ use crate::vfs::inode::Inode;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
+use core::fmt;
 
 /// 目录项（Dentry）
 ///
@@ -19,6 +20,22 @@ pub struct Dentry {
 
     /// 子 dentry 映射（文件名 -> dentry）
     children: SpinLock<BTreeMap<String, Arc<Dentry>>>,
+}
+
+impl fmt::Debug for Dentry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parent_name = self.parent().map(|p| p.name.clone());
+        let child_names = {
+            let children = self.children.lock();
+            children.keys().cloned().collect::<alloc::vec::Vec<_>>()
+        };
+
+        f.debug_struct("Dentry")
+            .field("name", &self.name)
+            .field("parent", &parent_name)
+            .field("children", &child_names)
+            .finish()
+    }
 }
 
 impl Dentry {
