@@ -107,8 +107,7 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
     if SCHEDULER.lock().update_time_slice() {
-        // FIXME: 现在从用户代码进入调度器会死锁
-        // schedule();
+        schedule();
     }
 }
 

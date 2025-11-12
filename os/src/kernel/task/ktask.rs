@@ -8,13 +8,13 @@ use core::{hint, sync::atomic::Ordering};
 use alloc::sync::Arc;
 
 use crate::{
-    arch::trap::restore,
+    arch::{intr::disable_interrupts, trap::restore},
     fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
         scheduler::Scheduler,
-        task::{TASK_MANAGER, TaskStruct, into_shared, task_manager::TaskManagerTrait},
+        task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
     },
     mm::{
         activate,
@@ -39,7 +39,6 @@ use crate::{
 /// Task id
 #[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
-    let entry_addr = entry_point as usize;
     let tid = TASK_MANAGER.lock().allocate_tid();
     let (pid, ppid) = {
         let cur_cpu = current_cpu().lock();
@@ -55,12 +54,22 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         tid,
         pid,
         ppid,
+        TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        entry_addr,
     );
+
+    let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+    // SAFETY: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
+    unsafe {
+        (*tf).set_kernel_trap_frame(
+            entry_point as usize,
+            super::terminate_task as usize,
+            task.kstack_base,
+        );
+    }
     let tid = task.tid;
-    let task = into_shared(task);
+    let task = task.into_shared();
 
     // 将任务加入调度器和任务管理器
     TASK_MANAGER.lock().add_task(task.clone());
@@ -86,7 +95,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
         let task_opt = TASK_MANAGER.lock().get_task(tid);
         if let Some(task) = task_opt {
             let t = task.lock();
-            if t.state == TaskState::Stopped {
+            if t.state == TaskState::Zombie {
                 if let Some(rv) = t.return_value {
                     // SAFETY: 调用者保证了 return_value_ptr 指向的内存是合法可写的
                     unsafe {
@@ -96,7 +105,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
                         }
                     }
                 }
-                TASK_MANAGER.lock().remove_task(tid);
+                TASK_MANAGER.lock().release_task(tid);
                 return 0; // 成功结束
             }
         } else {
@@ -124,9 +133,15 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
 
-    let cpu = current_cpu().lock();
-    let task = cpu.current_task.as_ref().unwrap().clone();
-
+    let task = {
+        let cpu = current_cpu().lock();
+        cpu.current_task.as_ref().unwrap().clone()
+    };
+    // 在restore之前不可发生中断
+    // execve伪造进程上下文用的trapframe和当前进程的是同一个
+    // 这时候发生中断会破坏创建到一半/创建好的的上下文
+    // 不必显式恢复中断，它会在restore中由sret指令自动恢复
+    unsafe { disable_interrupts() };
     {
         let mut t = task.lock();
         t.execve(space, entry, sp, argv, envp);
@@ -159,8 +174,7 @@ mod tests {
     fn dummy_thread() {}
 
     fn mk_task(tid: u32) -> SharedTask {
-        let t = TaskStruct::new_dummy_task(tid);
-        into_shared(t)
+        TaskStruct::new_dummy_task(tid).into_shared()
     }
 
     // 测试 kthread_spawn：应分配 tid 并放入任务管理器

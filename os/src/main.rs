@@ -19,6 +19,7 @@ mod kernel;
 mod mm;
 mod sync;
 mod test;
+mod tool;
 mod vfs;
 #[macro_use]
 mod log;

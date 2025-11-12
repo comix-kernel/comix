@@ -8,6 +8,7 @@
 //! 注意：该模块的实例应当被包装在适当的同步原语中以确保线程安全
 use alloc::collections::btree_map::BTreeMap;
 
+use crate::kernel::exit_task_with_block;
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
 use crate::sync::SpinLock;
@@ -19,7 +20,13 @@ lazy_static! {
 }
 
 /// 任务管理器接口
-/// 定义了任务管理器应实现的基本功能
+///
+/// 任务管理器负责所有与任务数据结构相关的修改。
+/// 具体来说，它负责以下几项工作：
+/// 1. 填写返回值（退出状态）。在 exit 流程中，任务管理器将进程的退出码写入其进程描述符中。
+/// 2. 数据结构维护： 维护进程描述符（task_struct）中的所有数据，如 PID、父子关系、权限、打开的文件列表等。
+/// 3. 任务生命周期管理： 负责任务的创建、销毁和查找等功能。
+/// 注意：任务运行状态的修改由调度器负责
 pub trait TaskManagerTrait {
     /// 创建一个新的任务管理器实例
     /// 返回值: TaskManager 结构体
@@ -35,10 +42,15 @@ pub trait TaskManagerTrait {
     /// * `task`: 需要添加的任务，类型为 SharedTask
     fn add_task(&mut self, task: SharedTask);
 
-    /// 从任务管理器中移除一个任务
+    /// 将一个任务标记为退出
     /// 参数:
-    /// * `tid`: 需要移除的任务 ID
-    fn remove_task(&mut self, tid: u32);
+    /// * `tid`: 需要退出的任务 ID
+    fn exit_task(&mut self, tid: u32, code: i32);
+
+    /// 释放一个已退出的任务
+    /// 参数:
+    /// * `tid`: 需要释放的任务 ID
+    fn release_task(&mut self, tid: u32);
 
     /// 根据任务 ID 获取对应的任务
     /// 参数:
@@ -79,7 +91,14 @@ impl TaskManagerTrait for TaskManager {
         self.tasks.insert(tid, task);
     }
 
-    fn remove_task(&mut self, tid: u32) {
+    fn exit_task(&mut self, tid: u32, code: i32) {
+        if let Some(task) = self.tasks.get(&tid).cloned() {
+            task.lock().return_value = Some(code as usize);
+            exit_task_with_block(task);
+        }
+    }
+
+    fn release_task(&mut self, tid: u32) {
         self.tasks.remove(&tid);
     }
 
@@ -95,8 +114,20 @@ impl TaskManagerTrait for TaskManager {
 
 #[cfg(test)]
 mod tests {
+    use alloc::sync::Arc;
+
     use super::*;
-    use crate::{kassert, kernel::task::TaskStruct, sync::SpinLock, test_case};
+    use crate::{
+        kassert,
+        kernel::{TaskState, task::TaskStruct},
+        sync::SpinLock,
+        test_case,
+    };
+
+    fn new_dummy_task(tid: u32) -> SharedTask {
+        let task = TaskStruct::new_dummy_task(tid);
+        Arc::new(SpinLock::new(task))
+    }
 
     // 通过 TaskManager 分配 tid：应从 1 开始递增
     test_case!(test_task_manager_allocate_sequence, {
@@ -109,31 +140,54 @@ mod tests {
         kassert!(t3 == 3);
     });
 
-    // 对不存在的 tid 进行查询与删除：不应崩溃，查询为 None
+    // 对不存在的 tid 进行查询与退出
     test_case!(test_task_manager_get_remove_nonexistent, {
         let mut tm = TaskManager::new();
         // 查询不存在的任务
         kassert!(tm.get_task(42).is_none());
 
         // 删除不存在的任务（应为 no-op）
-        tm.remove_task(42);
+        tm.exit_task(42, 0);
         kassert!(tm.get_task(42).is_none());
     });
 
-    // 关于 add_task/get_task 的正向测试
-    test_case!(test_task_manager_add_get_remove, {
+    // 关于 add_task/get_task/exit_task 的正向测试
+    test_case!(test_task_manager_add_get_exit, {
         let mut tm = TaskManager::new();
         let tid = tm.allocate_tid();
         let task = new_dummy_task(tid);
         tm.add_task(task.clone());
         kassert!(tm.get_task(tid).is_some());
-        tm.remove_task(tid);
-        kassert!(tm.get_task(tid).is_none());
+
+        const EXIT_CODE: i32 = 42;
+
+        // 任务管理器执行退出操作（设置返回值和通知调度器）
+        tm.exit_task(tid, EXIT_CODE);
+
+        let exited_task = tm.get_task(tid).unwrap();
+        let g = exited_task.lock();
+
+        // 验证任务管理器设置了返回值 (新的责任)
+        kassert!(g.return_value == Some(EXIT_CODE as usize));
+
+        // 验证调度器设置了状态 (调度器的责任)
+        kassert!(g.state == TaskState::Zombie);
     });
 
-    fn new_dummy_task(tid: u32) -> SharedTask {
-        use alloc::sync::Arc;
-        let task = TaskStruct::new_dummy_task(tid);
-        Arc::new(SpinLock::new(task))
-    }
+    // 释放已退出任务的测试
+    test_case!(test_task_manager_release_task, {
+        let mut tm = TaskManager::new();
+        let tid = tm.allocate_tid();
+        let task = new_dummy_task(tid);
+        tm.add_task(task.clone());
+
+        // 任务退出（此时状态为 Zombie，仍在 tasks 列表中）
+        tm.exit_task(tid, 0);
+        kassert!(tm.task_count() == 1);
+
+        // 释放任务
+        tm.release_task(tid);
+        kassert!(tm.task_count() == 0);
+        kassert!(tm.get_task(tid).is_none());
+    });
 }
