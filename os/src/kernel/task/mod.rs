@@ -16,6 +16,7 @@ pub use task_state::TaskState;
 pub use task_struct::SharedTask;
 pub use task_struct::Task as TaskStruct;
 
+use crate::mm::activate;
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
@@ -28,6 +29,9 @@ pub(crate) fn forkret() {
     {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap();
+        if !task.lock().is_kernel_thread() {
+            activate(task.lock().memory_space.clone().unwrap().root_ppn());
+        }
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
     // SAFETY: fp 指向的内存已经被分配且由当前任务拥有
