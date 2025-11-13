@@ -22,7 +22,6 @@ use crate::mm::activate;
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
-    sync::SpinLock,
     vfs::{FDTable, File, FsError},
 };
 
