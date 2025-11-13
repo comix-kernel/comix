@@ -68,8 +68,8 @@ pub fn rest_init() {
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
     super::trap::init();
-    create_kthreadd();
-    kernel_execve("/hello", &["hello"], &[]);
+    // create_kthreadd();
+    kernel_execve("init", &["init"], &[]);
 }
 
 /// 内核守护线程
