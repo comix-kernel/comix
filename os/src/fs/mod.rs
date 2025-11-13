@@ -63,3 +63,6 @@ pub fn init_simple_fs() -> Result<(), crate::vfs::FsError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
