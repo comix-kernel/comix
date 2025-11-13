@@ -71,14 +71,14 @@ pub fn schedule() {
     if let Some(plan) = plan {
         // SAFETY: prepare_switch 生成的切换计划中的指针均合法
         unsafe { switch(plan.old, plan.new) };
-        // let tid = current_cpu()
-        //     .lock()
-        //     .current_task
-        //     .as_ref()
-        //     .unwrap()
-        //     .lock()
-        //     .tid;
-        // pr_alert!("Switched to task {}", tid);
+        let tid = current_cpu()
+            .lock()
+            .current_task
+            .as_ref()
+            .unwrap()
+            .lock()
+            .tid;
+        pr_alert!("Switched to task {}", tid);
         // 通常不会立即返回；返回时再继续当前上下文后续逻辑
     }
 }
