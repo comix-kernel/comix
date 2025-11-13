@@ -1,4 +1,5 @@
-use crate::vfs::{Dentry, FsError};
+use crate::kernel::current_task;
+use crate::vfs::{Dentry, FsError, get_root_dentry};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -112,17 +113,69 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
 // TODO: 实现VFS 路径解析，将路径字符串解析为 Dentry
 /// VFS 路径解析
 pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
-    unimplemented!()
+    let components = parse_path(path);
+
+    // 确定起始 dentry
+    let mut current_dentry = if components.first() == Some(&PathComponent::Root) {
+        // 绝对路径：从根目录开始
+        get_root_dentry()?
+    } else {
+        // 相对路径：从当前工作目录开始
+        get_cur_dir()?
+    };
+
+    // 逐个解析路径组件
+    for component in components {
+        current_dentry = resolve_component(current_dentry, component)?;
+    }
+
+    Ok(current_dentry)
 }
 
 fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<Dentry>, FsError> {
-    unimplemented!()
-}
+    match component {
+        PathComponent::Root => {
+            // 已经在根目录，无需操作
+            get_root_dentry()
+        }
+        PathComponent::Current => {
+            // "." 表示当前目录
+            Ok(base)
+        }
+        PathComponent::Parent => {
+            // ".." 表示父目录
+            match base.parent() {
+                Some(parent) => Ok(parent),
+                None => Ok(base), // 根目录的父目录是自己
+            }
+        }
+        PathComponent::Normal(name) => {
+            // 正常文件名：查找子项
 
-fn get_root_dentry() -> Result<Arc<Dentry>, FsError> {
-    unimplemented!()
+            // 1. 先检查 dentry 缓存
+            if let Some(child) = base.lookup_child(&name) {
+                return Ok(child);
+            }
+
+            // 2. 缓存未命中，通过 inode 查找
+            let child_inode = base.inode.lookup(&name)?;
+
+            // 3. 创建新的 dentry 并加入缓存
+            let child_dentry = Dentry::new(name.clone(), child_inode);
+            base.add_child(child_dentry.clone());
+
+            // 4. 加入全局缓存
+            crate::vfs::DENTRY_CACHE.insert(&child_dentry);
+
+            Ok(child_dentry)
+        }
+    }
 }
 
 fn get_cur_dir() -> Result<Arc<Dentry>, FsError> {
-    unimplemented!()
+    current_task()
+        .lock()
+        .cwd
+        .clone()
+        .ok_or(FsError::NotSupported)
 }
