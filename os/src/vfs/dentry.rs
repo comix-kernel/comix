@@ -75,12 +75,12 @@ impl Dentry {
         self.children.lock().remove(name)
     }
 
-    /// 获取完整路径
+    /// 获取完整路径（通过向上遍历父节点直到根目录）
     pub fn full_path(&self) -> String {
         let mut components = alloc::vec::Vec::new();
         let mut current: *const Dentry = self;
 
-        // 向上遍历到根
+        // 向上遍历到根目录
         loop {
             let dentry = unsafe { &*current };
 

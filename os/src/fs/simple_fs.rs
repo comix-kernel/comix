@@ -100,7 +100,7 @@ impl SimpleFs {
         })
     }
 
-    /// 解析单个文件条目
+    /// 解析镜像中的单个文件条目并添加到父目录
     fn parse_file_entry(
         device: Arc<dyn BlockDevice>,
         offset: usize,
@@ -156,7 +156,7 @@ impl SimpleFs {
         Ok(cur_offset)
     }
 
-    /// 辅助函数：从设备的任意偏移读取数据
+    /// 从设备的任意偏移位置读取数据（支持跨块读取）
     fn read_at_offset(
         device: Arc<dyn BlockDevice>,
         offset: usize,
@@ -188,7 +188,7 @@ impl SimpleFs {
         Ok(())
     }
 
-    /// 按路径插入 inode（支持多级目录）
+    /// 按路径插入 inode，自动创建不存在的中间目录
     fn insert_inode_by_path(
         path: &str,
         inode: Arc<SimpleFsInode>,

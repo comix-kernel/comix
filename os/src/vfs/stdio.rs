@@ -209,9 +209,9 @@ impl Inode for StderrInode {
     }
 }
 
-/// 创建标准 I/O 文件对象
+/// 创建标准 I/O 文件对象（stdin、stdout、stderr）
 ///
-/// 返回 (stdin, stdout, stderr) 三元组
+/// 返回：三元组 (stdin, stdout, stderr)，分别对应文件描述符 0、1、2
 pub fn create_stdio_files() -> (Arc<crate::vfs::File>, Arc<crate::vfs::File>, Arc<crate::vfs::File>) {
     use crate::vfs::{File, OpenFlags, Dentry};
 

@@ -13,6 +13,11 @@ pub enum PathComponent {
 }
 
 /// 将路径字符串解析为组件列表
+///
+/// 参数：
+///     - path: 待解析的路径字符串（支持绝对路径和相对路径）
+///
+/// 返回：路径组件向量，包含 Root、Current、Parent 或 Normal 组件
 pub fn parse_path(path: &str) -> Vec<PathComponent> {
     let mut components = Vec::new();
 
@@ -35,6 +40,11 @@ pub fn parse_path(path: &str) -> Vec<PathComponent> {
 }
 
 /// 规范化路径（处理 ".." 和 "."）
+///
+/// 参数：
+///     - path: 待规范化的路径字符串
+///
+/// 返回：规范化后的路径字符串，移除冗余的 `.` 和 `..` 组件
 pub fn normalize_path(path: &str) -> String {
     let components = parse_path(path);
     let mut stack: Vec<String> = Vec::new();
@@ -92,34 +102,10 @@ pub fn normalize_path(path: &str) -> String {
 
 /// 将路径分割为目录部分和文件名部分
 ///
-/// 此函数会先规范化路径（处理多余的斜杠、`.` 和 `..`），然后将其分割为目录和文件名。
+/// 参数：
+///     - path: 待分割的路径字符串
 ///
-/// # 参数
-///
-/// * `path` - 要分割的路径字符串
-///
-/// # 返回值
-///
-/// * `Ok((dir, filename))` - 成功时返回目录路径和文件名的元组
-///   - 对于绝对路径如 `/foo/bar.txt`，返回 `("/foo", "bar.txt")`
-///   - 对于相对路径如 `foo/bar.txt`，返回 `("foo", "bar.txt")`
-///   - 对于没有目录的相对路径如 `bar.txt`，返回 `(".", "bar.txt")`
-/// * `Err(FsError::InvalidArgument)` - 当路径以斜杠结尾（表示目录）或文件名为空时
-///
-/// # 示例
-///
-/// ```
-/// let (dir, filename) = split_path("/foo/bar.txt").unwrap();
-/// assert_eq!(dir, "/foo");
-/// assert_eq!(filename, "bar.txt");
-///
-/// let (dir, filename) = split_path("///foo///bar.txt").unwrap();
-/// assert_eq!(dir, "/foo");  // 多余的斜杠被规范化
-/// assert_eq!(filename, "bar.txt");
-///
-/// // 路径以斜杠结尾会返回错误
-/// assert!(split_path("/foo/bar/").is_err());
-/// ```
+/// 返回：Ok((目录, 文件名)) 分割成功；Err(FsError::InvalidArgument) 路径以斜杠结尾或文件名为空
 pub fn split_path(path: &str) -> Result<(String, String), FsError> {
     // 如果路径以斜杠结尾，说明是目录而非文件，返回错误
     if path.ends_with('/') && path.len() > 1 {
@@ -148,8 +134,12 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
     }
 }
 
-// TODO: 实现VFS 路径解析，将路径字符串解析为 Dentry
-/// VFS 路径解析
+/// 将路径字符串解析为 Dentry（支持绝对/相对路径、符号链接解析）
+///
+/// 参数：
+///     - path: 文件或目录路径（绝对路径从根目录开始，相对路径从当前工作目录开始）
+///
+/// 返回：Ok(Arc<Dentry>) 路径对应的目录项；Err(FsError::NotFound) 路径不存在；Err(FsError::NotDirectory) 中间组件不是目录
 pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
     let components = parse_path(path);
 
@@ -170,6 +160,7 @@ pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
     Ok(current_dentry)
 }
 
+/// 解析单个路径组件，处理 `.`、`..`、普通文件名和符号链接
 fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<Dentry>, FsError> {
     match component {
         PathComponent::Root => {
@@ -210,6 +201,7 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
     }
 }
 
+/// 获取当前任务的工作目录
 fn get_cur_dir() -> Result<Arc<Dentry>, FsError> {
     current_task()
         .lock()

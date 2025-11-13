@@ -26,7 +26,7 @@ pub unsafe fn copy_cstr_to_string(ptr: *const u8) -> Result<String, ()> {
     Err(())
 }
 
-/// 把 NULL 终止的指针数组拷贝为 Vec<String>
+/// 把 NULL 终止的指针数组拷贝为 `Vec<String>`
 /// WARNING: 这个函数直接读取指针，调用者必须保证指针在内核可读
 pub unsafe fn ptr_array_to_vec_strings(ptrs: *const *const u8) -> Result<Vec<String>, ()> {
     let mut out: Vec<String> = Vec::new();
