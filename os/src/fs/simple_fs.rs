@@ -304,6 +304,10 @@ impl Inode for SimpleFsInode {
     }
 
     fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        if self.inode_type == InodeType::Directory {
+            return Err(FsError::IsDirectory);
+        }
+        
         let data = self.data.lock();
         if offset >= data.len() {
             return Ok(0);
@@ -315,6 +319,10 @@ impl Inode for SimpleFsInode {
     }
 
     fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        if self.inode_type == InodeType::Directory {
+            return Err(FsError::IsDirectory);
+        }
+
         let mut data = self.data.lock();
         if offset + buf.len() > data.len() {
             data.resize(offset + buf.len(), 0);
