@@ -2,7 +2,7 @@
 //!
 //! This script automatically:
 //! 1. Compiles user programs in ../user directory
-//! 2. Packs them into an initramfs image
+//! 2. Packs them into an init_simple_fs image
 //! 3. Embeds the image into the kernel binary
 
 use std::env;
@@ -20,10 +20,10 @@ fn main() {
     let user_dir = project_root.join("user");
     let user_bin_dir = user_dir.join("bin");
     let img_path = PathBuf::from(&out_dir).join("simple_fs.img");
-    let tool_path = project_root.join("scripts").join("make_initramfs.py");
+    let tool_path = project_root.join("scripts").join("make_init_simple_fs.py");
 
     println!("cargo:rerun-if-changed=../user");
-    println!("cargo:rerun-if-changed=../scripts/make_initramfs.py");
+    println!("cargo:rerun-if-changed=../scripts/make_init_simple_fs.py");
 
     // 步骤 1: 编译用户程序
     println!("cargo:warning=[build.rs] Building user programs...");
@@ -75,7 +75,7 @@ fn main() {
             create_empty_image(&img_path);
         }
         Err(e) => {
-            println!("cargo:warning=[build.rs] Failed to run make_initramfs.py: {}", e);
+            println!("cargo:warning=[build.rs] Failed to run make_init_simple_fs.py: {}", e);
             create_empty_image(&img_path);
         }
     }

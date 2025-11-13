@@ -21,14 +21,15 @@ impl SimpleFs {
     pub fn new() -> Arc<Self> {
         let root = Arc::new(SimpleFsInode::new_dir(
             1,
-            FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR
-                | FileMode::S_IRGRP | FileMode::S_IXGRP
-                | FileMode::S_IROTH | FileMode::S_IXOTH,
+            FileMode::S_IRUSR
+                | FileMode::S_IWUSR
+                | FileMode::S_IXUSR
+                | FileMode::S_IRGRP
+                | FileMode::S_IXGRP
+                | FileMode::S_IROTH
+                | FileMode::S_IXOTH,
         ));
-        Arc::new(Self {
-            device: None,
-            root,
-        })
+        Arc::new(Self { device: None, root })
     }
 }
 
@@ -78,9 +79,13 @@ impl SimpleFs {
         // 2. 创建根目录 inode (0o755 = rwxr-xr-x)
         let root = Arc::new(SimpleFsInode::new_dir(
             1,
-            FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR
-                | FileMode::S_IRGRP | FileMode::S_IXGRP
-                | FileMode::S_IROTH | FileMode::S_IXOTH,
+            FileMode::S_IRUSR
+                | FileMode::S_IWUSR
+                | FileMode::S_IXUSR
+                | FileMode::S_IRGRP
+                | FileMode::S_IXGRP
+                | FileMode::S_IROTH
+                | FileMode::S_IXOTH,
         ));
 
         // 3. 解析镜像，填充文件树
@@ -210,18 +215,28 @@ impl SimpleFs {
                 // 创建中间目录 (0o755 = rwxr-xr-x)
                 let new_dir = Arc::new(SimpleFsInode::new_dir(
                     current.next_inode_no(),
-                    FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR
-                        | FileMode::S_IRGRP | FileMode::S_IXGRP
-                        | FileMode::S_IROTH | FileMode::S_IXOTH,
+                    FileMode::S_IRUSR
+                        | FileMode::S_IWUSR
+                        | FileMode::S_IXUSR
+                        | FileMode::S_IRGRP
+                        | FileMode::S_IXGRP
+                        | FileMode::S_IROTH
+                        | FileMode::S_IXOTH,
                 ));
-                current.children.lock().insert(String::from(*part), new_dir.clone());
+                current
+                    .children
+                    .lock()
+                    .insert(String::from(*part), new_dir.clone());
                 current = new_dir;
             }
         }
 
         // 插入最终的文件/目录
         let final_name = parts[parts.len() - 1];
-        current.children.lock().insert(String::from(final_name), inode);
+        current
+            .children
+            .lock()
+            .insert(String::from(final_name), inode);
 
         Ok(())
     }
@@ -295,21 +310,6 @@ impl Inode for SimpleFsInode {
         }
         let len = core::cmp::min(buf.len(), data.len() - offset);
 
-        if offset == 0 && len > 0x2a7 && self.inode_no == 2 {
-            crate::println!("[SimpleFsInode::read_at] inode={}, data.len()={}, data[0x2a0..0x2a8]: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                self.inode_no,
-                data.len(),
-                data.get(0x2a0).copied().unwrap_or(0),
-                data.get(0x2a1).copied().unwrap_or(0),
-                data.get(0x2a2).copied().unwrap_or(0),
-                data.get(0x2a3).copied().unwrap_or(0),
-                data.get(0x2a4).copied().unwrap_or(0),
-                data.get(0x2a5).copied().unwrap_or(0),
-                data.get(0x2a6).copied().unwrap_or(0),
-                data.get(0x2a7).copied().unwrap_or(0)
-            );
-        }
-
         buf[..len].copy_from_slice(&data[offset..offset + len]);
         Ok(len)
     }
@@ -345,10 +345,7 @@ impl Inode for SimpleFsInode {
             return Err(FsError::AlreadyExists);
         }
 
-        let new_inode = Arc::new(SimpleFsInode::new_file(
-            (children.len() + 2) as u64,
-            mode,
-        ));
+        let new_inode = Arc::new(SimpleFsInode::new_file((children.len() + 2) as u64, mode));
         children.insert(String::from(name), new_inode.clone());
 
         Ok(new_inode as Arc<dyn Inode>)
@@ -364,10 +361,7 @@ impl Inode for SimpleFsInode {
             return Err(FsError::AlreadyExists);
         }
 
-        let new_inode = Arc::new(SimpleFsInode::new_dir(
-            (children.len() + 2) as u64,
-            mode,
-        ));
+        let new_inode = Arc::new(SimpleFsInode::new_dir((children.len() + 2) as u64, mode));
         children.insert(String::from(name), new_inode.clone());
 
         Ok(new_inode as Arc<dyn Inode>)
