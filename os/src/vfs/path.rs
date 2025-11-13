@@ -90,14 +90,52 @@ pub fn normalize_path(path: &str) -> String {
     }
 }
 
+/// 将路径分割为目录部分和文件名部分
+///
+/// 此函数会先规范化路径（处理多余的斜杠、`.` 和 `..`），然后将其分割为目录和文件名。
+///
+/// # 参数
+///
+/// * `path` - 要分割的路径字符串
+///
+/// # 返回值
+///
+/// * `Ok((dir, filename))` - 成功时返回目录路径和文件名的元组
+///   - 对于绝对路径如 `/foo/bar.txt`，返回 `("/foo", "bar.txt")`
+///   - 对于相对路径如 `foo/bar.txt`，返回 `("foo", "bar.txt")`
+///   - 对于没有目录的相对路径如 `bar.txt`，返回 `(".", "bar.txt")`
+/// * `Err(FsError::InvalidArgument)` - 当路径以斜杠结尾（表示目录）或文件名为空时
+///
+/// # 示例
+///
+/// ```
+/// let (dir, filename) = split_path("/foo/bar.txt").unwrap();
+/// assert_eq!(dir, "/foo");
+/// assert_eq!(filename, "bar.txt");
+///
+/// let (dir, filename) = split_path("///foo///bar.txt").unwrap();
+/// assert_eq!(dir, "/foo");  // 多余的斜杠被规范化
+/// assert_eq!(filename, "bar.txt");
+///
+/// // 路径以斜杠结尾会返回错误
+/// assert!(split_path("/foo/bar/").is_err());
+/// ```
 pub fn split_path(path: &str) -> Result<(String, String), FsError> {
-    if let Some(pos) = path.rfind('/') {
+    // 如果路径以斜杠结尾，说明是目录而非文件，返回错误
+    if path.ends_with('/') && path.len() > 1 {
+        return Err(FsError::InvalidArgument);
+    }
+
+    // 先规范化路径，处理多余的斜杠和 . / ..
+    let normalized = normalize_path(path);
+
+    if let Some(pos) = normalized.rfind('/') {
         let dir = if pos == 0 {
             String::from("/")
         } else {
-            String::from(&path[..pos])
+            String::from(&normalized[..pos])
         };
-        let filename = String::from(&path[pos + 1..]);
+        let filename = String::from(&normalized[pos + 1..]);
 
         if filename.is_empty() {
             return Err(FsError::InvalidArgument);
@@ -106,7 +144,7 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
         Ok((dir, filename))
     } else {
         // 相对路径，使用当前目录
-        Ok((String::from("."), String::from(path)))
+        Ok((String::from("."), String::from(normalized)))
     }
 }
 

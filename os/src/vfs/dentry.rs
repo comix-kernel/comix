@@ -65,16 +65,8 @@ impl Dentry {
     }
 
     /// 添加子 dentry
-    pub fn add_child(&self, child: Arc<Dentry>) {
-        // 设置父指针
-        child.set_parent(
-            &(unsafe {
-                // SAFETY: self 指针有效，我们立即将其包装为 Arc
-                Arc::from_raw(self as *const _ as *const Dentry)
-            }),
-        );
-
-        // 添加到子列表
+    pub fn add_child(self: &Arc<Self>, child: Arc<Dentry>) {
+        child.set_parent(self);
         self.children.lock().insert(child.name.clone(), child);
     }
 
