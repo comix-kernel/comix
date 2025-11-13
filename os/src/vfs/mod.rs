@@ -1,3 +1,5 @@
+//! 虚拟文件系统（VFS）层，提供统一的文件系统抽象接口
+
 pub mod dentry;
 pub mod error;
 pub mod fd_table;
@@ -20,6 +22,12 @@ pub use stdio::{StderrInode, StdinInode, StdoutInode, create_stdio_files};
 
 use alloc::{vec, vec::Vec};
 
+/// 从指定路径加载 ELF 文件内容
+///
+/// 参数：
+///     - path: 文件路径（绝对路径或相对于当前工作目录的相对路径）
+///
+/// 返回：Ok(Vec<u8>) 文件内容字节数组；Err(FsError::NotFound) 文件不存在；Err(FsError::IsDirectory) 路径指向目录
 pub fn vfs_load_elf(path: &str) -> Result<Vec<u8>, FsError> {
     let dentry = vfs_lookup(path)?;
     let inode = &dentry.inode;
