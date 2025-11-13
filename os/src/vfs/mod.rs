@@ -34,3 +34,6 @@ pub fn vfs_load_elf(path: &str) -> Result<Vec<u8>, FsError> {
     inode.read_at(0, &mut buf)?;
     Ok(buf)
 }
+
+#[cfg(test)]
+mod tests;
