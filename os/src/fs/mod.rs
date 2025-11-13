@@ -4,6 +4,7 @@
 //! 包括文件系统接口、文件操作等
 //! 目前只实现了一个简单的内存文件系统
 pub mod smfs;
+pub mod simple_fs;
 
 use lazy_static::lazy_static;
 
