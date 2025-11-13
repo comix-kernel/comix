@@ -25,6 +25,14 @@ pub unsafe extern "C" fn _start() -> ! {
                       .next().unwrap_or(&[]);
         match cmd {
             b"exit" => exit(0),
+            b"fork" => {
+                if fork() == 0 {
+                    print(b"Hello from child process!\n");
+                    exit(0);
+                } else {
+                    print(b"Hello from parent process!\n");
+                }
+            }
             b"help" => print(b"Available commands: help, exit\n"),
             b"shutdown" => shutdown(),
             b"hello" => {
@@ -33,24 +41,6 @@ pub unsafe extern "C" fn _start() -> ! {
             }
             _ => print(b"Unknown command\n"),
         }
-    }
-}
-
-fn cmd(line: &[u8]) {
-    // 去掉结尾的 \r 或 \n（兼容 CRLF）
-    let cmd = line.split(|&b| b == b'\n' || b == b'\r').next().unwrap_or(line);
-    match cmd {
-        b"exit" => exit(0),
-        b"help" => print(b"Available commands: help, exit\n"),
-        b"hello" => {
-            if fork() == 0 {
-                print(b"Hello from child process!\n");
-                exit(0);
-            } else {
-                print(b"Hello from parent process!\n");
-            }
-        },
-        _ => print(b"Unknown command\n"),
     }
 }
 
