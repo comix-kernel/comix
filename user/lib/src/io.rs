@@ -25,7 +25,7 @@ pub fn print(s: &[u8]) {
 /// - `buffer`: 可变的字节切片，用于接收读取的数据。
 /// 
 /// # 返回值
-/// 成功读取的字节数（包含换行符 `\n`，如果不溢出的话）。失败时返回 0。
+/// 成功读取的字节数（不包含换行符 `\n`，如果不溢出的话）。失败时返回 0。
 pub fn read_line(buffer: &mut [u8]) -> usize {
     let fd: usize = 0; // 标准输入 (stdin)
     let max_len = buffer.len();
