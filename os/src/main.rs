@@ -14,6 +14,7 @@ extern crate alloc;
 
 mod arch;
 mod config;
+mod devices;
 mod fs;
 mod kernel;
 mod mm;
