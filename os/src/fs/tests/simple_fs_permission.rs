@@ -1,6 +1,6 @@
 use super::*;
-use crate::{kassert, test_case};
 use crate::vfs::file_system::FileSystem;
+use crate::{kassert, test_case};
 
 // P1 重要功能测试
 
@@ -8,7 +8,9 @@ test_case!(test_simplefs_file_permissions_read, {
     // 创建只读文件 (0o444)
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let inode = root.create("readonly.txt", FileMode::from_bits_truncate(0o444)).unwrap();
+    let inode = root
+        .create("readonly.txt", FileMode::from_bits_truncate(0o444))
+        .unwrap();
 
     // 验证权限
     let metadata = inode.metadata().unwrap();
@@ -20,7 +22,9 @@ test_case!(test_simplefs_file_permissions_write, {
     // 创建只写文件 (0o222)
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let inode = root.create("writeonly.txt", FileMode::from_bits_truncate(0o222)).unwrap();
+    let inode = root
+        .create("writeonly.txt", FileMode::from_bits_truncate(0o222))
+        .unwrap();
 
     // 验证权限
     let metadata = inode.metadata().unwrap();
@@ -32,7 +36,9 @@ test_case!(test_simplefs_file_permissions_execute, {
     // 创建可执行文件 (0o755)
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let inode = root.create("executable", FileMode::from_bits_truncate(0o755)).unwrap();
+    let inode = root
+        .create("executable", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 验证权限
     let metadata = inode.metadata().unwrap();
@@ -45,7 +51,9 @@ test_case!(test_simplefs_directory_permissions, {
     // 创建目录 (0o755)
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 验证权限
     let metadata = dir.metadata().unwrap();
@@ -78,7 +86,9 @@ test_case!(test_simplefs_no_permissions, {
     // 创建没有任何权限的文件 (0o000)
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let inode = root.create("noperm.txt", FileMode::from_bits_truncate(0o000)).unwrap();
+    let inode = root
+        .create("noperm.txt", FileMode::from_bits_truncate(0o000))
+        .unwrap();
 
     // 验证权限
     let metadata = inode.metadata().unwrap();

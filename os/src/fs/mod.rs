@@ -3,18 +3,18 @@
 //! 包含文件系统相关的实现
 //! 包括文件系统接口、文件操作等
 //! 目前只实现了一个简单的内存文件系统
-pub mod smfs;
 pub mod simple_fs;
+pub mod smfs;
 
-use alloc::sync::Arc;
 use alloc::string::String;
+use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
-use crate::println;
 use crate::devices::RamDisk;
 use crate::fs::simple_fs::SimpleFs;
 use crate::fs::smfs::SimpleMemoryFileSystem;
-use crate::vfs::{MountFlags, MOUNT_TABLE};
+use crate::println;
+use crate::vfs::{MOUNT_TABLE, MountFlags};
 
 lazy_static! {
     /// 根文件系统实例

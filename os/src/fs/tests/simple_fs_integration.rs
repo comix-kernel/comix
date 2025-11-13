@@ -1,6 +1,6 @@
 use super::*;
-use crate::{kassert, test_case};
 use crate::vfs::file_system::FileSystem;
+use crate::{kassert, test_case};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -12,7 +12,9 @@ test_case!(test_simplefs_vfs_integration_basic, {
     let root = fs.root_inode();
 
     // 通过 VFS 接口创建文件
-    let inode = root.create("test.txt", FileMode::from_bits_truncate(0o644)).unwrap();
+    let inode = root
+        .create("test.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
 
     // 写入数据
     let content = b"Integration test";
@@ -31,11 +33,17 @@ test_case!(test_simplefs_vfs_integration_directory, {
     let root = fs.root_inode();
 
     // 创建目录结构
-    let dir1 = root.mkdir("dir1", FileMode::from_bits_truncate(0o755)).unwrap();
-    let dir2 = dir1.mkdir("dir2", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir1 = root
+        .mkdir("dir1", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    let dir2 = dir1
+        .mkdir("dir2", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 在嵌套目录中创建文件
-    let inode = dir2.create("file.txt", FileMode::from_bits_truncate(0o644)).unwrap();
+    let inode = dir2
+        .create("file.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
     inode.write_at(0, b"nested").unwrap();
 
     // 验证可以通过路径访问
@@ -82,12 +90,16 @@ test_case!(test_simplefs_multiple_operations, {
 
     // 执行一系列操作
     // 1. 创建目录
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 2. 在目录中创建多个文件
     for i in 0..3 {
         let filename = alloc::format!("file{}.txt", i);
-        let inode = dir.create(&filename, FileMode::from_bits_truncate(0o644)).unwrap();
+        let inode = dir
+            .create(&filename, FileMode::from_bits_truncate(0o644))
+            .unwrap();
         let content = alloc::format!("Content {}", i);
         inode.write_at(0, content.as_bytes()).unwrap();
     }

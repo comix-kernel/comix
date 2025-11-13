@@ -1,8 +1,8 @@
+use super::block_device::{BlockDevice, BlockError};
+use crate::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::sync::SpinLock;
-use super::block_device::{BlockDevice, BlockError};
 
 /// 内存模拟的块设备
 ///

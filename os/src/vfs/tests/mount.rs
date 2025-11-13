@@ -1,6 +1,6 @@
 use super::*;
-use crate::{kassert, test_case};
 use crate::vfs::file_system::FileSystem;
+use crate::{kassert, test_case};
 use alloc::string::String;
 
 // P1 重要功能测试
@@ -27,7 +27,9 @@ test_case!(test_mount_list, {
     // 挂载文件系统
     let fs1 = create_test_simplefs();
 
-    MOUNT_TABLE.mount(fs1, "/mnt_test", MountFlags::empty(), None).ok();
+    MOUNT_TABLE
+        .mount(fs1, "/mnt_test", MountFlags::empty(), None)
+        .ok();
 
     // 列出挂载点
     let mounts = MOUNT_TABLE.list_mounts();
@@ -40,7 +42,9 @@ test_case!(test_mount_list, {
 test_case!(test_umount_fs, {
     // 创建文件系统并挂载
     let fs = create_test_simplefs();
-    MOUNT_TABLE.mount(fs, "/test_umount2", MountFlags::empty(), None).ok();
+    MOUNT_TABLE
+        .mount(fs, "/test_umount2", MountFlags::empty(), None)
+        .ok();
 
     // 卸载
     let result = MOUNT_TABLE.umount("/test_umount2");

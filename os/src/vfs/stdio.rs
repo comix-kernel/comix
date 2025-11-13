@@ -112,8 +112,8 @@ impl Inode for StdoutInode {
 
     fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
         use core::fmt::Write;
-        
-        let s = unsafe {core::str::from_utf8_unchecked(buf)};
+
+        let s = unsafe { core::str::from_utf8_unchecked(buf) };
         crate::arch::lib::console::Stdout.write_str(s).unwrap();
         Ok(buf.len())
     }
@@ -174,8 +174,8 @@ impl Inode for StderrInode {
 
     fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
         use core::fmt::Write;
-        
-        let s = unsafe {core::str::from_utf8_unchecked(buf)};
+
+        let s = unsafe { core::str::from_utf8_unchecked(buf) };
         crate::arch::lib::console::Stdout.write_str(s).unwrap();
         Ok(buf.len())
     }
@@ -212,8 +212,12 @@ impl Inode for StderrInode {
 /// 创建标准 I/O 文件对象（stdin、stdout、stderr）
 ///
 /// 返回：三元组 (stdin, stdout, stderr)，分别对应文件描述符 0、1、2
-pub fn create_stdio_files() -> (Arc<crate::vfs::File>, Arc<crate::vfs::File>, Arc<crate::vfs::File>) {
-    use crate::vfs::{File, OpenFlags, Dentry};
+pub fn create_stdio_files() -> (
+    Arc<crate::vfs::File>,
+    Arc<crate::vfs::File>,
+    Arc<crate::vfs::File>,
+) {
+    use crate::vfs::{Dentry, File, OpenFlags};
 
     // 创建 inode
     let stdin_inode = Arc::new(StdinInode) as Arc<dyn Inode>;

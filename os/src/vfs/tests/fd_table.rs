@@ -174,7 +174,8 @@ test_case!(test_fdtable_alloc_multiple, {
 
     // 分配多个 FD
     for i in 0..5 {
-        let inode = create_test_file_with_content(&fs, &alloc::format!("test{}.txt", i), b"test").unwrap();
+        let inode =
+            create_test_file_with_content(&fs, &alloc::format!("test{}.txt", i), b"test").unwrap();
         let file = create_test_file(&alloc::format!("test{}.txt", i), inode, OpenFlags::O_RDONLY);
         let result = fd_table.alloc(file);
         kassert!(result.is_ok());

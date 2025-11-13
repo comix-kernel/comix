@@ -1,6 +1,6 @@
 use super::*;
-use crate::{kassert, test_case};
 use crate::vfs::file_system::FileSystem;
+use crate::{kassert, test_case};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -138,7 +138,8 @@ test_case!(test_simplefs_create_duplicate, {
     let root = fs.root_inode();
 
     // 第一次创建
-    root.create("test.txt", FileMode::from_bits_truncate(0o644)).unwrap();
+    root.create("test.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
 
     // 第二次创建同名文件应该失败
     let result = root.create("test.txt", FileMode::from_bits_truncate(0o644));

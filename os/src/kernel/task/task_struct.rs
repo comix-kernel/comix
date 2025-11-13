@@ -21,8 +21,8 @@ use crate::{
         memory_space::MemorySpace,
     },
     println,
-    vfs::{FDTable, Dentry, create_stdio_files, get_root_dentry},
     sync::SpinLock,
+    vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
 
 /// 共享任务句柄
@@ -92,7 +92,6 @@ pub struct Task {
     trap_frame_tracker: FrameTracker,
 
     // === 文件系统 ===
-
     /// 文件描述符表
     pub fd_table: Arc<FDTable>,
 
@@ -283,10 +282,16 @@ impl Task {
 
         // 初始化标准 I/O (FD 0/1/2)
         let (stdin, stdout, stderr) = create_stdio_files();
-        fd_table.install_at(0, stdin).expect("Failed to install stdin");
-        fd_table.install_at(1, stdout).expect("Failed to install stdout");
-        fd_table.install_at(2, stderr).expect("Failed to install stderr");
-        
+        fd_table
+            .install_at(0, stdin)
+            .expect("Failed to install stdin");
+        fd_table
+            .install_at(1, stdout)
+            .expect("Failed to install stdout");
+        fd_table
+            .install_at(2, stderr)
+            .expect("Failed to install stderr");
+
         let cwd = get_root_dentry().ok();
         let root = cwd.clone();
 
@@ -311,8 +316,8 @@ impl Task {
             return_value: None,
 
             fd_table,
-            cwd, 
-            root, 
+            cwd,
+            root,
         }
     }
 

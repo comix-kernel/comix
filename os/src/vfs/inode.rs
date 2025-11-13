@@ -1,9 +1,9 @@
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use alloc::string::String;
-use crate::vfs::error::FsError;
 use crate::arch::timer::get_time;
 use crate::config::CLOCK_FREQ;
+use crate::vfs::error::FsError;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 /// Inode类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl FileMode {
 }
 
 /// 轻量级目录项（readdir 返回）
-/// 
+///
 /// 用于数据传输，无引用关系，读取后即可丢弃
 #[derive(Debug, Clone)]
 pub struct DirEntry {
@@ -106,7 +106,7 @@ pub struct DirEntry {
 /// Inode 元数据
 #[derive(Debug, Clone)]
 pub struct InodeMetadata {
-    pub inode_no: usize,      // Inode 编号
+    pub inode_no: usize,       // Inode 编号
     pub inode_type: InodeType, // 文件类型
     pub mode: FileMode,        // 权限位
     pub uid: u32,              // 用户 ID

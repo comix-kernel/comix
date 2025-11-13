@@ -307,7 +307,7 @@ impl Inode for SimpleFsInode {
         if self.inode_type == InodeType::Directory {
             return Err(FsError::IsDirectory);
         }
-        
+
         let data = self.data.lock();
         if offset >= data.len() {
             return Ok(0);
