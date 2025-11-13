@@ -39,12 +39,12 @@ fn exit(code: i32) -> ! {
         (task.tid, task.ppid)
     };
     TASK_MANAGER.lock().exit_task(tid, code);
-
-    // 如果有父进程,通知父进程
-    if let Some(parent) = TASK_MANAGER.lock().get_task(ppid) {
-        parent.lock().notify_child_exit();
-    }
-
+    TASK_MANAGER
+        .lock()
+        .get_task(ppid)
+        .unwrap()
+        .lock()
+        .notify_child_exit();
     schedule();
     unreachable!("exit: exit_task should not return.");
 }
