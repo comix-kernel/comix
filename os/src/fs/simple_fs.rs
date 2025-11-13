@@ -158,21 +158,24 @@ impl SimpleFs {
         buf: &mut [u8],
     ) -> Result<(), FsError> {
         let block_size = device.block_size();
-        let start_block = offset / block_size;
-        let block_offset = offset % block_size;
         let mut buf_offset = 0;
 
         while buf_offset < buf.len() {
+            // 计算当前应该读取的块号和块内偏移
+            let current_offset = offset + buf_offset;
+            let block_num = current_offset / block_size;
+            let block_offset = current_offset % block_size;
+
             let mut block_buf = vec![0u8; block_size];
-            if let Err(block_error) = device.read_block(start_block + buf_offset / block_size, &mut block_buf) {
+            if let Err(block_error) = device.read_block(block_num, &mut block_buf) {
                 return Err(block_error.to_fs_error());
             }
 
-            let copy_start = if buf_offset == 0 { block_offset } else { 0 };
-            let copy_len = (block_size - copy_start).min(buf.len() - buf_offset);
+            // 计算本次要复制的字节数
+            let copy_len = (block_size - block_offset).min(buf.len() - buf_offset);
 
             buf[buf_offset..buf_offset + copy_len]
-                .copy_from_slice(&block_buf[copy_start..copy_start + copy_len]);
+                .copy_from_slice(&block_buf[block_offset..block_offset + copy_len]);
 
             buf_offset += copy_len;
         }
@@ -291,6 +294,22 @@ impl Inode for SimpleFsInode {
             return Ok(0);
         }
         let len = core::cmp::min(buf.len(), data.len() - offset);
+
+        if offset == 0 && len > 0x2a7 && self.inode_no == 2 {
+            crate::println!("[SimpleFsInode::read_at] inode={}, data.len()={}, data[0x2a0..0x2a8]: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                self.inode_no,
+                data.len(),
+                data.get(0x2a0).copied().unwrap_or(0),
+                data.get(0x2a1).copied().unwrap_or(0),
+                data.get(0x2a2).copied().unwrap_or(0),
+                data.get(0x2a3).copied().unwrap_or(0),
+                data.get(0x2a4).copied().unwrap_or(0),
+                data.get(0x2a5).copied().unwrap_or(0),
+                data.get(0x2a6).copied().unwrap_or(0),
+                data.get(0x2a7).copied().unwrap_or(0)
+            );
+        }
+
         buf[..len].copy_from_slice(&data[offset..offset + len]);
         Ok(len)
     }
