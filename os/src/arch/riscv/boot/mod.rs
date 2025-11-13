@@ -69,7 +69,7 @@ pub fn rest_init() {
 fn init() {
     super::trap::init();
     create_kthreadd();
-    kernel_execve("hello", &["hello"], &[]);
+    kernel_execve("/hello", &["hello"], &[]);
 }
 
 /// 内核守护线程
@@ -152,6 +152,10 @@ pub fn main() {
 
     // Initialize memory management (frame allocator + heap + kernel page table)
     mm::init();
+
+    // Initialize Simple FS
+    crate::fs::init_simple_fs().expect("Failed to initialize VFS");
+
     println!("Hello, world!");
 
     #[cfg(test)]

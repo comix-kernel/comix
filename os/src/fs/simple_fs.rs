@@ -1,22 +1,34 @@
 //! 简单的文件系统实现（用于测试/调试）
 
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use alloc::string::String;
-use alloc::collections::BTreeMap;
+use crate::devices::BlockDevice;
 use crate::sync::SpinLock;
 use crate::vfs::*;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 /// 简单的内存文件系统（用于测试）
 pub struct SimpleFs {
+    device: Option<Arc<dyn BlockDevice>>, // 可选的块设备
     root: Arc<SimpleFsInode>,
 }
 
 impl SimpleFs {
     /// 创建新的简单文件系统
     pub fn new() -> Arc<Self> {
-        let root = SimpleFsInode::new_dir(1);
-        Arc::new(Self { root })
+        let root = Arc::new(SimpleFsInode::new_dir(
+            1,
+            FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR
+                | FileMode::S_IRGRP | FileMode::S_IXGRP
+                | FileMode::S_IROTH | FileMode::S_IXOTH,
+        ));
+        Arc::new(Self {
+            device: None,
+            root,
+        })
     }
 }
 
@@ -47,6 +59,171 @@ impl FileSystem for SimpleFs {
     }
 }
 
+impl SimpleFs {
+    /// 从块设备和镜像创建 SimpleFS
+    pub fn from_ramdisk(device: Arc<dyn BlockDevice>) -> Result<Self, FsError> {
+        // 1. 读取镜像头，验证魔数
+        let block_size = device.block_size();
+        let mut header_block = vec![0u8; block_size];
+        if let Err(block_error) = device.read_block(0, &mut header_block) {
+            return Err(block_error.to_fs_error());
+        }
+
+        if &header_block[0..8] != b"RAMDISK\0" {
+            return Err(FsError::IoError);
+        }
+
+        let file_count = u32::from_le_bytes(header_block[8..12].try_into().unwrap());
+
+        // 2. 创建根目录 inode (0o755 = rwxr-xr-x)
+        let root = Arc::new(SimpleFsInode::new_dir(
+            1,
+            FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR
+                | FileMode::S_IRGRP | FileMode::S_IXGRP
+                | FileMode::S_IROTH | FileMode::S_IXOTH,
+        ));
+
+        // 3. 解析镜像，填充文件树
+        let mut offset = 16;
+        for _ in 0..file_count {
+            offset = Self::parse_file_entry(device.clone(), offset, root.clone())?;
+        }
+
+        Ok(Self {
+            device: Some(device),
+            root,
+        })
+    }
+
+    /// 解析单个文件条目
+    fn parse_file_entry(
+        device: Arc<dyn BlockDevice>,
+        offset: usize,
+        parent: Arc<SimpleFsInode>,
+    ) -> Result<usize, FsError> {
+        // 读取文件头 (32字节)
+        let mut header_buf = vec![0u8; 32];
+        Self::read_at_offset(device.clone(), offset, &mut header_buf)?;
+
+        let magic = u32::from_le_bytes(header_buf[0..4].try_into().unwrap());
+        if magic != 0x46494C45 {
+            return Err(FsError::IoError);
+        }
+
+        let name_len = u32::from_le_bytes(header_buf[4..8].try_into().unwrap()) as usize;
+        let data_len = u32::from_le_bytes(header_buf[8..12].try_into().unwrap()) as usize;
+        let file_type = u32::from_le_bytes(header_buf[12..16].try_into().unwrap());
+        let mode = u32::from_le_bytes(header_buf[16..20].try_into().unwrap());
+
+        let mut cur_offset = offset + 32;
+
+        // 读取文件名
+        let name_aligned = (name_len + 3) / 4 * 4;
+        let mut name_buf = vec![0u8; name_aligned];
+        Self::read_at_offset(device.clone(), cur_offset, &mut name_buf)?;
+        let name = String::from(String::from_utf8_lossy(&name_buf[..name_len]));
+        cur_offset += name_aligned;
+
+        // 读取文件数据
+        let data_aligned = (data_len + 511) / 512 * 512;
+        let mut data_buf = vec![0u8; data_len];
+        if data_len > 0 {
+            Self::read_at_offset(device.clone(), cur_offset, &mut data_buf)?;
+        }
+        cur_offset += data_aligned;
+
+        // 创建 inode 并添加到父目录
+        let inode = if file_type == 0 {
+            // 文件 (mode as u16 转换为 FileMode)
+            let file_mode = FileMode::from_bits_truncate(mode);
+            let inode = SimpleFsInode::new_file(parent.next_inode_no(), file_mode);
+            inode.data.lock().extend_from_slice(&data_buf);
+            Arc::new(inode)
+        } else {
+            // 目录
+            let dir_mode = FileMode::from_bits_truncate(mode);
+            Arc::new(SimpleFsInode::new_dir(parent.next_inode_no(), dir_mode))
+        };
+
+        // 处理多级路径 (如 "bin/hello")
+        Self::insert_inode_by_path(&name, inode, parent)?;
+
+        Ok(cur_offset)
+    }
+
+    /// 辅助函数：从设备的任意偏移读取数据
+    fn read_at_offset(
+        device: Arc<dyn BlockDevice>,
+        offset: usize,
+        buf: &mut [u8],
+    ) -> Result<(), FsError> {
+        let block_size = device.block_size();
+        let start_block = offset / block_size;
+        let block_offset = offset % block_size;
+        let mut buf_offset = 0;
+
+        while buf_offset < buf.len() {
+            let mut block_buf = vec![0u8; block_size];
+            if let Err(block_error) = device.read_block(start_block + buf_offset / block_size, &mut block_buf) {
+                return Err(block_error.to_fs_error());
+            }
+
+            let copy_start = if buf_offset == 0 { block_offset } else { 0 };
+            let copy_len = (block_size - copy_start).min(buf.len() - buf_offset);
+
+            buf[buf_offset..buf_offset + copy_len]
+                .copy_from_slice(&block_buf[copy_start..copy_start + copy_len]);
+
+            buf_offset += copy_len;
+        }
+
+        Ok(())
+    }
+
+    /// 按路径插入 inode（支持多级目录）
+    fn insert_inode_by_path(
+        path: &str,
+        inode: Arc<SimpleFsInode>,
+        root: Arc<SimpleFsInode>,
+    ) -> Result<(), FsError> {
+        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+
+        if parts.is_empty() {
+            return Err(FsError::InvalidArgument);
+        }
+
+        let mut current = root;
+
+        // 遍历到倒数第二级，确保父目录存在
+        for part in &parts[..parts.len() - 1] {
+            let child = {
+                let children = current.children.lock();
+                children.get(*part).cloned()
+            };
+
+            if let Some(child) = child {
+                current = child;
+            } else {
+                // 创建中间目录 (0o755 = rwxr-xr-x)
+                let new_dir = Arc::new(SimpleFsInode::new_dir(
+                    current.next_inode_no(),
+                    FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR
+                        | FileMode::S_IRGRP | FileMode::S_IXGRP
+                        | FileMode::S_IROTH | FileMode::S_IXOTH,
+                ));
+                current.children.lock().insert(String::from(*part), new_dir.clone());
+                current = new_dir;
+            }
+        }
+
+        // 插入最终的文件/目录
+        let final_name = parts[parts.len() - 1];
+        current.children.lock().insert(String::from(final_name), inode);
+
+        Ok(())
+    }
+}
+
 /// 简单文件系统的 Inode
 struct SimpleFsInode {
     inode_no: usize,
@@ -57,26 +234,36 @@ struct SimpleFsInode {
 }
 
 impl SimpleFsInode {
-    /// 创建文件 inode
-    fn new_file(inode_no: usize) -> Arc<Self> {
-        Arc::new(Self {
-            inode_no,
+    /// 创建文件 inode（带权限）
+    fn new_file(inode_no: u64, mode: FileMode) -> Self {
+        let file_mode = FileMode::S_IFREG | mode;
+
+        Self {
+            inode_no: inode_no as usize,
             inode_type: InodeType::File,
-            mode: FileMode::S_IFREG | FileMode::S_IRUSR | FileMode::S_IWUSR,
+            mode: file_mode,
             data: SpinLock::new(Vec::new()),
             children: SpinLock::new(BTreeMap::new()),
-        })
+        }
     }
 
-    /// 创建目录 inode
-    fn new_dir(inode_no: usize) -> Arc<Self> {
-        Arc::new(Self {
-            inode_no,
+    /// 创建目录 inode（带权限）
+    fn new_dir(inode_no: u64, mode: FileMode) -> Self {
+        let dir_mode = FileMode::S_IFDIR | mode;
+
+        Self {
+            inode_no: inode_no as usize,
             inode_type: InodeType::Directory,
-            mode: FileMode::S_IFDIR | FileMode::S_IRUSR | FileMode::S_IWUSR | FileMode::S_IXUSR,
+            mode: dir_mode,
             data: SpinLock::new(Vec::new()),
             children: SpinLock::new(BTreeMap::new()),
-        })
+        }
+    }
+
+    /// 获取下一个 inode 编号
+    fn next_inode_no(&self) -> u64 {
+        static NEXT_INODE: AtomicU64 = AtomicU64::new(2);
+        NEXT_INODE.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -139,7 +326,10 @@ impl Inode for SimpleFsInode {
             return Err(FsError::AlreadyExists);
         }
 
-        let new_inode = SimpleFsInode::new_file(children.len() + 2);
+        let new_inode = Arc::new(SimpleFsInode::new_file(
+            (children.len() + 2) as u64,
+            mode,
+        ));
         children.insert(String::from(name), new_inode.clone());
 
         Ok(new_inode as Arc<dyn Inode>)
@@ -155,7 +345,10 @@ impl Inode for SimpleFsInode {
             return Err(FsError::AlreadyExists);
         }
 
-        let new_inode = SimpleFsInode::new_dir(children.len() + 2);
+        let new_inode = Arc::new(SimpleFsInode::new_dir(
+            (children.len() + 2) as u64,
+            mode,
+        ));
         children.insert(String::from(name), new_inode.clone());
 
         Ok(new_inode as Arc<dyn Inode>)

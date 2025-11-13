@@ -9,7 +9,6 @@ use alloc::sync::Arc;
 
 use crate::{
     arch::{intr::disable_interrupts, trap::restore},
-    fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
@@ -123,12 +122,11 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
 /// * `argv`: 传递给新程序的参数列表
 /// * `envp`: 传递给新程序的环境变量列表
 pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
-    let data = ROOT_FS
-        .load_elf(path)
+    let data = crate::vfs::vfs_load_elf(path)
         .expect("kernel_execve: file not found");
 
     let (space, entry, sp) =
-        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+        MemorySpace::from_elf(&data).expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());

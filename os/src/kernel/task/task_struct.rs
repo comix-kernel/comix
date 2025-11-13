@@ -21,7 +21,7 @@ use crate::{
         memory_space::MemorySpace,
     },
     println,
-    vfs::{FDTable, Dentry, create_stdio_files},
+    vfs::{FDTable, Dentry, create_stdio_files, get_root_dentry},
     sync::SpinLock,
 };
 
@@ -287,6 +287,9 @@ impl Task {
         fd_table.install_at(1, stdout).expect("Failed to install stdout");
         fd_table.install_at(2, stderr).expect("Failed to install stderr");
         
+        let cwd = get_root_dentry().ok();
+        let root = cwd.clone();
+
         Task {
             context: Context::zero_init(),
             preempt_count: 0,
@@ -307,9 +310,9 @@ impl Task {
             exit_code: None,
             return_value: None,
 
-            fd_table: fd_table,
-            cwd: None, // TODO: 临时设置为none
-            root: None, // TODO: 临时设置为none
+            fd_table,
+            cwd, 
+            root, 
         }
     }
 
