@@ -1,6 +1,6 @@
 use super::*;
-use crate::{kassert, test_case};
 use crate::vfs::file_system::FileSystem;
+use crate::{kassert, test_case};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -29,9 +29,12 @@ test_case!(test_simplefs_readdir, {
     let root = fs.root_inode();
 
     // 创建几个文件
-    root.create("file1.txt", FileMode::from_bits_truncate(0o644)).unwrap();
-    root.create("file2.txt", FileMode::from_bits_truncate(0o644)).unwrap();
-    root.mkdir("dir1", FileMode::from_bits_truncate(0o755)).unwrap();
+    root.create("file1.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+    root.create("file2.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+    root.mkdir("dir1", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 列出目录内容
     let entries = root.readdir().unwrap();
@@ -50,7 +53,9 @@ test_case!(test_simplefs_nested_directory, {
     let root = fs.root_inode();
 
     // 创建第一级目录
-    let dir1 = root.mkdir("dir1", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir1 = root
+        .mkdir("dir1", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 在子目录中创建文件
     let result = dir1.create("file.txt", FileMode::from_bits_truncate(0o644));
@@ -67,8 +72,11 @@ test_case!(test_simplefs_lookup_in_directory, {
     let root = fs.root_inode();
 
     // 创建目录和文件
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
-    dir.create("file.txt", FileMode::from_bits_truncate(0o644)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    dir.create("file.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
 
     // 在目录中查找文件
     let result = dir.lookup("file.txt");
@@ -81,7 +89,8 @@ test_case!(test_simplefs_unlink_directory, {
     // 创建文件系统和空目录
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    root.mkdir("emptydir", FileMode::from_bits_truncate(0o755)).unwrap();
+    root.mkdir("emptydir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 删除空目录
     let result = root.unlink("emptydir");
@@ -96,7 +105,9 @@ test_case!(test_simplefs_readdir_empty, {
     // 创建空目录
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let dir = root.mkdir("emptydir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("emptydir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 读取空目录
     let entries = dir.readdir().unwrap();
@@ -107,7 +118,9 @@ test_case!(test_simplefs_directory_metadata, {
     // 创建目录
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 获取元数据
     let metadata = dir.metadata().unwrap();
@@ -125,7 +138,8 @@ test_case!(test_simplefs_mkdir_duplicate, {
     let root = fs.root_inode();
 
     // 第一次创建
-    root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    root.mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 第二次创建同名目录应该失败
     let result = root.mkdir("testdir", FileMode::from_bits_truncate(0o755));
@@ -137,7 +151,9 @@ test_case!(test_simplefs_write_to_directory, {
     // 创建目录
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 尝试写入目录（应该失败）
     let result = dir.write_at(0, b"test");
@@ -149,7 +165,9 @@ test_case!(test_simplefs_read_from_directory, {
     // 创建目录
     let fs = create_test_simplefs();
     let root = fs.root_inode();
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 尝试读取目录（应该失败）
     let mut buf = vec![0u8; 10];

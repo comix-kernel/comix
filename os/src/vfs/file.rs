@@ -1,6 +1,6 @@
-use alloc::sync::Arc;
 use crate::sync::SpinLock;
-use crate::vfs::{Dentry, Inode, InodeMetadata, FsError};
+use crate::vfs::{Dentry, FsError, Inode, InodeMetadata};
+use alloc::sync::Arc;
 
 /// 文件打开标志（与 POSIX 兼容）
 bitflags::bitflags! {
@@ -42,9 +42,9 @@ impl OpenFlags {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub enum SeekWhence {
-    Set = 0,  // SEEK_SET: 从文件开头
-    Cur = 1,  // SEEK_CUR: 从当前位置
-    End = 2,  // SEEK_END: 从文件末尾
+    Set = 0, // SEEK_SET: 从文件开头
+    Cur = 1, // SEEK_CUR: 从当前位置
+    End = 2, // SEEK_END: 从文件末尾
 }
 
 impl SeekWhence {

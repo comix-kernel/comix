@@ -1,9 +1,9 @@
 use super::*;
-use alloc::sync::Arc;
-use crate::fs::simple_fs::SimpleFs;
 use crate::devices::ram_disk::RamDisk;
+use crate::fs::simple_fs::SimpleFs;
 use crate::vfs::file_system::FileSystem;
 use alloc::string::String;
+use alloc::sync::Arc;
 
 // 测试辅助函数 (fixtures)
 
@@ -32,10 +32,7 @@ pub fn create_test_file_with_content(
 }
 
 /// 在测试 SimpleFS 中创建一个目录
-pub fn create_test_dir(
-    fs: &Arc<SimpleFs>,
-    path: &str,
-) -> Result<Arc<dyn Inode>, FsError> {
+pub fn create_test_dir(fs: &Arc<SimpleFs>, path: &str) -> Result<Arc<dyn Inode>, FsError> {
     let root = fs.root_inode();
     root.mkdir(path, FileMode::from_bits_truncate(0o755))
 }
@@ -51,9 +48,9 @@ pub fn create_test_file(name: &str, inode: Arc<dyn Inode>, flags: OpenFlags) -> 
     Arc::new(File::new(dentry, flags))
 }
 
-pub mod path;
 pub mod dentry;
-pub mod file;
 pub mod fd_table;
+pub mod file;
 pub mod mount;
+pub mod path;
 pub mod stdio;

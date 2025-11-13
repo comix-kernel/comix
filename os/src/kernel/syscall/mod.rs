@@ -136,14 +136,14 @@ fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> is
         }
     };
     let data_result = crate::vfs::vfs_load_elf(&path_str);
-    
+
     if data_result.is_err() {
         return -1;
     }
     let data = data_result.unwrap();
 
-    let (space, entry, sp) =
-        MemorySpace::from_elf(&data).expect("kernel_execve: failed to create memory space from ELF");
+    let (space, entry, sp) = MemorySpace::from_elf(&data)
+        .expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());

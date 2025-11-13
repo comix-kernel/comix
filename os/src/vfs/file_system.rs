@@ -1,6 +1,6 @@
-use alloc::sync::Arc;
+use crate::vfs::{FsError, Inode};
 use alloc::string::String;
-use crate::vfs::{Inode, FsError};
+use alloc::sync::Arc;
 
 /// 文件系统 trait
 ///

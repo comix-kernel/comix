@@ -2,31 +2,31 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsError {
     // 文件/目录相关
-    NotFound,           // -ENOENT(2): 文件不存在
-    AlreadyExists,      // -EEXIST(17): 文件已存在
-    NotDirectory,       // -ENOTDIR(20): 不是目录
-    IsDirectory,        // -EISDIR(21): 是目录
-    DirectoryNotEmpty,  // -ENOTEMPTY(39): 目录非空
+    NotFound,          // -ENOENT(2): 文件不存在
+    AlreadyExists,     // -EEXIST(17): 文件已存在
+    NotDirectory,      // -ENOTDIR(20): 不是目录
+    IsDirectory,       // -EISDIR(21): 是目录
+    DirectoryNotEmpty, // -ENOTEMPTY(39): 目录非空
 
     // 权限相关
-    PermissionDenied,   // -EACCES(13): 权限被拒绝
+    PermissionDenied, // -EACCES(13): 权限被拒绝
 
     // 文件描述符相关
-    BadFileDescriptor,  // -EBADF(9): 无效的文件描述符
-    TooManyOpenFiles,   // -EMFILE(24): 打开的文件过多
+    BadFileDescriptor, // -EBADF(9): 无效的文件描述符
+    TooManyOpenFiles,  // -EMFILE(24): 打开的文件过多
 
     // 参数相关
-    InvalidArgument,    // -EINVAL(22): 无效参数
-    NameTooLong,        // -ENAMETOOLONG(36): 文件名过长
+    InvalidArgument, // -EINVAL(22): 无效参数
+    NameTooLong,     // -ENAMETOOLONG(36): 文件名过长
 
     // 文件系统相关
-    ReadOnlyFs,         // -EROFS(30): 只读文件系统
-    NoSpace,            // -ENOSPC(28): 设备空间不足
-    IoError,            // -EIO(5): I/O 错误
+    ReadOnlyFs, // -EROFS(30): 只读文件系统
+    NoSpace,    // -ENOSPC(28): 设备空间不足
+    IoError,    // -EIO(5): I/O 错误
 
     // 其他
-    NotSupported,       // -ENOTSUP(95): 操作不支持
-    TooManyLinks,       // -EMLINK(31): 硬链接过多
+    NotSupported, // -ENOTSUP(95): 操作不支持
+    TooManyLinks, // -EMLINK(31): 硬链接过多
 }
 
 impl FsError {

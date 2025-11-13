@@ -32,7 +32,7 @@ fn main() {
         let status = Command::new("make")
             .current_dir(&user_dir)
             .env("BUILD_MODE", "release")
-            .stdout(std::process::Stdio::null())  // 抑制 make 输出
+            .stdout(std::process::Stdio::null()) // 抑制 make 输出
             .stderr(std::process::Stdio::null())
             .status();
 
@@ -41,11 +41,17 @@ fn main() {
                 println!("cargo:warning=[build.rs] User programs built successfully");
             }
             Ok(s) => {
-                println!("cargo:warning=[build.rs] User build failed with status: {}", s);
+                println!(
+                    "cargo:warning=[build.rs] User build failed with status: {}",
+                    s
+                );
                 // 继续构建，使用已有的 bin/ 内容
             }
             Err(e) => {
-                println!("cargo:warning=[build.rs] Failed to run make in user/: {}", e);
+                println!(
+                    "cargo:warning=[build.rs] Failed to run make in user/: {}",
+                    e
+                );
                 // 继续构建
             }
         }
@@ -64,18 +70,25 @@ fn main() {
 
     match status {
         Ok(s) if s.success() => {
-            let img_size = fs::metadata(&img_path)
-                .map(|m| m.len())
-                .unwrap_or(0);
-            println!("cargo:warning=[build.rs] Simple_fs image created: {} bytes", img_size);
+            let img_size = fs::metadata(&img_path).map(|m| m.len()).unwrap_or(0);
+            println!(
+                "cargo:warning=[build.rs] Simple_fs image created: {} bytes",
+                img_size
+            );
         }
         Ok(s) => {
-            println!("cargo:warning=[build.rs] Failed to pack simple_fs: status {}", s);
+            println!(
+                "cargo:warning=[build.rs] Failed to pack simple_fs: status {}",
+                s
+            );
             // 创建空镜像以避免编译失败
             create_empty_image(&img_path);
         }
         Err(e) => {
-            println!("cargo:warning=[build.rs] Failed to run make_init_simple_fs.py: {}", e);
+            println!(
+                "cargo:warning=[build.rs] Failed to run make_init_simple_fs.py: {}",
+                e
+            );
             create_empty_image(&img_path);
         }
     }
@@ -94,13 +107,16 @@ fn main() {
 fn create_empty_image(path: &PathBuf) {
     // 空镜像格式: RAMDISK\0 + 0个文件 + 保留字段
     let empty_header: [u8; 16] = [
-        b'R', b'A', b'M', b'D', b'I', b'S', b'K', 0,  // 魔数
-        0, 0, 0, 0,  // 文件数量 = 0
-        0, 0, 0, 0,  // 保留
+        b'R', b'A', b'M', b'D', b'I', b'S', b'K', 0, // 魔数
+        0, 0, 0, 0, // 文件数量 = 0
+        0, 0, 0, 0, // 保留
     ];
 
     if let Err(e) = fs::write(path, &empty_header) {
-        println!("cargo:warning=[build.rs] Failed to create empty image: {}", e);
+        println!(
+            "cargo:warning=[build.rs] Failed to create empty image: {}",
+            e
+        );
     } else {
         println!("cargo:warning=[build.rs] Created empty simple_fs image");
     }

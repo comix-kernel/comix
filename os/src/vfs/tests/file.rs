@@ -104,7 +104,11 @@ test_case!(test_file_append_mode, {
     let inode = create_test_file_with_content(&fs, "test.txt", b"Hello").unwrap();
 
     // 以追加模式打开
-    let file = create_test_file("test.txt", inode.clone(), OpenFlags::O_WRONLY | OpenFlags::O_APPEND);
+    let file = create_test_file(
+        "test.txt",
+        inode.clone(),
+        OpenFlags::O_WRONLY | OpenFlags::O_APPEND,
+    );
 
     // 写入数据（应该追加到末尾）
     file.write(b", World!").unwrap();
