@@ -10,6 +10,7 @@ use lazy_static::lazy_static;
 use crate::{
     arch::kernel::{context::Context, switch},
     kernel::{current_cpu, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    pr_alert,
     sync::SpinLock,
 };
 
@@ -70,6 +71,14 @@ pub fn schedule() {
     if let Some(plan) = plan {
         // SAFETY: prepare_switch 生成的切换计划中的指针均合法
         unsafe { switch(plan.old, plan.new) };
+        // let tid = current_cpu()
+        //     .lock()
+        //     .current_task
+        //     .as_ref()
+        //     .unwrap()
+        //     .lock()
+        //     .tid;
+        // pr_alert!("Switched to task {}", tid);
         // 通常不会立即返回；返回时再继续当前上下文后续逻辑
     }
 }

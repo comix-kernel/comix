@@ -65,7 +65,7 @@ pub fn stdin() -> Stdin {
 #[macro_export]
 macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print(format_args!($fmt $(, $($arg)+)?));
+        $crate::arch::lib::console::print(format_args!($fmt $(, $($arg)+)?));
     }
 }
 
