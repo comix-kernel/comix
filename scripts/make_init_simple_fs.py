@@ -173,6 +173,13 @@ def make_simple_fs(src_dir: Path, output: Path, verbose: bool = False) -> Tuple[
         for file_data in packed_files:
             f.write(file_data)
 
+        # 填充镜像到块边界，确保镜像大小是 BLOCK_SIZE 的整数倍
+        current_size = f.tell()
+        aligned_size = align_to(current_size, BLOCK_SIZE)
+        padding = aligned_size - current_size
+        if padding > 0:
+            f.write(b'\0' * padding)
+
     total_size = output.stat().st_size
 
     return len(packed_files), total_size

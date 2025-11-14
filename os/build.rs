@@ -32,8 +32,11 @@ fn main() {
         let status = Command::new("make")
             .current_dir(&user_dir)
             .env("BUILD_MODE", "release")
-            .stdout(std::process::Stdio::null()) // 抑制 make 输出
-            .stderr(std::process::Stdio::null())
+            // 清除可能从父目录继承的 CARGO 环境变量，避免用户程序继承 os 的构建配置
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("CARGO_BUILD_RUSTFLAGS")
+            // .stdout(std::process::Stdio::null()) // 抑制 make 输出
+            // .stderr(std::process::Stdio::null())
             .status();
 
         match status {
