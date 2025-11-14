@@ -217,7 +217,7 @@ impl MappingArea {
     /// 仅支持帧映射区域
     pub fn clone_with_data(
         &self,
-        _page_table: &mut ActivePageTableInner,
+        page_table: &mut ActivePageTableInner,
     ) -> Result<Self, page_table::PagingError> {
         let mut new_area = self.clone_metadata();
         if self.map_type != MapType::Framed {
@@ -234,6 +234,7 @@ impl MappingArea {
                     let new_ppn = new_frame.ppn();
                     let src_ppn = frame.ppn();
 
+                    // 复制数据到新帧
                     unsafe {
                         let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
                         let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
@@ -244,6 +245,9 @@ impl MappingArea {
                             crate::config::PAGE_SIZE,
                         );
                     }
+
+                    // 建立页表映射
+                    page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission)?;
 
                     new_area
                         .frames
@@ -259,6 +263,7 @@ impl MappingArea {
                         let new_ppn = new_frame.ppn();
                         let src_ppn = frame.ppn();
 
+                        // 复制数据到新帧
                         unsafe {
                             let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
                             let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
@@ -269,6 +274,9 @@ impl MappingArea {
                                 crate::config::PAGE_SIZE,
                             );
                         }
+
+                        // 建立页表映射
+                        page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission)?;
 
                         new_frames.push(new_frame);
                     }
@@ -291,6 +299,7 @@ impl MappingArea {
                 //    let new_ppn = new_frame_range.start_ppn();
                 //    let total_size = num_pages * crate::config::PAGE_SIZE;
                 //
+                //    // 复制数据到新帧
                 //    unsafe {
                 //        let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
                 //        let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
@@ -301,6 +310,14 @@ impl MappingArea {
                 //            total_size
                 //        );
                 //    }
+                //
+                //    // 建立页表映射 (根据页大小确定 PageSize)
+                //    let page_size = match num_pages {
+                //        262144 => PageSize::Size1G,  // 1GB = 262144 * 4KB
+                //        512 => PageSize::Size2M,     // 2MB = 512 * 4KB
+                //        _ => PageSize::Size4K,       // 其他情况使用 4K
+                //    };
+                //    page_table.map(*vpn, new_ppn, page_size, self.permission)?;
                 //
                 //    new_area.frames.insert(*vpn, TrackedFrames::Contiguous(new_frame_range));
                 // }
