@@ -2,7 +2,11 @@
 #![no_main]
 
 use core::ffi::CStr;
-use lib::{execve, exit, fork, io::{print, read_line}, shutdown};
+use lib::{
+    execve, exit, fork,
+    io::{print, read_line},
+    shutdown, waitpid,
+};
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> ! {
@@ -21,10 +25,49 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         // 取首个 token
-        let cmd = line.split(|&b| b.is_ascii_whitespace())
-                      .next().unwrap_or(&[]);
+        let cmd = line
+            .split(|&b| b.is_ascii_whitespace())
+            .next()
+            .unwrap_or(&[]);
         match cmd {
             b"exit" => exit(0),
+            b"bug1" => {
+                if fork() == 0 {
+                    let argv = [
+                        CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
+                        core::ptr::null(),
+                    ];
+                    execve(
+                        CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
+                        argv.as_ptr(),
+                        core::ptr::null(),
+                    );
+                }
+            }
+            b"bug2" => {
+                let id = fork();
+                if id == 0 {
+                    print(b"Hello from child process!\n");
+                    exit(0);
+                } else {
+                    let mut s: i32 = 0;
+                    waitpid(id, &mut s, 0);
+                    print(b"Hello from parent process!\n");
+                }
+            }
+            b"help" => print(b"Available commands: help, exit, bug1, bug2, shutdown, hello\n"),
+            b"shutdown" => shutdown(),
+            b"hello" => {
+                let argv = [
+                    CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
+                    core::ptr::null(),
+                ];
+                execve(
+                    CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
+                    argv.as_ptr(),
+                    core::ptr::null(),
+                );
+            }
             b"fork" => {
                 if fork() == 0 {
                     print(b"Hello from child process!\n");
@@ -32,12 +75,6 @@ pub unsafe extern "C" fn _start() -> ! {
                 } else {
                     print(b"Hello from parent process!\n");
                 }
-            }
-            b"help" => print(b"Available commands: help, exit\n"),
-            b"shutdown" => shutdown(),
-            b"hello" => {
-                let argv = [CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(), core::ptr::null()];
-                execve(CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(), argv.as_ptr(), core::ptr::null());
             }
             _ => print(b"Unknown command\n"),
         }
@@ -49,4 +86,3 @@ pub unsafe extern "C" fn _start() -> ! {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     exit(-1)
 }
-
