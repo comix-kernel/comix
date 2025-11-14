@@ -33,6 +33,7 @@ pub unsafe extern "C" fn _start() -> ! {
             b"exit" => exit(0),
             b"bug1" => {
                 if fork() == 0 {
+                    print(b"Hello from child process!\n");
                     let argv = [
                         CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
                         core::ptr::null(),
@@ -42,9 +43,12 @@ pub unsafe extern "C" fn _start() -> ! {
                         argv.as_ptr(),
                         core::ptr::null(),
                     );
+                } else {
+                    print(b"Hello from parent process!\n");
                 }
             }
             b"bug2" => {
+                print(b"bug2\n");
                 let id = fork();
                 if id == 0 {
                     print(b"Hello from child process!\n");

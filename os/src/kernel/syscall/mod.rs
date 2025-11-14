@@ -32,6 +32,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
+    pr_alert, pr_debug, println,
 };
 
 /// 关闭系统调用
@@ -48,6 +49,7 @@ fn exit(code: i32) -> ! {
         let task = cpu.current_task.as_ref().unwrap().lock();
         (task.tid, task.ppid)
     };
+    println!("exit: task {} exiting with code {}", tid, code);
     TASK_MANAGER.lock().exit_task(tid, code);
     TASK_MANAGER
         .lock()
@@ -184,12 +186,16 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 
 /// 等待子进程状态变化
 /// TODO: 目前只支持等待退出且只有阻塞模式
-fn wait(wstatus: *mut i32) -> isize {
+fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     // 阻塞当前任务，直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let (tid, exit_code) = task.lock().wait_for_child();
+    TASK_MANAGER.lock().release_task(tid);
     unsafe {
+        pr_alert!("1");
+        sstatus::set_sum();
         *wstatus = exit_code;
+        sstatus::clear_sum();
     }
     tid as isize
 }
@@ -205,7 +211,7 @@ impl_syscall!(
     execve,
     (*const u8, *const *const u8, *const *const u8)
 );
-impl_syscall!(sys_wait, wait, (*mut i32));
+impl_syscall!(sys_wait, wait, (u32, *mut i32, usize));
 
 fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> {
     // 必须在 unsafe 块中进行，因为依赖 C 的正确性
