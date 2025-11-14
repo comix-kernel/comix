@@ -20,7 +20,7 @@ use crate::{
         frame_allocator::{FrameRangeTracker, FrameTracker},
         memory_space::MemorySpace,
     },
-    println,
+    pr_debug,
     sync::SpinLock,
     vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
@@ -341,7 +341,7 @@ impl Task {
 
 impl Drop for Task {
     fn drop(&mut self) {
-        println!("Dropping Task {}", self.tid);
+        pr_debug!("Dropping Task {}", self.tid);
     }
 }
 // /// 关于任务的管理信息

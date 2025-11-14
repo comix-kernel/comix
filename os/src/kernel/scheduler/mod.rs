@@ -10,7 +10,7 @@ use lazy_static::lazy_static;
 use crate::{
     arch::kernel::{context::Context, switch},
     kernel::{current_cpu, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
-    pr_alert,
+    pr_debug,
     sync::SpinLock,
 };
 
@@ -78,7 +78,7 @@ pub fn schedule() {
             .unwrap()
             .lock()
             .tid;
-        pr_alert!("Switched to task {}", tid);
+        pr_debug!("Switched to task {}", tid);
         // 通常不会立即返回；返回时再继续当前上下文后续逻辑
     }
 }
