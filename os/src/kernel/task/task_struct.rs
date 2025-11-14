@@ -5,6 +5,7 @@
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use alloc::{sync::Arc, vec::Vec};
+use riscv::register::sstatus;
 
 use crate::{
     arch::{
@@ -20,7 +21,7 @@ use crate::{
         frame_allocator::{FrameRangeTracker, FrameTracker},
         memory_space::MemorySpace,
     },
-    println,
+    pr_alert, pr_debug, pr_info,
     sync::SpinLock,
     vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
@@ -211,12 +212,22 @@ impl Task {
     /// 等待子进程状态变化，目前只有退出
     pub fn wait_for_child(&mut self) -> (u32, i32) {
         loop {
-            for child in self.children.lock().iter() {
-                if child.lock().state == TaskState::Zombie {
-                    let c = child.lock();
-                    return (c.tid, c.exit_code.unwrap());
-                }
+            let mut children_guard = self.children.lock();
+            if let Some(idx) = children_guard
+                .iter()
+                .position(|ch| ch.lock().state == TaskState::Zombie)
+            {
+                let child = children_guard.swap_remove(idx);
+                drop(children_guard);
+
+                let (tid, code) = {
+                    let g = child.lock();
+                    (g.tid, g.exit_code.unwrap_or_default())
+                };
+                return (tid, code);
             }
+            drop(children_guard);
+
             let current_task = {
                 use crate::kernel::cpu::current_cpu;
                 current_cpu()
@@ -341,7 +352,7 @@ impl Task {
 
 impl Drop for Task {
     fn drop(&mut self) {
-        println!("Dropping Task {}", self.tid);
+        pr_alert!("Dropping Task {}", self.tid);
     }
 }
 // /// 关于任务的管理信息

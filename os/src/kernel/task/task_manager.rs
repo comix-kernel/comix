@@ -94,6 +94,7 @@ impl TaskManagerTrait for TaskManager {
     fn exit_task(&mut self, tid: u32, code: i32) {
         if let Some(task) = self.tasks.get(&tid).cloned() {
             task.lock().return_value = Some(code as usize);
+            task.lock().exit_code = Some(code as i32);
             exit_task_with_block(task);
         }
     }

@@ -60,10 +60,10 @@ pub fn user_trap(
 ) {
     match scause.cause() {
         Trap::Exception(8) => {
-            // 处理系统调用
-            dispatch_syscall(trap_frame);
             // 设置返回地址为下一个指令
             trap_frame.sepc = sepc_old.wrapping_add(4);
+            // 处理系统调用
+            dispatch_syscall(trap_frame);
         }
         Trap::Interrupt(5) => {
             // 处理时钟中断
