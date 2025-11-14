@@ -128,7 +128,6 @@ fn fork() -> usize {
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     let ptf = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        child_task.context.ra = forkret as usize;
         (*tf).set_fork_trap_frame(&*ptf);
     }
     let child_task = child_task.into_shared();
@@ -148,7 +147,7 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
     unsafe { sstatus::set_sum() };
     let path_str = get_path_safe(path).unwrap_or("");
     let data = ROOT_FS
-        .load_elf(&path_str)
+        .load_elf(path_str)
         .expect("kernel_execve: file not found");
 
     // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
