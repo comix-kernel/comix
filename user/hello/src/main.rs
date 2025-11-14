@@ -1,7 +1,10 @@
 #![no_std]
 #![no_main]
 
-use lib::{exit, io::{print, read_line}};
+use lib::{
+    exit,
+    io::{print, read_line},
+};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
@@ -10,7 +13,7 @@ pub extern "C" fn _start() -> ! {
 
     let mut line = [0u8; 64];
     let cnt = read_line(&mut line);
-    
+
     print(b"Hello, ");
     print(&line[..cnt]);
     print(b"!\n");

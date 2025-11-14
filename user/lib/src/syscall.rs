@@ -1,5 +1,7 @@
 //! Syscall 接口封装
 
+use core::ffi::c_char;
+
 use crate::__syscall;
 use crate::syscall;
 use crate::syscall_numbers;
@@ -58,13 +60,12 @@ pub fn fork() -> isize {
 /// - envp: 程序的环境变量
 /// # 返回值
 /// 成功时不返回，失败时返回负值
-pub fn execve(path: &str, argv: &[&str], envp: &[&str]) -> isize {
-    syscall!(
-        syscall_numbers::SYS_EXEC,
-        path.as_ptr(),
-        argv.as_ptr(),
-        envp.as_ptr()
-    )
+pub fn execve(
+    path: *const c_char,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> isize {
+    syscall!(syscall_numbers::SYS_EXEC, path, argv, envp)
 }
 
 /// 获取当前进程ID
@@ -81,13 +82,8 @@ pub fn getpid() -> isize {
 /// - options: 等待选项
 /// # 返回值
 /// 成功时返回子进程的PID，失败时返回负值
-pub fn waitpid(pid: isize, status: &mut i32, options: usize) -> isize {
-    syscall!(
-        syscall_numbers::SYS_WAITPID,
-        pid,
-        status as *mut i32,
-        options
-    )
+pub fn waitpid(pid: isize, status: *mut i32, options: usize) -> isize {
+    syscall!(syscall_numbers::SYS_WAITPID, pid, status, options)
 }
 
 /// 打开文件
@@ -95,8 +91,8 @@ pub fn waitpid(pid: isize, status: &mut i32, options: usize) -> isize {
 /// - path: 要打开的文件路径
 /// # 返回值
 /// 成功时返回文件描述符，失败时返回负值
-pub fn open(path: &str) -> isize {
-    syscall!(syscall_numbers::SYS_OPEN, path.as_ptr(), path.len())
+pub fn open(path: *const c_char) -> isize {
+    syscall!(syscall_numbers::SYS_OPEN, path)
 }
 
 /// 关闭文件

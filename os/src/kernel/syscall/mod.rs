@@ -3,9 +3,17 @@
 //! 提供系统调用的实现
 #![allow(dead_code)]
 
-use core::sync::atomic::Ordering;
+use core::{
+    ffi::{CStr, c_char},
+    sync::atomic::Ordering,
+};
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use riscv::register::sstatus;
 
 use crate::{
@@ -15,13 +23,16 @@ use crate::{
     },
     fs::ROOT_FS,
     impl_syscall,
-    kernel::{TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, schedule},
+    kernel::{
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, forkret,
+        schedule,
+    },
     mm::{
         activate,
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    tool::{copy_cstr_to_string, ptr_array_to_vec_strings},
+    pr_alert, pr_debug, println,
 };
 
 /// 关闭系统调用
@@ -38,6 +49,7 @@ fn exit(code: i32) -> ! {
         let task = cpu.current_task.as_ref().unwrap().lock();
         (task.tid, task.ppid)
     };
+    println!("exit: task {} exiting with code {}", tid, code);
     TASK_MANAGER.lock().exit_task(tid, code);
     TASK_MANAGER
         .lock()
@@ -104,7 +116,7 @@ fn fork() -> usize {
         .expect("fork: clone memory space failed.");
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let child_task = super::TaskStruct::utask_create(
+    let mut child_task = super::TaskStruct::utask_create(
         tid,
         tid,
         ppid,
@@ -119,7 +131,10 @@ fn fork() -> usize {
         (*tf).set_fork_trap_frame(&*ptf);
     }
     let child_task = child_task.into_shared();
-    task.lock().children.lock().push(child_task);
+    task.lock().children.lock().push(child_task.clone());
+
+    TASK_MANAGER.lock().add_task(child_task.clone());
+    SCHEDULER.lock().add_task(child_task);
     tid as usize
 }
 
@@ -128,43 +143,31 @@ fn fork() -> usize {
 /// - `path`: 可执行文件路径
 /// - `argv`: 命令行参数
 /// - `envp`: 环境变量
-fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> isize {
-    let path_str = unsafe {
-        match copy_cstr_to_string(path) {
-            Ok(s) => s,
-            Err(_) => return -1,
-        }
-    };
-    let data_result = crate::vfs::vfs_load_elf(&path_str);
-
-    if data_result.is_err() {
-        return -1;
-    }
-    let data = data_result.unwrap();
-
-    let (space, entry, sp) = MemorySpace::from_elf(&data)
-        .expect("kernel_execve: failed to create memory space from ELF");
-    let space: Arc<MemorySpace> = Arc::new(space);
-    // 换掉当前任务的地址空间，e.g. 切换 satp
-    activate(space.root_ppn());
+fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c_char) -> isize {
+    unsafe { sstatus::set_sum() };
+    let path_str = get_path_safe(path).unwrap_or("");
+    let data = ROOT_FS
+        .load_elf(path_str)
+        .expect("kernel_execve: file not found");
 
     // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
-    let argv_strings = match unsafe { ptr_array_to_vec_strings(argv) } {
-        Ok(v) => v,
-        Err(_) => return -1,
-    };
-    let envp_strings = match unsafe { ptr_array_to_vec_strings(envp) } {
-        Ok(v) => v,
-        Err(_) => return -1,
-    };
+    let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
+    let envp_strings = get_args_safe(envp, "envp").unwrap_or_else(|_| Vec::new());
     // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
     let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
-
+    unsafe { sstatus::clear_sum() };
     let task = {
         let cpu = current_cpu().lock();
         cpu.current_task.as_ref().unwrap().clone()
     };
+
+    let (space, entry, sp) =
+        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+    let space: Arc<MemorySpace> = Arc::new(space);
+    // 换掉当前任务的地址空间，e.g. 切换 satp
+    activate(space.root_ppn());
+
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {
         let mut t = task.lock();
@@ -182,12 +185,16 @@ fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> is
 
 /// 等待子进程状态变化
 /// TODO: 目前只支持等待退出且只有阻塞模式
-fn wait(wstatus: *mut i32) -> isize {
+fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     // 阻塞当前任务，直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let (tid, exit_code) = task.lock().wait_for_child();
+    TASK_MANAGER.lock().release_task(tid);
     unsafe {
+        pr_alert!("1");
+        sstatus::set_sum();
         *wstatus = exit_code;
+        sstatus::clear_sum();
     }
     tid as isize
 }
@@ -203,4 +210,60 @@ impl_syscall!(
     execve,
     (*const u8, *const *const u8, *const *const u8)
 );
-impl_syscall!(sys_wait, wait, (*mut i32));
+impl_syscall!(sys_wait, wait, (u32, *mut i32, usize));
+
+fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> {
+    // 必须在 unsafe 块中进行，因为依赖 C 的正确性
+    let c_str = unsafe {
+        // 检查指针是否为 NULL (空指针)
+        if path.is_null() {
+            return Err("Path pointer is NULL");
+        }
+        // 转换为安全的 &CStr 引用。如果指针无效或非空终止，这里会发生未定义行为 (UB)
+        CStr::from_ptr(path)
+    };
+
+    // 转换为 Rust 的 &str。to_str() 会检查 UTF-8 有效性
+    match c_str.to_str() {
+        Ok(s) => Ok(s),
+        Err(_) => Err("Path is not valid UTF-8"),
+    }
+}
+
+fn get_args_safe(
+    ptr_array: *const *const c_char,
+    name: &str, // 用于错误报告
+) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+
+    // 1. 检查指针数组是否为 NULL
+    if ptr_array.is_null() {
+        return Ok(Vec::new()); // 可能是合法的空列表
+    }
+
+    // 必须在 unsafe 块中进行，因为涉及到裸指针操作
+    unsafe {
+        let mut current_ptr = ptr_array;
+
+        // 2. 迭代直到遇到 NULL 指针
+        while !(*current_ptr).is_null() {
+            let c_str = {
+                // 3. 将当前的 *const c_char 转换为 &CStr
+                CStr::from_ptr(*current_ptr)
+            };
+
+            // 4. 转换为 Rust String 并收集
+            match c_str.to_str() {
+                Ok(s) => args.push(s.to_string()),
+                Err(_) => {
+                    return Err(format!("{} contains non-UTF-8 string", name));
+                }
+            }
+
+            // 移动到数组的下一个元素
+            current_ptr = current_ptr.add(1);
+        }
+    }
+
+    Ok(args)
+}

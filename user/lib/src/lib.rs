@@ -4,9 +4,9 @@
 
 #![no_std]
 #![allow(non_snake_case)]
+pub mod io;
 mod syscall;
 pub mod syscall_numbers;
-pub mod io;
 
 pub use crate::syscall::*;
 use core::arch::global_asm;
