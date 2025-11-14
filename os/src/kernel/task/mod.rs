@@ -46,8 +46,7 @@ pub(crate) fn forkret() {
 pub(crate) fn terminate_task(return_value: usize) -> ! {
     let task = {
         let cpu = current_cpu().lock();
-        let task = cpu.current_task.as_ref().unwrap().clone();
-        task
+        cpu.current_task.as_ref().unwrap().clone()
     };
 
     {
