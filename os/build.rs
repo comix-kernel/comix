@@ -41,18 +41,10 @@ fn main() {
                 println!("cargo:warning=[build.rs] User programs built successfully");
             }
             Ok(s) => {
-                println!(
-                    "cargo:warning=[build.rs] User build failed with status: {}",
-                    s
-                );
-                // 继续构建，使用已有的 bin/ 内容
+                panic!("User program build failed with status: {}. Aborting kernel build.", s);
             }
             Err(e) => {
-                println!(
-                    "cargo:warning=[build.rs] Failed to run make in user/: {}",
-                    e
-                );
-                // 继续构建
+                panic!("Failed to execute make for user programs: {}. Aborting kernel build.", e);
             }
         }
     } else {

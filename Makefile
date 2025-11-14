@@ -37,10 +37,10 @@ pack-simple-fs: build-user
 
 # 检查镜像内容
 inspect-simple-fs:
-	@IMG=$$(find os/target -name "simple_fs.img" -type f 2>/dev/null | head -1); \
-	if [ -n "$$IMG" ]; then \
-		python3 scripts/make_init_simple_fs.py --inspect $$IMG; \
-	else \
-		echo "Error: simple_fs.img not found. Run 'make build' first."; \
+		@IMG=$$(find os/target -name "simple_fs.img" -type f -print -quit 2>/dev/null); \
+	if [ -z "$$IMG" ]; then \
+		echo "Error: simple_fs.img not found. Run 'make build' first." >&2; \
 		exit 1; \
+	else \
+		python3 scripts/make_init_simple_fs.py --inspect "$$IMG"; \
 	fi
