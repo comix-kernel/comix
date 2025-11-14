@@ -44,10 +44,16 @@ fn main() {
                 println!("cargo:warning=[build.rs] User programs built successfully");
             }
             Ok(s) => {
-                panic!("User program build failed with status: {}. Aborting kernel build.", s);
+                panic!(
+                    "User program build failed with status: {}. Aborting kernel build.",
+                    s
+                );
             }
             Err(e) => {
-                panic!("Failed to execute make for user programs: {}. Aborting kernel build.", e);
+                panic!(
+                    "Failed to execute make for user programs: {}. Aborting kernel build.",
+                    e
+                );
             }
         }
     } else {
