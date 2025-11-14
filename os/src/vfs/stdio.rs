@@ -111,10 +111,9 @@ impl Inode for StdoutInode {
     }
 
     fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
-        use core::fmt::Write;
-
-        let s = unsafe { core::str::from_utf8_unchecked(buf) };
-        crate::arch::lib::console::Stdout.write_str(s).unwrap();
+        for &byte in buf {
+            crate::arch::lib::sbi::console_putchar(byte as usize);
+        }
         Ok(buf.len())
     }
 
@@ -173,12 +172,12 @@ impl Inode for StderrInode {
     }
 
     fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
-        use core::fmt::Write;
-
-        let s = unsafe { core::str::from_utf8_unchecked(buf) };
-        crate::arch::lib::console::Stdout.write_str(s).unwrap();
+        // TODO: 将来可以实现一个独立的 stderr 输出路径
+        for &byte in buf {
+            crate::arch::lib::sbi::console_putchar(byte as usize);
+        }
         Ok(buf.len())
-    }
+    } 
 
     fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotDirectory)
