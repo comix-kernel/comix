@@ -22,6 +22,7 @@ use crate::{
     },
     println,
     sync::SpinLock,
+    vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
 
 /// 共享任务句柄
@@ -38,7 +39,7 @@ pub type SharedTask = Arc<SpinLock<Task>>;
 /// 其区别仅在于：
 /// 1. 进程的 pid 等于 tid，线程的 pid 不等于 tid
 /// 2. 进程的返回值通过 exit_code 字段传递，线程的返回值通过 return_value 字段传递
-/// 3. 对于所有3.类信息，均通过引用计数共享。创建时任务，进程需传入新的Arc<T>，而线程则共享父任务的资源。
+/// 3. 对于所有3.类信息，均通过引用计数共享。创建时任务，进程需传入新的`Arc<T>`，而线程则共享父任务的资源。
 /// 注意：线程拥有自己独立的运行栈，和一套寄存器上下文。
 ///      TrapFrame，Context结构可以保证所有线程切换时保存和恢复寄存器状态。
 ///      每个任务的内核栈独立分配，互不干扰。内核线程只使用内核栈。
@@ -89,6 +90,16 @@ pub struct Task {
     kstack_tracker: FrameRangeTracker,
     /// 任务的 TrapFrame 跟踪器
     trap_frame_tracker: FrameTracker,
+
+    // === 文件系统 ===
+    /// 文件描述符表
+    pub fd_table: Arc<FDTable>,
+
+    /// 当前工作目录
+    pub cwd: Option<Arc<Dentry>>,
+
+    /// 根目录（用于 chroot）
+    pub root: Option<Arc<Dentry>>,
 }
 
 impl Task {
@@ -257,6 +268,32 @@ impl Task {
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
+        // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
+        // Safety: 该内存页已被分配且可写
+        unsafe {
+            let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize()
+                - size_of::<u8>()
+                - 1) as *mut u8;
+            ptr.write_volatile(0xFF);
+        };
+
+        // 创建文件描述符表
+        let fd_table = Arc::new(FDTable::new());
+
+        // 初始化标准 I/O (FD 0/1/2)
+        let (stdin, stdout, stderr) = create_stdio_files();
+        fd_table
+            .install_at(0, stdin)
+            .expect("Failed to install stdin");
+        fd_table
+            .install_at(1, stdout)
+            .expect("Failed to install stdout");
+        fd_table
+            .install_at(2, stderr)
+            .expect("Failed to install stderr");
+
+        let cwd = get_root_dentry().ok();
+        let root = cwd.clone();
 
         Task {
             context: Context::zero_init(),
@@ -277,6 +314,10 @@ impl Task {
             memory_space,
             exit_code: None,
             return_value: None,
+
+            fd_table,
+            cwd,
+            root,
         }
     }
 

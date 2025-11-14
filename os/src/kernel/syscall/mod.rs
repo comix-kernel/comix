@@ -119,7 +119,7 @@ fn fork() -> usize {
         (*tf).set_fork_trap_frame(&*ptf);
     }
     let child_task = child_task.into_shared();
-    task.lock().children.lock().push(child_task.clone());
+    task.lock().children.lock().push(child_task);
     tid as usize
 }
 
@@ -135,12 +135,15 @@ fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> is
             Err(_) => return -1,
         }
     };
-    let data = ROOT_FS
-        .load_elf(&path_str)
-        .expect("kernel_execve: file not found");
+    let data_result = crate::vfs::vfs_load_elf(&path_str);
 
-    let (space, entry, sp) =
-        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+    if data_result.is_err() {
+        return -1;
+    }
+    let data = data_result.unwrap();
+
+    let (space, entry, sp) = MemorySpace::from_elf(&data)
+        .expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());

@@ -30,5 +30,7 @@ pub const NUM_CPU: usize = 4;
 // TODO: fetch it form device tree in the future(after/while implemented devices feature)
 pub const MEMORY_END: usize = 0x88000000; // 128MB for QEMU RISC-V virt
 
+pub const DEFAULT_MAX_FDS: usize = 256;
+
 use crate::arch::constant::SV39_BOT_HALF_TOP;
 pub use crate::arch::platform::qemu::*;
