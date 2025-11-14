@@ -177,7 +177,7 @@ impl Inode for StderrInode {
             crate::arch::lib::sbi::console_putchar(byte as usize);
         }
         Ok(buf.len())
-    } 
+    }
 
     fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotDirectory)
