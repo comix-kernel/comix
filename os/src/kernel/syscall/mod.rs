@@ -119,7 +119,7 @@ fn fork() -> usize {
         (*tf).set_fork_trap_frame(&*ptf);
     }
     let child_task = child_task.into_shared();
-    task.lock().children.lock().push(child_task.clone());
+    task.lock().children.lock().push(child_task);
     tid as usize
 }
 
