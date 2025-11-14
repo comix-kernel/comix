@@ -1,0 +1,10 @@
+[build]
+target = "riscv64gc-unknown-none-elf"
+
+[unstable]
+build-std = ["core", "compiler_builtins", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.riscv64gc-unknown-none-elf]
+# 用户程序不需要自定义链接脚本，使用默认链接器行为
+rustflags = ["-Cforce-frame-pointers=yes"]
