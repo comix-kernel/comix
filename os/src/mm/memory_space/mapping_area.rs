@@ -225,7 +225,7 @@ impl MappingArea {
         }
 
         // 遍历原 area 的 frames BTreeMap
-        for (_frame_idx, (vpn, tracked_frames)) in self.frames.iter().enumerate() {
+        for (vpn, tracked_frames) in &self.frames {
             match tracked_frames {
                 TrackedFrames::Single(frame) => {
                     // 复制单个 4K 页
