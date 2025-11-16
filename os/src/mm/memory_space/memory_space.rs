@@ -621,7 +621,7 @@ impl MemorySpace {
         let mut new_space = MemorySpace::new();
         new_space.heap_top = self.heap_top;
 
-        for area in self.areas.iter() {
+        for area in &self.areas {
             match area.map_type() {
                 MapType::Direct => {
                     // 直接映射：克隆元数据并重新映射到新的页表
