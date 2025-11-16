@@ -21,7 +21,7 @@ use crate::{
         lib::{console::stdin, sbi::console_putchar},
         trap::restore,
     },
-    fs::ROOT_FS,
+    // fs::ROOT_FS,
     impl_syscall,
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, forkret,
@@ -32,7 +32,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    pr_alert, pr_debug, println,
+    println,
 };
 
 /// 关闭系统调用
@@ -146,9 +146,12 @@ fn fork() -> usize {
 fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c_char) -> isize {
     unsafe { sstatus::set_sum() };
     let path_str = get_path_safe(path).unwrap_or("");
-    let data = ROOT_FS
-        .load_elf(path_str)
-        .expect("kernel_execve: file not found");
+    let data_result = crate::vfs::vfs_load_elf(&path_str);
+
+    if data_result.is_err() {
+        return -1;
+    }
+    let data = data_result.unwrap();
 
     // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
     let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
@@ -163,7 +166,7 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
     };
 
     let (space, entry, sp) =
-        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+        MemorySpace::from_elf(&data).expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
@@ -186,18 +189,18 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 /// 等待子进程状态变化
 /// TODO: 目前只支持等待退出且只有阻塞模式
 fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
-    // 阻塞当前任务，直到指定的子任务结束
+    // 阻塞当前任务,直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let (tid, exit_code) = task.lock().wait_for_child();
     TASK_MANAGER.lock().release_task(tid);
     unsafe {
-        pr_alert!("1");
         sstatus::set_sum();
         *wstatus = exit_code;
         sstatus::clear_sum();
     }
     tid as isize
 }
+
 
 // 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
