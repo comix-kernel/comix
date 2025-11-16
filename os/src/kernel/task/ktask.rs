@@ -9,7 +9,6 @@ use alloc::sync::Arc;
 
 use crate::{
     arch::{intr::disable_interrupts, trap::restore},
-    // fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
@@ -21,7 +20,6 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    vfs::vfs_load_elf,
 };
 
 /// 创建一个新的内核线程并返回其 Arc 包装
