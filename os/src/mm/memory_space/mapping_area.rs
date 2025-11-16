@@ -231,6 +231,7 @@ impl MappingArea {
                     // 复制单个 4K 页
                     let new_frame =
                         alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+
                     let new_ppn = new_frame.ppn();
                     let src_ppn = frame.ppn();
 
@@ -257,7 +258,7 @@ impl MappingArea {
                     // 复制多个不连续的页
                     let mut new_frames = alloc::vec::Vec::new();
 
-                    for frame in frames {
+                    for frame in frames.iter() {
                         let new_frame =
                             alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
                         let new_ppn = new_frame.ppn();

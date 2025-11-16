@@ -21,7 +21,7 @@ use crate::{
         lib::{console::stdin, sbi::console_putchar},
         trap::restore,
     },
-    fs::ROOT_FS,
+    // fs::ROOT_FS,
     impl_syscall,
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, forkret,
@@ -32,7 +32,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    pr_alert, pr_debug, println,
+    println,
 };
 
 /// 关闭系统调用
@@ -163,8 +163,8 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
         cpu.current_task.as_ref().unwrap().clone()
     };
 
-    let (space, entry, sp) =
-        MemorySpace::from_elf(data).expect("kernel_execve: failed to create memory space from ELF");
+    let (space, entry, sp) = MemorySpace::from_elf(&data)
+        .expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
@@ -187,12 +187,11 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 /// 等待子进程状态变化
 /// TODO: 目前只支持等待退出且只有阻塞模式
 fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
-    // 阻塞当前任务，直到指定的子任务结束
+    // 阻塞当前任务,直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let (tid, exit_code) = task.lock().wait_for_child();
     TASK_MANAGER.lock().release_task(tid);
     unsafe {
-        pr_alert!("1");
         sstatus::set_sum();
         *wstatus = exit_code;
         sstatus::clear_sum();
