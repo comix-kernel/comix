@@ -16,12 +16,12 @@ use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
 use crate::vfs::{MOUNT_TABLE, MountFlags};
 
-// lazy_static! {
-//     /// 根文件系统实例
-//     /// 在系统初始化时创建
-//     /// 只读文件系统，驻留在内存中，不用担心同步问题
-//     pub static ref ROOT_FS: SimpleMemoryFileSystem = SimpleMemoryFileSystem::init();
-// }
+lazy_static! {
+    /// 根文件系统实例
+    /// 在系统初始化时创建
+    /// 只读文件系统，驻留在内存中，不用担心同步问题
+    pub static ref ROOT_FS: SimpleMemoryFileSystem = SimpleMemoryFileSystem::init();
+}
 
 /// 嵌入的 simple_fs 镜像
 /// 由 build.rs 在编译时生成
