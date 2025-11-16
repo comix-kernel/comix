@@ -69,7 +69,7 @@ pub fn rest_init() {
 fn init() {
     super::trap::init();
     // create_kthreadd();
-    kernel_execve("init", &["init"], &[]);
+    kernel_execve("/init", &["init"], &[]);
 }
 
 /// 内核守护线程

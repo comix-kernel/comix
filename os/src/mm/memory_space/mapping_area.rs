@@ -225,12 +225,13 @@ impl MappingArea {
         }
 
         // 遍历原 area 的 frames BTreeMap
-        for (vpn, tracked_frames) in &self.frames {
+        for (_frame_idx, (vpn, tracked_frames)) in self.frames.iter().enumerate() {
             match tracked_frames {
                 TrackedFrames::Single(frame) => {
                     // 复制单个 4K 页
                     let new_frame =
                         alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+
                     let new_ppn = new_frame.ppn();
                     let src_ppn = frame.ppn();
 
@@ -257,7 +258,7 @@ impl MappingArea {
                     // 复制多个不连续的页
                     let mut new_frames = alloc::vec::Vec::new();
 
-                    for frame in frames {
+                    for frame in frames.iter() {
                         let new_frame =
                             alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
                         let new_ppn = new_frame.ppn();
