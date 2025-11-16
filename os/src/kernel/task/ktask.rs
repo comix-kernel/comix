@@ -9,7 +9,6 @@ use alloc::sync::Arc;
 
 use crate::{
     arch::{intr::disable_interrupts, trap::restore},
-    // fs::ROOT_FS,
     kernel::{
         SCHEDULER, TaskState,
         cpu::current_cpu,
@@ -21,7 +20,6 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    vfs::vfs_load_elf,
 };
 
 /// 创建一个新的内核线程并返回其 Arc 包装
@@ -124,8 +122,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
 /// * `argv`: 传递给新程序的参数列表
 /// * `envp`: 传递给新程序的环境变量列表
 pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
-    let data_result = crate::vfs::vfs_load_elf(path);
-    let data = data_result.unwrap();
+    let data = crate::vfs::vfs_load_elf(path).expect("kernel_execve: file not found");
 
     let (space, entry, sp) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
