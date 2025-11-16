@@ -41,11 +41,16 @@ use crate::{
 #[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tid = TASK_MANAGER.lock().allocate_tid();
-    let (pid, ppid) = {
+    let (pid, ppid, signal_handlers, blocked) = {
         let cur_cpu = current_cpu().lock();
         let cur_task = cur_cpu.current_task.as_ref().unwrap();
         let cur_task = cur_task.lock();
-        (cur_task.pid, cur_task.ppid)
+        (
+            cur_task.pid,
+            cur_task.ppid,
+            cur_task.signal_handlers.clone(),
+            cur_task.blocked,
+        )
     };
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
@@ -58,6 +63,8 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
+        signal_handlers,
+        blocked,
     );
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);

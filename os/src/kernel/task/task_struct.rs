@@ -5,13 +5,13 @@
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use alloc::{sync::Arc, vec::Vec};
-use riscv::register::sstatus;
 
 use crate::{
     arch::{
         kernel::{context::Context, task::setup_stack_layout},
         trap::TrapFrame,
     },
+    ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
         WaitQueue,
         task::{forkret, task_state::TaskState},
@@ -21,7 +21,7 @@ use crate::{
         frame_allocator::{FrameRangeTracker, FrameTracker},
         memory_space::MemorySpace,
     },
-    pr_alert, pr_debug, pr_info,
+    pr_debug,
     sync::SpinLock,
     vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
@@ -91,6 +91,12 @@ pub struct Task {
     kstack_tracker: FrameRangeTracker,
     /// 任务的 TrapFrame 跟踪器
     trap_frame_tracker: FrameTracker,
+    /// 信号屏蔽字
+    pub blocked: SignalFlags,
+    /// 待处理信号集合
+    pub pending: SignalFlags,
+    /// 信号处理动作表
+    pub signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
 
     // === 文件系统 ===
     /// 文件描述符表
@@ -122,6 +128,8 @@ impl Task {
         children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
+        signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
+        blocked: SignalFlags,
     ) -> Self {
         let mut task = Self::new(
             tid,
@@ -131,6 +139,8 @@ impl Task {
             kstack_tracker,
             trap_frame_tracker,
             None,
+            signal_handlers,
+            blocked,
         );
         task.context
             .set_init_context(forkret as usize, task.kstack_base);
@@ -152,6 +162,8 @@ impl Task {
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         memory_space: Arc<MemorySpace>,
+        signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
+        blocked: SignalFlags,
     ) -> Self {
         let mut task = Self::new(
             tid,
@@ -161,6 +173,8 @@ impl Task {
             kstack_tracker,
             trap_frame_tracker,
             Some(memory_space),
+            signal_handlers,
+            blocked,
         );
         task.context
             .set_init_context(forkret as usize, task.kstack_base);
@@ -276,17 +290,11 @@ impl Task {
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
         memory_space: Option<Arc<MemorySpace>>,
+        signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
+        blocked: SignalFlags,
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
-        // 简单的 guard, 向TrapFrame所在页末位写入一个值，以防止越界访问
-        // Safety: 该内存页已被分配且可写
-        unsafe {
-            let ptr = (trap_frame_tracker.ppn().end_addr().to_vaddr().as_usize()
-                - size_of::<u8>()
-                - 1) as *mut u8;
-            ptr.write_volatile(0xFF);
-        };
 
         // 创建文件描述符表
         let fd_table = Arc::new(FDTable::new());
@@ -325,7 +333,9 @@ impl Task {
             memory_space,
             exit_code: None,
             return_value: None,
-
+            signal_handlers,
+            blocked,
+            pending: SignalFlags::empty(),
             fd_table,
             cwd,
             root,
@@ -346,13 +356,15 @@ impl Task {
             kstack_tracker,
             trap_frame_tracker,
             None,
+            Arc::new(SpinLock::new(SignalHandlerTable::new())),
+            SignalFlags::empty(),
         )
     }
 }
 
 impl Drop for Task {
     fn drop(&mut self) {
-        pr_alert!("Dropping Task {}", self.tid);
+        pr_debug!("Dropping Task {}", self.tid);
     }
 }
 // /// 关于任务的管理信息
@@ -386,6 +398,8 @@ mod tests {
             Task::empty_children(),
             kstack_tracker,
             trap_frame_tracker,
+            Arc::new(SpinLock::new(SignalHandlerTable::new())),
+            SignalFlags::empty(),
         );
         kassert!(t.tid == 1);
         kassert!(t.pid == t.tid);
@@ -417,6 +431,8 @@ mod tests {
             Task::empty_children(),
             kstack_tracker,
             trap_frame_tracker,
+            Arc::new(SpinLock::new(SignalHandlerTable::new())),
+            SignalFlags::empty(),
         );
         kassert!(t.tid == 10);
         kassert!(t.pid == 5);
