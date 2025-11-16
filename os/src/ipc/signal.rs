@@ -3,9 +3,14 @@
 //! 提供软件中断机制，用于发送异步通知给进程
 //! 处理信号的捕获、屏蔽和默认行为.
 
+use alloc::task;
 use bitflags::bitflags;
 
-use crate::{arch::kernel::cpu, kernel::current_cpu};
+use crate::{
+    arch::{kernel::cpu, trap::TrapFrame},
+    ipc::signal,
+    kernel::{SharedTask, current_cpu},
+};
 
 /* 信号定义 */
 pub const _NSIG: usize = 31;
@@ -78,6 +83,11 @@ bitflags! {
     }
 }
 
+/// 默认信号处理动作
+pub const SIG_DEF: usize = 0;
+/// 忽略信号
+pub const SIG_IGN: usize = 1;
+
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy)]
 /// 信号处理动作
@@ -100,7 +110,7 @@ impl SignalHandlerTable {
     pub fn new() -> Self {
         Self {
             actions: [SignalAction {
-                handler: 0,
+                handler: SIG_DEF,
                 mask: SignalFlags::empty(),
             }; _NSIG + 1],
         }
@@ -114,3 +124,163 @@ impl SignalHandlerTable {
         self.actions[sig] = action;
     }
 }
+
+/// 找出第一个可投递的信号（未被屏蔽且挂起的信号中编号最小的）
+pub fn first_deliverable_signal(
+    pending_flags: SignalFlags,
+    blocked_mask: SignalFlags,
+) -> Option<SignalFlags> {
+    let deliverable_signals = pending_flags.difference(blocked_mask);
+
+    if deliverable_signals.is_empty() {
+        return None;
+    }
+
+    let signal_bit_index = deliverable_signals.bits().trailing_zeros();
+    if signal_bit_index < _NSIG as u32 {
+        let first_sig = SignalFlags::from_bits(1 << signal_bit_index).unwrap();
+        return Some(first_sig);
+    }
+
+    None
+}
+
+#[inline]
+fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedTask) {
+    let sig_num = signal_from_flag(sig_flag).unwrap();
+
+    match action.handler {
+        SIG_DEF => match sig_num {
+            _SIGQUIT | _SIGILL | _SIGABRT | _SIGBUS | _SIGFPE | _SIGSEGV | _SIGSYS | _SIGXCPU
+            | _SIGXFSZ => sig_dump(sig_num), // 致命错误，调用退出系统调用或内核退出函数
+
+            _SIGHUP | _SIGINT | _SIGPIPE | _SIGALRM | _SIGTERM | _SIGUSR1 | _SIGUSR2
+            | _SIGSTKFLT | _SIGPROF | _SIGPWR => sig_terminate(sig_num), // 默认终止
+            _SIGKILL => sig_terminate(sig_num), // SIGKILL 总是终止
+            _SIGSTOP | _SIGTSTP | _SIGTTIN | _SIGTTOU => sig_stop(sig_num),
+            _SIGCONT => sig_continue(sig_num),
+            _SIGCHLD | _SIGURG | _SIGWINCH | _SIGIO => sig_ignore(sig_num),
+            _ => panic!("Unhandled signal"),
+        },
+        SIG_IGN => sig_ignore(sig_num),
+        handler_addr => {
+            // 自定义处理器：构造用户栈上下文并跳转
+            // **将 action.mask 传递给安装跳板函数**
+            install_user_signal_trampoline(task, sig_num, handler_addr, action.mask);
+        }
+    }
+}
+
+/// 在返回用户态前检查信号并处理
+pub fn check_signal() {
+    let task = {
+        let cpu = current_cpu().lock();
+        cpu.current_task.as_ref().unwrap().clone()
+    };
+
+    loop {
+        let (deliverable_sig_flag, action) = {
+            let mut t = task.lock();
+
+            let Some(sig_flag) = first_deliverable_signal(t.pending, t.blocked) else {
+                break;
+            };
+
+            let sig_num = signal_from_flag(sig_flag).unwrap();
+            let action = t.signal_handlers.lock().actions[sig_num];
+
+            t.pending.remove(sig_flag);
+
+            (sig_flag, action)
+        };
+
+        handle_one_signal(deliverable_sig_flag, action, &task);
+
+        // 注意：如果 handle_one_signal 导致进程退出 (sig_terminate/sig_dump)，
+        // 那么循环将不会继续，而是会被退出逻辑接管。
+    }
+}
+
+/// 设置信号用户态处理跳板
+fn install_user_signal_trampoline(
+    task: &SharedTask,
+    sig_num: usize,
+    entry: usize,
+    action_mask: SignalFlags, // 接收 action.mask 作为参数
+) {
+    let tp = current_cpu()
+        .lock()
+        .current_task
+        .clone()
+        .unwrap()
+        .lock()
+        .trap_frame_ptr
+        .load(core::sync::atomic::Ordering::SeqCst);
+
+    let original_blocked = {
+        let mut t = task.lock();
+        let original = t.blocked;
+
+        // 更新 blocked mask（原子性）
+        // 新的屏蔽集 = 原有屏蔽集 | 动作屏蔽集 | 自身信号
+        let sig_flag = SignalFlags::from_bits(1 << (sig_num - 1)).unwrap();
+        t.blocked |= action_mask | sig_flag;
+
+        original
+    };
+
+    unsafe {
+        // 构造 Signal Frame (在用户栈上)
+        let user_sp = (*tp).x2_sp;
+        let frame_size = size_of::<TrapFrame>();
+        let mask_size = size_of::<SignalFlags>();
+        let frame_addr = user_sp
+            .checked_sub(frame_size + mask_size)
+            .expect("User stack exhausted for Signal Frame");
+        let mask_addr = frame_addr + frame_size;
+        let frame_ptr = frame_addr as *mut TrapFrame;
+        (*frame_ptr).clone_from(&*tp);
+        let mask_ptr = mask_addr as *mut SignalFlags;
+        *mask_ptr = original_blocked;
+
+        // 修改内核 Trap Frame (实现跳转)
+        (*tp).sepc = entry;
+        (*tp).x10_a0 = sig_num;
+        // (*tp).x1_ra = TRAMPOLINE_SIGRETURN_ADDR;
+        (*tp).x2_sp = frame_addr;
+    }
+}
+
+fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
+    let bit_index = flag.bits().trailing_zeros() as usize;
+
+    if bit_index >= _NSIG {
+        return None;
+    }
+
+    Some(bit_index + 1)
+}
+
+/* 默认信号处理函数 */
+/// 默认行为：进程中止
+fn sig_terminate(sig_num: usize) {
+    unimplemented!()
+}
+
+/// 默认行为：终止并 Core Dump
+fn sig_dump(sig_num: usize) {
+    unimplemented!()
+}
+
+/// 默认行为：停止进程
+fn sig_stop(sig_num: usize) {
+    unimplemented!()
+}
+
+/// 默认行为：继续进程
+fn sig_continue(sig_num: usize) {
+    unimplemented!()
+}
+
+/// 默认行为：忽略信号
+fn sig_ignore(sig_num: usize) {}
