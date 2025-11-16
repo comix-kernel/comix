@@ -124,9 +124,8 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
 /// * `argv`: 传递给新程序的参数列表
 /// * `envp`: 传递给新程序的环境变量列表
 pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
-    let data_result = crate::vfs::vfs_load_elf(path);
-    let data = data_result.unwrap();
-
+    let data = crate::vfs::vfs_load_elf(path).expect("kernel_execve: file not found");
+    
     let (space, entry, sp) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);

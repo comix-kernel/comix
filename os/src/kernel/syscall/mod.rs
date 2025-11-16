@@ -146,12 +146,10 @@ fn fork() -> usize {
 fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c_char) -> isize {
     unsafe { sstatus::set_sum() };
     let path_str = get_path_safe(path).unwrap_or("");
-    let data_result = crate::vfs::vfs_load_elf(path_str);
-
-    if data_result.is_err() {
-        return -1;
-    }
-    let data = data_result.unwrap();
+    let data = match crate::vfs::vfs_load_elf(path_str) {
+        Ok(data) => data,
+        Err(_) => return -1,
+    };
 
     // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
     let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
