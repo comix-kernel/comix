@@ -4,16 +4,16 @@
 
 use core::sync::atomic::Ordering;
 
+use crate::arch::lib::sbi;
+use crate::println;
 use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
-use crate::arch::lib::sbi;
-use crate::println;
 
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::TIMER_TICKS;
 use crate::arch::trap::restore;
-use crate::kernel::{SCHEDULER, schedule, current_cpu};
+use crate::kernel::{SCHEDULER, current_cpu, schedule};
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，
@@ -109,7 +109,6 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
             println!("==============================================");
             // sbi::shutdown(true);
             panic!("Kernel exception in S-Mode");
-            
         }
         trap => panic!(
             "Unexpected trap in kernel: {:?}, sepc = {:#x}, sstatus = {:#x}",

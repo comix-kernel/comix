@@ -146,7 +146,7 @@ fn fork() -> usize {
 fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c_char) -> isize {
     unsafe { sstatus::set_sum() };
     let path_str = get_path_safe(path).unwrap_or("");
-    let data_result = crate::vfs::vfs_load_elf(&path_str);
+    let data_result = crate::vfs::vfs_load_elf(path_str);
 
     if data_result.is_err() {
         return -1;
@@ -165,8 +165,8 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
         cpu.current_task.as_ref().unwrap().clone()
     };
 
-    let (space, entry, sp) =
-        MemorySpace::from_elf(&data).expect("kernel_execve: failed to create memory space from ELF");
+    let (space, entry, sp) = MemorySpace::from_elf(&data)
+        .expect("kernel_execve: failed to create memory space from ELF");
     let space: Arc<MemorySpace> = Arc::new(space);
     // 换掉当前任务的地址空间，e.g. 切换 satp
     activate(space.root_ppn());
@@ -200,7 +200,6 @@ fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     }
     tid as isize
 }
-
 
 // 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
