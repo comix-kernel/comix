@@ -24,7 +24,7 @@ use crate::{
     // fs::ROOT_FS,
     impl_syscall,
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, forkret,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, do_exit,
         schedule,
     },
     mm::{
@@ -32,7 +32,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
-    println,
+    sync::SpinLock,
 };
 
 /// 关闭系统调用
@@ -44,19 +44,8 @@ fn shutdown() -> ! {
 /// # 参数
 /// - `code`: 退出代码
 fn exit(code: i32) -> ! {
-    let (tid, ppid) = {
-        let cpu = current_cpu().lock();
-        let task = cpu.current_task.as_ref().unwrap().lock();
-        (task.tid, task.ppid)
-    };
-    println!("exit: task {} exiting with code {}", tid, code);
-    TASK_MANAGER.lock().exit_task(tid, code);
-    TASK_MANAGER
-        .lock()
-        .get_task(ppid)
-        .unwrap()
-        .lock()
-        .notify_child_exit();
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    do_exit(task, code);
     schedule();
     unreachable!("exit: exit_task should not return.");
 }
@@ -105,33 +94,50 @@ fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
 /// 创建当前任务的子任务（fork）
 fn fork() -> usize {
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let ppid = task.lock().pid;
-    let memory_space = task
-        .lock()
-        .memory_space
-        .clone()
-        .expect("fork: Can only call fork on user task.")
-        .clone_for_fork()
-        .expect("fork: clone memory space failed.");
+    let (ppid, space, signal_handlers, blocked, ptf) = {
+        let cpu = current_cpu().lock();
+        let task = cpu.current_task.as_ref().unwrap().lock();
+        (
+            task.pid,
+            task.memory_space
+                .as_ref()
+                .unwrap()
+                .lock()
+                .clone_for_fork()
+                .expect("fork: clone memory space failed."),
+            task.signal_handlers.clone(),
+            task.blocked,
+            task.trap_frame_ptr.load(Ordering::SeqCst),
+        )
+    };
+
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let mut child_task = super::TaskStruct::utask_create(
+    let child_task = super::TaskStruct::utask_create(
         tid,
         tid,
         ppid,
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        Arc::new(memory_space),
+        Arc::new(SpinLock::new(space)),
+        signal_handlers,
+        blocked,
     );
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
-    let ptf = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
         (*tf).set_fork_trap_frame(&*ptf);
     }
     let child_task = child_task.into_shared();
-    task.lock().children.lock().push(child_task.clone());
+    current_cpu()
+        .lock()
+        .current_task
+        .as_ref()
+        .unwrap()
+        .lock()
+        .children
+        .lock()
+        .push(child_task.clone());
 
     TASK_MANAGER.lock().add_task(child_task.clone());
     SCHEDULER.lock().add_task(child_task);
@@ -165,9 +171,9 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 
     let (space, entry, sp) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
-    let space: Arc<MemorySpace> = Arc::new(space);
+    let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    activate(space.root_ppn());
+    activate(space.lock().root_ppn());
 
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {

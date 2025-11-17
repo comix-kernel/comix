@@ -4,7 +4,7 @@
 
 use core::sync::atomic::Ordering;
 
-use crate::arch::lib::sbi;
+use crate::ipc::check_signal;
 use crate::println;
 use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
@@ -13,7 +13,7 @@ use riscv::register::{sepc, sscratch, sstatus, stval};
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::TIMER_TICKS;
 use crate::arch::trap::restore;
-use crate::kernel::{SCHEDULER, current_cpu, schedule};
+use crate::kernel::{SCHEDULER, schedule};
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，
@@ -42,6 +42,7 @@ pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
         SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old),
     }
 
+    check_signal();
     // Safe:
     // restore 是一个汇编函数，它恢复寄存器并执行 sret。
     //

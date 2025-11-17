@@ -1,56 +1,86 @@
 #![allow(dead_code)]
-use crate::{
-    kernel::{WaitQueue, current_cpu, yield_task},
-    sync::raw_spin_lock::RawSpinLock,
-};
+use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicBool, Ordering};
 
-/// 提供基本的互斥锁功能的结构体。
-/// 使用睡眠等待的方式实现互斥锁，适用于可能长时间持有锁的场景。
-/// 使用示例：
-/// ```ignore
-/// let mut mutex = Mutex::new();
-/// mutex.lock(); // 获取锁
-/// // 访问临界区
-/// mutex.unlock(); // 释放锁
-/// ```
-pub struct Mutex {
-    locked: bool,
+use crate::kernel::{WaitQueue, current_cpu, yield_task};
+use crate::sync::SpinLock;
+use crate::sync::{raw_spin_lock::RawSpinLock, raw_spin_lock::RawSpinLockGuard};
+
+/// 互斥锁
+pub struct Mutex<T> {
+    locked: AtomicBool,
     guard: RawSpinLock,
-    queue: WaitQueue,
+    queue: SpinLock<WaitQueue>,
+    data: UnsafeCell<T>,
 }
 
-impl Mutex {
-    /// 创建一个新的未锁定的 Mutex 实例。
-    pub fn new() -> Self {
-        Mutex {
-            locked: false,
+unsafe impl<T: Send> Send for Mutex<T> {}
+unsafe impl<T: Send> Sync for Mutex<T> {}
+
+impl<T> Mutex<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
             guard: RawSpinLock::new(),
-            queue: WaitQueue::new(),
+            queue: SpinLock::new(WaitQueue::new()),
+            data: UnsafeCell::new(data),
         }
     }
 
-    /// 获取锁。如果锁已被其他线程持有，则当前线程将进入睡眠状态，直到锁可用。
-    pub fn lock(&mut self) {
+    pub fn lock(&self) -> MutexGuard<'_, T> {
         loop {
-            let _g = self.guard.lock();
-            if !self.locked {
-                self.locked = true;
-                return;
+            // 先自旋获取内部短锁
+            let spin = self.guard.lock();
+            // 尝试占用
+            if !self.locked.swap(true, Ordering::Acquire) {
+                // 成功，占用了
+                let data_ref = unsafe { &mut *self.data.get() };
+                return MutexGuard {
+                    mutex: self as *const _,
+                    _spin: spin,
+                    data: data_ref,
+                };
             }
-            let current_task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-            // 在 enqueue 之前仍然持有 guard 是合理的，确保 wait queue 与 locked 字段的原子性
-            self.queue.sleep(current_task);
-
-            // 释放 guard，然后让出 CPU
-            drop(_g);
+            // 已被占用：把当前任务挂到等待队列
+            let current = current_cpu()
+                .lock()
+                .current_task
+                .as_ref()
+                .expect("mutex::lock: no current task")
+                .clone();
+            self.queue.lock().sleep(current);
+            // 释放短锁后让调度器切走
+            drop(spin);
             yield_task();
+            // 醒来后重试
         }
     }
+}
 
-    /// 释放锁，并唤醒等待队列中的一个线程（如果有的话）。
-    pub fn unlock(&mut self) {
-        let _g = self.guard.lock();
-        self.locked = false;
-        self.queue.wake_up_one();
+pub struct MutexGuard<'a, T> {
+    mutex: *const Mutex<T>,
+    _spin: RawSpinLockGuard<'a>, // 保持内部互斥到 drop
+    data: &'a mut T,
+}
+
+impl<T> core::ops::Deref for MutexGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.data
+    }
+}
+
+impl<T> core::ops::DerefMut for MutexGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.data
+    }
+}
+
+impl<T> Drop for MutexGuard<'_, T> {
+    fn drop(&mut self) {
+        // 仍持有 _spin，自然是互斥的
+        let m = unsafe { &*self.mutex };
+        m.locked.store(false, Ordering::Release);
+        m.queue.lock().wake_up_all();
     }
 }
