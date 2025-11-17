@@ -1,15 +1,18 @@
+//! 基于 Inode 的磁盘文件实现
+
 use crate::sync::SpinLock;
 use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
-/// 基于 Inode 的磁盘文件实现
+/// 基于 Inode 的磁盘文件
 ///
-/// 替代原有的 `struct File`,专门用于基于磁盘 Inode 的文件。
+/// 对底层 Inode 的会话包装，维护：
+/// - 当前文件偏移量（offset）
+/// - 打开标志位（O_RDONLY/O_WRONLY/O_APPEND 等）
 ///
-/// # 职责
-/// - 维护会话状态 (offset, flags)
-/// - 将无状态的 read/write 调用转换为有状态的 inode.read_at/write_at
-/// - 处理 O_APPEND 等特殊标志
+/// # 并发安全
+///
+/// `offset` 使用 `SpinLock` 保护，因为多线程可能通过 `fork()` 共享同一个 fd。
 pub struct DiskFile {
     /// 关联的 dentry (保留,用于某些操作如 fstat)
     pub dentry: Arc<Dentry>,

@@ -1,3 +1,7 @@
+//! 管道文件实现
+//!
+//! 管道是流式单向通信设备，读端和写端分别由两个 [`PipeFile`] 实例表示。
+
 use crate::sync::SpinLock;
 use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType, TimeSpec};
 use alloc::collections::VecDeque;
@@ -5,9 +9,7 @@ use alloc::sync::Arc;
 
 /// 管道环形缓冲区
 ///
-/// 使用 VecDeque 简化实现,支持:
-/// - 非阻塞读写
-/// - 自动检测读端/写端关闭
+/// 容量默认 4KB（POSIX 最小 512 字节）。
 struct PipeRingBuffer {
     /// 内部缓冲区
     buffer: VecDeque<u8>,

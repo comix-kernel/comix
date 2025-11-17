@@ -1,4 +1,33 @@
-//! 虚拟文件系统（VFS）层，提供统一的文件系统抽象接口
+//! 虚拟文件系统（VFS）层
+//!
+//! 提供统一的文件系统抽象接口，支持多种文件类型和文件系统。
+//!
+//! # 架构
+//!
+//! VFS 采用分层设计：
+//!
+//! - **会话层** ([`File`] trait): 维护打开文件的会话状态（offset、flags），以 `Arc<dyn File>` 形式存储于进程文件描述符表中
+//! - **存储层** ([`Inode`] trait): 提供无状态的随机访问接口（`read_at`、`write_at`）
+//! - **路径层** ([`Dentry`]、[`path`] 模块): 管理目录树结构和路径解析
+//! - **挂载层** ([`mount`] 模块): 支持多文件系统挂载
+//!
+//! # 文件类型
+//!
+//! - [`DiskFile`]: 基于 Inode 的磁盘文件（支持 lseek）
+//! - [`PipeFile`]: 管道文件（流式设备，不支持 lseek）
+//! - [`StdinFile`]/[`StdoutFile`]/[`StderrFile`]: 标准 I/O 文件（字符设备）
+//!
+//! # 示例
+//!
+//! ```rust
+//! // 打开文件
+//! let dentry = vfs_lookup("/etc/passwd")?;
+//! let file = DiskFile::new(dentry, OpenFlags::O_RDONLY);
+//! let file: Arc<dyn File> = Arc::new(file);
+//!
+//! // 安装到文件描述符表
+//! fd_table.install_at(3, file)?;
+//! ```
 
 pub mod dentry;
 pub mod error;
