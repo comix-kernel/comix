@@ -1,8 +1,6 @@
-use alloc::sync::Arc;
 use crate::sync::SpinLock;
-use crate::vfs::{
-    File, Inode, FsError, InodeMetadata, OpenFlags, SeekWhence, Dentry
-};
+use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
+use alloc::sync::Arc;
 
 /// 基于 Inode 的磁盘文件实现
 ///
