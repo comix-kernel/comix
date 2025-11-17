@@ -1,10 +1,13 @@
+//! 标准 I/O 文件实现
+//!
+//! 提供标准输入、输出、错误输出的文件接口，直接操作控制台，不依赖 Inode。
+
 use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType, TimeSpec};
 use alloc::sync::Arc;
 
 /// 标准输入文件
 ///
-/// 直接从控制台读取,不经过 Inode 层。
-/// 替代 stdio.rs:6-85 的 StdinInode 设计。
+/// 从控制台读取输入，行缓冲模式。
 pub struct StdinFile;
 
 impl File for StdinFile {
@@ -61,6 +64,8 @@ impl File for StdinFile {
 }
 
 /// 标准输出文件
+///
+/// 输出到控制台，全缓冲模式。
 pub struct StdoutFile;
 
 impl File for StdoutFile {
@@ -102,6 +107,8 @@ impl File for StdoutFile {
 }
 
 /// 标准错误输出文件
+///
+/// 输出到控制台（与 stdout 相同），无缓冲模式。
 pub struct StderrFile;
 
 impl File for StderrFile {

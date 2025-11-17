@@ -1,4 +1,10 @@
+//! VFS 错误类型
+//!
+//! 定义了与 POSIX 兼容的文件系统错误码，可通过 [`FsError::to_errno()`] 转换为系统调用错误码。
+
 /// VFS 错误类型
+///
+/// 各错误码对应标准 POSIX errno 值。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsError {
     // 文件/目录相关

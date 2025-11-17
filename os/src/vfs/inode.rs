@@ -1,3 +1,15 @@
+//! Inode 抽象层 - VFS 存储层接口
+//!
+//! 定义了文件系统的底层存储接口，包括：
+//! - [`Inode`] trait：文件/目录的元数据和数据访问
+//! - [`InodeMetadata`]：文件元数据（大小、权限、时间等）
+//! - [`InodeType`]：文件类型枚举
+//!
+//! # 与 File trait 的区别
+//!
+//! - **Inode**：存储层，无状态，方法带 offset 参数（如 `read_at`）
+//! - **File**：会话层，有状态，方法不带 offset 参数（如 `read`）
+
 use crate::arch::timer::get_time;
 use crate::config::CLOCK_FREQ;
 use crate::vfs::error::FsError;
@@ -5,7 +17,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-/// Inode类型
+/// 文件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InodeType {
     File,        // 普通文件
@@ -103,7 +115,7 @@ pub struct DirEntry {
     pub inode_type: InodeType, // 文件类型
 }
 
-/// Inode 元数据
+/// 文件元数据
 #[derive(Debug, Clone)]
 pub struct InodeMetadata {
     pub inode_no: usize,       // Inode 编号
@@ -119,18 +131,30 @@ pub struct InodeMetadata {
     pub blocks: usize,         // 占用的块数（512B 为单位）
 }
 
-/// Inode trait - 所有文件系统必须实现
+/// 文件系统底层存储接口
+///
+/// Inode 代表文件系统中的一个文件或目录，提供无状态的随机访问。
+///
+/// # 设计要点
+///
+/// - 所有读写方法必须携带 `offset` 参数（体现随机访问能力）
+/// - 不维护会话状态（offset 由上层 File 维护）
+/// - 支持目录操作（lookup、create、mkdir、unlink）
 pub trait Inode: Send + Sync {
-    /// 获取 inode 元数据
+    /// 获取文件元数据
     fn metadata(&self) -> Result<InodeMetadata, FsError>;
 
     /// 从指定偏移量读取数据
+    ///
+    /// 多次调用相同参数应返回相同结果（无副作用）。
     fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError>;
 
-    /// 从指定偏移量写入数据
+    /// 向指定偏移量写入数据
     fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError>;
 
     /// 在目录中查找子项
+    ///
+    /// 返回子项的 Inode。仅对目录有效。
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 在目录中创建文件
@@ -140,6 +164,8 @@ pub trait Inode: Send + Sync {
     fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 删除目录项
+    ///
+    /// 仅删除目录项，不一定删除 Inode（取决于引用计数）。
     fn unlink(&self, name: &str) -> Result<(), FsError>;
 
     /// 列出目录内容
