@@ -11,7 +11,7 @@ use core::fmt;
 pub struct FDTable {
     /// 文件描述符数组
     /// None 表示该 FD 未使用
-    files: SpinLock<Vec<Option<Arc<File>>>>,
+    files: SpinLock<Vec<Option<Arc<dyn File>>>>,
 
     /// 最大文件描述符数量
     max_fds: usize,
@@ -39,7 +39,7 @@ impl FDTable {
     }
 
     /// 分配一个新的文件描述符
-    pub fn alloc(&self, file: Arc<File>) -> Result<usize, FsError> {
+    pub fn alloc(&self, file: Arc<dyn File>) -> Result<usize, FsError> {
         let mut files = self.files.lock();
 
         // 查找最小可用 FD
@@ -61,7 +61,7 @@ impl FDTable {
     }
 
     /// 在指定的 FD 位置安装文件
-    pub fn install_at(&self, fd: usize, file: Arc<File>) -> Result<(), FsError> {
+    pub fn install_at(&self, fd: usize, file: Arc<dyn File>) -> Result<(), FsError> {
         let mut files = self.files.lock();
 
         if fd >= self.max_fds {
@@ -79,7 +79,7 @@ impl FDTable {
     }
 
     /// 获取文件对象
-    pub fn get(&self, fd: usize) -> Result<Arc<File>, FsError> {
+    pub fn get(&self, fd: usize) -> Result<Arc<dyn File>, FsError> {
         let files = self.files.lock();
         files
             .get(fd)
@@ -137,7 +137,7 @@ impl FDTable {
         let mut files = self.files.lock();
         for slot in files.iter_mut() {
             if let Some(file) = slot {
-                if file.flags.contains(crate::vfs::OpenFlags::O_CLOEXEC) {
+                if file.flags().contains(crate::vfs::OpenFlags::O_CLOEXEC) {
                     *slot = None;
                 }
             }

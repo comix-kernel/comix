@@ -24,6 +24,10 @@ pub enum FsError {
     NoSpace,    // -ENOSPC(28): 设备空间不足
     IoError,    // -EIO(5): I/O 错误
 
+    // 管道相关 (新增)
+    BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
+    WouldBlock, // -EAGAIN(11): 非阻塞操作将阻塞
+
     // 其他
     NotSupported, // -ENOTSUP(95): 操作不支持
     TooManyLinks, // -EMLINK(31): 硬链接过多
@@ -36,6 +40,7 @@ impl FsError {
             FsError::NotFound => -2,
             FsError::IoError => -5,
             FsError::BadFileDescriptor => -9,
+            FsError::WouldBlock => -11,
             FsError::PermissionDenied => -13,
             FsError::AlreadyExists => -17,
             FsError::NotDirectory => -20,
@@ -45,6 +50,7 @@ impl FsError {
             FsError::NoSpace => -28,
             FsError::ReadOnlyFs => -30,
             FsError::TooManyLinks => -31,
+            FsError::BrokenPipe => -32,
             FsError::NameTooLong => -36,
             FsError::DirectoryNotEmpty => -39,
             FsError::NotSupported => -95,
