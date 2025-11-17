@@ -9,8 +9,10 @@
 #![allow(unused)]
 mod message;
 mod pipe;
+mod shared_memory;
 mod signal;
 
 pub use message::*;
 pub use pipe::*;
+pub use shared_memory::*;
 pub use signal::*;
