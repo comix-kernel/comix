@@ -56,7 +56,7 @@ impl PipeRingBuffer {
     fn write(&mut self, buf: &[u8]) -> Result<usize, FsError> {
         // 读端已关闭 -> EPIPE (应发送 SIGPIPE 信号)
         if self.read_end_count == 0 {
-            return Err(FsError::PermissionDenied); // 暂用 PermissionDenied 代替 EPIPE
+            return Err(FsError::BrokenPipe); 
         }
 
         // 缓冲区已满 -> 暂时只写入可用空间 (TODO: 阻塞等待)
