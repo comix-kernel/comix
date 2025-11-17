@@ -7,6 +7,8 @@
 //! 3. 管道
 //! 4. 共享内存
 #![allow(unused)]
+mod pipe;
 mod signal;
 
+pub use pipe::*;
 pub use signal::*;
