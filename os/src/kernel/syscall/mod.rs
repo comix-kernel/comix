@@ -32,6 +32,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
+    sync::SpinLock,
 };
 
 /// 关闭系统调用
@@ -101,6 +102,7 @@ fn fork() -> usize {
             task.memory_space
                 .as_ref()
                 .unwrap()
+                .lock()
                 .clone_for_fork()
                 .expect("fork: clone memory space failed."),
             task.signal_handlers.clone(),
@@ -118,7 +120,7 @@ fn fork() -> usize {
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        Arc::new(space),
+        Arc::new(SpinLock::new(space)),
         signal_handlers,
         blocked,
     );
@@ -169,9 +171,9 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 
     let (space, entry, sp) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
-    let space: Arc<MemorySpace> = Arc::new(space);
+    let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    activate(space.root_ppn());
+    activate(space.lock().root_ppn());
 
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {

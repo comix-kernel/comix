@@ -33,7 +33,7 @@ pub(crate) fn forkret() {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap();
         if !task.lock().is_kernel_thread() {
-            activate(task.lock().memory_space.clone().unwrap().root_ppn());
+            activate(task.lock().memory_space.as_ref().unwrap().lock().root_ppn());
         }
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }

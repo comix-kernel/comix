@@ -77,7 +77,7 @@ pub struct Task {
     pub trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 任务的内存空间
     /// 对于内核任务，该字段为 None
-    pub memory_space: Option<Arc<MemorySpace>>,
+    pub memory_space: Option<Arc<SpinLock<MemorySpace>>>,
     /// 退出码
     /// 存储任务退出时的状态码，通常用于表示任务的执行结果
     /// 由 exit 接口设置
@@ -161,7 +161,7 @@ impl Task {
         children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
-        memory_space: Arc<MemorySpace>,
+        memory_space: Arc<SpinLock<MemorySpace>>,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
     ) -> Self {
@@ -190,7 +190,7 @@ impl Task {
     /// * `envp`: 传递给新程序的环境变量列表
     pub fn execve(
         &mut self,
-        new_memory_space: Arc<MemorySpace>,
+        new_memory_space: Arc<SpinLock<MemorySpace>>,
         entry_point: usize,
         sp_high: usize,
         argv: &[&str],
@@ -289,7 +289,7 @@ impl Task {
         children: Arc<SpinLock<Vec<SharedTask>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
-        memory_space: Option<Arc<MemorySpace>>,
+        memory_space: Option<Arc<SpinLock<MemorySpace>>>,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
     ) -> Self {
