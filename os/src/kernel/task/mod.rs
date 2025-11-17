@@ -89,7 +89,7 @@ pub fn current_fd_table() -> Arc<FDTable> {
 }
 
 /// 从当前任务的 FD 表中获取文件
-pub fn get_file(fd: usize) -> Result<Arc<File>, FsError> {
+pub fn get_file(fd: usize) -> Result<Arc<dyn File>, FsError> {
     current_fd_table().get(fd)
 }
 
