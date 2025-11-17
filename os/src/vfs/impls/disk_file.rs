@@ -121,4 +121,8 @@ impl File for DiskFile {
     fn offset(&self) -> usize {
         *self.offset.lock()
     }
+
+    fn flags(&self) -> OpenFlags {
+        self.flags
+    }
 }
