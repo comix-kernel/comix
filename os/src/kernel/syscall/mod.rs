@@ -56,17 +56,25 @@ fn exit(code: i32) -> ! {
 /// - `buf`: 要写入的数据缓冲区
 /// - `count`: 要写入的字节数
 fn write(fd: usize, buf: *const u8, count: usize) -> isize {
-    if fd == 1 {
-        unsafe { sstatus::set_sum() };
-        for i in 0..count {
-            let c = unsafe { *buf.add(i) };
-            console_putchar(c as usize);
-        }
-        unsafe { sstatus::clear_sum() };
-        count as isize
-    } else {
-        -1 // 不支持其他文件描述符
-    }
+    // 1. 获取文件对象
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(fd) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 2. 访问用户态缓冲区
+    unsafe { sstatus::set_sum() };
+    let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
+
+    // 3. 调用File::write（会自动处理O_APPEND和offset）
+    let result = match file.write(buffer) {
+        Ok(n) => n as isize,
+        Err(e) => e.to_errno(),
+    };
+
+    unsafe { sstatus::clear_sum() };
+    result
 }
 
 /// 从文件描述符读取数据
@@ -75,20 +83,25 @@ fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 /// - `buf`: 存储读取数据的缓冲区
 /// - `count`: 要读取的字节数
 fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
-    if fd == 0 {
-        unsafe { sstatus::set_sum() };
-        let mut c = 0;
-        while c < count {
-            let ch = stdin().read_char();
-            unsafe {
-                *buf.add(c) = ch as u8;
-            }
-            c += 1;
-        }
-        unsafe { sstatus::clear_sum() };
-        return c as isize;
-    }
-    -1 // 不支持其他文件描述符
+    // 1. 获取文件对象
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(fd) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 2. 访问用户态缓冲区
+    unsafe { sstatus::set_sum() };
+    let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
+
+    // 3. 调用File::read（会自动更新offset）
+    let result = match file.read(buffer) {
+        Ok(n) => n as isize,
+        Err(e) => e.to_errno(),
+    };
+
+    unsafe { sstatus::clear_sum() };
+    result
 }
 
 /// 创建当前任务的子任务（fork）
@@ -124,6 +137,11 @@ fn fork() -> usize {
         signal_handlers,
         blocked,
     );
+
+    child_task.fd_table = Arc::new(task.lock().fd_table.clone_table());
+    child_task.cwd = task.lock().cwd.clone();
+    child_task.root = task.lock().root.clone();
+
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
         (*tf).set_fork_trap_frame(&*ptf);
@@ -168,6 +186,8 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
         let cpu = current_cpu().lock();
         cpu.current_task.as_ref().unwrap().clone()
     };
+
+    task.lock().fd_table.close_exec();
 
     let (space, entry, sp) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
