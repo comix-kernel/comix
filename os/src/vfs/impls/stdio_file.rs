@@ -1,5 +1,5 @@
+use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType, TimeSpec};
 use alloc::sync::Arc;
-use crate::vfs::{File, FsError, InodeMetadata, InodeType, FileMode, TimeSpec};
 
 /// 标准输入文件
 ///
@@ -145,11 +145,7 @@ impl File for StderrFile {
 /// 创建标准 I/O 文件对象 (替代 stdio.rs:211-237)
 ///
 /// 返回: 三元组 (stdin, stdout, stderr)
-pub fn create_stdio_files() -> (
-    Arc<dyn File>,
-    Arc<dyn File>,
-    Arc<dyn File>,
-) {
+pub fn create_stdio_files() -> (Arc<dyn File>, Arc<dyn File>, Arc<dyn File>) {
     (
         Arc::new(StdinFile),
         Arc::new(StdoutFile),

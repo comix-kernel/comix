@@ -1,5 +1,5 @@
-use alloc::sync::Arc;
 use crate::vfs::{FsError, InodeMetadata};
+use alloc::sync::Arc;
 
 /// File trait - 会话层接口
 ///
@@ -61,7 +61,7 @@ pub trait File: Send + Sync {
     }
 }
 
-/// lseek 的 whence 参数 
+/// lseek 的 whence 参数
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub enum SeekWhence {
@@ -80,7 +80,6 @@ impl SeekWhence {
         }
     }
 }
-
 
 bitflags::bitflags! {
     /// 打开标志

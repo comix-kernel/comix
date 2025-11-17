@@ -5,20 +5,20 @@ pub mod error;
 pub mod fd_table;
 pub mod file;
 pub mod file_system;
+pub mod impls;
 pub mod inode;
 pub mod mount;
 pub mod path;
-pub mod impls;
 
 pub use dentry::{DENTRY_CACHE, Dentry, DentryCache};
 pub use error::FsError;
 pub use fd_table::FDTable;
 pub use file::{File, OpenFlags, SeekWhence};
 pub use file_system::{FileSystem, StatFs};
+pub use impls::{DiskFile, PipeFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
 pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType, TimeSpec};
 pub use mount::{MOUNT_TABLE, MountFlags, MountPoint, MountTable, get_root_dentry};
 pub use path::{normalize_path, parse_path, split_path, vfs_lookup};
-pub use impls::{DiskFile, StderrFile, StdoutFile, StdinFile, create_stdio_files};
 
 use alloc::{vec, vec::Vec};
 
