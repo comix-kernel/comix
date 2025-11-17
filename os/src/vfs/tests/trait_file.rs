@@ -94,8 +94,12 @@ test_case!(test_fdtable_with_mixed_files, {
 
     // 添加 PipeFile
     let (pipe_read, pipe_write) = PipeFile::create_pair();
-    let fd2 = fd_table.alloc(Arc::new(pipe_read) as Arc<dyn File>).unwrap();
-    let fd3 = fd_table.alloc(Arc::new(pipe_write) as Arc<dyn File>).unwrap();
+    let fd2 = fd_table
+        .alloc(Arc::new(pipe_read) as Arc<dyn File>)
+        .unwrap();
+    let fd3 = fd_table
+        .alloc(Arc::new(pipe_write) as Arc<dyn File>)
+        .unwrap();
 
     // 验证可以取出
     kassert!(fd_table.get(fd1).is_ok());
@@ -112,8 +116,12 @@ test_case!(test_read_write_through_fdtable, {
 
     // 创建管道
     let (pipe_read, pipe_write) = PipeFile::create_pair();
-    let fd_read = fd_table.alloc(Arc::new(pipe_read) as Arc<dyn File>).unwrap();
-    let fd_write = fd_table.alloc(Arc::new(pipe_write) as Arc<dyn File>).unwrap();
+    let fd_read = fd_table
+        .alloc(Arc::new(pipe_read) as Arc<dyn File>)
+        .unwrap();
+    let fd_write = fd_table
+        .alloc(Arc::new(pipe_write) as Arc<dyn File>)
+        .unwrap();
 
     // 通过 fd 写入
     let write_file = fd_table.get(fd_write).unwrap();
