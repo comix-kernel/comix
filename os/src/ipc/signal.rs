@@ -9,7 +9,11 @@ use bitflags::bitflags;
 use crate::{
     arch::{kernel::cpu, trap::TrapFrame},
     ipc::signal,
-    kernel::{SharedTask, current_cpu},
+    kernel::{
+        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, do_exit,
+        exit_task_with_block, sleep_task_with_block, wake_up_with_block,
+    },
+    pr_err,
 };
 
 /* 信号定义 */
@@ -177,27 +181,30 @@ pub fn check_signal() {
         let cpu = current_cpu().lock();
         cpu.current_task.as_ref().unwrap().clone()
     };
-
     loop {
-        let (deliverable_sig_flag, action) = {
+        let (sig_flag, action) = {
             let mut t = task.lock();
-
-            let Some(sig_flag) = first_deliverable_signal(t.pending, t.blocked) else {
+            let Some(flag) = first_deliverable_signal(t.pending, t.blocked) else {
                 break;
             };
-
-            let sig_num = signal_from_flag(sig_flag).unwrap();
-            let action = t.signal_handlers.lock().actions[sig_num];
-
-            t.pending.remove(sig_flag);
-
-            (sig_flag, action)
+            let num = signal_from_flag(flag).unwrap();
+            let action = {
+                let handlers = t.signal_handlers.lock();
+                handlers.actions[num]
+            };
+            t.pending.remove(flag);
+            (flag, action)
         };
 
-        handle_one_signal(deliverable_sig_flag, action, &task);
+        handle_one_signal(sig_flag, action, &task);
 
-        // 注意：如果 handle_one_signal 导致进程退出 (sig_terminate/sig_dump)，
-        // 那么循环将不会继续，而是会被退出逻辑接管。
+        // 若任务已退出或停止且为终止类信号，停止继续处理
+        {
+            let t = task.lock();
+            if t.state == TaskState::Zombie {
+                break;
+            }
+        }
     }
 }
 
@@ -206,48 +213,34 @@ fn install_user_signal_trampoline(
     task: &SharedTask,
     sig_num: usize,
     entry: usize,
-    action_mask: SignalFlags, // 接收 action.mask 作为参数
+    action_mask: SignalFlags,
 ) {
-    let tp = current_cpu()
-        .lock()
-        .current_task
-        .clone()
-        .unwrap()
-        .lock()
-        .trap_frame_ptr
-        .load(core::sync::atomic::Ordering::SeqCst);
-
-    let original_blocked = {
-        let mut t = task.lock();
-        let original = t.blocked;
-
-        // 更新 blocked mask（原子性）
-        // 新的屏蔽集 = 原有屏蔽集 | 动作屏蔽集 | 自身信号
-        let sig_flag = SignalFlags::from_bits(1 << (sig_num - 1)).unwrap();
-        t.blocked |= action_mask | sig_flag;
-
-        original
-    };
-
+    use core::mem::size_of;
+    let mut t = task.lock();
+    let tp = t.trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        // 构造 Signal Frame (在用户栈上)
-        let user_sp = (*tp).x2_sp;
+        let tf = &mut *tp;
+        let user_sp = tf.x2_sp;
         let frame_size = size_of::<TrapFrame>();
         let mask_size = size_of::<SignalFlags>();
-        let frame_addr = user_sp
-            .checked_sub(frame_size + mask_size)
-            .expect("User stack exhausted for Signal Frame");
-        let mask_addr = frame_addr + frame_size;
+        // 16 字节对齐
+        let total = (frame_size + mask_size + 15) & !15;
+        let frame_addr = user_sp.checked_sub(total).expect("signal frame overflow");
         let frame_ptr = frame_addr as *mut TrapFrame;
-        (*frame_ptr).clone_from(&*tp);
-        let mask_ptr = mask_addr as *mut SignalFlags;
-        *mask_ptr = original_blocked;
+        frame_ptr.write(*tf); // 保存旧上下文
+        let mask_ptr = (frame_addr + frame_size) as *mut SignalFlags;
+        mask_ptr.write(t.blocked);
 
-        // 修改内核 Trap Frame (实现跳转)
-        (*tp).sepc = entry;
-        (*tp).x10_a0 = sig_num;
-        // (*tp).x1_ra = TRAMPOLINE_SIGRETURN_ADDR;
-        (*tp).x2_sp = frame_addr;
+        // 更新 blocked（跳过不可屏蔽信号）
+        if sig_num != _SIGKILL && sig_num != _SIGSTOP {
+            let self_flag = SignalFlags::from_bits(1 << (sig_num - 1)).unwrap();
+            t.blocked |= action_mask | self_flag;
+        }
+
+        // 设置用户处理器入口
+        tf.sepc = entry;
+        tf.x10_a0 = sig_num;
+        tf.x2_sp = frame_addr;
     }
 }
 
@@ -264,22 +257,73 @@ fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
 /* 默认信号处理函数 */
 /// 默认行为：进程中止
 fn sig_terminate(sig_num: usize) {
-    unimplemented!()
+    let pid = current_cpu()
+        .lock()
+        .current_task
+        .clone()
+        .unwrap()
+        .lock()
+        .pid;
+    let tasks = TASK_MANAGER.lock().get_process_threads(pid);
+    for task in tasks {
+        do_exit(task, (128 + sig_num) as i32);
+    }
 }
 
 /// 默认行为：终止并 Core Dump
+/// TODO: 实现生成 core dump 的功能
 fn sig_dump(sig_num: usize) {
-    unimplemented!()
+    pr_err!("signal {}: generating core (stub)", sig_num);
+    sig_terminate(sig_num);
 }
 
 /// 默认行为：停止进程
 fn sig_stop(sig_num: usize) {
-    unimplemented!()
+    let pid = current_cpu()
+        .lock()
+        .current_task
+        .clone()
+        .unwrap()
+        .lock()
+        .pid;
+    let tasks = TASK_MANAGER.lock().get_process_threads(pid);
+    for task in tasks {
+        {
+            let mut t = task.lock();
+            if t.state == TaskState::Zombie {
+                continue;
+            }
+            t.state = TaskState::Stopped;
+        }
+
+        // 从运行队列移除（不可被信号唤醒，外部需用 SIGCONT）
+        sleep_task_with_block(task, false);
+    }
 }
 
 /// 默认行为：继续进程
 fn sig_continue(sig_num: usize) {
-    unimplemented!()
+    let pid = current_cpu()
+        .lock()
+        .current_task
+        .clone()
+        .unwrap()
+        .lock()
+        .pid;
+    let tasks = TASK_MANAGER.lock().get_process_threads(pid);
+    for task in tasks {
+        let mut resume = false;
+        {
+            let mut t = task.lock();
+            if t.state == TaskState::Stopped {
+                t.state = TaskState::Running;
+                resume = true;
+            }
+        }
+        if resume {
+            wake_up_with_block(task);
+        }
+    }
 }
 
 /// 默认行为：忽略信号

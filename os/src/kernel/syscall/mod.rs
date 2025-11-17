@@ -24,7 +24,8 @@ use crate::{
     // fs::ROOT_FS,
     impl_syscall,
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, schedule,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, do_exit,
+        schedule,
     },
     mm::{
         activate,
@@ -42,18 +43,8 @@ fn shutdown() -> ! {
 /// # 参数
 /// - `code`: 退出代码
 fn exit(code: i32) -> ! {
-    let (tid, ppid) = {
-        let cpu = current_cpu().lock();
-        let task = cpu.current_task.as_ref().unwrap().lock();
-        (task.tid, task.ppid)
-    };
-    TASK_MANAGER.lock().exit_task(tid, code);
-    TASK_MANAGER
-        .lock()
-        .get_task(ppid)
-        .unwrap()
-        .lock()
-        .notify_child_exit();
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    do_exit(task, code);
     schedule();
     unreachable!("exit: exit_task should not return.");
 }

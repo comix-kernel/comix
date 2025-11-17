@@ -7,6 +7,7 @@
 //! 并提供分配唯一任务 ID 的功能
 //! 注意：该模块的实例应当被包装在适当的同步原语中以确保线程安全
 use alloc::collections::btree_map::BTreeMap;
+use alloc::vec::Vec;
 
 use crate::kernel::exit_task_with_block;
 use crate::kernel::task::SharedTask;
@@ -58,6 +59,12 @@ pub trait TaskManagerTrait {
     ///   返回值: 如果找到对应任务则返回 Some(SharedTask)，否则返回 None
     fn get_task(&self, tid: u32) -> Option<SharedTask>;
 
+    /// 获取进程（线程组）内所有线程
+    /// 参数：
+    /// * `pid`: 进程 ID
+    /// 返回值: 该进程内所有线程的列表
+    fn get_process_threads(&self, pid: u32) -> Vec<SharedTask>;
+
     #[cfg(test)]
     /// 获取当前任务数量（仅用于测试）
     /// 返回值: 当前任务数量
@@ -105,6 +112,16 @@ impl TaskManagerTrait for TaskManager {
 
     fn get_task(&self, tid: u32) -> Option<SharedTask> {
         self.tasks.get(&tid).cloned()
+    }
+
+    fn get_process_threads(&self, pid: u32) -> Vec<SharedTask> {
+        if let Some(p) = self.get_task(pid) {
+            let mut tasks = p.lock().children.lock().clone();
+            tasks.push(p);
+            tasks
+        } else {
+            Vec::new()
+        }
     }
 
     #[cfg(test)]
