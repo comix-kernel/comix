@@ -17,15 +17,12 @@ use alloc::{
 use riscv::register::sstatus;
 
 use crate::{
-    arch::{
-        lib::{console::stdin, sbi::console_putchar},
-        trap::restore,
-    },
+    arch::{lib::sbi, trap::restore},
     // fs::ROOT_FS,
     impl_syscall,
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, do_exit,
-        schedule,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
+        current_task, do_exit, schedule,
     },
     mm::{
         activate,
@@ -33,7 +30,16 @@ use crate::{
         memory_space::MemorySpace,
     },
     sync::SpinLock,
+    vfs::{
+        DENTRY_CACHE, Dentry, DiskFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence,
+        get_root_dentry, split_path, vfs_lookup, vfs_lookup_from,
+    },
 };
+
+const AT_FDCWD: i32 = -100;
+const AT_SYMLINK_NOFOLLOW: u32 = 0x100;
+const AT_REMOVEDIR: u32 = 0x200;
+const O_CLOEXEC: u32 = 0o2000000;
 
 /// 关闭系统调用
 fn shutdown() -> ! {
@@ -107,7 +113,7 @@ fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
 /// 创建当前任务的子任务（fork）
 fn fork() -> usize {
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (ppid, space, signal_handlers, blocked, ptf) = {
+    let (ppid, space, signal_handlers, blocked, ptf, fd_table, cwd, root) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
@@ -121,12 +127,15 @@ fn fork() -> usize {
             task.signal_handlers.clone(),
             task.blocked,
             task.trap_frame_ptr.load(Ordering::SeqCst),
+            task.fd_table.clone(),
+            task.cwd.clone(),
+            task.root.clone(),
         )
     };
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let child_task = super::TaskStruct::utask_create(
+    let mut child_task = super::TaskStruct::utask_create(
         tid,
         tid,
         ppid,
@@ -138,9 +147,9 @@ fn fork() -> usize {
         blocked,
     );
 
-    child_task.fd_table = Arc::new(task.lock().fd_table.clone_table());
-    child_task.cwd = task.lock().cwd.clone();
-    child_task.root = task.lock().root.clone();
+    child_task.fd_table = Arc::new(fd_table.clone_table());
+    child_task.cwd = cwd;
+    child_task.root = root;
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
@@ -225,6 +234,271 @@ fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     tid as isize
 }
 
+fn close(fd: usize) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.close(fd) {
+        Ok(()) => 0,
+        Err(e) => e.to_errno(),
+    }
+}
+
+fn lseek(fd: usize, offset: isize, whence: usize) -> isize {
+    // 获取文件对象
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(fd) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 转换whence参数
+    let seek_whence = match SeekWhence::from_usize(whence) {
+        Some(w) => w,
+        None => return FsError::InvalidArgument.to_errno(),
+    };
+
+    // 执行lseek
+    match file.lseek(offset, seek_whence) {
+        Ok(new_pos) => new_pos as isize,
+        Err(e) => e.to_errno(),
+    }
+}
+
+/// openat - 相对于目录文件描述符打开文件
+fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
+    // 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s,
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 2. 解析标志位
+    let open_flags = match OpenFlags::from_bits(flags) {
+        Some(f) => f,
+        None => return FsError::InvalidArgument.to_errno(),
+    };
+
+    // 解析路径（处理AT_FDCWD和相对路径）
+    let dentry = match resolve_at_path(dirfd, path_str) {
+        Ok(Some(d)) => {
+            // 文件已存在
+            // 检查 O_EXCL (与 O_CREAT 一起使用时，文件必须不存在)
+            if open_flags.contains(OpenFlags::O_CREAT) && open_flags.contains(OpenFlags::O_EXCL) {
+                return FsError::AlreadyExists.to_errno();
+            }
+            d
+        }
+        Ok(None) => {
+            // 文件不存在，检查是否需要创建
+            if !open_flags.contains(OpenFlags::O_CREAT) {
+                return FsError::NotFound.to_errno();
+            }
+
+            // 创建新文件
+            match create_file_at(dirfd, path_str, mode) {
+                Ok(d) => d,
+                Err(e) => return e.to_errno(),
+            }
+        }
+        Err(e) => return e.to_errno(),
+    };
+
+    // 获取文件元数据
+    let meta = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 检查 O_DIRECTORY (必须是目录)
+    if open_flags.contains(OpenFlags::O_DIRECTORY) {
+        if meta.inode_type != InodeType::Directory {
+            return FsError::NotDirectory.to_errno();
+        }
+    }
+
+    // 处理 O_TRUNC (截断文件)
+    if open_flags.contains(OpenFlags::O_TRUNC) && open_flags.writable() {
+        if meta.inode_type == InodeType::File {
+            if let Err(e) = dentry.inode.truncate(0) {
+                return e.to_errno();
+            }
+        }
+    }
+
+    // 创建 File 对象
+    let file = Arc::new(DiskFile::new(dentry, open_flags));
+
+    // 分配文件描述符
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.alloc(file) {
+        Ok(fd) => fd as isize,
+        Err(e) => e.to_errno(),
+    }
+}
+
+fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
+    // 解析路径
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s,
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 分割路径为目录和文件名
+    let (dir_path, dirname) = match split_path(path_str) {
+        Ok(p) => p,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 查找父目录
+    let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+        Ok(Some(d)) => d,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+
+    // 创建目录
+    let dir_mode = FileMode::from_bits_truncate(mode) | FileMode::S_IFDIR;
+    match parent_dentry.inode.mkdir(&dirname, dir_mode) {
+        Ok(_) => 0,
+        Err(e) => e.to_errno(),
+    }
+}
+
+fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
+    // 解析路径
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s,
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    let is_rmdir = (flags & AT_REMOVEDIR) != 0;
+
+    // 分割路径
+    let (dir_path, filename) = match split_path(path_str) {
+        Ok(p) => p,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 查找父目录
+    let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+        Ok(Some(d)) => d,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+
+    // 检查目标文件类型
+    let target_inode = match parent_dentry.inode.lookup(&filename) {
+        Ok(i) => i,
+        Err(e) => return e.to_errno(),
+    };
+
+    let meta = match target_inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 验证文件类型与flags匹配
+    if is_rmdir {
+        // rmdir: 必须是目录
+        if meta.inode_type != InodeType::Directory {
+            return FsError::NotDirectory.to_errno();
+        }
+    } else {
+        // unlink: 不能是目录
+        if meta.inode_type == InodeType::Directory {
+            return FsError::IsDirectory.to_errno();
+        }
+    }
+
+    // 删除目录项
+    match parent_dentry.inode.unlink(&filename) {
+        Ok(()) => {
+            // 从缓存中移除
+            parent_dentry.remove_child(&filename);
+            0
+        }
+        Err(e) => e.to_errno(),
+    }
+}
+
+fn chdir(path: *const c_char) -> isize {
+    // 解析路径
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(path) {
+        Ok(s) => s,
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 查找目标目录
+    let dentry = match vfs_lookup(path_str) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 检查是否为目录
+    let meta = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    if meta.inode_type != InodeType::Directory {
+        return FsError::NotDirectory.to_errno();
+    }
+
+    // 更新当前工作目录
+    current_task().lock().cwd = Some(dentry);
+    0
+}
+
+fn getcwd(buf: *mut u8, size: usize) -> isize {
+    // 获取当前工作目录dentry
+    let cwd_dentry = match current_task().lock().cwd.clone() {
+        Some(d) => d,
+        None => return FsError::NotSupported.to_errno(),
+    };
+
+    // 获取完整路径
+    let path = cwd_dentry.full_path();
+    let path_bytes = path.as_bytes();
+
+    // 检查缓冲区大小
+    if path_bytes.len() + 1 > size {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    // 复制到用户态缓冲区
+    unsafe {
+        sstatus::set_sum();
+        core::ptr::copy_nonoverlapping(
+            path_bytes.as_ptr(),
+            buf,
+            path_bytes.len()
+        );
+        *buf.add(path_bytes.len()) = 0; // null terminator
+        sstatus::clear_sum();
+    }
+
+    buf as isize
+}
+
 // 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
 impl_syscall!(sys_exit, exit, noreturn, (i32));
@@ -292,4 +566,65 @@ fn get_args_safe(
     }
 
     Ok(args)
+}
+
+/// 解析at系列系统调用的路径
+///
+/// 这是系统调用层的辅助函数，处理 AT_FDCWD 和相对路径逻辑
+fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, FsError> {
+    let base_dentry = if path.starts_with('/') {
+        get_root_dentry()?
+    } else if dirfd == AT_FDCWD {
+        current_task()
+            .lock()
+            .cwd
+            .clone()
+            .ok_or(FsError::NotSupported)?
+    } else {
+        // 对于文件描述符，我们需要获取对应的 dentry
+        // 由于 File trait 不提供 dentry 访问，我们需要从 task 的 fd_table_dentries 获取
+        // 或者使用 metadata 来验证它是目录，然后通过路径重新查找
+        let task = current_task();
+        let file = task.lock().fd_table.get(dirfd as usize)?;
+
+        // 验证是目录
+        let meta = file.metadata()?;
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        // TODO: 这里需要一个更好的方案来从 fd 获取 dentry
+        // 临时方案: 使用当前工作目录作为后备
+        // 正确的实现需要在 File trait 中添加获取 dentry 的方法，
+        // 或者在 FDTable 中存储 dentry 信息
+        return Err(FsError::NotSupported);
+    };
+
+    match vfs_lookup_from(base_dentry, path) {
+        Ok(d) => Ok(Some(d)),
+        Err(FsError::NotFound) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+fn create_file_at(dirfd: i32, path: &str, mode: u32) -> Result<Arc<Dentry>, FsError> {
+    let (dir_path, filename) = split_path(path)?;
+    let parent_dentry = match resolve_at_path(dirfd, &dir_path)? {
+        Some(d) => d,
+        None => return Err(FsError::NotFound),
+    };
+
+    let meta = parent_dentry.inode.metadata()?;
+    if meta.inode_type != InodeType::Directory {
+        return Err(FsError::NotDirectory);
+    }
+
+    let file_mode = FileMode::from_bits_truncate(mode) | FileMode::S_IFREG;
+    let child_inode = parent_dentry.inode.create(&filename, file_mode)?;
+
+    let child_dentry = Dentry::new(filename.clone(), child_inode);
+    parent_dentry.add_child(child_dentry.clone());
+    DENTRY_CACHE.insert(&child_dentry);
+
+    Ok(child_dentry)
 }
