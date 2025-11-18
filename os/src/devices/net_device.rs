@@ -1,4 +1,5 @@
 /// 网络设备错误
+#[derive(Debug)]
 pub enum NetDeviceError {
     IoError,
     DeviceNotReady,
@@ -32,6 +33,7 @@ pub trait NetDevice: Send + Sync {
 use crate::devices::virtio_hal::VirtIOHal;
 use crate::sync::SpinLock;
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use virtio_drivers::{
     device::net::{TxBuffer, VirtIONet},
     transport::Transport,
@@ -53,7 +55,7 @@ impl<T: Transport + Send + Sync> VirtioNetDevice<T> {
     /// # 参数
     /// * `transport` - VirtIO 设备传输层
     /// * `device_id` - 设备标识符
-    pub fn new(transport: T, device_id: usize) -> Result<Box<Self>, NetDeviceError> {
+    pub fn new(transport: T, device_id: usize) -> Result<Arc<Self>, NetDeviceError> {
         let virtio_net = VirtIONet::<VirtIOHal, T, 256>::new(transport, 0)
             .map_err(|_| NetDeviceError::DeviceNotReady)?;
 
@@ -61,7 +63,7 @@ impl<T: Transport + Send + Sync> VirtioNetDevice<T> {
         let mac = virtio_net.mac_address();
         let mtu = 1500; // 默认以太网 MTU
 
-        Ok(Box::new(Self {
+        Ok(Arc::new(Self {
             virtio_net: SpinLock::new(Some(Box::new(virtio_net))),
             device_id,
             name: "virtio-net",
