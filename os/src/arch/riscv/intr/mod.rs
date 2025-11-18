@@ -66,12 +66,14 @@ pub unsafe fn read_and_enable_interrupts() -> usize {
     let sie_mask: usize = 1 << 1;
     let old: usize;
     // 原子地设置 sstatus 中的 SIE 位，并返回旧的 sstatus 值
-    core::arch::asm!(
-    "csrrs {old}, sstatus, {mask}",
-    old = out(reg) old,
-    mask = in(reg) sie_mask,
-    options(nomem, nostack)
-    );
+    unsafe{
+        core::arch::asm!(
+        "csrrs {old}, sstatus, {mask}",
+        old = out(reg) old,
+        mask = in(reg) sie_mask,
+        options(nomem, nostack)
+        );
+    }
     old
 }
 /// 恢复中断状态
