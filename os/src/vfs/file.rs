@@ -96,6 +96,7 @@ impl SeekWhence {
 
 bitflags::bitflags! {
     /// 文件打开标志（与 POSIX 兼容）
+    #[derive(Clone)]
     pub struct OpenFlags: u32 {
         const O_RDONLY    = 0o0;        // 只读
         const O_WRONLY    = 0o1;        // 只写

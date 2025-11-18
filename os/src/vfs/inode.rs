@@ -55,6 +55,7 @@ impl TimeSpec {
 
 /// 文件权限和类型（与 POSIX 兼容）
 bitflags::bitflags! {
+    #[derive(Debug, Clone)]
     pub struct FileMode: u32 {
         // 文件类型掩码
         const S_IFMT   = 0o170000;  // 文件类型掩码
