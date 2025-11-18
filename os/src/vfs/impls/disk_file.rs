@@ -126,6 +126,6 @@ impl File for DiskFile {
     }
 
     fn flags(&self) -> OpenFlags {
-        self.flags
+        self.flags.clone()
     }
 }
