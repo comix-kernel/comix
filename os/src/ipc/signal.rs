@@ -3,7 +3,6 @@
 //! 提供软件中断机制，用于发送异步通知给进程
 //! 处理信号的捕获、屏蔽和默认行为.
 
-
 use bitflags::bitflags;
 
 use crate::{
