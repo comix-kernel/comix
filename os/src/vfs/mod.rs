@@ -29,6 +29,7 @@
 //! fd_table.install_at(3, file)?;
 //! ```
 
+pub mod adapter;
 pub mod dentry;
 pub mod error;
 pub mod fd_table;
@@ -39,9 +40,10 @@ pub mod inode;
 pub mod mount;
 pub mod path;
 
+pub use adapter::{LinuxDirent64, Stat, inode_type_to_d_type};
 pub use dentry::{DENTRY_CACHE, Dentry, DentryCache};
 pub use error::FsError;
-pub use fd_table::FDTable;
+pub use fd_table::{FDFlags, FDTable};
 pub use file::{File, OpenFlags, SeekWhence};
 pub use file_system::{FileSystem, StatFs};
 pub use impls::{DiskFile, PipeFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};

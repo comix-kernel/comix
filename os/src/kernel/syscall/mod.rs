@@ -31,8 +31,9 @@ use crate::{
     },
     sync::SpinLock,
     vfs::{
-        DENTRY_CACHE, Dentry, DiskFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence,
-        get_root_dentry, split_path, vfs_lookup, vfs_lookup_from,
+        DENTRY_CACHE, Dentry, DiskFile, FDFlags, File, FileMode, FsError, InodeType, LinuxDirent64,
+        OpenFlags, PipeFile, SeekWhence, Stat, dentry, get_root_dentry, inode_type_to_d_type,
+        split_path, vfs_lookup, vfs_lookup_from,
     },
 };
 
@@ -487,16 +488,189 @@ fn getcwd(buf: *mut u8, size: usize) -> isize {
     // 复制到用户态缓冲区
     unsafe {
         sstatus::set_sum();
-        core::ptr::copy_nonoverlapping(
-            path_bytes.as_ptr(),
-            buf,
-            path_bytes.len()
-        );
+        core::ptr::copy_nonoverlapping(path_bytes.as_ptr(), buf, path_bytes.len());
         *buf.add(path_bytes.len()) = 0; // null terminator
         sstatus::clear_sum();
     }
 
     buf as isize
+}
+
+fn dup(oldfd: usize) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.dup(oldfd) {
+        Ok(newfd) => newfd as isize,
+        Err(e) => e.to_errno(),
+    }
+}
+
+fn dup3(oldfd: usize, newfd: usize, flags: u32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+
+    let open_flags = match OpenFlags::from_bits(flags) {
+        Some(f) => f,
+        None => return FsError::InvalidArgument.to_errno(),
+    };
+
+    if open_flags.bits() & !OpenFlags::O_CLOEXEC.bits() != 0 {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    match task.lock().fd_table.dup3(oldfd, newfd, open_flags) {
+        Ok(newfd) => newfd as isize,
+        Err(e) => e.to_errno(),
+    }
+}
+
+fn pipe2(pipefd: *mut i32, flags: u32) -> isize {
+    if pipefd.is_null() {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    let valid_flags = OpenFlags::O_CLOEXEC | OpenFlags::O_NONBLOCK;
+    if flags & !valid_flags.bits() != 0 {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    let fd_flags =
+        FDFlags::from_open_flags(OpenFlags::from_bits(flags).unwrap_or(OpenFlags::empty()));
+
+    let (pipe_read, pipe_write) = PipeFile::create_pair();
+
+    // 获取当前任务的 FD 表
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let fd_table = &task.lock().fd_table;
+
+    // 分配文件描述符
+    let read_fd = match fd_table.alloc_with_flags(Arc::new(pipe_read) as Arc<dyn File>, fd_flags) {
+        Ok(fd) => fd,
+        Err(e) => return e.to_errno(),
+    };
+
+    let write_fd = match fd_table.alloc_with_flags(Arc::new(pipe_write) as Arc<dyn File>, fd_flags)
+    {
+        Ok(fd) => fd,
+        Err(e) => {
+            // 分配失败，需要回滚读端 FD
+            let _ = fd_table.close(read_fd);
+            return e.to_errno();
+        }
+    };
+
+    // 将 FD 写回用户空间
+    unsafe {
+        sstatus::set_sum();
+        core::ptr::write(pipefd.offset(0), read_fd as i32);
+        core::ptr::write(pipefd.offset(1), write_fd as i32);
+        sstatus::clear_sum();
+    }
+
+    0
+}
+
+fn fstat(fd: usize, statbuf: *mut Stat) -> isize {
+    // 检查指针有效性
+    if statbuf.is_null() {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    // 获取当前任务和文件对象
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(fd) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 获取文件元数据
+    let metadata = match file.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 转换为 Stat 结构
+    let stat = crate::vfs::Stat::from_metadata(&metadata);
+
+    // 写回用户空间
+    unsafe {
+        sstatus::set_sum();
+        core::ptr::write(statbuf, stat);
+        sstatus::clear_sum();
+    }
+
+    0
+}
+
+fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
+    use crate::vfs::{LinuxDirent64, inode_type_to_d_type};
+
+    // 检查参数有效性
+    if dirp.is_null() || count == 0 {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    // 获取当前任务和文件对象
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(fd) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 获取 inode（目录必须通过 inode 读取）
+    let inode = match file.inode() {
+        Ok(i) => i,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 读取目录项
+    let entries = match inode.readdir() {
+        Ok(e) => e,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 写入目录项到用户空间
+    let mut written = 0usize;
+    let mut offset = 0i64;
+
+    unsafe {
+        sstatus::set_sum();
+
+        for entry in entries {
+            // 计算这个 dirent 需要的空间
+            let dirent_len = LinuxDirent64::total_len(&entry.name);
+
+            // 检查缓冲区是否还有足够空间
+            if written + dirent_len > count {
+                break;
+            }
+
+            // 写入 dirent 头部
+            let dirent_ptr = dirp.add(written) as *mut LinuxDirent64;
+            core::ptr::write(
+                dirent_ptr,
+                LinuxDirent64 {
+                    d_ino: entry.inode_no as u64,
+                    d_off: offset + dirent_len as i64,
+                    d_reclen: dirent_len as u16,
+                    d_type: inode_type_to_d_type(entry.inode_type),
+                },
+            );
+
+            // 写入文件名（在 dirent 结构体之后）
+            let name_ptr = dirp.add(written + core::mem::size_of::<LinuxDirent64>());
+            let name_bytes = entry.name.as_bytes();
+            core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, name_bytes.len());
+            // 添加 null 终止符
+            core::ptr::write(name_ptr.add(name_bytes.len()), 0);
+
+            written += dirent_len;
+            offset += dirent_len as i64;
+        }
+
+        sstatus::clear_sum();
+    }
+
+    // 返回写入的字节数
+    written as isize
 }
 
 // 系统调用实现注册
@@ -511,6 +685,14 @@ impl_syscall!(
     (*const u8, *const *const u8, *const *const u8)
 );
 impl_syscall!(sys_wait, wait, (u32, *mut i32, usize));
+impl_syscall!(sys_close, close, (usize));
+impl_syscall!(sys_lseek, lseek, (usize, isize, usize));
+impl_syscall!(sys_openat, openat, (i32, *const c_char, u32, u32));
+impl_syscall!(sys_dup, dup, (usize));
+impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
+impl_syscall!(sys_pipe2, pipe2, (*mut i32, u32));
+impl_syscall!(sys_fstat, fstat, (usize, *mut Stat));
+impl_syscall!(sys_getdents64, getdents64, (usize, *mut u8, usize));
 
 fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> {
     // 必须在 unsafe 块中进行，因为依赖 C 的正确性
@@ -582,8 +764,6 @@ fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, FsErro
             .ok_or(FsError::NotSupported)?
     } else {
         // 对于文件描述符，我们需要获取对应的 dentry
-        // 由于 File trait 不提供 dentry 访问，我们需要从 task 的 fd_table_dentries 获取
-        // 或者使用 metadata 来验证它是目录，然后通过路径重新查找
         let task = current_task();
         let file = task.lock().fd_table.get(dirfd as usize)?;
 
@@ -593,11 +773,11 @@ fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, FsErro
             return Err(FsError::NotDirectory);
         }
 
-        // TODO: 这里需要一个更好的方案来从 fd 获取 dentry
-        // 临时方案: 使用当前工作目录作为后备
-        // 正确的实现需要在 File trait 中添加获取 dentry 的方法，
-        // 或者在 FDTable 中存储 dentry 信息
-        return Err(FsError::NotSupported);
+        if let Ok(dentry) = file.dentry() {
+            dentry
+        } else {
+            return Err(FsError::NotDirectory);
+        }
     };
 
     match vfs_lookup_from(base_dentry, path) {
