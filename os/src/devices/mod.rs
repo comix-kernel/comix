@@ -1,10 +1,14 @@
-//! 设备抽象层，提供块设备接口和内存磁盘实现
+//! 设备抽象层，提供块设备接口、内存磁盘实现和网络设备接口
 
 pub mod block_device;
 pub mod ram_disk;
+pub mod net_device;
+pub mod virtio_hal;
 
 pub use block_device::{BlockDevice, BlockError};
 pub use ram_disk::RamDisk;
+pub use net_device::{NetDevice};
+pub use virtio_hal::VirtIOHal;
 
 #[cfg(test)]
 mod tests;
