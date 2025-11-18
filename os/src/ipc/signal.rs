@@ -3,12 +3,10 @@
 //! 提供软件中断机制，用于发送异步通知给进程
 //! 处理信号的捕获、屏蔽和默认行为.
 
-use alloc::task;
 use bitflags::bitflags;
 
 use crate::{
     arch::{kernel::cpu, trap::TrapFrame},
-    ipc::signal,
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, do_exit,
         exit_task_with_block, sleep_task_with_block, wake_up_with_block,
@@ -52,6 +50,7 @@ pub const _SIGPWR: usize = 30;
 pub const _SIGSYS: usize = 31;
 
 bitflags! {
+    #[derive(Clone, Debug, Copy)]
     pub struct SignalFlags: usize {
         const SIGHUP = 1 << (_SIGHUP - 1);
         const SIGINT = 1 << (_SIGINT - 1);
@@ -92,9 +91,9 @@ pub const SIG_DEF: usize = 0;
 /// 忽略信号
 pub const SIG_IGN: usize = 1;
 
+/// 信号处理动作
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy)]
-/// 信号处理动作
 pub struct SignalAction {
     /// 信号处理函数指针
     pub handler: usize,
@@ -113,10 +112,10 @@ impl SignalHandlerTable {
     /// 创建一个新的进程信号状态，所有信号动作和屏蔽字为空，待处理信号为空
     pub fn new() -> Self {
         Self {
-            actions: [SignalAction {
+            actions: core::array::from_fn(|_| SignalAction {
                 handler: SIG_DEF,
                 mask: SignalFlags::empty(),
-            }; _NSIG + 1],
+            }),
         }
     }
 
@@ -184,7 +183,9 @@ pub fn check_signal() {
     loop {
         let (sig_flag, action) = {
             let mut t = task.lock();
-            let Some(flag) = first_deliverable_signal(t.pending, t.blocked) else {
+            let pending_copy = t.pending.clone();
+            let blocked_copy = t.blocked.clone();
+            let Some(flag) = first_deliverable_signal(pending_copy, blocked_copy) else {
                 break;
             };
             let num = signal_from_flag(flag).unwrap();
@@ -229,7 +230,7 @@ fn install_user_signal_trampoline(
         let frame_ptr = frame_addr as *mut TrapFrame;
         frame_ptr.write(*tf); // 保存旧上下文
         let mask_ptr = (frame_addr + frame_size) as *mut SignalFlags;
-        mask_ptr.write(t.blocked);
+        mask_ptr.write(t.blocked.clone());
 
         // 更新 blocked（跳过不可屏蔽信号）
         if sig_num != _SIGKILL && sig_num != _SIGSTOP {

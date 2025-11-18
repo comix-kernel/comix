@@ -291,7 +291,7 @@ impl Inode for SimpleFsInode {
         Ok(InodeMetadata {
             inode_no: self.inode_no,
             inode_type: self.inode_type,
-            mode: self.mode,
+            mode: self.mode.clone(),
             uid: 0,
             gid: 0,
             size: data.len(),
