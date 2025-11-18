@@ -20,7 +20,7 @@ pub struct Cpu {
     pub current_task: Option<SharedTask>,
     /// 当前使用的内存空间
     /// 对于内核线程，其本身相应字段为 None，因而使用上一个任务的内存空间
-    pub cur_memory_space: Option<Arc<MemorySpace>>,
+    pub cur_memory_space: Option<Arc<SpinLock<MemorySpace>>>,
 }
 
 impl Cpu {

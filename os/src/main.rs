@@ -16,6 +16,7 @@ mod arch;
 mod config;
 mod devices;
 mod fs;
+mod ipc;
 mod kernel;
 mod mm;
 mod sync;
