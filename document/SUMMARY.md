@@ -48,9 +48,22 @@
   - [上下文保存](kernel/trap/context.md)
   - [特权级切换](kernel/trap/switch.md)
 
+# 进程间通信
+- [进程间通信概述](ipc/README.md)
+  - [管道](ipc/pipe.md)
+  - [消息](ipc/message.md)
+  - [共享内存](ipc/shared_memory.md)
+  - [信号](ipc/signal.md)
+  - [信号生命周期](ipc/signal_lifecycle.md)
+
+# 系统调用
+
+- [系统调用速查](syscall/README.md)
+
 # 架构相关
 
 ## RISC-V
+
 - [RISC-V寄存器](arch/riscv/riscv_register.md)
 - [用户栈布局](arch/riscv/stack_layout.md)
 
