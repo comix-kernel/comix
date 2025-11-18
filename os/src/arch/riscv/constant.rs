@@ -18,3 +18,7 @@ pub const SV39_BOT_HALF_BASE: usize = 0x0000_0000_0000_0000;
 
 /// 16 字节对齐所需的掩码 (RV64)
 pub const STACK_ALIGN_MASK: usize = 0xF;
+
+/// 用户空间地址范围常量
+pub const USER_BASE: usize = 0x0000_0000_0000_0000;
+pub const USER_TOP: usize = 0x0000_003f_ffff_ffff;

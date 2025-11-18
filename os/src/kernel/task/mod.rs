@@ -33,7 +33,7 @@ pub(crate) fn forkret() {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap();
         if !task.lock().is_kernel_thread() {
-            activate(task.lock().memory_space.clone().unwrap().root_ppn());
+            activate(task.lock().memory_space.as_ref().unwrap().lock().root_ppn());
         }
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
@@ -89,6 +89,28 @@ pub fn current_fd_table() -> Arc<FDTable> {
 }
 
 /// 从当前任务的 FD 表中获取文件
-pub fn get_file(fd: usize) -> Result<Arc<File>, FsError> {
+pub fn get_file(fd: usize) -> Result<Arc<dyn File>, FsError> {
     current_fd_table().get(fd)
+}
+
+/// 任务退出处理
+/// 该函数负责清理任务资源并通知父任务，
+/// TODO: 如果该进程有子进程，处理孤儿进程
+/// TODO: 如果该进程有线程，处理线程退出
+/// # 参数：
+/// * `tid`: 任务ID
+/// * `ppid`: 父任务ID
+/// * `code`: 退出码
+pub fn do_exit(task: SharedTask, code: i32) {
+    let (tid, ppid) = {
+        let task = task.lock();
+        (task.tid, task.ppid)
+    };
+    TASK_MANAGER.lock().exit_task(tid, code);
+    TASK_MANAGER
+        .lock()
+        .get_task(ppid)
+        .unwrap()
+        .lock()
+        .notify_child_exit();
 }
