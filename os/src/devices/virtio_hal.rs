@@ -1,5 +1,6 @@
 //! HAL (硬件抽象层) 实现，用于适配 virtio-drivers 0.12.0 库
 use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
+use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
 use crate::mm::frame_allocator::FrameRangeTracker;
 use crate::sync::SpinLock;
 use alloc::collections::btree_map::BTreeMap;
@@ -53,16 +54,19 @@ unsafe impl Hal for VirtIOHal {
 
     /// 将MMIO物理地址转换为虚拟地址
     unsafe fn mmio_phys_to_virt(paddr: PhysAddr, _size: usize) -> NonNull<u8> {
-        // 在RISC-V架构中，物理地址映射到虚拟地址通常是通过添加VADDR_START偏移
-        // 这里简化实现，直接使用物理地址作为虚拟地址
-        let vaddr = paddr as *mut u8;
-        NonNull::new(vaddr).unwrap()
+        // 提取物理地址值并使用架构特定的转换函数
+        let phys_addr = paddr as usize;
+        let virt = paddr_to_vaddr(phys_addr);
+        
+        // 确保返回有效的NonNull指针
+        NonNull::new(virt as *mut u8).unwrap()
     }
 
     /// 共享内存区域给设备，并返回设备可访问的物理地址
     unsafe fn share(buffer: NonNull<[u8]>, _direction: BufferDirection) -> PhysAddr {
         let vaddr = buffer.as_ptr() as *const u8 as usize;
-        PhysAddr::from(vaddr as u64)
+        let paddr = unsafe { vaddr_to_paddr(vaddr) };
+        PhysAddr::from(paddr as u64)
     }
 
     /// 取消共享内存区域，并在必要时将数据复制回原始缓冲区
