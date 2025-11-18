@@ -164,6 +164,10 @@ pub fn main() {
     // 初始化工作
     trap::init_boot_trap();
     timer::init();
+
+    // 初始化网络设备
+    crate::devices::init_net_devices();
+
     unsafe { intr::enable_interrupts() };
 
     rest_init();
