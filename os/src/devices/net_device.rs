@@ -76,7 +76,7 @@ impl<T: Transport + Send + Sync> VirtioNetDevice<T> {
 impl<T: Transport + Send + Sync> NetDevice for VirtioNetDevice<T> {
     /// 发送数据包
     fn send(&self, packet: &[u8]) -> Result<(), NetDeviceError> {
-        if packet.len() > self.mtu + 18 {
+        if packet.len() > self.mtu {
             // 18 字节用于以太网头部和尾部
             return Err(NetDeviceError::QueueFull);
         }
