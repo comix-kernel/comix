@@ -126,15 +126,15 @@ test_case!(test_file_readable_check, {
 
     // 只写模式
     let file_wo = create_test_file("test.txt", inode.clone(), OpenFlags::O_WRONLY);
-    kassert!(!file_wo.flags.readable());
+    kassert!(!file_wo.readable());
 
     // 只读模式
     let file_ro = create_test_file("test.txt", inode.clone(), OpenFlags::O_RDONLY);
-    kassert!(file_ro.flags.readable());
+    kassert!(file_ro.readable());
 
     // 读写模式
     let file_rw = create_test_file("test.txt", inode, OpenFlags::O_RDWR);
-    kassert!(file_rw.flags.readable());
+    kassert!(file_rw.readable());
 });
 
 test_case!(test_file_writable_check, {
@@ -144,15 +144,15 @@ test_case!(test_file_writable_check, {
 
     // 只读模式
     let file_ro = create_test_file("test.txt", inode.clone(), OpenFlags::O_RDONLY);
-    kassert!(!file_ro.flags.writable());
+    kassert!(!file_ro.writable());
 
     // 只写模式
     let file_wo = create_test_file("test.txt", inode.clone(), OpenFlags::O_WRONLY);
-    kassert!(file_wo.flags.writable());
+    kassert!(file_wo.writable());
 
     // 读写模式
     let file_rw = create_test_file("test.txt", inode, OpenFlags::O_RDWR);
-    kassert!(file_rw.flags.writable());
+    kassert!(file_rw.writable());
 });
 
 // P2 边界和错误处理测试

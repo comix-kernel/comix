@@ -2,10 +2,12 @@
 
 use core::{hint, sync::atomic::Ordering};
 
+use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, timer, trap},
+    ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         kernel_execve,
@@ -15,6 +17,7 @@ use crate::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
     },
     println,
+    sync::SpinLock,
     test::run_early_tests,
 };
 /// 内核的第一个任务启动函数
@@ -30,6 +33,8 @@ pub fn rest_init() {
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
+        Arc::new(SpinLock::new(SignalHandlerTable::new())),
+        SignalFlags::empty(),
     ); // init 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
@@ -93,6 +98,8 @@ fn create_kthreadd() {
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
+        Arc::new(SpinLock::new(SignalHandlerTable::new())),
+        SignalFlags::empty(),
     ); // kthreadd 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
