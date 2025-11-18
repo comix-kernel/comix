@@ -10,6 +10,7 @@ use lazy_static::lazy_static;
 use crate::{
     arch::kernel::{context::Context, switch},
     kernel::{current_cpu, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    pr_debug,
     sync::SpinLock,
 };
 
@@ -82,9 +83,10 @@ pub fn schedule() {
         // 如果是用户任务，激活其页表
         if let Some(memory_space) = &new_task.lock().memory_space {
             use crate::mm::activate;
-            activate(memory_space.root_ppn());
+            activate(memory_space.lock().root_ppn());
         }
 
+        pr_debug!("Switched to task {}", new_task.lock().tid);
         // 通常不会立即返回；返回时再继续当前上下文后续逻辑
     }
 }

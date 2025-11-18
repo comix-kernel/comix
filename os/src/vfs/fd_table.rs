@@ -1,3 +1,8 @@
+//! 文件描述符表
+//!
+//! 每个进程维护一个 [`FDTable`]，管理打开的文件。文件以 `Arc<dyn File>` 形式存储，
+//! 支持异构文件类型（DiskFile、PipeFile、StdioFile等）。
+
 use crate::config::DEFAULT_MAX_FDS;
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError};
@@ -7,11 +12,13 @@ use core::fmt;
 
 /// 文件描述符表
 ///
-/// 每个进程维护一个文件描述符表，管理打开的文件
+/// # 并发安全
+///
+/// 内部使用 `SpinLock` 保护，支持多线程访问。
 pub struct FDTable {
     /// 文件描述符数组
     /// None 表示该 FD 未使用
-    files: SpinLock<Vec<Option<Arc<File>>>>,
+    files: SpinLock<Vec<Option<Arc<dyn File>>>>,
 
     /// 最大文件描述符数量
     max_fds: usize,
@@ -39,7 +46,7 @@ impl FDTable {
     }
 
     /// 分配一个新的文件描述符
-    pub fn alloc(&self, file: Arc<File>) -> Result<usize, FsError> {
+    pub fn alloc(&self, file: Arc<dyn File>) -> Result<usize, FsError> {
         let mut files = self.files.lock();
 
         // 查找最小可用 FD
@@ -61,7 +68,7 @@ impl FDTable {
     }
 
     /// 在指定的 FD 位置安装文件
-    pub fn install_at(&self, fd: usize, file: Arc<File>) -> Result<(), FsError> {
+    pub fn install_at(&self, fd: usize, file: Arc<dyn File>) -> Result<(), FsError> {
         let mut files = self.files.lock();
 
         if fd >= self.max_fds {
@@ -79,7 +86,7 @@ impl FDTable {
     }
 
     /// 获取文件对象
-    pub fn get(&self, fd: usize) -> Result<Arc<File>, FsError> {
+    pub fn get(&self, fd: usize) -> Result<Arc<dyn File>, FsError> {
         let files = self.files.lock();
         files
             .get(fd)
@@ -99,13 +106,17 @@ impl FDTable {
         Ok(())
     }
 
-    /// dup
+    /// 复制文件描述符
+    ///
+    /// 返回新的 fd，与 old_fd 指向同一个 `Arc<dyn File>` (共享 offset)。
     pub fn dup(&self, old_fd: usize) -> Result<usize, FsError> {
         let file = self.get(old_fd)?;
         self.alloc(file)
     }
 
-    /// dup2
+    /// 复制文件描述符到指定位置
+    ///
+    /// 如果 new_fd 已打开，先关闭它。
     pub fn dup2(&self, old_fd: usize, new_fd: usize) -> Result<usize, FsError> {
         // 特殊情况：如果两个 FD 相同，直接返回
         if old_fd == new_fd {
@@ -124,6 +135,8 @@ impl FDTable {
     }
 
     /// 克隆整个文件描述符表（用于 fork）
+    ///
+    /// 所有 `Arc<dyn File>` 引用计数递增，父子进程共享文件对象。
     pub fn clone_table(&self) -> Self {
         let files = self.files.lock().clone();
         Self {
@@ -137,7 +150,7 @@ impl FDTable {
         let mut files = self.files.lock();
         for slot in files.iter_mut() {
             if let Some(file) = slot {
-                if file.flags.contains(crate::vfs::OpenFlags::O_CLOEXEC) {
+                if file.flags().contains(crate::vfs::OpenFlags::O_CLOEXEC) {
                     *slot = None;
                 }
             }

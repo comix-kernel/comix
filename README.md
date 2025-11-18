@@ -5,8 +5,9 @@ Comix 是一个用 Rust 编写的教学/实验型 RISC-V 64 位内核
 ## 目标
 
 1. 循序实现从最小可运行内核到具备基础进程 / 虚拟内存 / 系统调用 / 文件系统的原型，并保持结构清晰与可重构性。
-2. 实现自举
-3. 兼容Linux ABI
+2. 支持musl
+3. 实现自举
+4. 兼容Linux ABI
 
 ## 特性概览
 
@@ -22,8 +23,8 @@ Comix 是一个用 Rust 编写的教学/实验型 RISC-V 64 位内核
 - 同步原语：自旋锁、睡眠锁、屏蔽中断守卫；
 - 简易“内存文件系统”（嵌入 ELF，保证 8 字节对齐）
 - 日志与调试：分级日志、GDB 可用符号、SBI 控制台输出
-- [ ] IPC
-- [ ] 虚拟文件系统
+- IPC
+- 虚拟文件系统
 - [ ] 设备管理
 - [ ] I/O 与驱动程序
 - [ ] 安全性与权限
@@ -33,17 +34,38 @@ Comix 是一个用 Rust 编写的教学/实验型 RISC-V 64 位内核
 ## 目录结构
 
 ```
-os/                    内核源码主目录
-  arch/                架构相关（当前重点：riscv）
-  kernel/              核心：任务/调度/系统调用/CPU
-  mm/                  内存管理（页表/分配器/地址类型）
-  fs/                  简单内存文件系统（smfs）
-  sync/                同步原语
-  log/                 日志系统
-  vfs/                 VFS 框架雏形
-document/              设计与说明（待补充集成）
-qemu-run.sh            启动脚本
-Cargo.toml             构建定义
+/                         项目根
+  document/               设计文档与开发指南
+    README.md             文档维护说明
+    SUMMARY.md            mdBook 目录
+    ...                   各子系统文档（arch/kernel/mm/ipc/log/sync/...）
+
+  os/                     内核源码与构建脚本（Rust crate）
+    Cargo.toml            内核 crate 定义
+    build.rs              构建脚本
+    Makefile              构建/运行辅助
+    qemu-run.sh           在 QEMU 上运行内核的脚本
+    rust-toolchain.toml   工具链版本钉死
+    rustfmt.toml          Rust 格式化配置
+    .cargo/
+      config.toml         构建/目标配置
+    src/
+      arch/               架构相关抽象
+        riscv/            RISC-V 支持（常量/启动/中断/陷阱/内核/内存/平台/系统调用/定时器）
+        loongarch/        LoongArch（占位）
+      kernel/             核心：CPU/任务/调度器/系统调用入口
+      mm/                 内存管理：地址/页帧/全局堆/内存空间/页表
+      ipc/                进程间通信：pipe/message/shared_memory/signal
+      fs/                 简单文件系统实现（simple_fs/smfs）与测试
+      vfs/                虚拟文件系统框架与实现（管道/stdio/磁盘文件）
+      devices/            设备抽象与内存盘
+      sync/               同步原语：自旋锁/互斥/中断保护
+      log/                日志系统
+      tool/               工具与通用数据结构（环形缓冲/用户缓冲/字符串）
+      test/               内核测试支撑
+      main.rs             入口
+      linker.ld           链接脚本
+    target/               构建产物（可忽略）
 ```
 
 ## 快速开始
@@ -62,13 +84,6 @@ Cargo.toml             构建定义
 - DevContainer相关插件
 
 ### 构建 & 运行
-
-```bash
-# 编译user文件夹下的所有用户程序并将可执行文件置于user/bin/
-# 在编译完成后，目前你需要到os/fs/smfs中将你的用户程序静态加载到内核中
-cd user
-make
-```
 
 ```bash
 cd os
@@ -102,7 +117,6 @@ make gdb
 
 欢迎提交 PR / Issue：  
 - 可以阅读[document](./document/README.md)中的文档快速了解项目
-- 提交pr时参照.github中的 issue 与 pr 模板
 - 仔细阅读[编码规范](./CONTRIBUTING.md)
 
 ## 许可证

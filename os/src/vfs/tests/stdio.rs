@@ -8,14 +8,14 @@ test_case!(test_create_stdio_files, {
     let (stdin, stdout, stderr) = create_stdio_files();
 
     // 验证 stdin
-    kassert!(stdin.flags.readable());
-    kassert!(!stdin.flags.writable());
+    kassert!(stdin.readable());
+    kassert!(!stdin.writable());
 
     // 验证 stdout
-    kassert!(!stdout.flags.readable());
-    kassert!(stdout.flags.writable());
+    kassert!(!stdout.readable());
+    kassert!(stdout.writable());
 
     // 验证 stderr
-    kassert!(!stderr.flags.readable());
-    kassert!(stderr.flags.writable());
+    kassert!(!stderr.readable());
+    kassert!(stderr.writable());
 });
