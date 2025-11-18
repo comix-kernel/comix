@@ -43,6 +43,11 @@ impl DiskFile {
     pub fn inode(&self) -> Arc<dyn Inode> {
         self.inode.clone()
     }
+
+    /// 获取底层 dentry 引用 (用于某些系统调用)
+    pub fn dentry(&self) -> Arc<Dentry> {
+        self.dentry.clone()
+    }
 }
 
 impl File for DiskFile {
@@ -127,5 +132,13 @@ impl File for DiskFile {
 
     fn flags(&self) -> OpenFlags {
         self.flags
+    }
+
+    fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
+        Ok(self.inode())
+    }
+
+    fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
+        Ok(self.dentry())
     }
 }
