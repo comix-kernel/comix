@@ -6,12 +6,12 @@
 //! - 使用 Dentry 引用而非存储路径，消除与 VFS 的冗余
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
+use crate::sync::SpinLock;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use crate::sync::SpinLock;
 
-use crate::vfs::{Dentry, Inode, InodeType, DirEntry, FsError, InodeMetadata, FileMode, TimeSpec};
+use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType, TimeSpec};
 
 /// Ext4 Inode 包装
 pub struct Ext4Inode {
@@ -40,9 +40,7 @@ impl Ext4Inode {
 
     /// 辅助方法：获取完整路径（从 Dentry 动态获取）
     fn get_full_path(&self) -> Result<String, FsError> {
-        let dentry = self.dentry.lock()
-            .upgrade()
-            .ok_or(FsError::IoError)?;
+        let dentry = self.dentry.lock().upgrade().ok_or(FsError::IoError)?;
         Ok(dentry.full_path())
     }
 
@@ -58,20 +56,20 @@ impl Ext4Inode {
             InodeFileType::S_IFBLK => InodeType::BlockDevice,
             InodeFileType::S_IFIFO => InodeType::Fifo,
             InodeFileType::S_IFSOCK => InodeType::Socket,
-            _ => InodeType::File,  // 默认为普通文件
+            _ => InodeType::File, // 默认为普通文件
         }
     }
 
     /// 辅助方法：将ext4_rs的DirEntryType转换为VFS InodeType
     fn convert_dir_entry_type(dentry_type: u8) -> InodeType {
         match dentry_type {
-            1 => InodeType::File,         // EXT4_DE_REG_FILE
-            2 => InodeType::Directory,    // EXT4_DE_DIR
-            3 => InodeType::CharDevice,   // EXT4_DE_CHRDEV
-            4 => InodeType::BlockDevice,  // EXT4_DE_BLKDEV
-            5 => InodeType::Fifo,         // EXT4_DE_FIFO
-            6 => InodeType::Socket,       // EXT4_DE_SOCK
-            7 => InodeType::Symlink,      // EXT4_DE_SYMLINK
+            1 => InodeType::File,        // EXT4_DE_REG_FILE
+            2 => InodeType::Directory,   // EXT4_DE_DIR
+            3 => InodeType::CharDevice,  // EXT4_DE_CHRDEV
+            4 => InodeType::BlockDevice, // EXT4_DE_BLKDEV
+            5 => InodeType::Fifo,        // EXT4_DE_FIFO
+            6 => InodeType::Socket,      // EXT4_DE_SOCK
+            7 => InodeType::Symlink,     // EXT4_DE_SYMLINK
             _ => InodeType::File,
         }
     }
@@ -104,9 +102,18 @@ impl Inode for Ext4Inode {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
-            atime: TimeSpec { sec: inode.atime as i64, nsec: 0 },
-            mtime: TimeSpec { sec: inode.mtime as i64, nsec: 0 },
-            ctime: TimeSpec { sec: inode.ctime as i64, nsec: 0 },
+            atime: TimeSpec {
+                sec: inode.atime as i64,
+                nsec: 0,
+            },
+            mtime: TimeSpec {
+                sec: inode.mtime as i64,
+                nsec: 0,
+            },
+            ctime: TimeSpec {
+                sec: inode.ctime as i64,
+                nsec: 0,
+            },
             inode_type,
             mode: FileMode::from_bits_truncate(mode as u32),
             nlinks: inode.links_count as usize,
@@ -146,7 +153,8 @@ impl Inode for Ext4Inode {
         let mut parent = self.ino;
         let mut name_off = 0;
 
-        let child_ino = fs.generic_open(&full_path, &mut parent, false, 0, &mut name_off)
+        let child_ino = fs
+            .generic_open(&full_path, &mut parent, false, 0, &mut name_off)
             .map_err(|_| FsError::NotFound)?;
 
         // 创建子 Inode（暂时没有 dentry，VFS 会调用 set_dentry）
@@ -172,14 +180,15 @@ impl Inode for Ext4Inode {
         } else if file_type_bits == FileMode::S_IFLNK.bits() {
             ext4_rs::InodeFileType::S_IFLNK.bits()
         } else {
-            ext4_rs::InodeFileType::S_IFREG.bits()  // 默认为普通文件
+            ext4_rs::InodeFileType::S_IFREG.bits() // 默认为普通文件
         };
 
         // generic_open 的签名: (path, parent, create, ftype, name_off)
         let mut parent = self.ino;
         let mut name_off = 0;
 
-        let child_ino = fs.generic_open(&full_path, &mut parent, true, ftype, &mut name_off)
+        let child_ino = fs
+            .generic_open(&full_path, &mut parent, true, ftype, &mut name_off)
             .map_err(|_| FsError::AlreadyExists)?;
 
         Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
@@ -210,20 +219,23 @@ impl Inode for Ext4Inode {
         let entries = fs.dir_get_entries(self.ino);
 
         // 转换为 VFS 的 DirEntry 格式
-        let vfs_entries = entries.iter().map(|e| {
-            // Ext4DirEntry 的 name 字段是 [u8; 255]，需要转换为 String
-            let name_len = e.name_len as usize;
-            let name = String::from_utf8_lossy(&e.name[..name_len]).into_owned();
+        let vfs_entries = entries
+            .iter()
+            .map(|e| {
+                // Ext4DirEntry 的 name 字段是 [u8; 255]，需要转换为 String
+                let name_len = e.name_len as usize;
+                let name = String::from_utf8_lossy(&e.name[..name_len]).into_owned();
 
-            // inner 是 union，需要 unsafe 访问 inode_type 字段
-            let inode_type = unsafe { Self::convert_dir_entry_type(e.inner.inode_type) };
+                // inner 是 union，需要 unsafe 访问 inode_type 字段
+                let inode_type = unsafe { Self::convert_dir_entry_type(e.inner.inode_type) };
 
-            DirEntry {
-                name,
-                inode_type,
-                inode_no: e.inode as usize,
-            }
-        }).collect();
+                DirEntry {
+                    name,
+                    inode_type,
+                    inode_no: e.inode as usize,
+                }
+            })
+            .collect();
 
         Ok(vfs_entries)
     }

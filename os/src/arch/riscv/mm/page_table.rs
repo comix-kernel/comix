@@ -499,10 +499,10 @@ mod page_table_tests {
         let mut pt = PageTableInner::new();
         let vpn = Vpn::from_usize(0x1000);
         let ppn = Ppn::from_usize(0x80000);
-        let flags = UniversalPTEFlag::kernel_rw();
+        let original_flags = UniversalPTEFlag::kernel_rw();
 
         // 先映射
-        pt.map(vpn, ppn, PageSize::Size4K, flags).unwrap();
+        pt.map(vpn, ppn, PageSize::Size4K, original_flags).unwrap();
 
         // 遍历获取映射信息
         let walk_result = pt.walk(vpn);
@@ -510,7 +510,9 @@ mod page_table_tests {
 
         let (mapped_ppn, _, mapped_flags) = walk_result.unwrap();
         kassert!(mapped_ppn == ppn);
-        kassert!(mapped_flags.bits() == flags.bits());
+        // 创建新的flags实例用于比较，避免所有权问题
+        let expected_flags = UniversalPTEFlag::kernel_rw();
+        kassert!(mapped_flags.bits() == expected_flags.bits());
     });
 
     // 6. 更新标志位测试
@@ -524,13 +526,15 @@ mod page_table_tests {
             .unwrap();
 
         // 更新为内核只读 (kernel_r)
-        let new_flags = UniversalPTEFlag::kernel_r();
-        let result = pt.update_flags(vpn, new_flags);
+        let update_flags = UniversalPTEFlag::kernel_r();
+        let result = pt.update_flags(vpn, update_flags);
         kassert!(result.is_ok());
 
         // 验证标志位是否已更改
         let (_, _, flags) = pt.walk(vpn).unwrap();
-        kassert!(flags.bits() == new_flags.bits());
+        // 创建新的flags实例用于比较，避免所有权问题
+        let expected_flags = UniversalPTEFlag::kernel_r();
+        kassert!(flags.bits() == expected_flags.bits());
     });
 
     // 7. 多重映射测试

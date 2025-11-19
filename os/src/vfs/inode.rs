@@ -12,10 +12,10 @@
 
 use crate::arch::timer::get_time;
 use crate::config::CLOCK_FREQ;
-use crate::vfs::{FsError, Dentry};
-use alloc::sync::Weak;
+use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
+use alloc::sync::Weak;
 use alloc::vec::Vec;
 
 /// 文件类型
@@ -56,6 +56,7 @@ impl TimeSpec {
 
 /// 文件权限和类型（与 POSIX 兼容）
 bitflags::bitflags! {
+    #[derive(Debug, Clone)]
     pub struct FileMode: u32 {
         // 文件类型掩码
         const S_IFMT   = 0o170000;  // 文件类型掩码
@@ -180,7 +181,7 @@ pub trait Inode: Send + Sync {
 
     /// 设置 Dentry（可选方法）
     fn set_dentry(&self, _dentry: Weak<Dentry>) {
-        return
+        return;
     }
 
     /// 获取 Dentry（可选方法）

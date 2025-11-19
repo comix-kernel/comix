@@ -1,10 +1,10 @@
 //! BlockDevice 适配器：VFS BlockDevice → ext4_rs BlockDevice
 
+use crate::pr_err;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use crate::pr_err;
 
-use crate::devices::{BlockDevice as VfsBlockDevice, BlockError};
+use crate::devices::{BlockDevice as VfsBlockDevice, block_device::BlockError};
 
 /// ext4_rs BlockDevice trait 实现
 ///

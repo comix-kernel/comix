@@ -14,7 +14,8 @@
 //! - [`PipeFile`](crate::vfs::PipeFile) - 管道，流式设备，不支持 seek
 //! - [`StdinFile`](crate::vfs::StdinFile) / [`StdoutFile`](crate::vfs::StdoutFile) - 标准 I/O
 
-use crate::vfs::{FsError, InodeMetadata};
+use crate::vfs::{Dentry, FsError, Inode, InodeMetadata};
+use alloc::sync::Arc;
 
 /// 文件操作的统一接口
 ///
@@ -66,6 +67,20 @@ pub trait File: Send + Sync {
     fn flags(&self) -> OpenFlags {
         OpenFlags::empty()
     }
+
+    /// 获取目录项（可选方法）
+    ///
+    /// 默认返回`FsError::NotSupported`,适用于DiskFile
+    fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 获取Inode（可选方法）
+    ///
+    /// 默认返回`FsError::NotSupported`,适用于DiskFile
+    fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
 }
 
 /// 文件偏移量设置模式
@@ -96,6 +111,7 @@ impl SeekWhence {
 
 bitflags::bitflags! {
     /// 文件打开标志（与 POSIX 兼容）
+    #[derive(Clone)]
     pub struct OpenFlags: u32 {
         const O_RDONLY    = 0o0;        // 只读
         const O_WRONLY    = 0o1;        // 只写
