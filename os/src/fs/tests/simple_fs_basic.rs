@@ -2,7 +2,6 @@ use super::*;
 use crate::vfs::file_system::FileSystem;
 use crate::{kassert, test_case};
 use alloc::vec;
-use alloc::vec::Vec;
 
 // P0 核心功能测试
 

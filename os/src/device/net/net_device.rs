@@ -30,7 +30,7 @@ pub trait NetDevice: Send + Sync {
     fn mac_address(&self) -> [u8; 6];
 }
 
-use crate::devices::virtio_hal::VirtIOHal;
+use crate::device::virtio_hal::VirtIOHal;
 use crate::sync::SpinLock;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
