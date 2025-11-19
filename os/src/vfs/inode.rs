@@ -12,7 +12,8 @@
 
 use crate::arch::timer::get_time;
 use crate::config::CLOCK_FREQ;
-use crate::vfs::error::FsError;
+use crate::vfs::{FsError, Dentry};
+use alloc::sync::Weak;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -176,4 +177,14 @@ pub trait Inode: Send + Sync {
 
     /// 同步文件数据到存储设备
     fn sync(&self) -> Result<(), FsError>;
+
+    /// 设置 Dentry（可选方法）
+    fn set_dentry(&self, _dentry: Weak<Dentry>) {
+        return
+    }
+
+    /// 获取 Dentry（可选方法）
+    fn get_dentry(&self) -> Option<Arc<Dentry>> {
+        None
+    }
 }
