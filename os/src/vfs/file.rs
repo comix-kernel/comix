@@ -72,14 +72,14 @@ pub trait File: Send + Sync {
     ///
     /// 默认返回`FsError::NotSupported`,适用于DiskFile
     fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
-        return Err(FsError::NotSupported);
+        Err(FsError::NotSupported)
     }
 
     /// 获取Inode（可选方法）
     ///
     /// 默认返回`FsError::NotSupported`,适用于DiskFile
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
-        return Err(FsError::NotSupported);
+        Err(FsError::NotSupported)
     }
 }
 

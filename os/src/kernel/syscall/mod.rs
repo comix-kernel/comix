@@ -269,7 +269,7 @@ fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
     // 解析路径字符串
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(pathname) {
-        Ok(s) => s,
+        Ok(s) => s.to_string(),
         Err(_) => {
             unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
@@ -284,7 +284,7 @@ fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
     };
 
     // 解析路径（处理AT_FDCWD和相对路径）
-    let dentry = match resolve_at_path(dirfd, path_str) {
+    let dentry = match resolve_at_path(dirfd, &path_str) {
         Ok(Some(d)) => {
             // 文件已存在
             // 检查 O_EXCL (与 O_CREAT 一起使用时，文件必须不存在)
@@ -300,7 +300,7 @@ fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
             }
 
             // 创建新文件
-            match create_file_at(dirfd, path_str, mode) {
+            match create_file_at(dirfd, &path_str, mode) {
                 Ok(d) => d,
                 Err(e) => return e.to_errno(),
             }
@@ -345,7 +345,7 @@ fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     // 解析路径
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(pathname) {
-        Ok(s) => s,
+        Ok(s) => s.to_string(),
         Err(_) => {
             unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
@@ -354,7 +354,7 @@ fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     unsafe { sstatus::clear_sum() };
 
     // 分割路径为目录和文件名
-    let (dir_path, dirname) = match split_path(path_str) {
+    let (dir_path, dirname) = match split_path(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -378,7 +378,7 @@ fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     // 解析路径
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(pathname) {
-        Ok(s) => s,
+        Ok(s) => s.to_string(),
         Err(_) => {
             unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
@@ -389,7 +389,7 @@ fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     let is_rmdir = (flags & AT_REMOVEDIR) != 0;
 
     // 分割路径
-    let (dir_path, filename) = match split_path(path_str) {
+    let (dir_path, filename) = match split_path(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -538,8 +538,7 @@ fn pipe2(pipefd: *mut i32, flags: u32) -> isize {
     let (pipe_read, pipe_write) = PipeFile::create_pair();
 
     // 获取当前任务的 FD 表
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let fd_table = &task.lock().fd_table;
+    let fd_table = current_task().lock().fd_table.clone();
 
     // 分配文件描述符
     let read_fd = match fd_table.alloc_with_flags(Arc::new(pipe_read) as Arc<dyn File>, fd_flags) {
