@@ -15,6 +15,14 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         SYS_FORK => sys_fork(frame),
         SYS_EXEC => sys_execve(frame),
         SYS_WAITPID => sys_wait(frame),
+        SYS_DUP => sys_dup(frame),
+        SYS_DUP3 => sys_dup3(frame),
+        SYS_OPENAT => sys_openat(frame),
+        SYS_CLOSE => sys_close(frame),
+        SYS_PIPE2 => sys_pipe2(frame),
+        SYS_GETDENTS64 => sys_getdents64(frame),
+        SYS_LSEEK => sys_lseek(frame),
+        SYS_FSTAT => sys_fstat(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
