@@ -6,6 +6,7 @@
 use crate::mm::address::Ppn;
 
 bitflags::bitflags! {
+    #[derive(Debug, Clone)]
     /// 定义了一组通用的页表项标志，可以映射到各种体系结构。
     /// 其低 8 位与 Risc-V SV39 兼容。（如果其他架构需要，可添加更多标志位）
     pub struct UniversalPTEFlag: usize {

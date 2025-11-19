@@ -2,18 +2,17 @@
 //!
 //! 基于 ext4_rs crate，提供 VFS 接口
 
-
 pub mod adpaters;
 pub mod inode;
 
 pub use adpaters::BlockDeviceAdapter;
 pub use inode::Ext4Inode;
 
-use alloc::sync::Arc;
-use crate::sync::SpinLock;
-use crate::pr_info;
 use crate::devices::BlockDevice as VfsBlockDevice;
-use crate::vfs::{FileSystem, Inode, FsError, StatFs};
+use crate::pr_info;
+use crate::sync::SpinLock;
+use crate::vfs::{FileSystem, FsError, Inode, StatFs};
+use alloc::sync::Arc;
 
 /// Ext4 文件系统
 pub struct Ext4FileSystem {
@@ -48,13 +47,9 @@ impl Ext4FileSystem {
         let ext4 = Arc::new(SpinLock::new(ext4));
 
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
-        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2));  // ← 不再传 path
+        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2)); // ← 不再传 path
 
-        let fs = Arc::new(Ext4FileSystem {
-            device,
-            ext4,
-            root,
-        });
+        let fs = Arc::new(Ext4FileSystem { device, ext4, root });
 
         pr_info!("[Ext4] Filesystem opened successfully");
         Ok(fs)
@@ -87,7 +82,7 @@ impl FileSystem for Ext4FileSystem {
             total_inodes: sb.inodes_count as usize,
             free_inodes: sb.free_inodes_count() as usize,
             fsid: self.device.device_id() as u64,
-            max_filename_len: 255,  // EXT4_NAME_LEN
+            max_filename_len: 255, // EXT4_NAME_LEN
         })
     }
 }
