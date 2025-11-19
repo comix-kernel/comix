@@ -10,6 +10,7 @@ use crate::sync::SpinLock;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use ext4_rs::InodeFileType;
 
 use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType, TimeSpec};
 
@@ -174,16 +175,20 @@ impl Inode for Ext4Inode {
 
         // create() only creates regular files (not directories)
         let fs = self.fs.lock();
-        let ftype = ext4_rs::InodeFileType::S_IFREG.bits();
+        // 用户、组、其他用户的可读写执行 = 0o777;
+        let ftype = ext4_rs::InodeFileType::S_IFREG.bits() | 0o777;
 
         let mut parent = self.ino;
         let mut name_off = 0;
 
-        let child_ino = fs
-            .generic_open(name, &mut parent, true, ftype, &mut name_off)
+        let child_inode = fs
+            .create(parent, name, ftype)
             .map_err(|_| FsError::IoError)?;
 
-        Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
+        Ok(Arc::new(Ext4Inode::new(
+            self.fs.clone(),
+            child_inode.inode_num,
+        )))
     }
 
     fn mkdir(&self, name: &str, _mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
@@ -198,28 +203,79 @@ impl Inode for Ext4Inode {
             return Err(FsError::AlreadyExists);
         }
 
-        // mkdir() creates directories using S_IFDIR
+        // mkdir() creates directories using S_IFDIR | 0o755
         let fs = self.fs.lock();
-        let ftype = ext4_rs::InodeFileType::S_IFDIR.bits();
+        let ftype = ext4_rs::InodeFileType::S_IFDIR.bits() | 0o755;
 
         let mut parent = self.ino;
         let mut name_off = 0;
 
-        crate::pr_info!("[Ext4] mkdir: parent={}, name={}, ftype={:#x}", parent, name, ftype);
+        let inode_id = fs
+            .generic_open(name, &mut parent, true, ftype, &mut name_off)
+            .map_err(|e| {
+                crate::println!("[Ext4Inode::mkdir] generic_open failed: {:?}", e);
+                FsError::NoSpace
+            })?;
 
-        let result = fs.generic_open(name, &mut parent, true, ftype, &mut name_off);
+        Ok(Arc::new(Ext4Inode::new(self.fs.clone(), inode_id)))
+    }
 
-        crate::pr_info!("[Ext4] mkdir result: {:?}, parent after={}", result.is_ok(), parent);
+    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
 
-        let child_ino = result.map_err(|e| {
-            crate::pr_info!("[Ext4] mkdir failed: {:?}", e);
-            FsError::IoError
-        })?;
+        let parent = self.ino;
+        let inode_mod = InodeFileType::S_IFLNK.bits() | 0o777;
+        let fs = self.fs.lock();
 
-        Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
+        let new_inode = fs
+            .create(parent, name, inode_mod)
+            .map_err(|_| FsError::NoSpace)?;
+
+        fs.write_at(new_inode.inode_num, 0, target.as_bytes())
+            .map_err(|_| FsError::IoError)?;
+
+        Ok(Arc::new(Ext4Inode::new(
+            self.fs.clone(),
+            new_inode.inode_num,
+        )))
+    }
+
+    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError> {
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        // 向下转型为 Ext4Inode 以获取 inode 号
+        let ext4_inode = target
+            .downcast_ref::<Ext4Inode>()
+            .ok_or(FsError::InvalidArgument)?;
+
+        if !Arc::ptr_eq(&self.fs, &ext4_inode.fs) {
+            return Err(FsError::InvalidArgument);
+        }
+
+        let fs = self.fs.lock();
+        let mut self_ref = fs.get_inode_ref(self.ino);
+        let mut target_ref = fs.get_inode_ref(ext4_inode.ino);
+        fs.link(&mut self_ref, &mut target_ref, name)
+            .map_err(|_| FsError::NoSpace)?;
+
+        Ok(())
     }
 
     fn unlink(&self, name: &str) -> Result<(), FsError> {
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
         // 检查文件是否存在
         if self.lookup(name).is_err() {
             return Err(FsError::NotFound);
@@ -232,6 +288,30 @@ impl Inode for Ext4Inode {
             .map_err(|_| FsError::IoError)?;
 
         Ok(())
+    }
+
+    fn rmdir(&self, name: &str) -> Result<(), FsError> {
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        let fs = self.fs.lock();
+        let parent = self.ino;
+
+        fs.dir_remove(parent, name)
+            .map(|_| ())
+            .map_err(|_| FsError::NotFound)
+    }
+
+    fn rename(
+        &self,
+        old_name: &str,
+        new_parent: Arc<dyn Inode>,
+        new_name: &str,
+    ) -> Result<(), FsError> {
+        todo!("implement rename");
     }
 
     fn readdir(&self) -> Result<Vec<DirEntry>, FsError> {
@@ -282,8 +362,6 @@ impl Inode for Ext4Inode {
 
     fn sync(&self) -> Result<(), FsError> {
         // ext4_rs 会自动同步数据到 BlockDevice
-        // 这里我们只需要 flush 底层设备即可
-        // 如果需要强制写回 inode，可以调用 write_back_inode
         Ok(())
     }
 
@@ -293,5 +371,9 @@ impl Inode for Ext4Inode {
 
     fn get_dentry(&self) -> Option<Arc<Dentry>> {
         self.dentry.lock().upgrade()
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }

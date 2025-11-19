@@ -160,8 +160,8 @@ pub fn main() {
     // Initialize memory management (frame allocator + heap + kernel page table)
     mm::init();
 
-    // Initialize Simple FS
-    crate::fs::init_simple_fs().expect("Failed to initialize VFS");
+    // Initialize Simple FS (暂时禁用)
+    // crate::fs::init_simple_fs().expect("Failed to initialize VFS");
 
     println!("Hello, world!");
 
