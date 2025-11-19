@@ -541,10 +541,11 @@ fn pipe2(pipefd: *mut i32, flags: u32) -> isize {
     let fd_table = current_task().lock().fd_table.clone();
 
     // 分配文件描述符
-    let read_fd = match fd_table.alloc_with_flags(Arc::new(pipe_read) as Arc<dyn File>, fd_flags.clone()) {
-        Ok(fd) => fd,
-        Err(e) => return e.to_errno(),
-    };
+    let read_fd =
+        match fd_table.alloc_with_flags(Arc::new(pipe_read) as Arc<dyn File>, fd_flags.clone()) {
+            Ok(fd) => fd,
+            Err(e) => return e.to_errno(),
+        };
 
     let write_fd = match fd_table.alloc_with_flags(Arc::new(pipe_write) as Arc<dyn File>, fd_flags)
     {
