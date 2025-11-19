@@ -160,7 +160,15 @@ pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
     Ok(current_dentry)
 }
 
-/// 从指定的base dentry开始解析相对路径
+/// 从指定的 base dentry 开始解析路径。
+///
+/// 如果 `path` 是绝对路径（以'/'开头），此函数会忽略路径中的根组件("/")，
+/// 并从传入的 `base` dentry 开始解析。因此，调用者有责任在处理绝对路径时
+/// 提供根 dentry 作为 `base`。
+///
+/// # 参数
+/// - `base`: 开始查找的目录项。
+/// - `path`: 要解析的路径字符串。
 pub fn vfs_lookup_from(base: Arc<Dentry>, path: &str) -> Result<Arc<Dentry>, FsError> {
     let components = parse_path(path);
     let mut current_dentry = base;
