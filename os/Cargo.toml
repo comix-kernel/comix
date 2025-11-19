@@ -8,7 +8,7 @@ sbi-rt = { version = "0.0.2", features = ["legacy"] }
 riscv = "0.15.0"
 talc = { version = "4" }
 lock_api = "0.4"
-bitflags = { version = "1.2.1" }
+bitflags = { version = "2.10.0" }
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 once_cell = { version = "1.21.3", default-features = false, features = [
     "alloc",
@@ -16,6 +16,8 @@ once_cell = { version = "1.21.3", default-features = false, features = [
 ] }
 xmas-elf = "0.9"
 paste = "1.0"
+virtio-drivers = "0.12.0"
+spin = "0.9.8"
 
 [lints.rustdoc]
 broken_intra_doc_links = "deny"
