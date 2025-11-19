@@ -139,22 +139,21 @@ impl Inode for Ext4Inode {
     }
 
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>, FsError> {
-        // 从 Dentry 动态获取完整路径
-        let current_path = self.get_full_path()?;
-        let full_path = if current_path == "/" {
-            alloc::format!("/{}", name)
-        } else {
-            alloc::format!("{}/{}", current_path, name)
-        };
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
 
-        // ext4_rs 的 generic_open 签名:
-        // pub fn generic_open(&self, path: &str, parent: &mut u32, create: bool, ftype: u16, name_off: &mut u32) -> Result<u32>
+        // 类似 create,lookup 也应该使用相对路径
+        // 直接在当前目录下查找指定名称的文件
         let mut fs = self.fs.lock();
         let mut parent = self.ino;
         let mut name_off = 0;
 
+        // 直接使用文件名作为路径
         let child_ino = fs
-            .generic_open(&full_path, &mut parent, false, 0, &mut name_off)
+            .generic_open(name, &mut parent, false, 0, &mut name_off)
             .map_err(|_| FsError::NotFound)?;
 
         // 创建子 Inode（暂时没有 dentry，VFS 会调用 set_dentry）
@@ -162,46 +161,70 @@ impl Inode for Ext4Inode {
     }
 
     fn create(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
-        let current_path = self.get_full_path()?;
-        let full_path = if current_path == "/" {
-            alloc::format!("/{}", name)
-        } else {
-            alloc::format!("{}/{}", current_path, name)
-        };
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
 
+        // Check if file already exists
+        if self.lookup(name).is_ok() {
+            return Err(FsError::AlreadyExists);
+        }
+
+        // create() only creates regular files (not directories)
         let fs = self.fs.lock();
+        let ftype = ext4_rs::InodeFileType::S_IFREG.bits();
 
-        // 从 FileMode 提取文件类型位（高4位）
-        let file_type_bits = mode.bits() & 0o170000;
-
-        // 将 FileMode 的文件类型转换为 ext4_rs 的 ftype
-        let ftype = if file_type_bits == FileMode::S_IFDIR.bits() {
-            ext4_rs::InodeFileType::S_IFDIR.bits()
-        } else if file_type_bits == FileMode::S_IFLNK.bits() {
-            ext4_rs::InodeFileType::S_IFLNK.bits()
-        } else {
-            ext4_rs::InodeFileType::S_IFREG.bits() // 默认为普通文件
-        };
-
-        // generic_open 的签名: (path, parent, create, ftype, name_off)
         let mut parent = self.ino;
         let mut name_off = 0;
 
         let child_ino = fs
-            .generic_open(&full_path, &mut parent, true, ftype, &mut name_off)
-            .map_err(|_| FsError::AlreadyExists)?;
+            .generic_open(name, &mut parent, true, ftype, &mut name_off)
+            .map_err(|_| FsError::IoError)?;
 
         Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
     }
 
-    fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
-        // mkdir 就是创建目录类型的文件
-        // 确保 mode 包含目录类型位
-        let dir_mode = FileMode::S_IFDIR | (mode & !FileMode::S_IFMT);
-        self.create(name, dir_mode)
+    fn mkdir(&self, name: &str, _mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        // Check if directory already exists
+        if self.lookup(name).is_ok() {
+            return Err(FsError::AlreadyExists);
+        }
+
+        // mkdir() creates directories using S_IFDIR
+        let fs = self.fs.lock();
+        let ftype = ext4_rs::InodeFileType::S_IFDIR.bits();
+
+        let mut parent = self.ino;
+        let mut name_off = 0;
+
+        crate::pr_info!("[Ext4] mkdir: parent={}, name={}, ftype={:#x}", parent, name, ftype);
+
+        let result = fs.generic_open(name, &mut parent, true, ftype, &mut name_off);
+
+        crate::pr_info!("[Ext4] mkdir result: {:?}, parent after={}", result.is_ok(), parent);
+
+        let child_ino = result.map_err(|e| {
+            crate::pr_info!("[Ext4] mkdir failed: {:?}", e);
+            FsError::IoError
+        })?;
+
+        Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
     }
 
     fn unlink(&self, name: &str) -> Result<(), FsError> {
+        // 检查文件是否存在
+        if self.lookup(name).is_err() {
+            return Err(FsError::NotFound);
+        }
+
         let fs = self.fs.lock();
         // ext4_rs 的 dir_remove 签名: pub fn dir_remove(&self, parent: u32, path: &str) -> Result<usize>
         // unlink 删除文件或目录，都使用 dir_remove
@@ -212,6 +235,12 @@ impl Inode for Ext4Inode {
     }
 
     fn readdir(&self) -> Result<Vec<DirEntry>, FsError> {
+        // Check if current inode is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
         let fs = self.fs.lock();
 
         // ext4_rs 的 dir_get_entries 签名: pub fn dir_get_entries(&self, inode: u32) -> Vec<Ext4DirEntry>

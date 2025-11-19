@@ -29,12 +29,30 @@ impl BlockDeviceAdapter {
 /// 实现 ext4_rs 的 BlockDevice trait
 impl ext4_rs::BlockDevice for BlockDeviceAdapter {
     fn read_offset(&self, offset: usize) -> Vec<u8> {
-        // ext4_rs 默认读取一个块的数据
+        // ext4_rs 可能读取非对齐的数据（如超级块在偏移1024处）
+        // 需要处理跨块读取
         let block_id = offset / self.block_size;
-        let mut buf = alloc::vec![0u8; self.block_size];
+        let block_offset = offset % self.block_size;
 
+        // 读取包含目标数据的块
+        let mut buf = alloc::vec![0u8; self.block_size];
         match self.inner.read_block(block_id, &mut buf) {
-            Ok(_) => buf,
+            Ok(_) => {
+                // 返回从block_offset开始的数据
+                // ext4_rs通常期望读取整个块，但从指定偏移开始
+                if block_offset == 0 {
+                    buf
+                } else {
+                    // 需要拼接两个块
+                    let mut result = buf[block_offset..].to_vec();
+                    // 尝试读取下一个块补齐
+                    let mut next_buf = alloc::vec![0u8; self.block_size];
+                    if self.inner.read_block(block_id + 1, &mut next_buf).is_ok() {
+                        result.extend_from_slice(&next_buf[..block_offset]);
+                    }
+                    result
+                }
+            }
             Err(e) => {
                 pr_err!("[Ext4Adapter] Read error at offset {}: {:?}", offset, e);
                 // ext4_rs 的 read_offset 不返回 Result，只能返回空数据
