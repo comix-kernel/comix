@@ -14,7 +14,8 @@
 //! - [`PipeFile`](crate::vfs::PipeFile) - 管道，流式设备，不支持 seek
 //! - [`StdinFile`](crate::vfs::StdinFile) / [`StdoutFile`](crate::vfs::StdoutFile) - 标准 I/O
 
-use crate::vfs::{FsError, InodeMetadata};
+use crate::vfs::{Dentry, FsError, Inode, InodeMetadata};
+use alloc::sync::Arc;
 
 /// 文件操作的统一接口
 ///
@@ -65,6 +66,20 @@ pub trait File: Send + Sync {
     /// 用于 exec 时关闭 `O_CLOEXEC` 文件。
     fn flags(&self) -> OpenFlags {
         OpenFlags::empty()
+    }
+
+    /// 获取目录项（可选方法）
+    ///
+    /// 默认返回`FsError::NotSupported`,适用于DiskFile
+    fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 获取Inode（可选方法）
+    ///
+    /// 默认返回`FsError::NotSupported`,适用于DiskFile
+    fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
     }
 }
 
