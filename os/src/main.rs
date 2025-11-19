@@ -14,7 +14,7 @@ extern crate alloc;
 
 mod arch;
 mod config;
-mod devices;
+mod device;
 mod fs;
 mod ipc;
 mod kernel;
@@ -43,8 +43,8 @@ global_asm!(include_str!("./arch/riscv/boot/entry.S"));
 /// 此函数标记为 `#[unsafe(no_mangle)]` 以确保链接器可以找到它。
 /// 它必须从正确初始化的汇编入口点调用。
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_main() -> ! {
-    arch::boot::main();
+pub extern "C" fn rust_main(_hartid: usize) -> ! {
+    arch::boot::main(_hartid);
     unreachable!("Unreachable in rust_main()");
 }
 
