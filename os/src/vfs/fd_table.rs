@@ -36,6 +36,7 @@ bitflags::bitflags! {
     /// 它们也可以有不同的 FD 标志。
     ///
     /// 对应 POSIX 的 `fcntl(F_GETFD/F_SETFD)` 操作。
+    #[derive(Debug, Clone)]
     pub struct FDFlags: u32 {
         /// exec 时关闭此文件描述符
         const FD_CLOEXEC = 1;
