@@ -102,6 +102,12 @@ fn main() {
 
     // 输出镜像路径供代码使用
     println!("cargo:rustc-env=SIMPLE_FS_IMAGE={}", img_path.display());
+
+    // 步骤 3: 创建 ext4 测试镜像
+    println!("cargo:warning=[build.rs] Creating ext4 test image...");
+    let ext4_img_path = PathBuf::from(&out_dir).join("ext4_test.img");
+    create_ext4_image(&ext4_img_path);
+    println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_img_path.display());
 }
 
 /// 创建空的 simple_fs 镜像
@@ -120,5 +126,66 @@ fn create_empty_image(path: &PathBuf) {
         );
     } else {
         println!("cargo:warning=[build.rs] Created empty simple_fs image");
+    }
+}
+
+/// 创建 ext4 测试镜像
+fn create_ext4_image(path: &PathBuf) {
+    const IMG_SIZE_MB: usize = 8; // 8 MB
+    const BLOCK_SIZE: usize = 1024 * 1024; // 1 MB blocks for dd
+
+    // 使用 dd 和 mkfs.ext4 创建镜像
+    // 步骤 1: 创建空文件
+    let dd_status = Command::new("dd")
+        .arg("if=/dev/zero")
+        .arg(format!("of={}", path.display()))
+        .arg(format!("bs={}", BLOCK_SIZE))
+        .arg(format!("count={}", IMG_SIZE_MB))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match dd_status {
+        Ok(s) if s.success() => {
+            println!("cargo:warning=[build.rs] Created {} MB blank image", IMG_SIZE_MB);
+        }
+        _ => {
+            println!("cargo:warning=[build.rs] Failed to create blank image with dd, creating empty file");
+            // 如果 dd 失败，创建一个空文件
+            let _ = fs::write(path, vec![0u8; IMG_SIZE_MB * BLOCK_SIZE]);
+            return;
+        }
+    }
+
+    // 步骤 2: 格式化为 ext4
+    let mkfs_status = Command::new("mkfs.ext4")
+        .arg("-F") // 强制格式化
+        .arg("-b")
+        .arg("4096") // 4KB 块大小
+        .arg(path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match mkfs_status {
+        Ok(s) if s.success() => {
+            let img_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            println!(
+                "cargo:warning=[build.rs] Ext4 image created successfully: {} bytes",
+                img_size
+            );
+        }
+        Ok(s) => {
+            println!(
+                "cargo:warning=[build.rs] mkfs.ext4 failed with status: {}. Tests may fail.",
+                s
+            );
+        }
+        Err(e) => {
+            println!(
+                "cargo:warning=[build.rs] Failed to run mkfs.ext4: {}. Tests may fail.",
+                e
+            );
+        }
     }
 }

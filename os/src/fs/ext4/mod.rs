@@ -36,13 +36,17 @@ impl Ext4FileSystem {
     /// Ext4 文件系统实例
     pub fn open(device: Arc<dyn VfsBlockDevice>) -> Result<Arc<Self>, FsError> {
         pr_info!("[Ext4] Opening Ext4 filesystem on block device");
+        pr_info!("[Ext4] Device block size: {}, total blocks: {}",
+            device.block_size(), device.total_blocks());
 
         // 创建适配器
         let adapter = Arc::new(BlockDeviceAdapter::new(device.clone()));
 
         // 使用 ext4_rs 打开文件系统
         // 注意：ext4_rs::Ext4::open 直接返回 Ext4，不返回 Result
+        pr_info!("[Ext4] Calling ext4_rs::Ext4::open...");
         let ext4 = ext4_rs::Ext4::open(adapter);
+        pr_info!("[Ext4] ext4_rs returned successfully");
 
         let ext4 = Arc::new(SpinLock::new(ext4));
 

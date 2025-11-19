@@ -9,13 +9,21 @@ pub mod smfs;
 
 use alloc::string::String;
 use alloc::sync::Arc;
-use lazy_static::lazy_static;
 
 use crate::devices::RamDisk;
 use crate::fs::simple_fs::SimpleFs;
-use crate::fs::smfs::SimpleMemoryFileSystem;
+// use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
 use crate::vfs::{MOUNT_TABLE, MountFlags};
+
+/// 嵌入的 EXT4 镜像
+/// 
+/// 由 build.rs 在编译时生成
+static EXT4_FS_IMAGE: &[u8] = include_bytes!(env!("EXT4_FS_IMAGE"));
+
+// pub fn init_ext4() -> Result<(), crate::vfs::FsError> {
+//     unimplemented!()
+// }
 
 // lazy_static! {
 //     /// 根文件系统实例
