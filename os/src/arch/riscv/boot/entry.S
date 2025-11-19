@@ -1,6 +1,11 @@
     .section .text.entry
     .globl _start
 _start:
+    # 将a1的值存储到DTP位置
+    # a1: 指向设备树的物理地址,由引导加载程序传递
+    la t0, DTP
+    sd a1, 0(t0) 
+
     # 1. 设置早期页表（恒等映射 + 高地址映射）
     la t0, boot_pagetable
     srli t0, t0, 12          # 转换为 PPN

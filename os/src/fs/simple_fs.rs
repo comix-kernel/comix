@@ -1,6 +1,6 @@
 //! 简单的文件系统实现（用于测试/调试）
 
-use crate::devices::BlockDevice;
+use crate::device::BlockDevice;
 use crate::sync::SpinLock;
 use crate::vfs::*;
 use alloc::collections::BTreeMap;
