@@ -131,7 +131,7 @@ impl File for DiskFile {
     }
 
     fn flags(&self) -> OpenFlags {
-        self.flags
+        self.flags.clone()
     }
 
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {

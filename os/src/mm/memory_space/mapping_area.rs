@@ -65,7 +65,7 @@ impl MappingArea {
     }
 
     pub fn permission(&self) -> UniversalPTEFlag {
-        self.permission
+        self.permission.clone()
     }
 
     pub fn map_type(&self) -> MapType {
@@ -125,7 +125,7 @@ impl MappingArea {
             }
         };
 
-        page_table.map(vpn, ppn, PageSize::Size4K, self.permission)?;
+        page_table.map(vpn, ppn, PageSize::Size4K, self.permission.clone())?;
         Ok(())
     }
 
@@ -208,7 +208,7 @@ impl MappingArea {
             vpn_range: self.vpn_range,
             area_type: self.area_type,
             map_type: self.map_type,
-            permission: self.permission,
+            permission: self.permission.clone(),
             frames: BTreeMap::new(), // 不克隆帧
         }
     }
@@ -248,7 +248,7 @@ impl MappingArea {
                     }
 
                     // 建立页表映射
-                    page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission)?;
+                    page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission.clone())?;
 
                     new_area
                         .frames
@@ -277,7 +277,7 @@ impl MappingArea {
                         }
 
                         // 建立页表映射
-                        page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission)?;
+                        page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission.clone())?;
 
                         new_frames.push(new_frame);
                     }
