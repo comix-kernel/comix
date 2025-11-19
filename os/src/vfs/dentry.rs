@@ -41,12 +41,16 @@ impl fmt::Debug for Dentry {
 impl Dentry {
     /// 创建新的 dentry
     pub fn new(name: String, inode: Arc<dyn Inode>) -> Arc<Self> {
-        Arc::new(Self {
+        let dentry = Arc::new(Self {
             name,
             inode,
             parent: SpinLock::new(Weak::new()),
             children: SpinLock::new(BTreeMap::new()),
-        })
+        });
+
+        dentry.inode.set_dentry(Arc::downgrade(&dentry));
+
+        dentry
     }
 
     /// 设置父 dentry
