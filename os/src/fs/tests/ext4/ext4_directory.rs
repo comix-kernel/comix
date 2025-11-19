@@ -1,7 +1,7 @@
 use super::*;
 use crate::vfs::file_system::FileSystem;
 use crate::vfs::inode::InodeType;
-use crate::{kassert, test_case};
+use crate::{kassert, println, test_case};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -12,8 +12,17 @@ test_case!(test_ext4_create_directory, {
     let fs = create_test_ext4();
     let root = fs.root_inode();
 
+    // 调试：检查文件系统状态
+    if let Ok(statfs) = fs.statfs() {
+        println!("Free blocks: {}/{}", statfs.free_blocks, statfs.total_blocks);
+        println!("Free inodes: {}/{}", statfs.free_inodes, statfs.total_inodes);
+    }
+
     // 创建目录
     let result = root.mkdir("testdir", FileMode::from_bits_truncate(0o755));
+    if let Err(e) = result {
+        println!("{}", e.to_errno());
+    }
     kassert!(result.is_ok());
 
     if let Ok(_) = result {
@@ -129,6 +138,9 @@ test_case!(test_ext4_directory_metadata, {
     let fs = create_test_ext4();
     let root = fs.root_inode();
     let dir_res = root.mkdir("testdir", FileMode::from_bits_truncate(0o755));
+    if let Err(e) = dir_res {
+        println!("{}", e.to_errno());
+    }
     kassert!(dir_res.is_ok());
     
     if let Ok(dir) = dir_res {

@@ -413,4 +413,8 @@ impl Inode for SimpleFsInode {
     fn sync(&self) -> Result<(), FsError> {
         Ok(())
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self as &dyn core::any::Any
+    }
 }

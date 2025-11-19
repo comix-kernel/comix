@@ -25,80 +25,81 @@ fn main() {
     println!("cargo:rerun-if-changed=../user");
     println!("cargo:rerun-if-changed=../scripts/make_init_simple_fs.py");
 
-    // 步骤 1: 编译用户程序
-    println!("cargo:warning=[build.rs] Building user programs...");
+    // 步骤 1: 编译用户程序 (暂时禁用)
+    println!("cargo:warning=[build.rs] Skipping user programs build (disabled for now)...");
 
-    if user_dir.exists() {
-        let status = Command::new("make")
-            .current_dir(&user_dir)
-            .env("BUILD_MODE", "release")
-            // 清除可能从父目录继承的 CARGO 环境变量，避免用户程序继承 os 的构建配置
-            .env_remove("CARGO_ENCODED_RUSTFLAGS")
-            .env_remove("CARGO_BUILD_RUSTFLAGS")
-            // .stdout(std::process::Stdio::null()) // 抑制 make 输出
-            // .stderr(std::process::Stdio::null())
-            .status();
+    // if user_dir.exists() {
+    //     let status = Command::new("make")
+    //         .current_dir(&user_dir)
+    //         .env("BUILD_MODE", "release")
+    //         // 清除可能从父目录继承的 CARGO 环境变量，避免用户程序继承 os 的构建配置
+    //         .env_remove("CARGO_ENCODED_RUSTFLAGS")
+    //         .env_remove("CARGO_BUILD_RUSTFLAGS")
+    //         // .stdout(std::process::Stdio::null()) // 抑制 make 输出
+    //         // .stderr(std::process::Stdio::null())
+    //         .status();
+    //
+    //     match status {
+    //         Ok(s) if s.success() => {
+    //             println!("cargo:warning=[build.rs] User programs built successfully");
+    //         }
+    //         Ok(s) => {
+    //             panic!(
+    //                 "User program build failed with status: {}. Aborting kernel build.",
+    //                 s
+    //             );
+    //         }
+    //         Err(e) => {
+    //             panic!(
+    //                 "Failed to execute make for user programs: {}. Aborting kernel build.",
+    //                 e
+    //             );
+    //         }
+    //     }
+    // } else {
+    //     println!("cargo:warning=[build.rs] User directory not found, skipping user build");
+    // }
 
-        match status {
-            Ok(s) if s.success() => {
-                println!("cargo:warning=[build.rs] User programs built successfully");
-            }
-            Ok(s) => {
-                panic!(
-                    "User program build failed with status: {}. Aborting kernel build.",
-                    s
-                );
-            }
-            Err(e) => {
-                panic!(
-                    "Failed to execute make for user programs: {}. Aborting kernel build.",
-                    e
-                );
-            }
-        }
-    } else {
-        println!("cargo:warning=[build.rs] User directory not found, skipping user build");
-    }
+    // 步骤 2: 打包 simple_fs 镜像 (暂时禁用，直接创建空镜像)
+    println!("cargo:warning=[build.rs] Creating empty simple_fs image (user programs disabled)...");
+    create_empty_image(&img_path);
 
-    // 步骤 2: 打包 simple_fs 镜像
-    println!("cargo:warning=[build.rs] Packing simple_fs image...");
-
-    let status = Command::new("python3")
-        .arg(&tool_path)
-        .arg(&user_bin_dir)
-        .arg(&img_path)
-        .status();
-
-    match status {
-        Ok(s) if s.success() => {
-            let img_size = fs::metadata(&img_path).map(|m| m.len()).unwrap_or(0);
-            println!(
-                "cargo:warning=[build.rs] Simple_fs image created: {} bytes",
-                img_size
-            );
-        }
-        Ok(s) => {
-            println!(
-                "cargo:warning=[build.rs] Failed to pack simple_fs: status {}",
-                s
-            );
-            // 创建空镜像以避免编译失败
-            create_empty_image(&img_path);
-        }
-        Err(e) => {
-            println!(
-                "cargo:warning=[build.rs] Failed to run make_init_simple_fs.py: {}",
-                e
-            );
-            create_empty_image(&img_path);
-        }
-    }
-
-    // 验证镜像文件存在
-    if !img_path.exists() {
-        println!("cargo:warning=[build.rs] Image not found, creating empty image");
-        create_empty_image(&img_path);
-    }
+    // let status = Command::new("python3")
+    //     .arg(&tool_path)
+    //     .arg(&user_bin_dir)
+    //     .arg(&img_path)
+    //     .status();
+    //
+    // match status {
+    //     Ok(s) if s.success() => {
+    //         let img_size = fs::metadata(&img_path).map(|m| m.len()).unwrap_or(0);
+    //         println!(
+    //             "cargo:warning=[build.rs] Simple_fs image created: {} bytes",
+    //             img_size
+    //         );
+    //     }
+    //     Ok(s) => {
+    //         println!(
+    //             "cargo:warning=[build.rs] Failed to pack simple_fs: status {}",
+    //             s
+    //         );
+    //         // 创建空镜像以避免编译失败
+    //         create_empty_image(&img_path);
+    //     }
+    //     Err(e) => {
+    //         println!(
+    //             "cargo:warning=[build.rs] Failed to run make_init_simple_fs.py: {}",
+    //             e
+    //         );
+    //         create_empty_image(&img_path);
+    //     }
+    // }
+    //
+    // // 验证镜像文件存在
+    // if !img_path.exists() {
+    //     println!("cargo:warning=[build.rs] Image not found, creating empty image");
+    //     create_empty_image(&img_path);
+    // }
 
     // 输出镜像路径供代码使用
     println!("cargo:rustc-env=SIMPLE_FS_IMAGE={}", img_path.display());
@@ -131,7 +132,7 @@ fn create_empty_image(path: &PathBuf) {
 
 /// 创建 ext4 测试镜像
 fn create_ext4_image(path: &PathBuf) {
-    const IMG_SIZE_MB: usize = 8; // 8 MB
+    const IMG_SIZE_MB: usize = 12; // 12 MB - 平衡大小和内存使用
     const BLOCK_SIZE: usize = 1024 * 1024; // 1 MB blocks for dd
 
     // 使用 dd 和 mkfs.ext4 创建镜像
@@ -158,8 +159,12 @@ fn create_ext4_image(path: &PathBuf) {
     }
 
     // 步骤 2: 格式化为 ext4
+    // 注意：ext4_rs 在禁用 journal 时存在 bug，所以保留 journal
+    // 但不保留 root 空间以最大化可用空间
     let mkfs_status = Command::new("mkfs.ext4")
         .arg("-F") // 强制格式化
+        .arg("-m")
+        .arg("0") // 不保留空间给 root
         .arg("-b")
         .arg("4096") // 4KB 块大小
         .arg(path)
