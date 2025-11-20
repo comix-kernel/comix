@@ -7,6 +7,7 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, timer, trap},
+    device,
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
@@ -152,7 +153,7 @@ mod tests {
     // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
 }
 
-pub fn main() {
+pub fn main(hartid: usize) {
     clear_bss();
 
     run_early_tests();
@@ -163,18 +164,16 @@ pub fn main() {
     // Initialize Simple FS
     crate::fs::init_simple_fs().expect("Failed to initialize VFS");
 
-    println!("Hello, world!");
+    println!("[Boot] Hello, world!");
+    println!("[Boot] RISC-V Hart {} is up!", hartid);
 
     #[cfg(test)]
     crate::test_main();
 
     // 初始化工作
+    device::init();
     trap::init_boot_trap();
     timer::init();
-
-    // 初始化网络设备
-    crate::devices::init_net_devices();
-
     unsafe { intr::enable_interrupts() };
 
     rest_init();
