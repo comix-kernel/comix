@@ -9,9 +9,9 @@ rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
 if [ ! -f "fs.img" ]; then
     echo "Creating 128MB Ext4 filesystem image..."
     # 创建空白镜像
-    dd if=/dev/zero of=fs.img bs=1M count=128 2>/dev/null
+    dd if=/dev/zero of=fs.img bs=1M count=128 >/dev/null 2>&1 || { echo "Error: 'dd' failed to create disk image." >&2; exit 1; }
     # 格式化为 Ext4，参数参考 GitHub feat/fs/ext4 分支
-    mkfs.ext4 -F -b 4096 -m 0 fs.img >/dev/null 2>&1
+    mkfs.ext4 -F -b 4096 -m 0 fs.img >/dev/null 2>&1 || { echo "Error: 'mkfs.ext4' failed to format disk image." >&2; exit 1; }
     echo "fs.img created successfully (128MB Ext4, 4KB blocks, 0% reserved)"
 fi
 

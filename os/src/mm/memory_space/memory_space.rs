@@ -670,25 +670,30 @@ impl MemorySpace {
         let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(vaddr_usize + size));
 
         // 检查是否已经映射
-        // 遍历该范围内的所有VPN,检查是否都已映射为MMIO区域
-        let mut all_mapped = true;
+        let mut some_unmapped = false;
+        let mut some_mapped = false;
         for vpn in VpnRange::new(vpn_start, vpn_end) {
             if let Some(area) = self.find_area(vpn) {
-                // 如果找到了区域,检查是否是MMIO区域
                 if area.area_type() != AreaType::KernelMmio {
                     // 已经被映射为其他类型,这是一个错误
                     return Err(PagingError::AlreadyMapped);
                 }
+                some_mapped = true;
             } else {
-                // 有VPN未映射
-                all_mapped = false;
-                break;
+                some_unmapped = true;
             }
         }
 
-        // 如果已经完全映射,直接返回虚拟地址
-        if all_mapped {
+        // 如果已经完全映射,直接返回虚拟地址 (幂等)
+        if some_mapped && !some_unmapped {
             return Ok(vaddr);
+        }
+
+        // 如果部分映射，当前实现会创建重叠区域，这是一个bug。
+        // 暂时禁止部分重叠映射，要求用户精确映射。
+        if some_mapped && some_unmapped {
+            // TODO: 实现对部分映射区域的扩展或合并
+            return Err(PagingError::AlreadyMapped);
         }
 
         // 如果没有映射,调用map_mmio_region进行映射
@@ -702,19 +707,33 @@ impl MemorySpace {
         let vpn_start = Vpn::from_addr_floor(vaddr);
         let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(vaddr.as_usize() + size));
 
-        // 遍历范围内的所有VPN,找到对应的区域并移除
-        let mut areas_to_remove = Vec::new();
-        for vpn in VpnRange::new(vpn_start, vpn_end) {
-            if let Some(area) = self.find_area(vpn) {
+        // 使用 BTreeSet 以提高去重效率
+        let mut areas_to_remove = alloc::collections::BTreeSet::new();
+        let unmap_vpn_range = VpnRange::new(vpn_start, vpn_end);
+
+        let mut current_vpn = vpn_start;
+        while current_vpn < vpn_end {
+            if let Some(area) = self.find_area(current_vpn) {
                 // 验证这是一个MMIO区域
                 if area.area_type() != AreaType::KernelMmio {
                     return Err(PagingError::InvalidAddress);
                 }
-                // 记录需要移除的区域起始VPN
-                let area_start = area.vpn_range().start();
-                if !areas_to_remove.contains(&area_start) {
-                    areas_to_remove.push(area_start);
+
+                // 安全性检查：确保要取消映射的区域完全覆盖了此area，防止意外删除
+                let area_range = area.vpn_range();
+                if !unmap_vpn_range.contains_range(&area_range) {
+                    // 错误：尝试部分取消映射，当前不支持
+                    // TODO: 如果需要，可以实现区域分割逻辑
+                    return Err(PagingError::InvalidAddress);
                 }
+
+                // 记录需要移除的区域起始VPN
+                areas_to_remove.insert(area.vpn_range().start());
+                // 优化：跳到此区域之后继续查找
+                current_vpn = area.vpn_range().end();
+            } else {
+                // 优化：跳到下一页
+                current_vpn = Vpn::from_usize(current_vpn.as_usize() + 1);
             }
         }
 
@@ -958,7 +977,10 @@ mod memory_space_tests {
 
         let paddr = Paddr::from_usize(TEST_PADDR);
 
-        println!("Testing map_mmio with existing mapping at PA=0x{:x}", TEST_PADDR);
+        println!(
+            "Testing map_mmio with existing mapping at PA=0x{:x}",
+            TEST_PADDR
+        );
 
         // 第一次映射
         let result1 = ms.map_mmio(paddr, TEST_SIZE);
@@ -972,12 +994,15 @@ mod memory_space_tests {
 
         // 应该返回相同的虚拟地址
         kassert!(vaddr1.as_usize() == vaddr2.as_usize());
-        println!("  map_mmio existing mapping test passed (VA=0x{:x})", vaddr1.as_usize());
+        println!(
+            "  map_mmio existing mapping test passed (VA=0x{:x})",
+            vaddr1.as_usize()
+        );
     });
 
     // 11. 测试 map_mmio 函数 - 冲突检测
     test_case!(test_map_mmio_conflict, {
-        use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+        use crate::arch::mm::paddr_to_vaddr;
 
         let mut ms = MemorySpace::new();
 
@@ -990,7 +1015,10 @@ mod memory_space_tests {
         let vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(test_vaddr));
         let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(test_vaddr + TEST_SIZE));
 
-        println!("Testing map_mmio conflict detection at VA=0x{:x}", test_vaddr);
+        println!(
+            "Testing map_mmio conflict detection at VA=0x{:x}",
+            test_vaddr
+        );
 
         // 首先映射一个非MMIO区域到这个位置
         let vpn_range = VpnRange::new(vpn_start, vpn_end);
@@ -1031,7 +1059,10 @@ mod memory_space_tests {
 
         let paddr = Paddr::from_usize(TEST_PADDR);
 
-        println!("Testing unmap_mmio with normal unmapping at PA=0x{:x}", TEST_PADDR);
+        println!(
+            "Testing unmap_mmio with normal unmapping at PA=0x{:x}",
+            TEST_PADDR
+        );
 
         // 先映射
         let result = ms.map_mmio(paddr, TEST_SIZE);
@@ -1112,8 +1143,12 @@ mod memory_space_tests {
         let paddr1 = Paddr::from_usize(REGION1_PADDR);
         let paddr2 = Paddr::from_usize(REGION2_PADDR);
 
-        let vaddr1 = ms.map_mmio(paddr1, REGION_SIZE).expect("Failed to map region 1");
-        let vaddr2 = ms.map_mmio(paddr2, REGION_SIZE).expect("Failed to map region 2");
+        let vaddr1 = ms
+            .map_mmio(paddr1, REGION_SIZE)
+            .expect("Failed to map region 1");
+        let vaddr2 = ms
+            .map_mmio(paddr2, REGION_SIZE)
+            .expect("Failed to map region 2");
 
         println!("  Mapped region 1 to VA=0x{:x}", vaddr1.as_usize());
         println!("  Mapped region 2 to VA=0x{:x}", vaddr2.as_usize());
@@ -1123,12 +1158,14 @@ mod memory_space_tests {
         kassert!(ms.find_area(Vpn::from_addr_floor(vaddr2)).is_some());
 
         // 取消映射第一个区域
-        ms.unmap_mmio(vaddr1, REGION_SIZE).expect("Failed to unmap region 1");
+        ms.unmap_mmio(vaddr1, REGION_SIZE)
+            .expect("Failed to unmap region 1");
         kassert!(ms.find_area(Vpn::from_addr_floor(vaddr1)).is_none());
         kassert!(ms.find_area(Vpn::from_addr_floor(vaddr2)).is_some());
 
         // 取消映射第二个区域
-        ms.unmap_mmio(vaddr2, REGION_SIZE).expect("Failed to unmap region 2");
+        ms.unmap_mmio(vaddr2, REGION_SIZE)
+            .expect("Failed to unmap region 2");
         kassert!(ms.find_area(Vpn::from_addr_floor(vaddr2)).is_none());
 
         println!("  Multiple MMIO regions test passed");
