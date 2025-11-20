@@ -9,6 +9,7 @@
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
 
+use crate::ipc::SignalFlags;
 use crate::kernel::exit_task_with_block;
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
@@ -46,12 +47,12 @@ pub trait TaskManagerTrait {
     /// 将一个任务标记为退出
     /// 参数:
     /// * `tid`: 需要退出的任务 ID
-    fn exit_task(&mut self, tid: u32, code: i32);
+    fn exit_task(&mut self, task: SharedTask, code: i32);
 
     /// 释放一个已退出的任务
     /// 参数:
     /// * `tid`: 需要释放的任务 ID
-    fn release_task(&mut self, tid: u32);
+    fn release_task(&mut self, task: SharedTask);
 
     /// 根据任务 ID 获取对应的任务
     /// 参数:
@@ -63,7 +64,20 @@ pub trait TaskManagerTrait {
     /// 参数：
     /// * `pid`: 进程 ID
     /// 返回值: 该进程内所有线程的列表
-    fn get_process_threads(&self, pid: u32) -> Vec<SharedTask>;
+    fn get_process_threads(&self, process: SharedTask) -> Vec<SharedTask>;
+
+    /// 获取进程的所有子进程
+    /// 参数：
+    /// * `pid`: 进程 ID
+    /// 返回值: 该进程的所有子进程列表
+    fn get_process_children(&self, process: SharedTask) -> Vec<SharedTask>;
+
+    /// 发送信号给指定任务
+    /// 参数:
+    /// * `tid`: 目标任务 ID
+    /// * `signal`: 需要发送的信号编号
+    /// 返回值: 如果任务存在且信号发送成功则返回 true，否则返回 false
+    fn send_signal(&self, task: SharedTask, signal: usize) -> bool;
 
     #[cfg(test)]
     /// 获取当前任务数量（仅用于测试）
@@ -98,30 +112,44 @@ impl TaskManagerTrait for TaskManager {
         self.tasks.insert(tid, task);
     }
 
-    fn exit_task(&mut self, tid: u32, code: i32) {
-        if let Some(task) = self.tasks.get(&tid).cloned() {
-            task.lock().return_value = Some(code as usize);
-            task.lock().exit_code = Some(code as i32);
-            exit_task_with_block(task);
+    fn exit_task(&mut self, task: SharedTask, code: i32) {
+        {
+            let mut task = task.lock();
+            task.exit_code = Some(code as i32);
         }
+        exit_task_with_block(task);
     }
 
-    fn release_task(&mut self, tid: u32) {
-        self.tasks.remove(&tid);
+    fn release_task(&mut self, task: SharedTask) {
+        self.tasks.remove(&task.lock().tid);
     }
 
     fn get_task(&self, tid: u32) -> Option<SharedTask> {
         self.tasks.get(&tid).cloned()
     }
 
-    fn get_process_threads(&self, pid: u32) -> Vec<SharedTask> {
-        if let Some(p) = self.get_task(pid) {
-            let mut tasks = p.lock().children.lock().clone();
-            tasks.push(p);
-            tasks
-        } else {
-            Vec::new()
+    fn get_process_threads(&self, process: SharedTask) -> Vec<SharedTask> {
+        let mut v = Vec::new();
+        let pid = process.lock().pid;
+        for task in self.tasks.values() {
+            if task.lock().pid == pid {
+                v.push(task.clone());
+            }
         }
+        v
+    }
+
+    fn get_process_children(&self, process: SharedTask) -> Vec<SharedTask> {
+        process.lock().children.lock().clone()
+    }
+
+    fn send_signal(&self, task: SharedTask, signal: usize) -> bool {
+        {
+            let mut t = task.lock();
+            t.pending
+                .insert(SignalFlags::from_signal_num(signal).expect("invalid signal"));
+        }
+        true
     }
 
     #[cfg(test)]
@@ -165,7 +193,7 @@ mod tests {
         kassert!(tm.get_task(42).is_none());
 
         // 删除不存在的任务（应为 no-op）
-        tm.exit_task(42, 0);
+        tm.exit_task(new_dummy_task(42), 0);
         kassert!(tm.get_task(42).is_none());
     });
 
@@ -180,13 +208,13 @@ mod tests {
         const EXIT_CODE: i32 = 42;
 
         // 任务管理器执行退出操作（设置返回值和通知调度器）
-        tm.exit_task(tid, EXIT_CODE);
+        tm.exit_task(task, EXIT_CODE);
 
         let exited_task = tm.get_task(tid).unwrap();
         let g = exited_task.lock();
 
         // 验证任务管理器设置了返回值 (新的责任)
-        kassert!(g.return_value == Some(EXIT_CODE as usize));
+        kassert!(g.exit_code == Some(EXIT_CODE as i32));
 
         // 验证调度器设置了状态 (调度器的责任)
         kassert!(g.state == TaskState::Zombie);
@@ -200,11 +228,11 @@ mod tests {
         tm.add_task(task.clone());
 
         // 任务退出（此时状态为 Zombie，仍在 tasks 列表中）
-        tm.exit_task(tid, 0);
+        tm.exit_task(task.clone(), 0);
         kassert!(tm.task_count() == 1);
 
         // 释放任务
-        tm.release_task(tid);
+        tm.release_task(task);
         kassert!(tm.task_count() == 0);
         kassert!(tm.get_task(tid).is_none());
     });

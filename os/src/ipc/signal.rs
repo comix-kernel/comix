@@ -8,8 +8,8 @@ use bitflags::bitflags;
 use crate::{
     arch::{kernel::cpu, trap::TrapFrame},
     kernel::{
-        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, do_exit,
-        exit_task_with_block, sleep_task_with_block, wake_up_with_block,
+        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
+        exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block,
     },
     pr_err,
 };
@@ -83,6 +83,15 @@ bitflags! {
         const SIGIO = 1 << (_SIGIO - 1);
         const SIGPWR = 1 << (_SIGPWR - 1);
         const SIGSYS = 1 << (_SIGSYS - 1);
+    }
+}
+
+impl SignalFlags {
+    pub fn from_signal_num(sig_num: usize) -> Option<Self> {
+        if sig_num == 0 || sig_num > _NSIG {
+            return None;
+        }
+        Some(SignalFlags::from_bits(1 << (sig_num - 1)).unwrap())
     }
 }
 
@@ -258,16 +267,9 @@ fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
 /* 默认信号处理函数 */
 /// 默认行为：进程中止
 fn sig_terminate(sig_num: usize) {
-    let pid = current_cpu()
-        .lock()
-        .current_task
-        .clone()
-        .unwrap()
-        .lock()
-        .pid;
-    let tasks = TASK_MANAGER.lock().get_process_threads(pid);
+    let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
     for task in tasks {
-        do_exit(task, (128 + sig_num) as i32);
+        exit_process(task, (128 + sig_num) as i32);
     }
 }
 
@@ -287,7 +289,7 @@ fn sig_stop(sig_num: usize) {
         .unwrap()
         .lock()
         .pid;
-    let tasks = TASK_MANAGER.lock().get_process_threads(pid);
+    let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
     for task in tasks {
         {
             let mut t = task.lock();
@@ -311,7 +313,7 @@ fn sig_continue(sig_num: usize) {
         .unwrap()
         .lock()
         .pid;
-    let tasks = TASK_MANAGER.lock().get_process_threads(pid);
+    let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
     for task in tasks {
         let mut resume = false;
         {

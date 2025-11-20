@@ -1,5 +1,8 @@
 //! RISC-V 架构的中断管理
 #![allow(unused)]
+mod irq;
+
+pub use irq::*;
 use riscv::register::{
     sie,
     sstatus::{self, Sstatus},
