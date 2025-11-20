@@ -11,7 +11,7 @@ use crate::{
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        kernel_execve,
+        kernel_execve, kthread_spawn, kworker,
     },
     mm::{
         self,
@@ -74,7 +74,7 @@ pub fn rest_init() {
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
     super::trap::init();
-    // create_kthreadd();
+    create_kthreadd();
     kernel_execve("/init", &["init"], &[]);
 }
 
@@ -82,6 +82,7 @@ fn init() {
 /// PID = 2
 /// 负责创建内核任务，回收僵尸任务等工作
 fn kthreadd() {
+    kthread_spawn(kworker);
     loop {
         hint::spin_loop();
     }
