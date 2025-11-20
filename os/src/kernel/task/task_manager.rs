@@ -115,7 +115,6 @@ impl TaskManagerTrait for TaskManager {
     fn exit_task(&mut self, task: SharedTask, code: i32) {
         {
             let mut task = task.lock();
-            task.return_value = Some(code as usize);
             task.exit_code = Some(code as i32);
         }
         exit_task_with_block(task);
@@ -215,7 +214,7 @@ mod tests {
         let g = exited_task.lock();
 
         // 验证任务管理器设置了返回值 (新的责任)
-        kassert!(g.return_value == Some(EXIT_CODE as usize));
+        kassert!(g.exit_code == Some(EXIT_CODE as i32));
 
         // 验证调度器设置了状态 (调度器的责任)
         kassert!(g.state == TaskState::Zombie);

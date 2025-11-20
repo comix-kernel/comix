@@ -83,10 +83,6 @@ pub struct Task {
     /// 由 exit 接口设置
     /// 对应于 waitpid 的 exit_status
     pub exit_code: Option<i32>,
-    /// 返回值
-    /// 存储线程函数的返回值，通常是一个指针大小的值 (usize)
-    /// 对应于 pthread_join 的 void*
-    pub return_value: Option<usize>,
     /// 内核栈跟踪器
     kstack_tracker: FrameRangeTracker,
     /// 任务的 TrapFrame 跟踪器
@@ -332,7 +328,6 @@ impl Task {
             trap_frame_ptr: AtomicPtr::new(trap_frame_ptr as *mut TrapFrame),
             memory_space,
             exit_code: None,
-            return_value: None,
             signal_handlers,
             blocked,
             pending: SignalFlags::empty(),
