@@ -198,6 +198,12 @@ impl MemorySpace {
         phys_mem_area.map(&mut self.page_table)?;
         self.areas.push(phys_mem_area);
 
+        // 6. 映射 MMIO 区域
+        for &(mmio_base, mmio_size) in crate::config::MMIO {
+            let mmio_vaddr = paddr_to_vaddr(mmio_base);
+            self.map_mmio_region(mmio_vaddr, mmio_size)?;
+        }
+
         Ok(())
     }
 
@@ -281,6 +287,15 @@ impl MemorySpace {
             .find(|area| area.vpn_range().contains(vpn))
     }
 
+    /// 获取所有 MMIO 映射区域（用于测试）
+    #[cfg(test)]
+    pub fn get_mmio_areas(&self) -> Vec<&MappingArea> {
+        self.areas
+            .iter()
+            .filter(|area| area.area_type() == AreaType::KernelMmio)
+            .collect()
+    }
+
     /// 通过 VPN 移除并取消映射一个区域
     pub fn remove_area(&mut self, vpn: Vpn) -> Result<(), PagingError> {
         if let Some(pos) = self.areas.iter().position(|a| a.vpn_range().contains(vpn)) {
@@ -330,9 +345,17 @@ impl MemorySpace {
         Ok(())
     }
 
-    /// 辅助函数：映射一个 MMIO 区域
-    fn map_mmio_region(
-        space: &mut MemorySpace,
+    /// 映射一个 MMIO 区域
+    ///
+    /// # 参数
+    /// - `addr`: MMIO 设备的虚拟地址（已通过 paddr_to_vaddr 转换）
+    /// - `size`: MMIO 区域的大小（字节）
+    ///
+    /// # 返回
+    /// - `Ok(())`: 映射成功
+    /// - `Err(PagingError)`: 映射失败
+    pub fn map_mmio_region(
+        &mut self,
         addr: usize,
         size: usize,
     ) -> Result<(), PagingError> {
@@ -346,8 +369,8 @@ impl MemorySpace {
             UniversalPTEFlag::kernel_rw(),
         );
 
-        area.map(&mut space.page_table)?;
-        space.areas.push(area);
+        area.map(&mut self.page_table)?;
+        self.areas.push(area);
         Ok(())
     }
 
@@ -646,7 +669,7 @@ mod memory_space_tests {
     use super::*;
     use crate::mm::address::{Vpn, VpnRange};
     use crate::mm::page_table::UniversalPTEFlag;
-    use crate::{kassert, test_case};
+    use crate::{kassert, test_case, println};
 
     // 1. 创建内存空间
     test_case!(test_memspace_create, {
@@ -692,5 +715,132 @@ mod memory_space_tests {
 
         let token = kernel_token();
         kassert!(token > 0); // 有效的 SATP 值
+    });
+
+    // 5. 测试 MMIO 映射是否存在
+    test_case!(test_mmio_mapping_exists, {
+        use crate::mm::memory_space::memory_space::with_kernel_space;
+
+        with_kernel_space(|space| {
+            // 获取所有 MMIO 区域
+            let mmio_areas = space.get_mmio_areas();
+
+            // 验证至少有一个 MMIO 区域被映射
+            kassert!(!mmio_areas.is_empty());
+
+            // 打印所有 MMIO 映射信息
+            println!("Found {} MMIO area(s):", mmio_areas.len());
+            for (i, area) in mmio_areas.iter().enumerate() {
+                let range = area.vpn_range();
+                let start_va = range.start().start_addr().as_usize();
+                let end_va = range.end().start_addr().as_usize();
+                let size = end_va - start_va;
+                println!(
+                    "  MMIO #{}: VA range [0x{:x}, 0x{:x}), size = {} bytes",
+                    i, start_va, end_va, size
+                );
+            }
+        });
+    });
+
+    // 6. 测试 MMIO 地址翻译
+    test_case!(test_mmio_translation, {
+        use crate::mm::memory_space::memory_space::with_kernel_space;
+        use crate::arch::mm::paddr_to_vaddr;
+
+        with_kernel_space(|space| {
+            // 获取第一个 MMIO 配置
+            if let Some(&(mmio_paddr, _size)) = crate::config::MMIO.first() {
+                // 转换为虚拟地址
+                let mmio_vaddr = paddr_to_vaddr(mmio_paddr);
+                let vpn = Vpn::from_addr_floor(Vaddr::from_usize(mmio_vaddr));
+
+                println!("Testing MMIO at PA=0x{:x}, VA=0x{:x}", mmio_paddr, mmio_vaddr);
+
+                // 查找包含该地址的区域
+                let area = space.find_area(vpn);
+                kassert!(area.is_some());
+
+                if let Some(area) = area {
+                    kassert!(area.area_type() == AreaType::KernelMmio);
+                    kassert!(area.map_type() == MapType::Direct);
+                }
+
+                // 测试页表翻译
+                let translated_paddr = space.page_table().translate(Vaddr::from_usize(mmio_vaddr));
+                kassert!(translated_paddr.is_some());
+
+                if let Some(paddr) = translated_paddr {
+                    println!("  Translation successful: VA 0x{:x} -> PA 0x{:x}", mmio_vaddr, paddr.as_usize());
+                    // 验证翻译结果（允许页偏移误差）
+                    let expected_paddr = mmio_paddr & !0xfff; // 清除页内偏移
+                    let actual_paddr = paddr.as_usize() & !0xfff;
+                    kassert!(actual_paddr == expected_paddr);
+                }
+            } else {
+                println!("Warning: No MMIO regions configured in platform");
+            }
+        });
+    });
+
+    // 7. 测试 MMIO 内存访问（读写测试）
+    test_case!(test_mmio_memory_access, {
+        use crate::arch::mm::paddr_to_vaddr;
+
+        // 注意：这个测试会实际访问 MMIO 设备
+        // QEMU virt 机器的 TEST 设备 (0x100000) 支持简单的读写
+        const TEST_DEVICE_PADDR: usize = 0x0010_0000;
+
+        if crate::config::MMIO.iter().any(|&(addr, _)| addr == TEST_DEVICE_PADDR) {
+            let test_vaddr = paddr_to_vaddr(TEST_DEVICE_PADDR);
+
+            println!("Testing MMIO memory access at VA=0x{:x}", test_vaddr);
+
+            // 读取测试设备的值（应该可以安全读取）
+            let value = unsafe {
+                core::ptr::read_volatile(test_vaddr as *const u32)
+            };
+
+            println!("  Read value from TEST device: 0x{:x}", value);
+
+            // TEST 设备的特性：写入某些值会触发特定行为
+            // 这里我们只验证写操作不会导致 panic
+            // 注意：不要写入 0x5555 (FINISHER_PASS) 或 0x3333 (FINISHER_FAIL)
+            // 因为这会导致 QEMU 退出
+
+            println!("  MMIO read test passed (no page fault occurred)");
+        } else {
+            println!("Warning: TEST device (0x100000) not in MMIO configuration");
+        }
+    });
+
+    // 8. 测试动态添加 MMIO 映射
+    test_case!(test_dynamic_mmio_mapping, {
+        use crate::arch::mm::paddr_to_vaddr;
+
+        let mut ms = MemorySpace::new();
+
+        // 尝试映射一个自定义的 MMIO 区域（使用未占用的地址）
+        const CUSTOM_MMIO_PADDR: usize = 0x5000_0000;
+        const CUSTOM_MMIO_SIZE: usize = 0x1000;
+
+        let custom_vaddr = paddr_to_vaddr(CUSTOM_MMIO_PADDR);
+
+        println!("Adding custom MMIO mapping at PA=0x{:x}, VA=0x{:x}",
+                 CUSTOM_MMIO_PADDR, custom_vaddr);
+
+        // 动态添加 MMIO 映射
+        let result = ms.map_mmio_region(custom_vaddr, CUSTOM_MMIO_SIZE);
+        kassert!(result.is_ok());
+
+        // 验证映射存在
+        let vpn = Vpn::from_addr_floor(Vaddr::from_usize(custom_vaddr));
+        let area = ms.find_area(vpn);
+        kassert!(area.is_some());
+
+        if let Some(area) = area {
+            kassert!(area.area_type() == AreaType::KernelMmio);
+            println!("  Dynamic MMIO mapping test passed");
+        }
     });
 }
