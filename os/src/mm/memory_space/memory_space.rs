@@ -199,7 +199,7 @@ impl MemorySpace {
         self.areas.push(phys_mem_area);
 
         // 6. 映射 MMIO 区域
-        for &(mmio_base, mmio_size) in crate::config::MMIO {
+        for &(_device, mmio_base, mmio_size) in crate::config::MMIO {
             let mmio_vaddr = paddr_to_vaddr(mmio_base);
             self.map_mmio_region(mmio_vaddr, mmio_size)?;
         }
@@ -746,7 +746,7 @@ mod memory_space_tests {
 
         with_kernel_space(|space| {
             // 获取第一个 MMIO 配置
-            if let Some(&(mmio_paddr, _size)) = crate::config::MMIO.first() {
+            if let Some(&(_, mmio_paddr, _size)) = crate::config::MMIO.first() {
                 // 转换为虚拟地址
                 let mmio_vaddr = paddr_to_vaddr(mmio_paddr);
                 let vpn = Vpn::from_addr_floor(Vaddr::from_usize(mmio_vaddr));
@@ -796,7 +796,7 @@ mod memory_space_tests {
 
         if crate::config::MMIO
             .iter()
-            .any(|&(addr, _)| addr == TEST_DEVICE_PADDR)
+            .any(|&(_, addr, _)| addr == TEST_DEVICE_PADDR)
         {
             let test_vaddr = paddr_to_vaddr(TEST_DEVICE_PADDR);
 
