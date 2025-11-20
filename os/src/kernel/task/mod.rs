@@ -5,12 +5,14 @@
 use core::sync::atomic::Ordering;
 
 mod ktask;
+mod process;
 mod task_manager;
 mod task_state;
 mod task_struct;
 mod tid_allocator;
 
 pub use ktask::*;
+pub use process::*;
 pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
 pub use task_state::TaskState;
 pub use task_struct::SharedTask;
@@ -18,6 +20,7 @@ pub use task_struct::Task as TaskStruct;
 
 use alloc::sync::Arc;
 
+use crate::ipc::_SIGCHLD;
 use crate::mm::activate;
 use crate::{
     arch::trap::{TrapFrame, restore},
@@ -83,6 +86,20 @@ pub fn current_task() -> SharedTask {
         .clone()
 }
 
+/// 通知父任务子任务状态变化
+/// # 参数：
+/// * `task`: 子任务
+pub fn notify_parent(task: SharedTask) {
+    let ppid = {
+        let t = task.lock();
+        t.ppid
+    };
+
+    let t = TASK_MANAGER.lock();
+    let p = t.get_task(ppid).unwrap();
+    t.send_signal(p, _SIGCHLD);
+}
+
 /// 获取当前任务的文件描述符表
 pub fn current_fd_table() -> Arc<FDTable> {
     current_task().lock().fd_table.clone()
@@ -91,26 +108,4 @@ pub fn current_fd_table() -> Arc<FDTable> {
 /// 从当前任务的 FD 表中获取文件
 pub fn get_file(fd: usize) -> Result<Arc<dyn File>, FsError> {
     current_fd_table().get(fd)
-}
-
-/// 任务退出处理
-/// 该函数负责清理任务资源并通知父任务，
-/// TODO: 如果该进程有子进程，处理孤儿进程
-/// TODO: 如果该进程有线程，处理线程退出
-/// # 参数：
-/// * `tid`: 任务ID
-/// * `ppid`: 父任务ID
-/// * `code`: 退出码
-pub fn do_exit(task: SharedTask, code: i32) {
-    let (tid, ppid) = {
-        let task = task.lock();
-        (task.tid, task.ppid)
-    };
-    TASK_MANAGER.lock().exit_task(tid, code);
-    TASK_MANAGER
-        .lock()
-        .get_task(ppid)
-        .unwrap()
-        .lock()
-        .notify_child_exit();
 }

@@ -21,7 +21,6 @@ use crate::{
         memory_space::MemorySpace,
     },
     sync::SpinLock,
-    vfs::vfs_load_elf,
 };
 
 /// 创建一个新的内核线程并返回其 Arc 包装
@@ -113,7 +112,7 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
                         }
                     }
                 }
-                TASK_MANAGER.lock().release_task(tid);
+                TASK_MANAGER.lock().release_task(task.clone());
                 return 0; // 成功结束
             }
         } else {
