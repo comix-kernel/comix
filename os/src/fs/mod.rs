@@ -8,11 +8,9 @@ pub mod smfs;
 
 use alloc::string::String;
 use alloc::sync::Arc;
-use lazy_static::lazy_static;
 
-use crate::devices::RamDisk;
+use crate::device::RamDisk;
 use crate::fs::simple_fs::SimpleFs;
-use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
 use crate::vfs::{MOUNT_TABLE, MountFlags};
 

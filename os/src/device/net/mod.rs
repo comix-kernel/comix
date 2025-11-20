@@ -1,26 +1,40 @@
-//! 设备抽象层，提供块设备接口、内存磁盘实现和网络设备接口
-
-#[macro_use]
-pub mod block_device;
-pub mod net_device;
-pub mod ram_disk;
-pub mod virtio_hal;
-
-pub use block_device::BlockDevice;
-pub use net_device::NetDevice;
-pub use ram_disk::RamDisk;
-
-use crate::println;
-use crate::sync::SpinLock;
+use crate::{
+    device::{Driver, NETWORK_DEVICES, NetDevice},
+    println,
+};
 use alloc::vec::Vec;
-use core::ptr::NonNull;
-use lazy_static::lazy_static;
-use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
+// use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
 
-lazy_static! {
-    /// 网络设备管理器
-/// 负责存储和管理系统中的所有网络设备
-    pub static ref NETWORK_DEVICES: SpinLock<Vec<alloc::sync::Arc<dyn NetDevice>>> = SpinLock::new(Vec::new());
+pub mod net_device;
+
+pub trait NetDriver: Driver {
+    // fn get_mac(&self) -> EthernetAddress {
+    //     unimplemented!("not a net driver")
+    // }
+
+    // fn get_ifname(&self) -> String {
+    //     unimplemented!("not a net driver")
+    // }
+
+    // fn get_ip_addresses(&self) -> Vec<IpCidr> {
+    //     unimplemented!("not a net driver")
+    // }
+
+    // fn ipv4_address(&self) -> Option<Ipv4Address> {
+    //     unimplemented!("not a net driver")
+    // }
+
+    // fn poll(&self) {
+    //     unimplemented!("not a net driver")
+    // }
+
+    // fn send(&self, _data: &[u8]) -> Option<usize> {
+    //     unimplemented!("not a net driver")
+    // }
+
+    // fn get_arp(&self, _ip: IpAddress) -> Option<EthernetAddress> {
+    //     unimplemented!("not a net driver")
+    // }
 }
 
 /// 注册网络设备
@@ -93,6 +107,3 @@ fn format_mac_address(mac: [u8; 6]) -> alloc::string::String {
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
     )
 }
-
-#[cfg(test)]
-mod tests;
