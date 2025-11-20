@@ -354,11 +354,7 @@ impl MemorySpace {
     /// # 返回
     /// - `Ok(())`: 映射成功
     /// - `Err(PagingError)`: 映射失败
-    pub fn map_mmio_region(
-        &mut self,
-        addr: usize,
-        size: usize,
-    ) -> Result<(), PagingError> {
+    pub fn map_mmio_region(&mut self, addr: usize, size: usize) -> Result<(), PagingError> {
         let vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(addr));
         let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(addr + size));
 
@@ -669,7 +665,7 @@ mod memory_space_tests {
     use super::*;
     use crate::mm::address::{Vpn, VpnRange};
     use crate::mm::page_table::UniversalPTEFlag;
-    use crate::{kassert, test_case, println};
+    use crate::{kassert, println, test_case};
 
     // 1. 创建内存空间
     test_case!(test_memspace_create, {
@@ -745,8 +741,8 @@ mod memory_space_tests {
 
     // 6. 测试 MMIO 地址翻译
     test_case!(test_mmio_translation, {
-        use crate::mm::memory_space::memory_space::with_kernel_space;
         use crate::arch::mm::paddr_to_vaddr;
+        use crate::mm::memory_space::memory_space::with_kernel_space;
 
         with_kernel_space(|space| {
             // 获取第一个 MMIO 配置
@@ -755,7 +751,10 @@ mod memory_space_tests {
                 let mmio_vaddr = paddr_to_vaddr(mmio_paddr);
                 let vpn = Vpn::from_addr_floor(Vaddr::from_usize(mmio_vaddr));
 
-                println!("Testing MMIO at PA=0x{:x}, VA=0x{:x}", mmio_paddr, mmio_vaddr);
+                println!(
+                    "Testing MMIO at PA=0x{:x}, VA=0x{:x}",
+                    mmio_paddr, mmio_vaddr
+                );
 
                 // 查找包含该地址的区域
                 let area = space.find_area(vpn);
@@ -771,7 +770,11 @@ mod memory_space_tests {
                 kassert!(translated_paddr.is_some());
 
                 if let Some(paddr) = translated_paddr {
-                    println!("  Translation successful: VA 0x{:x} -> PA 0x{:x}", mmio_vaddr, paddr.as_usize());
+                    println!(
+                        "  Translation successful: VA 0x{:x} -> PA 0x{:x}",
+                        mmio_vaddr,
+                        paddr.as_usize()
+                    );
                     // 验证翻译结果（允许页偏移误差）
                     let expected_paddr = mmio_paddr & !0xfff; // 清除页内偏移
                     let actual_paddr = paddr.as_usize() & !0xfff;
@@ -791,15 +794,16 @@ mod memory_space_tests {
         // QEMU virt 机器的 TEST 设备 (0x100000) 支持简单的读写
         const TEST_DEVICE_PADDR: usize = 0x0010_0000;
 
-        if crate::config::MMIO.iter().any(|&(addr, _)| addr == TEST_DEVICE_PADDR) {
+        if crate::config::MMIO
+            .iter()
+            .any(|&(addr, _)| addr == TEST_DEVICE_PADDR)
+        {
             let test_vaddr = paddr_to_vaddr(TEST_DEVICE_PADDR);
 
             println!("Testing MMIO memory access at VA=0x{:x}", test_vaddr);
 
             // 读取测试设备的值（应该可以安全读取）
-            let value = unsafe {
-                core::ptr::read_volatile(test_vaddr as *const u32)
-            };
+            let value = unsafe { core::ptr::read_volatile(test_vaddr as *const u32) };
 
             println!("  Read value from TEST device: 0x{:x}", value);
 
@@ -826,8 +830,10 @@ mod memory_space_tests {
 
         let custom_vaddr = paddr_to_vaddr(CUSTOM_MMIO_PADDR);
 
-        println!("Adding custom MMIO mapping at PA=0x{:x}, VA=0x{:x}",
-                 CUSTOM_MMIO_PADDR, custom_vaddr);
+        println!(
+            "Adding custom MMIO mapping at PA=0x{:x}, VA=0x{:x}",
+            CUSTOM_MMIO_PADDR, custom_vaddr
+        );
 
         // 动态添加 MMIO 映射
         let result = ms.map_mmio_region(custom_vaddr, CUSTOM_MMIO_SIZE);
