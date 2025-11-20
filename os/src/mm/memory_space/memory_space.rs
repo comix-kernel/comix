@@ -198,11 +198,12 @@ impl MemorySpace {
         phys_mem_area.map(&mut self.page_table)?;
         self.areas.push(phys_mem_area);
 
-        // 6. 映射 MMIO 区域
-        for &(_device, mmio_base, mmio_size) in crate::config::MMIO {
-            let mmio_vaddr = paddr_to_vaddr(mmio_base);
-            self.map_mmio_region(mmio_vaddr, mmio_size)?;
-        }
+        // 暂时移除自动 MMIO 映射
+        // // 6. 映射 MMIO 区域
+        // for &(_device, mmio_base, mmio_size) in crate::config::MMIO {
+        //     let mmio_vaddr = paddr_to_vaddr(mmio_base);
+        //     self.map_mmio_region(mmio_vaddr, mmio_size)?;
+        // }
 
         Ok(())
     }
