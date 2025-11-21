@@ -58,8 +58,8 @@ impl WorkQueue {
             for task in &self.worker {
                 if task.lock().state == TaskState::Interruptible {
                     wake_up_with_block(task.clone());
+                    break;
                 }
-                break;
             }
         }
     }
