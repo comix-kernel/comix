@@ -2,6 +2,7 @@ use super::Driver;
 
 pub mod block_device;
 pub mod ram_disk;
+pub mod virtio_blk;
 
 pub trait BlockDriver: Driver {
     fn read_block(&self, _block_id: usize, _buf: &mut [u8]) -> bool {
