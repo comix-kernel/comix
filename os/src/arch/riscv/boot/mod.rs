@@ -11,7 +11,7 @@ use crate::{
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        kernel_execve, kthread_spawn, kworker,
+        current_memory_space, kernel_execve, kthread_spawn, kworker,
     },
     mm::{
         self,
@@ -27,7 +27,7 @@ pub fn rest_init() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
-    let task = TaskStruct::ktask_create(
+    let mut task = TaskStruct::ktask_create(
         tid,
         tid,
         0,
@@ -47,6 +47,8 @@ pub fn rest_init() {
     let ra = task.context.ra;
     let sp = task.context.sp;
     let ptr = task.trap_frame_ptr.load(Ordering::SeqCst);
+    // init 进程不同于其他内核线程，需要有一个独立的内存空间
+    task.memory_space = Some(current_memory_space());
     let task = task.into_shared();
     unsafe {
         sscratch::write(ptr as usize);

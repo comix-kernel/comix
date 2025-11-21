@@ -21,7 +21,7 @@ pub struct Cpu {
     pub current_task: Option<SharedTask>,
     /// 当前使用的内存空间
     /// 对于内核线程，其本身相应字段为 None，因而使用上一个任务的内存空间
-    pub cur_memory_space: Option<Arc<SpinLock<MemorySpace>>>,
+    pub current_memory_space: Option<Arc<SpinLock<MemorySpace>>>,
 }
 
 impl Cpu {
@@ -29,7 +29,7 @@ impl Cpu {
     pub fn new() -> Self {
         Cpu {
             current_task: None,
-            cur_memory_space: None,
+            current_memory_space: None,
         }
     }
 
@@ -39,9 +39,23 @@ impl Cpu {
     pub fn switch_task(&mut self, task: SharedTask) {
         self.current_task = Some(task.clone());
         if !task.lock().is_kernel_thread() {
-            self.cur_memory_space = task.lock().memory_space.clone();
-            activate(self.cur_memory_space.as_ref().unwrap().lock().root_ppn());
+            self.current_memory_space = task.lock().memory_space.clone();
+            activate(
+                self.current_memory_space
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .root_ppn(),
+            );
         }
+    }
+
+    /// 切换当前内存空间
+    /// # 参数
+    /// * `space` - 要切换到的内存空间
+    pub fn switch_space(&mut self, space: Arc<SpinLock<MemorySpace>>) {
+        self.current_memory_space = Some(space.clone());
+        activate(space.lock().root_ppn());
     }
 }
 
