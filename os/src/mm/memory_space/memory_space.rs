@@ -800,48 +800,44 @@ mod memory_space_tests {
         kassert!(token > 0); // 有效的 SATP 值
     });
 
-    // 5. 测试 MMIO 映射是否存在
+    // 5. 测试 MMIO 映射是否存在 - 已移除自动映射,改为测试手动映射
     test_case!(test_mmio_mapping_exists, {
         use crate::mm::memory_space::memory_space::with_kernel_space;
 
         with_kernel_space(|space| {
-            // 获取所有 MMIO 区域
+            // 由于移除了自动 MMIO 映射,初始状态应该没有 MMIO 区域
             let mmio_areas = space.get_mmio_areas();
 
-            // 验证至少有一个 MMIO 区域被映射
-            kassert!(!mmio_areas.is_empty());
+            println!("Initial MMIO areas count: {}", mmio_areas.len());
+            kassert!(mmio_areas.is_empty());
 
-            // 打印所有 MMIO 映射信息
-            println!("Found {} MMIO area(s):", mmio_areas.len());
-            for (i, area) in mmio_areas.iter().enumerate() {
-                let range = area.vpn_range();
-                let start_va = range.start().start_addr().as_usize();
-                let end_va = range.end().start_addr().as_usize();
-                let size = end_va - start_va;
-                println!(
-                    "  MMIO #{}: VA range [0x{:x}, 0x{:x}), size = {} bytes",
-                    i, start_va, end_va, size
-                );
-            }
+            println!("  MMIO mapping test passed (no auto-mapping as expected)");
         });
     });
 
-    // 6. 测试 MMIO 地址翻译
+    // 6. 测试 MMIO 地址翻译 - 修改为手动映射后测试
     test_case!(test_mmio_translation, {
         use crate::arch::mm::paddr_to_vaddr;
         use crate::mm::memory_space::memory_space::with_kernel_space;
 
         with_kernel_space(|space| {
             // 获取第一个 MMIO 配置
-            if let Some(&(_, mmio_paddr, _size)) = crate::config::MMIO.first() {
-                // 转换为虚拟地址
-                let mmio_vaddr = paddr_to_vaddr(mmio_paddr);
-                let vpn = Vpn::from_addr_floor(Vaddr::from_usize(mmio_vaddr));
-
+            if let Some(&(_, mmio_paddr, mmio_size)) = crate::config::MMIO.first() {
                 println!(
-                    "Testing MMIO at PA=0x{:x}, VA=0x{:x}",
-                    mmio_paddr, mmio_vaddr
+                    "Testing MMIO translation at PA=0x{:x}, size=0x{:x}",
+                    mmio_paddr, mmio_size
                 );
+
+                // 手动映射 MMIO 区域
+                let paddr = Paddr::from_usize(mmio_paddr);
+                let result = space.map_mmio(paddr, mmio_size);
+                kassert!(result.is_ok());
+
+                let vaddr = result.unwrap();
+                let mmio_vaddr = vaddr.as_usize();
+                let vpn = Vpn::from_addr_floor(vaddr);
+
+                println!("  Mapped to VA=0x{:x}", mmio_vaddr);
 
                 // 查找包含该地址的区域
                 let area = space.find_area(vpn);
@@ -873,33 +869,44 @@ mod memory_space_tests {
         });
     });
 
-    // 7. 测试 MMIO 内存访问（读写测试）
+    // 7. 测试 MMIO 内存访问（读写测试）- 修改为手动映射后访问
     test_case!(test_mmio_memory_access, {
-        use crate::arch::mm::paddr_to_vaddr;
+        use crate::mm::memory_space::memory_space::with_kernel_space;
 
         // 注意：这个测试会实际访问 MMIO 设备
         // QEMU virt 机器的 TEST 设备 (0x100000) 支持简单的读写
         const TEST_DEVICE_PADDR: usize = 0x0010_0000;
+        const TEST_DEVICE_SIZE: usize = 0x1000;
 
         if crate::config::MMIO
             .iter()
             .any(|&(_, addr, _)| addr == TEST_DEVICE_PADDR)
         {
-            let test_vaddr = paddr_to_vaddr(TEST_DEVICE_PADDR);
+            println!("Testing MMIO memory access at PA=0x{:x}", TEST_DEVICE_PADDR);
 
-            println!("Testing MMIO memory access at VA=0x{:x}", test_vaddr);
+            with_kernel_space(|space| {
+                // 手动映射 TEST 设备
+                let paddr = Paddr::from_usize(TEST_DEVICE_PADDR);
+                let result = space.map_mmio(paddr, TEST_DEVICE_SIZE);
+                kassert!(result.is_ok());
 
-            // 读取测试设备的值（应该可以安全读取）
-            let value = unsafe { core::ptr::read_volatile(test_vaddr as *const u32) };
+                let vaddr = result.unwrap();
+                let test_vaddr = vaddr.as_usize();
 
-            println!("  Read value from TEST device: 0x{:x}", value);
+                println!("  Mapped TEST device to VA=0x{:x}", test_vaddr);
 
-            // TEST 设备的特性：写入某些值会触发特定行为
-            // 这里我们只验证写操作不会导致 panic
-            // 注意：不要写入 0x5555 (FINISHER_PASS) 或 0x3333 (FINISHER_FAIL)
-            // 因为这会导致 QEMU 退出
+                // 读取测试设备的值（应该可以安全读取）
+                let value = unsafe { core::ptr::read_volatile(test_vaddr as *const u32) };
 
-            println!("  MMIO read test passed (no page fault occurred)");
+                println!("  Read value from TEST device: 0x{:x}", value);
+
+                // TEST 设备的特性：写入某些值会触发特定行为
+                // 这里我们只验证写操作不会导致 panic
+                // 注意：不要写入 0x5555 (FINISHER_PASS) 或 0x3333 (FINISHER_FAIL)
+                // 因为这会导致 QEMU 退出
+
+                println!("  MMIO read test passed (no page fault occurred)");
+            });
         } else {
             println!("Warning: TEST device (0x100000) not in MMIO configuration");
         }
