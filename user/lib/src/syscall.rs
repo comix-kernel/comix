@@ -92,7 +92,7 @@ pub fn waitpid(pid: isize, status: *mut i32, options: usize) -> isize {
 /// # 返回值
 /// 成功时返回文件描述符，失败时返回负值
 pub fn open(path: *const c_char) -> isize {
-    syscall!(syscall_numbers::SYS_OPEN, path)
+    syscall!(syscall_numbers::SYS_OPENAT, path)
 }
 
 /// 关闭文件
@@ -115,5 +115,6 @@ pub fn close(fd: usize) -> isize {
 /// # Safety
 /// 调用者必须确保 `dirp` 指针有效且指向至少 `count` 字节的缓冲区
 pub fn getdents(fd: usize, dirp: &mut [u8], count: usize) -> isize {
-    syscall!(syscall_numbers::SYS_GETDENTS, fd, dirp.as_mut_ptr(), count)
+    // syscall!(syscall_numbers::SYS_GETDENTS, fd, dirp.as_mut_ptr(), count)
+    -1
 }

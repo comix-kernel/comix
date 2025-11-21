@@ -144,12 +144,13 @@ impl TaskManagerTrait for TaskManager {
     }
 
     fn send_signal(&self, task: SharedTask, signal: usize) -> bool {
-        {
+        if let Some(signal_flag) = SignalFlags::from_signal_num(signal) {
             let mut t = task.lock();
-            t.pending
-                .insert(SignalFlags::from_signal_num(signal).expect("invalid signal"));
+            t.pending.insert(signal_flag);
+            true
+        } else {
+            false
         }
-        true
     }
 
     #[cfg(test)]

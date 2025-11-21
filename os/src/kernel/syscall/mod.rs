@@ -25,7 +25,6 @@ use crate::{
         current_task, exit_process, schedule,
     },
     mm::{
-        activate,
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
@@ -225,7 +224,12 @@ fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     // 阻塞当前任务,直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let (tid, exit_code) = task.lock().wait_for_child();
-    TASK_MANAGER.lock().release_task(task);
+    {
+        let mut tm = TASK_MANAGER.lock();
+        if let Some(child_task) = tm.get_task(tid) {
+            tm.release_task(child_task);
+        }
+    }
     unsafe {
         sstatus::set_sum();
         *wstatus = exit_code;
