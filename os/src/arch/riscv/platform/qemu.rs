@@ -79,7 +79,7 @@ pub const MMIO: &[(VirtDevice, usize, usize)] = &[
     (VirtDevice::VirtImsicS, 0x2800_0000, VIRT_IMSIC_MAX_SIZE),
     (VirtDevice::VirtPcieEcam, 0x3000_0000, 0x1000_0000),
     (VirtDevice::VirtPcieMmio, 0x4000_0000, 0x4000_0000),
-    (VirtDevice::VirtDram, 0x8000_0000, 0), // size 0 表示“由内存探测或外部传入”
+    (VirtDevice::VirtDram, 0x8000_0000, 0), // size 0 表示"由内存探测或外部传入"
 ];
 
 /// 查找设备的 (base, size)
