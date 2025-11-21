@@ -24,3 +24,6 @@ target
 book/
 # 用户可执行文件
 user/bin/**
+
+# 磁盘镜像文件
+*.img
