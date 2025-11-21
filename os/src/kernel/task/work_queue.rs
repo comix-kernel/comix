@@ -8,7 +8,9 @@
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
 use crate::{
-    kernel::{SharedTask, current_task, sleep_task_with_block, wake_up_with_block},
+    kernel::{
+        SharedTask, TaskState, current_task, sleep_task_with_block, wake_up_with_block, yield_task,
+    },
     sync::SpinLock,
 };
 
@@ -52,11 +54,13 @@ impl WorkQueue {
     /// 将工作项加入工作队列，并唤醒工作线程
     pub fn schedule_work(&mut self, work: WorkItem) {
         self.work_queue.push_back(work);
-        if self.sleeping >= self.worker.len() {
+        if self.sleeping > 0 {
             for task in &self.worker {
-                wake_up_with_block(task.clone());
+                if task.lock().state == TaskState::Interruptible {
+                    wake_up_with_block(task.clone());
+                    break;
+                }
             }
-            self.sleeping = 0;
         }
     }
 
@@ -76,8 +80,10 @@ pub fn kworker() {
             (work.task)();
         } else {
             queue.sleeping += 1;
-            drop(queue);
             sleep_task_with_block(current_task(), true);
+            drop(queue);
+            yield_task();
+            GLOBAL_WORK_QUEUE.lock().sleeping -= 1;
         }
     }
 }

@@ -16,7 +16,6 @@ use crate::{
         task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
     },
     mm::{
-        activate,
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },

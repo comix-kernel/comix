@@ -1,6 +1,6 @@
 //! RISC-V 架构相关的启动代码
 
-use core::{hint, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
 
 use alloc::sync::Arc;
 use riscv::register::sscratch;
@@ -11,7 +11,8 @@ use crate::{
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_memory_space, kernel_execve, kthread_spawn, kworker,
+        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
+        sleep_task_with_block, yield_task,
     },
     mm::{
         self,
@@ -87,7 +88,9 @@ fn init() {
 fn kthreadd() {
     kthread_spawn(kworker);
     loop {
-        hint::spin_loop();
+        // 休眠等待任务
+        sleep_task_with_block(current_task(), true);
+        yield_task();
     }
 }
 
