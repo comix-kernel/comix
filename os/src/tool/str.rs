@@ -1,9 +1,34 @@
+use core::ptr::{read_volatile, write_volatile};
+
 use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
 
 use crate::config::MAX_ARGV;
+
+/// 向指定地址写入内容
+/// # 参数：
+/// * `addr` - 目标地址
+/// * `content` - 要写入的内容
+#[inline(always)]
+pub fn write<T>(addr: usize, content: T) {
+    let cell = (addr) as *mut T;
+    unsafe {
+        write_volatile(cell, content);
+    }
+}
+
+/// 从指定地址读取内容
+/// # 参数：
+/// * `addr` - 目标地址
+/// # 返回值：
+/// 读取到的内容
+#[inline(always)]
+pub fn read<T>(addr: usize) -> T {
+    let cell = (addr) as *const T;
+    unsafe { read_volatile(cell) }
+}
 
 /// 从以 NULL 结尾的 C 字符串指针拷贝并返回一个 owned String
 /// WARNING: 这个函数直接读取指针，调用者必须保证指针在内核可读

@@ -5,6 +5,7 @@ pub mod bus;
 pub mod block;
 pub mod gpu;
 pub mod input;
+pub mod irq;
 pub mod net;
 pub mod rtc;
 pub mod virtio_hal;
