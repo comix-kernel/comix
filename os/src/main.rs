@@ -19,6 +19,7 @@ mod fs;
 mod ipc;
 mod kernel;
 mod mm;
+mod net;
 mod sync;
 mod test;
 mod tool;
