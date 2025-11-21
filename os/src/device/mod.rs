@@ -14,12 +14,11 @@ pub mod device_tree;
 use alloc::sync::Arc;
 pub use block::block_device::BlockDevice;
 pub use block::ram_disk::RamDisk;
-pub use net::net_device::NetDevice;
 use spin::RwLock;
 use virtio_drivers::transport::DeviceType;
 
 use crate::device::rtc::RtcDriver;
-use crate::device::{block::BlockDriver, net::NetDriver};
+use crate::device::{block::BlockDriver, net::net_device::NetDevice};
 use crate::sync::SpinLock;
 use alloc::{string::String, vec::Vec};
 use lazy_static::lazy_static;
@@ -39,7 +38,7 @@ pub trait Driver: Send + Sync {
     fn get_id(&self) -> String;
 
     // trait casting
-    fn as_net(&self) -> Option<&dyn NetDriver> {
+    fn as_net(&self) -> Option<&dyn NetDevice> {
         None
     }
 
@@ -67,7 +66,6 @@ lazy_static! {
 lazy_static! {
     // NOTE: RwLock 只在初始化阶段有写操作，运行时均为读操作
     pub static ref DRIVERS: RwLock<Vec<Arc<dyn Driver>>> = RwLock::new(Vec::new());
-    pub static ref NET_DRIVERS: RwLock<Vec<Arc<dyn NetDriver>>> = RwLock::new(Vec::new());
     pub static ref BLK_DRIVERS: RwLock<Vec<Arc<dyn BlockDriver>>> = RwLock::new(Vec::new());
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
     // pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());

@@ -3,9 +3,8 @@ use alloc::{format, string::String};
 use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::mmio::MmioTransport;
 
-use crate::device::net::NetDriver;
 use crate::device::virtio_hal::VirtIOHal;
-use crate::device::{BLK_DRIVERS, DRIVERS};
+use crate::device::{BLK_DRIVERS, DRIVERS, NetDevice};
 use crate::println;
 use crate::sync::Mutex;
 
@@ -34,7 +33,7 @@ impl Driver for VirtIOBlkDriver {
         Some(self)
     }
 
-    fn as_net(&self) -> Option<&dyn NetDriver> {
+    fn as_net(&self) -> Option<&dyn NetDevice> {
         None
     }
 

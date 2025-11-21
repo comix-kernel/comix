@@ -1,5 +1,5 @@
 use crate::{
-    device::{Driver, NETWORK_DEVICES, NetDevice},
+    device::{ NETWORK_DEVICES, NetDevice},
     println,
 };
 use alloc::vec::Vec;
@@ -7,36 +7,10 @@ use alloc::vec::Vec;
 
 pub mod net_device;
 pub mod virtio_net;
+pub mod network_config;
+pub mod network_interface;
 
-pub trait NetDriver: Driver {
-    // fn get_mac(&self) -> EthernetAddress {
-    //     unimplemented!("not a net driver")
-    // }
 
-    // fn get_ifname(&self) -> String {
-    //     unimplemented!("not a net driver")
-    // }
-
-    // fn get_ip_addresses(&self) -> Vec<IpCidr> {
-    //     unimplemented!("not a net driver")
-    // }
-
-    // fn ipv4_address(&self) -> Option<Ipv4Address> {
-    //     unimplemented!("not a net driver")
-    // }
-
-    // fn poll(&self) {
-    //     unimplemented!("not a net driver")
-    // }
-
-    // fn send(&self, _data: &[u8]) -> Option<usize> {
-    //     unimplemented!("not a net driver")
-    // }
-
-    // fn get_arp(&self, _ip: IpAddress) -> Option<EthernetAddress> {
-    //     unimplemented!("not a net driver")
-    // }
-}
 
 /// 注册网络设备
 pub fn register_net_device(device: alloc::sync::Arc<dyn NetDevice>) {

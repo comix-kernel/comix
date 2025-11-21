@@ -23,6 +23,17 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         SYS_GETDENTS64 => sys_getdents64(frame),
         SYS_LSEEK => sys_lseek(frame),
         SYS_FSTAT => sys_fstat(frame),
+        // 网络系统调用
+        SYS_GETIFADDRS => sys_getifaddrs(frame),
+        SYS_SETSOCKOPT => sys_setsockopt(frame),
+        SYS_SOCKET => sys_socket(frame),
+        SYS_BIND => sys_bind(frame),
+        SYS_LISTEN => sys_listen(frame),
+        SYS_ACCEPT => sys_accept(frame),
+        SYS_CONNECT => sys_connect(frame),
+        SYS_SEND => sys_send(frame),
+        SYS_RECV => sys_recv(frame),
+        SYS_GETSOCKOPT => sys_getsockopt(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
