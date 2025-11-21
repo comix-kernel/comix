@@ -52,7 +52,7 @@ pub fn rest_init() {
         sscratch::write(ptr as usize);
     }
     TASK_MANAGER.lock().add_task(task.clone());
-    current_cpu().lock().current_task = Some(task);
+    current_cpu().lock().switch_task(task);
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
     // SAFETY: 在 Task 创建时已正确初始化 ra 和 sp
@@ -74,6 +74,7 @@ pub fn rest_init() {
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
     super::trap::init();
+    device::init();
     create_kthreadd();
     kernel_execve("/init", &["init"], &[]);
 }
@@ -172,7 +173,6 @@ pub fn main(hartid: usize) {
     crate::test_main();
 
     // 初始化工作
-    device::init();
     trap::init_boot_trap();
     timer::init();
     unsafe { intr::enable_interrupts() };

@@ -4,6 +4,7 @@
 use alloc::sync::Arc;
 
 use crate::config::NUM_CPU;
+use crate::mm::activate;
 use crate::{kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::SpinLock};
 use core::array;
 use lazy_static::lazy_static;
@@ -29,6 +30,17 @@ impl Cpu {
         Cpu {
             current_task: None,
             cur_memory_space: None,
+        }
+    }
+
+    /// 切换当前任务
+    /// # 参数
+    /// * `task` - 要切换到的任务
+    pub fn switch_task(&mut self, task: SharedTask) {
+        self.current_task = Some(task.clone());
+        if !task.lock().is_kernel_thread() {
+            self.cur_memory_space = task.lock().memory_space.clone();
+            activate(self.cur_memory_space.as_ref().unwrap().lock().root_ppn());
         }
     }
 }
