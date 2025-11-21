@@ -298,8 +298,8 @@ fn sig_stop(sig_num: usize) {
 
         // 从运行队列移除（不可被信号唤醒，外部需用 SIGCONT）
         sleep_task_with_block(task, false);
-        yield_task();
     }
+    yield_task();
 }
 
 /// 默认行为：继续进程
