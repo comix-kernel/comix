@@ -23,7 +23,6 @@ pub use global_allocator::init_heap;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
 use crate::mm::address::Ppn;
-use crate::mm::memory_space::with_kernel_space;
 
 unsafe extern "C" {
     // 链接器脚本中定义的内核结束地址
@@ -56,10 +55,13 @@ pub fn init() {
     // 3. 创建并激活内核地址空间 (内核地址空间通过 lazy_static 自动初始化)
     #[cfg(target_arch = "riscv64")]
     {
-        // 获取内核地址空间根页表（Page Table Root）的物理页号（Ppn）。
-        let root_ppn = with_kernel_space(|space| space.root_ppn());
-        // 激活内核地址空间
-        activate(root_ppn);
+        use alloc::sync::Arc;
+
+        use crate::{kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock};
+
+        let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
+        // let root_ppn = with_kernel_space(|space| space.root_ppn());
+        current_cpu().lock().switch_space(space.clone());
     }
 }
 

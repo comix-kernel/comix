@@ -23,7 +23,8 @@ pub use work_queue::*;
 use alloc::sync::Arc;
 
 use crate::ipc::_SIGCHLD;
-use crate::mm::activate;
+use crate::mm::memory_space::MemorySpace;
+use crate::sync::SpinLock;
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
@@ -37,9 +38,6 @@ pub(crate) fn forkret() {
     {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap();
-        if !task.lock().is_kernel_thread() {
-            activate(task.lock().memory_space.as_ref().unwrap().lock().root_ppn());
-        }
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
     // SAFETY: fp 指向的内存已经被分配且由当前任务拥有
@@ -69,14 +67,24 @@ pub(crate) fn terminate_task(code: usize) -> ! {
 }
 
 /// 获取当前task
-///
-/// 获取后须手动lock
+/// # 返回值：当前任务的SharedTask
 pub fn current_task() -> SharedTask {
     current_cpu()
         .lock()
         .current_task
         .as_ref()
         .expect("current_task: CPU has no current task")
+        .clone()
+}
+
+/// 获取当前任务的内存空间
+/// # 返回值：当前任务的内存空间
+pub fn current_memory_space() -> Arc<SpinLock<MemorySpace>> {
+    current_cpu()
+        .lock()
+        .current_memory_space
+        .as_ref()
+        .expect("current_memory_space: current task has no memory space")
         .clone()
 }
 

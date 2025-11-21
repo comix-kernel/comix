@@ -2,9 +2,9 @@
 use core::ptr::NonNull;
 
 use crate::{
-    arch::mm::paddr_to_vaddr,
+    kernel::current_memory_space,
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    println,
+    pr_info, pr_warn, println,
 };
 use fdt::{Fdt, node::FdtNode, standard_nodes::Compatible};
 use virtio_drivers::transport::{
@@ -96,21 +96,23 @@ fn virtio_probe(node: FdtNode) {
     if let Some(reg) = node.reg().and_then(|mut reg| reg.next()) {
         let paddr = reg.starting_address as usize;
         let size = reg.size.unwrap();
-        let vaddr = paddr_to_vaddr(paddr);
-        println!("walk dt addr={:#x}, size={:#x}", paddr, size);
-        println!(
+        pr_info!(
             "Device tree node {}: {:?}",
             node.name,
             node.compatible().map(Compatible::first),
         );
-        let header = NonNull::new(vaddr as *mut VirtIOHeader).unwrap();
         //判 断 virtio 设 备 类 型
+        let vaddr = current_memory_space()
+            .lock()
+            .map_mmio(Paddr::from_usize(paddr), size)
+            .ok()
+            .expect("Failed to map MMIO region");
+        let header = NonNull::new(vaddr.as_usize() as *mut VirtIOHeader).unwrap();
         match unsafe { MmioTransport::new(header, size) } {
-            Err(e) => println!("Error creating VirtIO MMIO transport: {}", e),
+            Err(e) => pr_warn!("Error creating VirtIO MMIO transport: {}", e),
             Ok(transport) => {
                 println!(
-                    "Detected virtio MMIO device with vendor id {:#X}, device type {:?},
-, → version {:?}",
+                    "[Device]Detected virtio MMIO device with vendor id {:#X}, device type {:?}, version {:?}",
                     transport.vendor_id(),
                     transport.device_type(),
                     transport.version(),
@@ -130,6 +132,6 @@ fn virtio_device(transport: impl Transport) {
         // DeviceType::GPU => virtio_gpu(transport),
         // DeviceType::Input => virtio_input(transport),
         // DeviceType::Network => virtio_net(transport),
-        t => println!("Unrecognized virtio device: {:?}", t),
+        t => pr_warn!("Unrecognized virtio device: {:?}", t),
     }
 }
