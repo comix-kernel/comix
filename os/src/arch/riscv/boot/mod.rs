@@ -17,7 +17,7 @@ use crate::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
     },
-    println,
+    print, println,
     sync::SpinLock,
     test::run_early_tests,
 };

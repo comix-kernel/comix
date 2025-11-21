@@ -9,7 +9,7 @@ use crate::{
     arch::{kernel::cpu, trap::TrapFrame},
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
-        exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block,
+        exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block, yield_task,
     },
     pr_err,
 };
@@ -298,6 +298,7 @@ fn sig_stop(sig_num: usize) {
 
         // 从运行队列移除（不可被信号唤醒，外部需用 SIGCONT）
         sleep_task_with_block(task, false);
+        yield_task();
     }
 }
 
