@@ -61,7 +61,7 @@ pub fn init() {
 
         let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
         // let root_ppn = with_kernel_space(|space| space.root_ppn());
-        current_cpu().lock().switch_space(space.clone());
+        current_cpu().lock().switch_space(space);
     }
 }
 
