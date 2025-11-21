@@ -132,12 +132,12 @@ fn create_empty_image(path: &PathBuf) {
 
 /// 创建 ext4 测试镜像
 fn create_ext4_image(path: &PathBuf) {
-    const IMG_SIZE_MB: usize = 12; // 12 MB - 平衡大小和内存使用
-    const BLOCK_SIZE: usize = 1024 * 1024; // 1 MB blocks for dd
+    // 修改为 8MB，给堆内存留出 8MB 的喘息空间
+    const IMG_SIZE_MB: usize = 8;
+    const BLOCK_SIZE: usize = 1024 * 1024;
 
-    // 使用 dd 和 mkfs.ext4 创建镜像
-    // 步骤 1: 创建空文件
-    let dd_status = Command::new("dd")
+    // 1. 创建 8MB 空文件 (确保清零)
+    let _ = Command::new("dd")
         .arg("if=/dev/zero")
         .arg(format!("of={}", path.display()))
         .arg(format!("bs={}", BLOCK_SIZE))
@@ -146,27 +146,24 @@ fn create_ext4_image(path: &PathBuf) {
         .stderr(std::process::Stdio::null())
         .status();
 
-    match dd_status {
-        Ok(s) if s.success() => {
-            println!("cargo:warning=[build.rs] Created {} MB blank image", IMG_SIZE_MB);
-        }
-        _ => {
-            println!("cargo:warning=[build.rs] Failed to create blank image with dd, creating empty file");
-            // 如果 dd 失败，创建一个空文件
-            let _ = fs::write(path, vec![0u8; IMG_SIZE_MB * BLOCK_SIZE]);
-            return;
-        }
-    }
-
-    // 步骤 2: 格式化为 ext4
-    // 注意：ext4_rs 在禁用 journal 时存在 bug，所以保留 journal
-    // 但不保留 root 空间以最大化可用空间
+    // 2. 格式化为 ext4
+    // 目标：在 8MB 空间内构建 ext4_rs 能读懂的布局
     let mkfs_status = Command::new("mkfs.ext4")
-        .arg("-F") // 强制格式化
-        .arg("-m")
-        .arg("0") // 不保留空间给 root
-        .arg("-b")
-        .arg("4096") // 4KB 块大小
+        .arg("-F")
+        .arg("-b").arg("4096")      // 必须: 4K 块
+        .arg("-m").arg("0")         // 0% 保留空间
+        .arg("-I").arg("256")       // 指定 inode 大小 (标准值)
+        
+        // 尝试强制创建一个最小的 2MB 日志
+        // 如果 mkfs 报错说空间不足，可能需要去掉这行（但那样会触发 ext4_rs 的无日志 bug）
+        .arg("-J").arg("size=2")    
+        
+        // 核心特性控制：
+        // 64bit: 必须开启！修复 ENOSPC 的关键
+        // ^resize_inode: 必须禁用！节省 GDT 空间，避免布局混乱
+        // ^dir_index, ^metadata_csum: 兼容性禁用
+        .arg("-O").arg("64bit,^resize_inode,^dir_index,^metadata_csum")
+        
         .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -174,23 +171,20 @@ fn create_ext4_image(path: &PathBuf) {
 
     match mkfs_status {
         Ok(s) if s.success() => {
-            let img_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-            println!(
-                "cargo:warning=[build.rs] Ext4 image created successfully: {} bytes",
-                img_size
-            );
+            println!("cargo:warning=[build.rs] 8MB Ext4 image created successfully.");
         }
-        Ok(s) => {
-            println!(
-                "cargo:warning=[build.rs] mkfs.ext4 failed with status: {}. Tests may fail.",
-                s
-            );
-        }
-        Err(e) => {
-            println!(
-                "cargo:warning=[build.rs] Failed to run mkfs.ext4: {}. Tests may fail.",
-                e
-            );
+        _ => {
+            println!("cargo:warning=[build.rs] mkfs failed! trying without journal...");
+            // 如果 8MB 塞不下日志，尝试无日志模式作为最后的退路
+            let _ = Command::new("mkfs.ext4")
+                .arg("-F")
+                .arg("-b").arg("4096")
+                .arg("-m").arg("0")
+                .arg("-O").arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
+                .arg(path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
         }
     }
 }
