@@ -58,9 +58,9 @@ pub const SYS_CONNECT: usize = 203;
 pub const SYS_SEND: usize = 206;
 /// 接收数据 - 使用recvfrom   
 pub const SYS_RECV: usize = 207;
-/// 获取网络接口地址列表 
+/// 获取网络接口地址列表
 pub const SYS_GETIFADDRS: usize = 500;
 /// 设置套接字选项
 pub const SYS_SETSOCKOPT: usize = 501;
-/// 获取套接字选项 
+/// 获取套接字选项
 pub const SYS_GETSOCKOPT: usize = 502;

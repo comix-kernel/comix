@@ -1,16 +1,14 @@
 use crate::{
-    device::{ NETWORK_DEVICES, NetDevice},
+    device::{NETWORK_DEVICES, NetDevice},
     println,
 };
 use alloc::vec::Vec;
 // use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
 
 pub mod net_device;
-pub mod virtio_net;
 pub mod network_config;
 pub mod network_interface;
-
-
+pub mod virtio_net;
 
 /// 注册网络设备
 pub fn register_net_device(device: alloc::sync::Arc<dyn NetDevice>) {
