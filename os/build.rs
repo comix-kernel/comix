@@ -132,59 +132,54 @@ fn create_empty_image(path: &PathBuf) {
 
 /// 创建 ext4 测试镜像
 fn create_ext4_image(path: &PathBuf) {
-    // 修改为 8MB，给堆内存留出 8MB 的喘息空间
+    // 8MB 镜像
     const IMG_SIZE_MB: usize = 8;
     const BLOCK_SIZE: usize = 1024 * 1024;
 
-    // 1. 创建 8MB 空文件 (确保清零)
-    let _ = Command::new("dd")
+    println!("cargo:warning=[build.rs] Creating {}MB ext4 image at {}", IMG_SIZE_MB, path.display());
+
+    // 1. 创建空文件 (dd)
+    let dd_status = Command::new("dd")
         .arg("if=/dev/zero")
         .arg(format!("of={}", path.display()))
         .arg(format!("bs={}", BLOCK_SIZE))
         .arg(format!("count={}", IMG_SIZE_MB))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .status()
+        .expect("Failed to execute dd");
+
+    if !dd_status.success() {
+        panic!("Failed to create empty disk image");
+    }
 
     // 2. 格式化为 ext4
-    // 目标：在 8MB 空间内构建 ext4_rs 能读懂的布局
+    // 关键策略：通过 -g 512 强制生成多个块组 (Block Groups)
+    // 8MB / 2MB(512*4k) = 4 个块组
+    // 这样 ext4_rs 即使跳过 Group 0，也有 Group 1, 2, 3 可用
     let mkfs_status = Command::new("mkfs.ext4")
-        .arg("-F")
-        .arg("-b").arg("4096")      // 必须: 4K 块
-        .arg("-m").arg("0")         // 0% 保留空间
-        .arg("-I").arg("256")       // 指定 inode 大小 (标准值)
+        .arg("-F")                  // 强制覆盖
+        .arg("-b").arg("4096")      // 块大小 4K
+        .arg("-g").arg("512")       // [关键!] 每组 512 块 (2MB)。确保 8MB 镜像有 4 个组。
+        .arg("-m").arg("0")         // 0% 保留空间，最大化可用容量
+        .arg("-I").arg("256")       // Inode 大小 256 字节
         
-        // 尝试强制创建一个最小的 2MB 日志
-        // 如果 mkfs 报错说空间不足，可能需要去掉这行（但那样会触发 ext4_rs 的无日志 bug）
-        .arg("-J").arg("size=2")    
-        
-        // 核心特性控制：
-        // 64bit: 必须开启！修复 ENOSPC 的关键
-        // ^resize_inode: 必须禁用！节省 GDT 空间，避免布局混乱
-        // ^dir_index, ^metadata_csum: 兼容性禁用
-        .arg("-O").arg("64bit,^resize_inode,^dir_index,^metadata_csum")
+        // 特性控制 (Features):
+        // ^has_journal:   [关键!] 禁用日志。小块组无法容纳日志，且 OS 开发初期建议无日志以简化。
+        // ^resize_inode:  禁用在线调整大小预留，节省 GDT 空间。
+        // ^metadata_csum: 禁用校验和，提高与旧版驱动/ext4_rs 的兼容性。
+        // 64bit:          保持开启，现代 ext4 默认特性。
+        .arg("-O").arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
         
         .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .status()
+        .expect("Failed to execute mkfs.ext4");
 
-    match mkfs_status {
-        Ok(s) if s.success() => {
-            println!("cargo:warning=[build.rs] 8MB Ext4 image created successfully.");
-        }
-        _ => {
-            println!("cargo:warning=[build.rs] mkfs failed! trying without journal...");
-            // 如果 8MB 塞不下日志，尝试无日志模式作为最后的退路
-            let _ = Command::new("mkfs.ext4")
-                .arg("-F")
-                .arg("-b").arg("4096")
-                .arg("-m").arg("0")
-                .arg("-O").arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
-                .arg(path)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-        }
+    if mkfs_status.success() {
+        println!("cargo:warning=[build.rs] Ext4 image formatted successfully (No Journal, Multi-Group).");
+    } else {
+        panic!("Failed to format ext4 image! Make sure 'mkfs.ext4' is installed.");
     }
 }
