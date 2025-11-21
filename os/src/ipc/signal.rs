@@ -185,10 +185,7 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
 
 /// 在返回用户态前检查信号并处理
 pub fn check_signal() {
-    let task = {
-        let cpu = current_cpu().lock();
-        cpu.current_task.as_ref().unwrap().clone()
-    };
+    let task = current_task();
     loop {
         let (sig_flag, action) = {
             let mut t = task.lock();

@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 // use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
 
 pub mod net_device;
+pub mod virtio_net;
 
 pub trait NetDriver: Driver {
     // fn get_mac(&self) -> EthernetAddress {

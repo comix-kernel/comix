@@ -2,13 +2,14 @@
 use core::ptr::NonNull;
 
 use crate::{
-    arch::mm::paddr_to_vaddr,
+    device::{block, gpu, input, net},
+    kernel::current_memory_space,
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    println,
+    pr_info, pr_warn, println,
 };
 use fdt::{Fdt, node::FdtNode, standard_nodes::Compatible};
 use virtio_drivers::transport::{
-    Transport,
+    DeviceType, Transport,
     mmio::{MmioTransport, VirtIOHeader},
 };
 
@@ -96,21 +97,23 @@ fn virtio_probe(node: FdtNode) {
     if let Some(reg) = node.reg().and_then(|mut reg| reg.next()) {
         let paddr = reg.starting_address as usize;
         let size = reg.size.unwrap();
-        let vaddr = paddr_to_vaddr(paddr);
-        println!("walk dt addr={:#x}, size={:#x}", paddr, size);
-        println!(
+        pr_info!(
             "Device tree node {}: {:?}",
             node.name,
             node.compatible().map(Compatible::first),
         );
-        let header = NonNull::new(vaddr as *mut VirtIOHeader).unwrap();
         //判 断 virtio 设 备 类 型
+        let vaddr = current_memory_space()
+            .lock()
+            .map_mmio(Paddr::from_usize(paddr), size)
+            .ok()
+            .expect("Failed to map MMIO region");
+        let header = NonNull::new(vaddr.as_usize() as *mut VirtIOHeader).unwrap();
         match unsafe { MmioTransport::new(header, size) } {
-            Err(e) => println!("Error creating VirtIO MMIO transport: {}", e),
+            Err(e) => pr_warn!("Error creating VirtIO MMIO transport: {}", e),
             Ok(transport) => {
                 println!(
-                    "Detected virtio MMIO device with vendor id {:#X}, device type {:?},
-, → version {:?}",
+                    "[Device] Detected virtio MMIO device with vendor id {:#X}, device type {:?}, version {:?}",
                     transport.vendor_id(),
                     transport.device_type(),
                     transport.version(),
@@ -124,12 +127,12 @@ fn virtio_probe(node: FdtNode) {
 /// 对不同的virtio设备进行进一步的初始化工作
 /// # 参数
 /// * `transport` - virtio 传输对象
-fn virtio_device(transport: impl Transport) {
+fn virtio_device(transport: MmioTransport<'static>) {
     match transport.device_type() {
-        // DeviceType::Block => virtio_blk(transport),
-        // DeviceType::GPU => virtio_gpu(transport),
-        // DeviceType::Input => virtio_input(transport),
-        // DeviceType::Network => virtio_net(transport),
-        t => println!("Unrecognized virtio device: {:?}", t),
+        DeviceType::Block => block::virtio_blk::init(transport),
+        DeviceType::GPU => gpu::virtio_gpu::init(transport),
+        DeviceType::Input => input::virtio_input::init(transport),
+        DeviceType::Network => net::virtio_net::init(transport),
+        t => pr_warn!("Unrecognized virtio device: {:?}", t),
     }
 }
