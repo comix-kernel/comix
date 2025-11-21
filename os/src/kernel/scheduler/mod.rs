@@ -92,7 +92,7 @@ pub fn yield_task() {
 /// * `receive_signal`: 是否可被信号中断
 /// 注意: 该函数仅设置状态，不负责切换任务
 pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
-    SCHEDULER.lock().sleep_task(task.clone(), receive_signal);
+    SCHEDULER.lock().sleep_task(task, receive_signal);
 }
 
 /// 唤醒任务
