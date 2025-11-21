@@ -136,7 +136,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         .expect("kernel_execve: failed to create memory space from ELF");
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    activate(space.lock().root_ppn());
+    current_cpu().lock().switch_space(space.clone());
 
     let task = {
         let cpu = current_cpu().lock();

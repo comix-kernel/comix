@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 
 use crate::{
     arch::kernel::{context::Context, switch},
-    kernel::{current_cpu, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    kernel::{current_cpu, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     pr_debug,
     sync::SpinLock,
 };
@@ -65,28 +65,14 @@ pub trait Scheduler {
 pub fn schedule() {
     let plan = {
         let mut sched = SCHEDULER.lock();
+        // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
         sched.next_task()
     };
 
     if let Some(plan) = plan {
         // SAFETY: prepare_switch 生成的切换计划中的指针均合法
         unsafe { switch(plan.old, plan.new) };
-
-        // 切换后，更新 satp 寄存器以使用新任务的页表
-        let new_task = current_cpu()
-            .lock()
-            .current_task
-            .as_ref()
-            .expect("schedule: no current task after switch")
-            .clone();
-
-        // 如果是用户任务，激活其页表
-        if let Some(memory_space) = &new_task.lock().memory_space {
-            use crate::mm::activate;
-            activate(memory_space.lock().root_ppn());
-        }
-
-        pr_debug!("Switched to task {}", new_task.lock().tid);
+        pr_debug!("Switched to task {}", current_task().lock().tid);
         // 通常不会立即返回；返回时再继续当前上下文后续逻辑
     }
 }
