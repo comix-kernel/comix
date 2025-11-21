@@ -1,8 +1,8 @@
 //! 网络协议实现
-//! 
+//!
 //! 此模块实现了基本的网络协议，包括ARP和ICMP。
 
-use alloc::{vec::Vec, string::String};
+use alloc::{string::String, vec::Vec};
 
 use crate::println;
 
@@ -23,7 +23,7 @@ impl EthernetHeader {
             ether_type,
         }
     }
-    
+
     /// 将以太网帧头部转换为字节数组
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(14);
@@ -37,13 +37,13 @@ impl EthernetHeader {
 /// ARP协议相关实现
 pub mod arp {
     use super::*;
-    
+
     /// ARP操作类型
     pub enum ArpOperation {
         Request,
         Reply,
     }
-    
+
     /// ARP数据包
     #[derive(Debug, Clone)]
     pub struct ArpPacket {
@@ -57,7 +57,7 @@ pub mod arp {
         pub target_mac: [u8; 6],
         pub target_ip: [u8; 4],
     }
-    
+
     impl ArpPacket {
         /// 创建一个新的ARP请求数据包
         pub fn new_request(sender_mac: [u8; 6], sender_ip: [u8; 4], target_ip: [u8; 4]) -> Self {
@@ -73,9 +73,14 @@ pub mod arp {
                 target_ip,
             }
         }
-        
+
         /// 创建一个新的ARP响应数据包
-        pub fn new_reply(sender_mac: [u8; 6], sender_ip: [u8; 4], target_mac: [u8; 6], target_ip: [u8; 4]) -> Self {
+        pub fn new_reply(
+            sender_mac: [u8; 6],
+            sender_ip: [u8; 4],
+            target_mac: [u8; 6],
+            target_ip: [u8; 4],
+        ) -> Self {
             Self {
                 hardware_type: [0x00, 0x01], // Ethernet
                 protocol_type: [0x08, 0x00], // IPv4
@@ -88,7 +93,7 @@ pub mod arp {
                 target_ip,
             }
         }
-        
+
         /// 将ARP数据包转换为字节数组
         pub fn to_bytes(&self) -> Vec<u8> {
             let mut bytes = Vec::with_capacity(28);
@@ -104,12 +109,12 @@ pub mod arp {
             bytes
         }
     }
-    
+
     /// ARP缓存
     pub struct ArpCache {
         entries: Vec<(u32, [u8; 6])>, // (IP地址, MAC地址)
     }
-    
+
     impl ArpCache {
         /// 创建一个新的ARP缓存
         pub fn new() -> Self {
@@ -117,29 +122,33 @@ pub mod arp {
                 entries: Vec::new(),
             }
         }
-        
+
         /// 添加或更新ARP表项
         pub fn add_entry(&mut self, ip: [u8; 4], mac: [u8; 6]) {
             let ip_u32 = u32::from_be_bytes(ip);
-            
+
             // 查找是否已存在该IP的表项
-            if let Some(entry) = self.entries.iter_mut().find(|(ip_entry, _)| *ip_entry == ip_u32) {
+            if let Some(entry) = self
+                .entries
+                .iter_mut()
+                .find(|(ip_entry, _)| *ip_entry == ip_u32)
+            {
                 entry.1 = mac;
             } else {
                 self.entries.push((ip_u32, mac));
             }
         }
-        
+
         /// 根据IP地址查找MAC地址
         pub fn find_mac(&self, ip: [u8; 4]) -> Option<[u8; 6]> {
             let ip_u32 = u32::from_be_bytes(ip);
-            
+
             for (ip_entry, mac_entry) in &self.entries {
                 if *ip_entry == ip_u32 {
                     return Some(*mac_entry);
                 }
             }
-            
+
             None
         }
     }
@@ -148,13 +157,13 @@ pub mod arp {
 /// ICMP协议相关实现
 pub mod icmp {
     use super::*;
-    
+
     /// ICMP类型
     pub enum IcmpType {
         EchoReply = 0,
         EchoRequest = 8,
     }
-    
+
     /// ICMP数据包
     #[derive(Debug, Clone)]
     pub struct IcmpPacket {
@@ -165,7 +174,7 @@ pub mod icmp {
         pub sequence: [u8; 2],
         pub data: Vec<u8>,
     }
-    
+
     impl IcmpPacket {
         /// 创建一个新的ICMP回显请求数据包
         pub fn new_echo_request(identifier: u16, sequence: u16, data: &[u8]) -> Self {
@@ -177,13 +186,13 @@ pub mod icmp {
                 sequence: sequence.to_be_bytes(),
                 data: data.to_vec(),
             };
-            
+
             // 计算校验和
             packet.checksum = packet.calculate_checksum();
-            
+
             packet
         }
-        
+
         /// 创建一个新的ICMP回显响应数据包
         pub fn new_echo_reply(request: &Self) -> Self {
             let mut packet = Self {
@@ -194,25 +203,25 @@ pub mod icmp {
                 sequence: request.sequence,
                 data: request.data.clone(),
             };
-            
+
             // 计算校验和
             packet.checksum = packet.calculate_checksum();
-            
+
             packet
         }
-        
+
         /// 计算ICMP数据包的校验和
         fn calculate_checksum(&self) -> [u8; 2] {
             let mut sum = 0u32;
-            
+
             // 添加类型和代码
             sum += self.icmp_type as u32;
             sum += self.code as u32;
-            
+
             // 添加标识符和序列号
             sum += u16::from_be_bytes(self.identifier) as u32;
             sum += u16::from_be_bytes(self.sequence) as u32;
-            
+
             // 添加数据部分
             let mut data_iter = self.data.chunks(2);
             for chunk in &mut data_iter {
@@ -222,15 +231,15 @@ pub mod icmp {
                     sum += chunk[0] as u32;
                 }
             }
-            
+
             // 计算校验和
             while sum >> 16 != 0 {
                 sum = (sum & 0xFFFF) + (sum >> 16);
             }
-            
+
             (!sum as u16).to_be_bytes()
         }
-        
+
         /// 将ICMP数据包转换为字节数组
         pub fn to_bytes(&self) -> Vec<u8> {
             let mut bytes = Vec::with_capacity(8 + self.data.len());

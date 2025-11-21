@@ -1,13 +1,13 @@
+use crate::device::net::net_device::NetDevice;
+use crate::println;
+use crate::sync::SpinLock;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use smoltcp::iface::{Interface, Routes};
 use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpCidr, IpAddress, Ipv4Address};
-use crate::sync::SpinLock;
-use crate::device::net::net_device::NetDevice;
-use crate::println;
+use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
 
 /// 网络接口管理器
 pub struct NetworkInterfaceManager {
@@ -40,7 +40,7 @@ impl NetworkInterfaceManager {
 
 lazy_static! {
     /// 全局网络接口管理器
-    pub static ref NETWORK_INTERFACE_MANAGER: SpinLock<NetworkInterfaceManager> = 
+    pub static ref NETWORK_INTERFACE_MANAGER: SpinLock<NetworkInterfaceManager> =
         SpinLock::new(NetworkInterfaceManager::new());
 }
 
@@ -107,62 +107,67 @@ impl NetworkInterface {
     pub fn ipv4_gateway(&self) -> Option<Ipv4Address> {
         *self.ipv4_gateway.lock()
     }
-    
+
     /// 启用中断
     pub fn enable_interrupt(&self) {
         *self.interrupt_enabled.lock() = true;
         println!("Interrupt enabled for interface {}", self.name());
     }
-    
+
     /// 禁用中断
     pub fn disable_interrupt(&self) {
         *self.interrupt_enabled.lock() = false;
         println!("Interrupt disabled for interface {}", self.name());
     }
-    
+
     /// 检查中断是否启用
     pub fn is_interrupt_enabled(&self) -> bool {
         *self.interrupt_enabled.lock()
     }
-    
+
     /// 更新最后中断时间
     pub fn update_interrupt_time(&self) {
         // 在实际系统中，这里应该使用真实的时间源
         // 这里使用一个简单的计数器模拟
-        *self.last_interrupt_time.lock() = Instant::from_millis(
-            self.last_interrupt_time.lock().total_millis() + 1
-        );
+        *self.last_interrupt_time.lock() =
+            Instant::from_millis(self.last_interrupt_time.lock().total_millis() + 1);
     }
 
     /// 创建smoltcp以太网接口
-    pub fn create_smoltcp_interface(&self) -> Interface{
+    pub fn create_smoltcp_interface(&self) -> Interface {
         // 创建路由表
         let mut routes = Routes::new();
-        
+
         // 如果设置了网关，添加默认路由
         if let Some(gateway) = self.ipv4_gateway() {
             routes.add_default_ipv4_route(gateway).ok();
         }
-        
+
         // 创建网络设备适配器
         let mut device_adapter = NetDeviceAdapter::new(self.device.clone());
-        
+
         // 创建以太网接口
-        let config = smoltcp::iface::Config::new(smoltcp::wire::HardwareAddress::Ethernet(self.mac_address()));
-        let mut iface = Interface::new(config, &mut device_adapter, smoltcp::time::Instant::from_millis(0));
-        
+        let config = smoltcp::iface::Config::new(smoltcp::wire::HardwareAddress::Ethernet(
+            self.mac_address(),
+        ));
+        let mut iface = Interface::new(
+            config,
+            &mut device_adapter,
+            smoltcp::time::Instant::from_millis(0),
+        );
+
         // 设置IP地址
         for ip_cidr in self.ip_addresses.lock().iter() {
             iface.update_ip_addrs(|addrs| {
                 addrs.push(*ip_cidr);
             });
         }
-        
+
         // 设置路由
         if let Some(gateway) = self.ipv4_gateway() {
             iface.routes_mut().add_default_ipv4_route(gateway).ok();
         }
-        
+
         iface
     }
 }
@@ -188,21 +193,28 @@ impl smoltcp::phy::Device for NetDeviceAdapter {
     type RxToken<'a> = NetRxToken<'a>;
     type TxToken<'a> = NetTxToken<'a>;
 
-    fn receive(&mut self, _timestamp: smoltcp::time::Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+    fn receive(
+        &mut self,
+        _timestamp: smoltcp::time::Instant,
+    ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         // 尝试接收数据包
         match self.device.receive(&mut self.rx_buffer) {
-            Ok(size) if size > 0 => {
-                Some((
-                    NetRxToken { buffer: &self.rx_buffer[..size] },
-                    NetTxToken { device: &self.device }
-                ))
-            },
+            Ok(size) if size > 0 => Some((
+                NetRxToken {
+                    buffer: &self.rx_buffer[..size],
+                },
+                NetTxToken {
+                    device: &self.device,
+                },
+            )),
             _ => None,
         }
     }
 
-    fn transmit(&mut self ,_timestamp: smoltcp::time::Instant) -> Option<Self::TxToken<'_>> {
-        Some(NetTxToken { device: &self.device })
+    fn transmit(&mut self, _timestamp: smoltcp::time::Instant) -> Option<Self::TxToken<'_>> {
+        Some(NetTxToken {
+            device: &self.device,
+        })
     }
 
     fn capabilities(&self) -> smoltcp::phy::DeviceCapabilities {
@@ -226,7 +238,7 @@ impl smoltcp::phy::RxToken for NetRxToken<'_> {
         let buffer = self.buffer.to_vec();
         f(&buffer)
     }
-    
+
     fn meta(&self) -> smoltcp::phy::PacketMeta {
         smoltcp::phy::PacketMeta::default()
     }
@@ -245,16 +257,16 @@ impl smoltcp::phy::TxToken for NetTxToken<'_> {
         // 创建发送缓冲区
         let mut buffer = alloc::vec![0; len];
         let result = f(&mut buffer);
-        
+
         // 发送数据
         if let Err(_) = self.device.send(&buffer) {
             // 在实际实现中，这里应该有错误处理，但根据trait定义，我们不能返回错误
             // 所以我们只能忽略发送错误
         }
-        
+
         result
     }
-    
+
     fn set_meta(&mut self, _meta: smoltcp::phy::PacketMeta) {}
 }
 
@@ -265,29 +277,40 @@ impl crate::device::Driver for NetworkInterface {
         if !self.is_interrupt_enabled() {
             return false;
         }
-        
+
         // 记录中断信息
         if let Some(irq_num) = irq {
-            println!("Network interface {} received interrupt on IRQ {}", self.name(), irq_num);
+            println!(
+                "Network interface {} received interrupt on IRQ {}",
+                self.name(),
+                irq_num
+            );
         } else {
-            println!("Network interface {} received interrupt without IRQ number", self.name());
+            println!(
+                "Network interface {} received interrupt without IRQ number",
+                self.name()
+            );
         }
-        
+
         // 更新最后中断时间
         self.update_interrupt_time();
-        
+
         // 处理接收中断：尝试接收数据包
         let mut buffer = [0u8; 2048];
         match self.device.receive(&mut buffer) {
             Ok(size) if size > 0 => {
-                println!("Received {} bytes of data on interface {}", size, self.name());
+                println!(
+                    "Received {} bytes of data on interface {}",
+                    size,
+                    self.name()
+                );
                 // 这里可以添加数据包处理逻辑
                 true
-            },
+            }
             Err(e) => {
                 println!("Error receiving data: {:?}", e);
                 true // 仍然返回true表示我们处理了这个中断
-            },
+            }
             _ => {
                 // 没有接收到数据，但可能是发送完成中断等
                 true
@@ -306,11 +329,11 @@ impl crate::device::Driver for NetworkInterface {
     fn as_net(&self) -> Option<&dyn crate::device::net::net_device::NetDevice> {
         Some(self.device.as_ref())
     }
-    
+
     fn as_block(&self) -> Option<&dyn crate::device::block::BlockDriver> {
         None
     }
-    
+
     fn as_rtc(&self) -> Option<&dyn crate::device::rtc::RtcDriver> {
         None
     }

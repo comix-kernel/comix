@@ -1,8 +1,11 @@
 //! 网络接口抽象模块
-//! 
+//!
 //! 此模块定义了网络接口的抽象接口，用于管理不同类型的网络接口。
 
-use alloc::{string::{String, ToString}, sync::Arc};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+};
 use spin::Mutex;
 
 use crate::net::device::NetDevice;
@@ -86,60 +89,60 @@ impl NetworkInterface {
             device,
         }
     }
-    
+
     /// 发送数据包
     pub fn send_packet(&mut self, data: &[u8]) -> Result<(), ()> {
         if !self.config.enabled {
             return Err(());
         }
-        
+
         match self.device.lock().send(data) {
             Ok(_) => {
                 self.stats.tx_packets += 1;
                 self.stats.tx_bytes += data.len();
                 Ok(())
-            },
+            }
             Err(_) => {
                 self.stats.tx_errors += 1;
                 Err(())
             }
         }
     }
-    
+
     /// 接收数据包
     pub fn receive_packet(&mut self, buffer: &mut [u8]) -> Result<usize, ()> {
         if !self.config.enabled {
             return Err(());
         }
-        
+
         match self.device.lock().receive(buffer) {
             Ok(size) => {
                 self.stats.rx_packets += 1;
                 self.stats.rx_bytes += size;
                 Ok(size)
-            },
+            }
             Err(_) => {
                 self.stats.rx_errors += 1;
                 Err(())
             }
         }
     }
-    
+
     /// 设置接口配置
     pub fn set_config(&mut self, new_config: InterfaceConfig) {
         self.config = new_config;
     }
-    
+
     /// 获取接口统计信息
     pub fn get_stats(&self) -> &InterfaceStats {
         &self.stats
     }
-    
+
     /// 启用接口
     pub fn enable(&mut self) {
         self.config.enabled = true;
     }
-    
+
     /// 禁用接口
     pub fn disable(&mut self) {
         self.config.enabled = false;
