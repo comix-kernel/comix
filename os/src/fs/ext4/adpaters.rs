@@ -1,10 +1,10 @@
 //! BlockDevice 适配器：VFS BlockDevice → ext4_rs BlockDevice
 //! 纯净版：移除了所有针对 ENOSPC 的 Hack
 
+use crate::devices::{BlockDevice as VfsBlockDevice, block_device::BlockError};
 use crate::pr_err;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use crate::devices::{BlockDevice as VfsBlockDevice, block_device::BlockError};
 
 pub struct BlockDeviceAdapter {
     inner: Arc<dyn VfsBlockDevice>,
@@ -14,7 +14,10 @@ pub struct BlockDeviceAdapter {
 impl BlockDeviceAdapter {
     pub fn new(device: Arc<dyn VfsBlockDevice>) -> Self {
         let block_size = device.block_size();
-        crate::println!("[Ext4Adapter] Created adapter with block_size: {}", block_size);
+        crate::println!(
+            "[Ext4Adapter] Created adapter with block_size: {}",
+            block_size
+        );
         Self {
             inner: device,
             block_size,

@@ -168,35 +168,35 @@ pub trait Inode: Send + Sync + Any {
     fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 创建符号链接
-    /// 
+    ///
     /// 提供默认Err，以避免为SimpleFS实现新语义
     fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
     }
 
     /// 创建硬链接
-    /// 
+    ///
     /// 提供默认Err，以避免为SimpleFS实现新语义
     fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 
     /// 删除普通文件/链接
-    /// 
+    ///
     /// 提供默认Err，以避免为SimpleFS实现新语义
     fn unlink(&self, name: &str) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 
     /// 删除目录
-    /// 
+    ///
     /// 提供默认Err，以避免为SimpleFS实现新语义
     fn rmdir(&self, name: &str) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 
     /// 重命名/移动 (原子操作)
-    /// 
+    ///
     /// 提供默认Err，以避免为SimpleFS实现新语义
     fn rename(
         &self,

@@ -14,8 +14,14 @@ test_case!(test_ext4_create_directory, {
 
     // 调试：检查文件系统状态
     if let Ok(statfs) = fs.statfs() {
-        println!("Free blocks: {}/{}", statfs.free_blocks, statfs.total_blocks);
-        println!("Free inodes: {}/{}", statfs.free_inodes, statfs.total_inodes);
+        println!(
+            "Free blocks: {}/{}",
+            statfs.free_blocks, statfs.total_blocks
+        );
+        println!(
+            "Free inodes: {}/{}",
+            statfs.free_inodes, statfs.total_inodes
+        );
     }
 
     // 创建目录
@@ -51,7 +57,7 @@ test_case!(test_ext4_readdir, {
     // 列出目录内容
     let entries_result = root.readdir();
     kassert!(entries_result.is_ok());
-    
+
     if let Ok(entries) = entries_result {
         kassert!(entries.len() >= 3); // 至少包含我们创建的 3 个项
 
@@ -89,7 +95,9 @@ test_case!(test_ext4_lookup_in_directory, {
     let root = fs.root_inode();
 
     // 创建目录和文件
-    let dir = root.mkdir("testdir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("testdir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     let create_result = dir.create("file.txt", FileMode::from_bits_truncate(0o644));
     kassert!(create_result.is_ok());
@@ -122,7 +130,7 @@ test_case!(test_ext4_readdir_empty, {
     let root = fs.root_inode();
     let dir_res = root.mkdir("emptydir", FileMode::from_bits_truncate(0o755));
     kassert!(dir_res.is_ok());
-    
+
     if let Ok(dir) = dir_res {
         // 读取空目录
         let entries_res = dir.readdir();
@@ -142,7 +150,7 @@ test_case!(test_ext4_directory_metadata, {
         println!("{}", e.to_errno());
     }
     kassert!(dir_res.is_ok());
-    
+
     if let Ok(dir) = dir_res {
         // 获取元数据
         let metadata_res = dir.metadata();

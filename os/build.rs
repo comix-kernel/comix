@@ -136,7 +136,11 @@ fn create_ext4_image(path: &PathBuf) {
     const IMG_SIZE_MB: usize = 8;
     const BLOCK_SIZE: usize = 1024 * 1024;
 
-    println!("cargo:warning=[build.rs] Creating {}MB ext4 image at {}", IMG_SIZE_MB, path.display());
+    println!(
+        "cargo:warning=[build.rs] Creating {}MB ext4 image at {}",
+        IMG_SIZE_MB,
+        path.display()
+    );
 
     // 1. 创建空文件 (dd)
     let dd_status = Command::new("dd")
@@ -158,19 +162,22 @@ fn create_ext4_image(path: &PathBuf) {
     // 8MB / 2MB(512*4k) = 4 个块组
     // 这样 ext4_rs 即使跳过 Group 0，也有 Group 1, 2, 3 可用
     let mkfs_status = Command::new("mkfs.ext4")
-        .arg("-F")                  // 强制覆盖
-        .arg("-b").arg("4096")      // 块大小 4K
-        .arg("-g").arg("512")       // [关键!] 每组 512 块 (2MB)。确保 8MB 镜像有 4 个组。
-        .arg("-m").arg("0")         // 0% 保留空间，最大化可用容量
-        .arg("-I").arg("256")       // Inode 大小 256 字节
-        
+        .arg("-F") // 强制覆盖
+        .arg("-b")
+        .arg("4096") // 块大小 4K
+        .arg("-g")
+        .arg("512") // [关键!] 每组 512 块 (2MB)。确保 8MB 镜像有 4 个组。
+        .arg("-m")
+        .arg("0") // 0% 保留空间，最大化可用容量
+        .arg("-I")
+        .arg("256") // Inode 大小 256 字节
         // 特性控制 (Features):
         // ^has_journal:   [关键!] 禁用日志。小块组无法容纳日志，且 OS 开发初期建议无日志以简化。
         // ^resize_inode:  禁用在线调整大小预留，节省 GDT 空间。
         // ^metadata_csum: 禁用校验和，提高与旧版驱动/ext4_rs 的兼容性。
         // 64bit:          保持开启，现代 ext4 默认特性。
-        .arg("-O").arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
-        
+        .arg("-O")
+        .arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
         .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -178,7 +185,9 @@ fn create_ext4_image(path: &PathBuf) {
         .expect("Failed to execute mkfs.ext4");
 
     if mkfs_status.success() {
-        println!("cargo:warning=[build.rs] Ext4 image formatted successfully (No Journal, Multi-Group).");
+        println!(
+            "cargo:warning=[build.rs] Ext4 image formatted successfully (No Journal, Multi-Group)."
+        );
     } else {
         panic!("Failed to format ext4 image! Make sure 'mkfs.ext4' is installed.");
     }
