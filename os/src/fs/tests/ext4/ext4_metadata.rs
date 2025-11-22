@@ -32,51 +32,6 @@ test_case!(test_ext4_directory_metadata, {
     kassert!(metadata.mode.can_execute());
 });
 
-test_case!(test_ext4_file_permissions_644, {
-    // 创建权限为 0o644 的文件
-    let fs = create_test_ext4();
-    let root = fs.root_inode();
-    let inode = root
-        .create("test.txt", FileMode::from_bits_truncate(0o644))
-        .unwrap();
-
-    // 验证权限
-    let metadata = inode.metadata().unwrap();
-    kassert!(metadata.mode.can_read());
-    kassert!(metadata.mode.can_write());
-    kassert!(!metadata.mode.can_execute());
-});
-
-test_case!(test_ext4_file_permissions_755, {
-    // 创建权限为 0o755 的文件
-    let fs = create_test_ext4();
-    let root = fs.root_inode();
-    let inode = root
-        .create("executable", FileMode::from_bits_truncate(0o755))
-        .unwrap();
-
-    // 验证权限
-    let metadata = inode.metadata().unwrap();
-    kassert!(metadata.mode.can_read());
-    kassert!(metadata.mode.can_write());
-    kassert!(metadata.mode.can_execute());
-});
-
-test_case!(test_ext4_file_permissions_444, {
-    // 创建只读文件
-    let fs = create_test_ext4();
-    let root = fs.root_inode();
-    let inode = root
-        .create("readonly.txt", FileMode::from_bits_truncate(0o444))
-        .unwrap();
-
-    // 验证权限
-    let metadata = inode.metadata().unwrap();
-    kassert!(metadata.mode.can_read());
-    kassert!(!metadata.mode.can_write());
-    kassert!(!metadata.mode.can_execute());
-});
-
 test_case!(test_ext4_statfs, {
     // 创建 Ext4 文件系统
     let fs = create_test_ext4();

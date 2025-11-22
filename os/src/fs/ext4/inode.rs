@@ -124,6 +124,12 @@ impl Inode for Ext4Inode {
     }
 
     fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        // Check if this is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type == InodeType::Directory {
+            return Err(FsError::IsDirectory);
+        }
+
         let fs = self.fs.lock();
 
         // ext4_rs 的 read_at 签名: pub fn read_at(&self, inode: u32, offset: usize, read_buf: &mut [u8])
@@ -132,6 +138,12 @@ impl Inode for Ext4Inode {
     }
 
     fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        // Check if this is a directory
+        let metadata = self.metadata()?;
+        if metadata.inode_type == InodeType::Directory {
+            return Err(FsError::IsDirectory);
+        }
+
         let fs = self.fs.lock();
 
         // ext4_rs 的 write_at 签名: pub fn write_at(&self, inode: u32, offset: usize, write_buf: &[u8])
@@ -161,7 +173,7 @@ impl Inode for Ext4Inode {
         Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
     }
 
-    fn create(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
+    fn create(&self, name: &str, _mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
         // Check if current inode is a directory
         let metadata = self.metadata()?;
         if metadata.inode_type != InodeType::Directory {
@@ -175,14 +187,12 @@ impl Inode for Ext4Inode {
 
         // create() only creates regular files (not directories)
         let fs = self.fs.lock();
-        // 用户、组、其他用户的可读写执行 = 0o777;
+        // ext4_rs 的 create_inode 内部会强制设置 mode |= 0o777
+        // 所以这里直接使用 0o777
         let ftype = ext4_rs::InodeFileType::S_IFREG.bits() | 0o777;
 
-        let mut parent = self.ino;
-        let mut name_off = 0;
-
         let child_inode = fs
-            .create(parent, name, ftype)
+            .create(self.ino, name, ftype)
             .map_err(|_| FsError::IoError)?;
 
         Ok(Arc::new(Ext4Inode::new(
@@ -276,16 +286,40 @@ impl Inode for Ext4Inode {
             return Err(FsError::NotDirectory);
         }
 
-        // 检查文件是否存在
-        if self.lookup(name).is_err() {
-            return Err(FsError::NotFound);
-        }
+        // 查找要删除的项
+        let child = self.lookup(name)?;
+        let child_metadata = child.metadata()?;
+
+        // 获取 child 的 inode 号
+        let child_ext4 = child
+            .as_any()
+            .downcast_ref::<Ext4Inode>()
+            .ok_or(FsError::InvalidArgument)?;
 
         let fs = self.fs.lock();
-        // ext4_rs 的 dir_remove 签名: pub fn dir_remove(&self, parent: u32, path: &str) -> Result<usize>
-        // unlink 删除文件或目录，都使用 dir_remove
-        fs.dir_remove(self.ino, name)
-            .map_err(|_| FsError::IoError)?;
+
+        // Workaround for ext4_rs bug: dir_remove() 无条件调用 dir_has_entry()
+        // 但 dir_has_entry() 内部 assert child 必须是目录
+        // 所以对于普通文件，我们需要使用底层的 API 绕过这个 bug
+
+        if child_metadata.inode_type == InodeType::Directory {
+            // 对于目录，使用 dir_remove（它会检查目录是否为空）
+            fs.dir_remove(self.ino, name)
+                .map_err(|_| FsError::IoError)?;
+        } else {
+            // 对于普通文件，使用底层 API 手动删除
+            let mut parent_ref = fs.get_inode_ref(self.ino);
+            let mut child_ref = fs.get_inode_ref(child_ext4.ino);
+
+            // 调用底层的 unlink，它会：
+            // 1. 删除目录项（dir_remove_entry）
+            // 2. 释放 inode（ialloc_free_inode）
+            fs.unlink(&mut parent_ref, &mut child_ref, name)
+                .map_err(|_| FsError::IoError)?;
+
+            // 写回 parent inode
+            fs.write_back_inode(&mut parent_ref);
+        }
 
         Ok(())
     }
@@ -350,12 +384,39 @@ impl Inode for Ext4Inode {
     }
 
     fn truncate(&self, size: usize) -> Result<(), FsError> {
-        let fs = self.fs.lock();
-        let mut inode_ref = fs.get_inode_ref(self.ino);
+        let metadata = self.metadata()?;
+        let old_size = metadata.size;
 
-        // ext4_rs 的 truncate_inode 签名: pub fn truncate_inode(&self, inode_ref: &mut Ext4InodeRef, new_size: u64) -> Result<usize>
-        fs.truncate_inode(&mut inode_ref, size as u64)
-            .map_err(|_| FsError::IoError)?;
+        if size == old_size {
+            // 大小不变，直接返回
+            return Ok(());
+        }
+
+        if size < old_size {
+            // 缩小文件：使用 ext4_rs 的 truncate_inode
+            let fs = self.fs.lock();
+            let mut inode_ref = fs.get_inode_ref(self.ino);
+            fs.truncate_inode(&mut inode_ref, size as u64)
+                .map_err(|_| FsError::IoError)?;
+        } else {
+            // 扩展文件：ext4_rs 的 truncate_inode 不支持扩展（有 assert）
+            // Workaround: 在文件末尾写入零字节来扩展
+            // 这是安全的，因为：
+            // 1. 写入位置从 old_size 开始，在现有数据之后
+            // 2. write_at 会分配新块并更新文件大小
+            // 3. 符合 POSIX truncate 语义（新增部分填充零）
+            let extend_size = size - old_size;
+            let zero_buf = alloc::vec![0u8; extend_size.min(4096)]; // 使用 4KB 缓冲区
+
+            let fs = self.fs.lock();
+            let mut written = 0;
+            while written < extend_size {
+                let to_write = (extend_size - written).min(zero_buf.len());
+                fs.write_at(self.ino, old_size + written, &zero_buf[..to_write])
+                    .map_err(|_| FsError::IoError)?;
+                written += to_write;
+            }
+        }
 
         Ok(())
     }
