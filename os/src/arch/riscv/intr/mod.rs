@@ -1,12 +1,12 @@
 //! RISC-V 架构的中断管理
 #![allow(unused)]
-mod irq;
+mod softirq;
 
-pub use irq::*;
 use riscv::register::{
     sie,
     sstatus::{self, Sstatus},
 };
+pub use softirq::*;
 
 use crate::arch::constant::SSTATUS_SIE;
 

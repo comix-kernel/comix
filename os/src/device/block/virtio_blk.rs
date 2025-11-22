@@ -1,11 +1,12 @@
 use alloc::sync::Arc;
 use alloc::{format, string::String};
 use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::transport::InterruptStatus;
 use virtio_drivers::transport::mmio::MmioTransport;
 
 use crate::device::net::NetDriver;
 use crate::device::virtio_hal::VirtIOHal;
-use crate::device::{BLK_DRIVERS, DRIVERS};
+use crate::device::{BLK_DRIVERS, DRIVERS, IRQ_MANAGER};
 use crate::println;
 use crate::sync::Mutex;
 
@@ -19,8 +20,8 @@ pub struct VirtIOBlkDriver(Mutex<VirtIOBlk<VirtIOHal, MmioTransport<'static>>>);
 
 impl Driver for VirtIOBlkDriver {
     fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
-        self.0.lock().ack_interrupt();
-        true
+        let status = self.0.lock().ack_interrupt();
+        status.contains(InterruptStatus::QUEUE_INTERRUPT)
     }
 
     fn device_type(&self) -> DeviceType {
@@ -59,7 +60,7 @@ pub fn init(transport: MmioTransport<'static>) {
     let blk = VirtIOBlk::new(transport).expect("failed to init blk driver");
     let driver = Arc::new(VirtIOBlkDriver(Mutex::new(blk)));
     DRIVERS.write().push(driver.clone());
-    // IRQ_MANAGER.write().register_all(driver.clone());
+    IRQ_MANAGER.write().register_all(driver.clone());
     BLK_DRIVERS.write().push(driver);
     println!("[Device] Block driver (virtio-blk) is initialized");
 }

@@ -17,7 +17,6 @@ pub use block::block_device::BlockDevice;
 pub use block::ram_disk::RamDisk;
 pub use net::net_device::NetDevice;
 use spin::RwLock;
-use virtio_drivers::transport::DeviceType;
 
 use crate::device::rtc::RtcDriver;
 use crate::device::{block::BlockDriver, net::NetDriver};
@@ -25,34 +24,57 @@ use crate::sync::SpinLock;
 use alloc::{string::String, vec::Vec};
 use lazy_static::lazy_static;
 
+/// 设备类型枚举
+#[derive(Debug, Eq, PartialEq)]
+pub enum DeviceType {
+    /// 网络设备
+    Net,
+    /// 图形处理单元设备
+    Gpu,
+    /// 输入设备
+    Input,
+    /// 块设备
+    Block,
+    /// 实时时钟设备
+    Rtc,
+    /// 串行设备
+    Serial,
+    /// 中断控制器
+    Intc,
+}
+
+/// 设备驱动程序特征
 pub trait Driver: Send + Sync {
-    // if interrupt belongs to this driver, handle it and return true
-    // return false otherwise
-    // irq number is provided when available
-    // driver should skip handling when irq number is mismatched
+    // 如果中断属于此驱动程序，则处理它并返回 true
+    // 否则返回 false
+    // 中断号在可用时提供
+    // 如果中断号不匹配，驱动程序应跳过处理。
     fn try_handle_interrupt(&self, irq: Option<usize>) -> bool;
 
-    // return the correspondent device type, see DeviceType
+    // 返回对应的设备类型，请参阅 DeviceType
     fn device_type(&self) -> DeviceType;
 
-    // get unique identifier for this device
-    // should be different for each instance
+    // 获取此设备的唯一标识符
+    // 每个实例的标识符应该不同
     fn get_id(&self) -> String;
 
-    // trait casting
+    /// 将驱动程序转换为网络驱动程序（如果适用）
     fn as_net(&self) -> Option<&dyn NetDriver> {
         None
     }
 
+    /// 将驱动程序转换为块设备驱动程序（如果适用）
     fn as_block(&self) -> Option<&dyn BlockDriver> {
         None
     }
 
+    /// 将驱动程序转换为实时时钟驱动程序（如果适用）
     fn as_rtc(&self) -> Option<&dyn RtcDriver> {
         None
     }
 }
 
+/// 初始化设备子系统
 pub fn init() {
     device_tree::init();
     net::init_net_devices();
@@ -72,5 +94,5 @@ lazy_static! {
     pub static ref BLK_DRIVERS: RwLock<Vec<Arc<dyn BlockDriver>>> = RwLock::new(Vec::new());
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
     // pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
-    // pub static ref IRQ_MANAGER: RwLock<irq::IrqManager> = RwLock::new(irq::IrqManager::new(true));
+    pub static ref IRQ_MANAGER: RwLock<irq::IrqManager> = RwLock::new(irq::IrqManager::new(true));
 }

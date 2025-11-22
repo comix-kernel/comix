@@ -1,6 +1,6 @@
 use super::{super::DRIVERS, IrqManager};
-use crate::device::Driver;
 use crate::device::irq::IntcDriver;
+use crate::device::{DeviceType, Driver};
 use crate::println;
 // use super::{super::IRQ_MANAGER, IntcDriver, IrqManager};
 use crate::{sync::SpinLock as Mutex, tool::read, tool::write};
@@ -8,7 +8,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use fdt::node::FdtNode;
-use virtio_drivers::transport::DeviceType;
 
 /// Platform Level Interrupt Controller (PLIC) 结构体
 pub struct Plic {
@@ -33,9 +32,7 @@ impl Driver for Plic {
 
     /// 返回设备类型
     fn device_type(&self) -> DeviceType {
-        unimplemented!();
-        // TODO: Virtio的DeviceType中似乎没有PLIC类型？
-        // DeviceType::Intc
+        DeviceType::Intc
     }
 
     /// 获取设备唯一标识符
