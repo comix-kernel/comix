@@ -5,7 +5,7 @@
 //! 支持块设备、GPU、输入设备和网络设备的初始化
 use core::ptr::NonNull;
 
-use fdt::{node::FdtNode, standard_nodes::Compatible};
+use fdt::node::FdtNode;
 use virtio_drivers::transport::{
     DeviceType, Transport,
     mmio::{MmioTransport, VirtIOHeader},
@@ -18,7 +18,7 @@ use crate::{
     },
     kernel::current_memory_space,
     mm::address::{Paddr, UsizeConvert},
-    pr_info, pr_warn, println,
+    pr_warn,
 };
 
 pub fn driver_init() {
@@ -40,11 +40,6 @@ fn virtio_probe(node: &FdtNode) {
             pr_warn!("Virtio MMIO device tree node {} has no size", node.name);
             return;
         }
-        pr_info!(
-            "Device tree node {}: {:?}",
-            node.name,
-            node.compatible().map(Compatible::first),
-        );
         //判 断 virtio 设 备 类 型
         let vaddr = current_memory_space()
             .lock()
@@ -55,12 +50,6 @@ fn virtio_probe(node: &FdtNode) {
         match unsafe { MmioTransport::new(header, size) } {
             Err(e) => pr_warn!("Error creating VirtIO MMIO transport: {}", e),
             Ok(transport) => {
-                println!(
-                    "[Device] Detected virtio MMIO device with vendor id {:#X}, device type {:?}, version {:?}",
-                    transport.vendor_id(),
-                    transport.device_type(),
-                    transport.version(),
-                );
                 virtio_device(transport);
             }
         }

@@ -71,9 +71,12 @@ fn walk_dt(fdt: &Fdt, intc_only: bool) {
     for node in fdt.all_nodes() {
         if let Some(compatible) = node.compatible() {
             if node.property("interrupt-controller").is_some() == intc_only {
+                pr_info!("[Device] Found device: {}", node.name);
                 let registry = DEVICE_TREE_REGISTRY.read();
-                if let Some(f) = registry.get(compatible.first()) {
-                    f(&node);
+                for c in compatible.all() {
+                    if let Some(f) = registry.get(c) {
+                        f(&node);
+                    }
                 }
             }
         }
