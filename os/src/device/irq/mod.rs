@@ -81,7 +81,7 @@ impl IrqManager {
     /// * `driver` - 要注销的驱动程序
     pub fn deregister_irq(&mut self, irq: usize, driver: Arc<dyn Driver>) {
         if let Some(e) = self.mapping.get_mut(&irq) {
-            e.retain(|d| !Arc::ptr_eq(&d, &driver));
+            e.retain(|d| !Arc::ptr_eq(d, &driver));
         }
     }
 
@@ -89,7 +89,7 @@ impl IrqManager {
     /// # 参数：
     /// * `driver` - 要注销的驱动程序
     pub fn deregister_all(&mut self, driver: Arc<dyn Driver>) {
-        self.all.retain(|d| !Arc::ptr_eq(&d, &driver));
+        self.all.retain(|d| !Arc::ptr_eq(d, &driver));
     }
 
     /// 处理中断
