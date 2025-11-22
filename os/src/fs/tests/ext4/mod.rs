@@ -1,13 +1,13 @@
+use crate::devices::BlockDevice as VfsBlockDevice;
 use crate::devices::ram_disk::RamDisk;
 use crate::fs::ext4::Ext4FileSystem;
+use crate::sync::SpinLock;
+use crate::vfs::dentry::{Dentry, DentryCache};
 use crate::vfs::error::FsError;
 use crate::vfs::file_system::FileSystem;
 use crate::vfs::inode::{FileMode, Inode};
-use crate::vfs::dentry::{Dentry, DentryCache};
-use alloc::sync::Arc;
 use alloc::string::String;
-use crate::devices::BlockDevice as VfsBlockDevice;
-use crate::sync::SpinLock;
+use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
 // Test helper functions (fixtures)
@@ -142,7 +142,7 @@ pub fn create_test_dir(fs: &Arc<Ext4FileSystem>, name: &str) -> Result<Arc<dyn I
 // Export test modules
 pub mod ext4_basic;
 pub mod ext4_directory;
-pub mod ext4_metadata;
-pub mod ext4_io;
 pub mod ext4_error;
 pub mod ext4_integration;
+pub mod ext4_io;
+pub mod ext4_metadata;

@@ -139,9 +139,10 @@ test_case!(test_ext4_vfs_interface_completeness, {
     kassert!(dir.metadata().is_ok());
     kassert!(dir.readdir().is_ok());
     kassert!(dir.lookup("test.txt").is_err()); // 不在这个目录
-    kassert!(dir
-        .create("subfile.txt", FileMode::from_bits_truncate(0o644))
-        .is_ok());
+    kassert!(
+        dir.create("subfile.txt", FileMode::from_bits_truncate(0o644))
+            .is_ok()
+    );
     kassert!(dir.lookup("subfile.txt").is_ok());
 
     // 清理
