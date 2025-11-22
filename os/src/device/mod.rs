@@ -74,12 +74,6 @@ pub trait Driver: Send + Sync {
     }
 }
 
-/// 初始化设备子系统
-pub fn init() {
-    device_tree::init();
-    net::init_net_devices();
-}
-
 lazy_static! {
     /// 网络设备管理器
     /// 负责存储和管理系统中的所有网络设备
@@ -95,4 +89,10 @@ lazy_static! {
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
     // pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
     pub static ref IRQ_MANAGER: RwLock<irq::IrqManager> = RwLock::new(irq::IrqManager::new(true));
+}
+
+lazy_static! {
+    // 内核命令行参数
+    // 存储从设备树中提取的 bootargs 属性
+    pub static ref CMDLINE: RwLock<String> = RwLock::new(String::new());
 }

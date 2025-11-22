@@ -1,30 +1,39 @@
 //! 设备树模块
-use core::ptr::NonNull;
 
 use crate::{
-    device::{block, gpu, input, net},
-    kernel::current_memory_space,
+    device::{CMDLINE, irq::IntcDriver},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    pr_info, pr_warn, println,
+    pr_info, println,
 };
-use fdt::{Fdt, node::FdtNode, standard_nodes::Compatible};
-use virtio_drivers::transport::{
-    DeviceType, Transport,
-    mmio::{MmioTransport, VirtIOHeader},
-};
-
+use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
+use fdt::{Fdt, node::FdtNode};
+use spin::RwLock;
 /// 指向设备树的指针，在启动时由引导程序设置
 #[unsafe(no_mangle)]
 pub static mut DTP: usize = 0x114514; // 占位地址，实际由引导程序设置
 
 lazy_static::lazy_static! {
     /// 设备树
+    /// 通过 DTP 指针解析得到
+    /// XXX: 是否需要这个?
     pub static ref FDT: Fdt<'static> = {
         unsafe {
             let addr = Paddr::to_vaddr(&Paddr::from_usize(DTP));
             fdt::Fdt::from_ptr(addr.as_usize() as *mut u8).expect("Failed to parse device tree")
         }
     };
+
+    /// Compatible 字符串到探测函数的映射表
+    /// 键为设备的 compatible 字符串，值为对应的探测函数
+    /// 用于在设备树中查找和初始化设备
+    pub static ref DEVICE_TREE_REGISTRY: RwLock<BTreeMap<&'static str, fn(&FdtNode)>> =
+        RwLock::new(BTreeMap::new());
+
+    /// 设备树中断控制器映射表
+    /// 键为中断控制器的 phandle，值为对应的中断控制器驱动程序
+    /// 用于在设备树中查找和管理中断控制器
+    pub static ref DEVICE_TREE_INTC: RwLock<BTreeMap<u32, Arc<dyn IntcDriver>>> =
+        RwLock::new(BTreeMap::new());
 }
 
 /// 初始化设备树
@@ -43,7 +52,34 @@ pub fn init() {
         );
     });
 
-    walk_dt(*FDT);
+    // 首先初始化中断控制器
+    walk_dt(&FDT, true);
+    walk_dt(&FDT, false);
+}
+
+/// 遍历设备树，查找并初始化 virtio 设备
+/// # 参数
+/// * `fdt` - 设备树对象
+fn walk_dt(fdt: &Fdt, intc_only: bool) {
+    for node in fdt.all_nodes() {
+        if let Some(compatible) = node.compatible() {
+            if node.property("interrupt-controller").is_some() == intc_only {
+                let registry = DEVICE_TREE_REGISTRY.read();
+                if let Some(f) = registry.get(compatible.first()) {
+                    f(&node);
+                }
+            }
+        }
+        if let Some(bootargs) = node.property("bootargs") {
+            if bootargs.as_str().is_some() {
+                let args = bootargs.as_str().unwrap();
+                if args.len() > 0 {
+                    pr_info!("Kernel cmdline: {}", args);
+                    *CMDLINE.write() = String::from(args);
+                }
+            }
+        }
+    }
 }
 
 /// 返回 DRAM 的起始物理地址与总大小（合并所有 memory.regions）
@@ -72,67 +108,5 @@ pub fn dram_info() -> Option<(usize, usize)> {
         Some((start, end - start))
     } else {
         None
-    }
-}
-
-/// 遍历设备树，查找并初始化 virtio 设备
-/// # 参数
-/// * `fdt` - 设备树对象
-fn walk_dt(fdt: Fdt) {
-    for node in fdt.all_nodes() {
-        if let Some(compatible) = node.compatible() {
-            if compatible.all().any(|s| s == "virtio,mmio") {
-                virtio_probe(node);
-            }
-        }
-    }
-}
-
-/// 探测并初始化 virtio 设备
-/// 分析设备树节点，创建对应的 virtio 传输对象，并调用设备初始化函数
-/// # 参数
-/// * `node` - 设备树节点
-fn virtio_probe(node: FdtNode) {
-    // 分 析 reg 信 息
-    if let Some(reg) = node.reg().and_then(|mut reg| reg.next()) {
-        let paddr = reg.starting_address as usize;
-        let size = reg.size.unwrap();
-        pr_info!(
-            "Device tree node {}: {:?}",
-            node.name,
-            node.compatible().map(Compatible::first),
-        );
-        //判 断 virtio 设 备 类 型
-        let vaddr = current_memory_space()
-            .lock()
-            .map_mmio(Paddr::from_usize(paddr), size)
-            .ok()
-            .expect("Failed to map MMIO region");
-        let header = NonNull::new(vaddr.as_usize() as *mut VirtIOHeader).unwrap();
-        match unsafe { MmioTransport::new(header, size) } {
-            Err(e) => pr_warn!("Error creating VirtIO MMIO transport: {}", e),
-            Ok(transport) => {
-                println!(
-                    "[Device] Detected virtio MMIO device with vendor id {:#X}, device type {:?}, version {:?}",
-                    transport.vendor_id(),
-                    transport.device_type(),
-                    transport.version(),
-                );
-                virtio_device(transport);
-            }
-        }
-    }
-}
-
-/// 对不同的virtio设备进行进一步的初始化工作
-/// # 参数
-/// * `transport` - virtio 传输对象
-fn virtio_device(transport: MmioTransport<'static>) {
-    match transport.device_type() {
-        DeviceType::Block => block::virtio_blk::init(transport),
-        DeviceType::GPU => gpu::virtio_gpu::init(transport),
-        DeviceType::Input => input::virtio_input::init(transport),
-        DeviceType::Network => net::virtio_net::init(transport),
-        t => pr_warn!("Unrecognized virtio device: {:?}", t),
     }
 }

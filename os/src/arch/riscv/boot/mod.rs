@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
-    arch::{intr, mm::vaddr_to_paddr, timer, trap},
+    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
     device,
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
@@ -77,7 +77,6 @@ pub fn rest_init() {
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
     super::trap::init();
-    device::init();
     create_kthreadd();
     kernel_execve("/init", &["init"], &[]);
 }
@@ -178,6 +177,7 @@ pub fn main(hartid: usize) {
     crate::test_main();
 
     // 初始化工作
+    platform::init();
     trap::init_boot_trap();
     timer::init();
     unsafe { intr::enable_interrupts() };
