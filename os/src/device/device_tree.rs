@@ -52,6 +52,13 @@ pub fn init() {
         );
     });
 
+    if let Some(bootargs) = FDT.chosen().bootargs() {
+        if !bootargs.is_empty() {
+            pr_info!("Kernel cmdline: {}", bootargs);
+            *CMDLINE.write() = String::from(bootargs);
+        }
+    }
+
     // 首先初始化中断控制器
     walk_dt(&FDT, true);
     walk_dt(&FDT, false);
@@ -67,15 +74,6 @@ fn walk_dt(fdt: &Fdt, intc_only: bool) {
                 let registry = DEVICE_TREE_REGISTRY.read();
                 if let Some(f) = registry.get(compatible.first()) {
                     f(&node);
-                }
-            }
-        }
-        if let Some(bootargs) = node.property("bootargs") {
-            if bootargs.as_str().is_some() {
-                let args = bootargs.as_str().unwrap();
-                if args.len() > 0 {
-                    pr_info!("Kernel cmdline: {}", args);
-                    *CMDLINE.write() = String::from(args);
                 }
             }
         }
