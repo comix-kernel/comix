@@ -8,7 +8,13 @@ use riscv::register::{
 };
 pub use softirq::*;
 
-use crate::arch::constant::SSTATUS_SIE;
+use crate::{
+    arch::{
+        constant::{IRQ_MIN, SSTATUS_SIE},
+        mm::paddr_to_vaddr,
+    },
+    println,
+};
 
 /// 启用定时器中断
 /// 安全性: 该函数直接操作 CPU 寄存器，启用中断可能会引发竞态条件或不一致状态。
@@ -90,11 +96,7 @@ pub unsafe fn restore_interrupts(flags: usize) {
     }
 }
 
-/// 启用指定的 IRQ
-#[inline(always)]
+/// 启用指定的中断号
 pub fn enable_irq(irq: usize) {
-    unimplemented!("enable_irq not implemented for riscv");
-    // let mut ioapic = unsafe { IoApic::new(phys_to_virt(IOAPIC_ADDR as usize)) };
-    // ioapic.set_irq_vector(irq as u8, (consts::IrqMin + irq) as u8);
-    // ioapic.enable(irq as u8, 0);
+    // Handled in PLIC driver
 }
