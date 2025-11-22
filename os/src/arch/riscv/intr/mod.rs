@@ -1,12 +1,12 @@
 //! RISC-V 架构的中断管理
 #![allow(unused)]
-mod irq;
+mod softirq;
 
-pub use irq::*;
 use riscv::register::{
     sie,
     sstatus::{self, Sstatus},
 };
+pub use softirq::*;
 
 use crate::arch::constant::SSTATUS_SIE;
 
@@ -88,4 +88,13 @@ pub unsafe fn restore_interrupts(flags: usize) {
     if spie != 0 {
         unsafe { sstatus::set_sie() };
     }
+}
+
+/// 启用指定的 IRQ
+#[inline(always)]
+pub fn enable_irq(irq: usize) {
+    unimplemented!("enable_irq not implemented for riscv");
+    // let mut ioapic = unsafe { IoApic::new(phys_to_virt(IOAPIC_ADDR as usize)) };
+    // ioapic.set_irq_vector(irq as u8, (consts::IrqMin + irq) as u8);
+    // ioapic.enable(irq as u8, 0);
 }
