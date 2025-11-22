@@ -177,8 +177,8 @@ pub fn main(hartid: usize) {
     crate::test_main();
 
     // 初始化工作
-    platform::init();
     trap::init_boot_trap();
+    platform::init();
     timer::init();
     unsafe { intr::enable_interrupts() };
 

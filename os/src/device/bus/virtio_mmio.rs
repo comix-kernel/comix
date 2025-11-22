@@ -35,7 +35,11 @@ fn virtio_probe(node: &FdtNode) {
     // 分 析 reg 信 息
     if let Some(reg) = node.reg().and_then(|mut reg| reg.next()) {
         let paddr = reg.starting_address as usize;
-        let size = reg.size.unwrap();
+        let size = reg.size.unwrap_or(0);
+        if size == 0 {
+            pr_warn!("Virtio MMIO device tree node {} has no size", node.name);
+            return;
+        }
         pr_info!(
             "Device tree node {}: {:?}",
             node.name,
