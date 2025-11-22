@@ -1,4 +1,5 @@
 use super::{super::DRIVERS, IrqManager};
+use crate::device::device_tree::DEVICE_TREE_REGISTRY;
 use crate::device::irq::IntcDriver;
 use crate::device::{DeviceType, Driver};
 use crate::println;
@@ -84,6 +85,5 @@ pub fn init_dt(dt: &FdtNode) {
 
 /// 注册 PLIC 驱动初始化函数
 pub fn driver_init() {
-    todo!();
-    // DEVICE_TREE_REGISTRY.write().insert("riscv,plic0", init_dt);
+    DEVICE_TREE_REGISTRY.write().insert("riscv,plic0", init_dt);
 }
