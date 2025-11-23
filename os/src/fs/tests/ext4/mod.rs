@@ -1,5 +1,6 @@
 use crate::device::block::block_device::BlockDevice as VfsBlockDevice;
 use crate::device::block::ram_disk::RamDisk;
+use crate::device::block::BlockDriver;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::sync::SpinLock;
 use crate::vfs::dentry::{Dentry, DentryCache};
@@ -50,7 +51,17 @@ pub fn create_test_ramdisk() -> Arc<RamDisk> {
 /// (Ext4FileSystem, root Dentry)
 pub fn create_test_ext4_with_root() -> (Arc<Ext4FileSystem>, Arc<Dentry>) {
     let ramdisk = create_test_ramdisk();
-    let fs = Ext4FileSystem::open(ramdisk).expect("Failed to create Ext4FileSystem");
+
+    // 获取 ramdisk 的参数
+    let block_size = ramdisk.block_size();
+    let total_blocks = ramdisk.total_blocks();
+    let device_id = ramdisk.device_id();
+
+    // 将 ramdisk 转换为 BlockDriver
+    let block_driver: Arc<dyn BlockDriver> = ramdisk;
+
+    let fs = Ext4FileSystem::open(block_driver, block_size, total_blocks, device_id)
+        .expect("Failed to create Ext4FileSystem");
 
     // 为每个测试生成唯一的虚拟根路径,避免与全局 "/" 冲突
     let test_id = {
