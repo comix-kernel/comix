@@ -3,11 +3,13 @@
 #[macro_use]
 pub mod bus;
 pub mod block;
+pub mod console;
 pub mod gpu;
 pub mod input;
 pub mod irq;
 pub mod net;
 pub mod rtc;
+pub mod serial;
 pub mod virtio_hal;
 
 pub mod device_tree;
@@ -19,6 +21,7 @@ pub use net::net_device::NetDevice;
 use spin::RwLock;
 
 use crate::device::rtc::RtcDriver;
+use crate::device::serial::SerialDriver;
 use crate::device::{block::BlockDriver, net::NetDriver};
 use crate::sync::SpinLock;
 use alloc::{string::String, vec::Vec};
@@ -87,7 +90,7 @@ lazy_static! {
     pub static ref NET_DRIVERS: RwLock<Vec<Arc<dyn NetDriver>>> = RwLock::new(Vec::new());
     pub static ref BLK_DRIVERS: RwLock<Vec<Arc<dyn BlockDriver>>> = RwLock::new(Vec::new());
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
-    // pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
+    pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
     pub static ref IRQ_MANAGER: RwLock<irq::IrqManager> = RwLock::new(irq::IrqManager::new(true));
 }
 
