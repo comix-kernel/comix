@@ -1,6 +1,7 @@
 //! Platform Level Interrupt Controller (PLIC) 驱动实现
 //!
 //! PLIC 提供对外设中断的集中管理，支持优先级和中断分发功能。
+
 use super::{super::DRIVERS, IrqManager};
 use crate::arch::constant::SUPERVISOR_EXTERNAL;
 use crate::device::device_tree::{DEVICE_TREE_INTC, DEVICE_TREE_REGISTRY};
