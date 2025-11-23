@@ -1,4 +1,5 @@
-//! 网络系统调用实现
+//! 网络相关的系统调用实现
+
 use core::ffi::{CStr, c_char};
 
 use riscv::register::sstatus;
@@ -121,7 +122,7 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, flags: i32) -> isize {
 }
 
 /// 关闭套接字
-pub fn close(sockfd: i32) -> isize {
+pub fn close_sock(sockfd: i32) -> isize {
     // TODO: 实现关闭逻辑
     0
 }
