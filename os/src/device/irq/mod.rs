@@ -1,3 +1,7 @@
+//! 中断管理模块
+//!
+//! 包含中断管理器和中断控制器驱动接口的定义
+
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
