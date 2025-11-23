@@ -146,3 +146,4 @@ pub mod ext4_error;
 pub mod ext4_integration;
 pub mod ext4_io;
 pub mod ext4_metadata;
+pub mod ext4_rename;

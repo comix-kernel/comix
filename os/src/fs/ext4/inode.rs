@@ -339,13 +339,219 @@ impl Inode for Ext4Inode {
             .map_err(|_| FsError::NotFound)
     }
 
+    /// 重命名或移动文件/目录
+    ///
+    /// # 安全性保证
+    /// - **并发安全**：持有文件系统锁直到操作完成，防止竞态条件
+    /// - **失败回滚**：关键操作失败时会尝试恢复到原始状态
+    /// - **参数验证**：严格检查所有前置条件
+    ///
+    /// # 安全性限制 ⚠️
+    /// - **非崩溃安全**：由于 ext4_rs 没有事务日志支持，系统崩溃时可能导致文件系统不一致
+    ///   - 最坏情况：文件可能同时出现在两个位置，或完全丢失
+    ///   - 建议：关键操作后调用 `sync()` 确保数据写入磁盘
+    /// - **回滚非原子**：回滚操作本身也可能失败（如磁盘已满）
+    /// - **简化的循环检测**：只检查是否移动到自身，未实现完整的祖先链遍历
+    ///
+    /// # 注意事项
+    /// - 操作持有全局文件系统锁，可能影响并发性能
+    /// - 跨目录移动目录比简单重命名更耗时（需要更新 ".." 引用）
     fn rename(
         &self,
         old_name: &str,
         new_parent: Arc<dyn Inode>,
         new_name: &str,
     ) -> Result<(), FsError> {
-        todo!("implement rename");
+        // 重命名实现：使用 "添加新条目 + 删除旧条目" 的方式
+        //
+        // 操作顺序（最小化中间不一致状态）：
+        // 1. 验证所有参数和前置条件
+        // 2. 备份需要删除的目标（如果存在）
+        // 3. 在新位置添加条目
+        // 4. 从旧位置删除条目
+        // 5. 如果是目录，更新 ".." 引用
+        // 6. 失败时回滚
+
+        // ========== 阶段 1: 验证 ==========
+
+        // 检查当前 inode（旧父目录）是否为目录
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        // 查找要重命名的子项
+        let old_child = self.lookup(old_name)?;
+        let old_child_metadata = old_child.metadata()?;
+        let old_child_ext4 = old_child
+            .as_any()
+            .downcast_ref::<Ext4Inode>()
+            .ok_or(FsError::InvalidArgument)?;
+
+        // 转换新父目录
+        let new_parent_ext4 = new_parent
+            .as_any()
+            .downcast_ref::<Ext4Inode>()
+            .ok_or(FsError::InvalidArgument)?;
+
+        // 检查新父目录是否为目录
+        let new_parent_metadata = new_parent_ext4.metadata()?;
+        if new_parent_metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        // 确保在同一个文件系统中
+        if !Arc::ptr_eq(&self.fs, &new_parent_ext4.fs) {
+            return Err(FsError::InvalidArgument);
+        }
+
+        // 防止将目录移动到其子目录中（会造成循环）
+        if old_child_metadata.inode_type == InodeType::Directory {
+            // 简单检查：如果新父目录就是被移动的目录本身
+            if old_child_ext4.ino == new_parent_ext4.ino {
+                return Err(FsError::InvalidArgument);
+            }
+            // TODO: 完整的循环检查需要遍历新父目录的祖先链
+        }
+
+        // 持有锁直到操作完成
+        let fs = self.fs.lock();
+
+        // ========== 阶段 2: 检查目标是否存在 ==========
+
+        let mut replaced_inode: Option<u32> = None;
+
+        // 检查目标位置是否已有文件/目录
+        let target_exists = {
+            let mut parent = new_parent_ext4.ino;
+            let mut name_off = 0;
+            fs.generic_open(new_name, &mut parent, false, 0, &mut name_off)
+                .ok()
+        };
+
+        if let Some(existing_ino) = target_exists {
+            // 如果目标已存在，需要先删除它
+            let existing_ref = fs.get_inode_ref(existing_ino);
+            let replaced_is_dir = existing_ref.inode.is_dir();
+
+            if replaced_is_dir {
+                // 如果目标是目录，必须为空
+                if fs.dir_has_entry(existing_ino) {
+                    return Err(FsError::DirectoryNotEmpty);
+                }
+
+                // 删除空目录
+                fs.dir_remove(new_parent_ext4.ino, new_name)
+                    .map_err(|_| FsError::IoError)?;
+            } else {
+                // 删除普通文件
+                let mut new_parent_ref = fs.get_inode_ref(new_parent_ext4.ino);
+                let mut existing_ref = fs.get_inode_ref(existing_ino);
+
+                fs.unlink(&mut new_parent_ref, &mut existing_ref, new_name)
+                    .map_err(|_| FsError::IoError)?;
+
+                fs.write_back_inode(&mut new_parent_ref);
+            }
+
+            // 记录被替换的 inode，以便回滚
+            replaced_inode = Some(existing_ino);
+        }
+
+        // ========== 阶段 3: 执行重命名（关键部分）==========
+
+        let mut old_parent_ref = fs.get_inode_ref(self.ino);
+        let mut new_parent_ref = fs.get_inode_ref(new_parent_ext4.ino);
+        let child_ref = fs.get_inode_ref(old_child_ext4.ino);
+
+        // 步骤 3a: 在新位置添加条目
+        if let Err(_e) = fs.dir_add_entry(&mut new_parent_ref, &child_ref, new_name) {
+            // 失败：尝试恢复被删除的目标文件
+            if let Some(replaced_ino) = replaced_inode {
+                let replaced_ref = fs.get_inode_ref(replaced_ino);
+                let _ = fs.dir_add_entry(&mut new_parent_ref, &replaced_ref, new_name);
+                fs.write_back_inode(&mut new_parent_ref);
+            }
+            return Err(FsError::NoSpace);
+        }
+
+        // 步骤 3b: 从旧位置删除条目
+        if let Err(_e) = fs.dir_remove_entry(&mut old_parent_ref, old_name) {
+            // 回滚：删除刚添加的新条目
+            let _ = fs.dir_remove_entry(&mut new_parent_ref, new_name);
+
+            // 尝试恢复被删除的目标文件
+            if let Some(replaced_ino) = replaced_inode {
+                let replaced_ref = fs.get_inode_ref(replaced_ino);
+                let _ = fs.dir_add_entry(&mut new_parent_ref, &replaced_ref, new_name);
+            }
+
+            fs.write_back_inode(&mut old_parent_ref);
+            fs.write_back_inode(&mut new_parent_ref);
+            return Err(FsError::IoError);
+        }
+
+        // ========== 阶段 4: 更新目录的 ".." 引用（如果需要）==========
+
+        if old_child_metadata.inode_type == InodeType::Directory && self.ino != new_parent_ext4.ino {
+            // 只有跨目录移动时才需要更新 ".."
+            let mut child_ref = fs.get_inode_ref(old_child_ext4.ino);
+
+            // 步骤 4a: 删除旧的 ".." 条目
+            if let Err(_e) = fs.dir_remove_entry(&mut child_ref, "..") {
+                // 回滚：恢复旧位置的条目，删除新位置的条目
+                let _ = fs.dir_add_entry(&mut old_parent_ref, &child_ref, old_name);
+                let _ = fs.dir_remove_entry(&mut new_parent_ref, new_name);
+
+                if let Some(replaced_ino) = replaced_inode {
+                    let replaced_ref = fs.get_inode_ref(replaced_ino);
+                    let _ = fs.dir_add_entry(&mut new_parent_ref, &replaced_ref, new_name);
+                }
+
+                fs.write_back_inode(&mut old_parent_ref);
+                fs.write_back_inode(&mut new_parent_ref);
+                fs.write_back_inode(&mut child_ref);
+                return Err(FsError::IoError);
+            }
+
+            // 步骤 4b: 添加新的 ".." 条目
+            if let Err(_e) = fs.dir_add_entry(&mut child_ref, &new_parent_ref, "..") {
+                // 回滚：恢复 ".." 条目，恢复旧位置条目，删除新位置条目
+                let _ = fs.dir_add_entry(&mut child_ref, &old_parent_ref, "..");
+                let _ = fs.dir_add_entry(&mut old_parent_ref, &child_ref, old_name);
+                let _ = fs.dir_remove_entry(&mut new_parent_ref, new_name);
+
+                if let Some(replaced_ino) = replaced_inode {
+                    let replaced_ref = fs.get_inode_ref(replaced_ino);
+                    let _ = fs.dir_add_entry(&mut new_parent_ref, &replaced_ref, new_name);
+                }
+
+                fs.write_back_inode(&mut old_parent_ref);
+                fs.write_back_inode(&mut new_parent_ref);
+                fs.write_back_inode(&mut child_ref);
+                return Err(FsError::NoSpace);
+            }
+
+            // 步骤 4c: 更新链接计数
+            let old_parent_links = old_parent_ref.inode.links_count();
+            if old_parent_links > 0 {
+                old_parent_ref.inode.set_links_count(old_parent_links - 1);
+            }
+
+            let new_parent_links = new_parent_ref.inode.links_count();
+            new_parent_ref
+                .inode
+                .set_links_count(new_parent_links + 1);
+
+            fs.write_back_inode(&mut child_ref);
+        }
+
+        // ========== 阶段 5: 提交更改 ==========
+
+        fs.write_back_inode(&mut old_parent_ref);
+        fs.write_back_inode(&mut new_parent_ref);
+
+        Ok(())
     }
 
     fn readdir(&self) -> Result<Vec<DirEntry>, FsError> {
