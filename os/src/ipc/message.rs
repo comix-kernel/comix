@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering;
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
 use crate::{
-    kernel::{WaitQueue, current_cpu, yield_task},
+    kernel::{WaitQueue, current_cpu, current_task, yield_task},
     sync::{Mutex, SpinLock},
 };
 
@@ -86,14 +86,10 @@ impl MessageQueue {
                 self.recv_waiters.lock().wake_up_all();
                 return;
             }
-            // 不可入队，释放锁并阻塞等待空间
-            let current = {
-                let cpu = current_cpu().lock();
-                cpu.current_task.as_ref().unwrap().clone()
-            };
+
             // XXX: 是否有丢失唤醒风险
             drop(st);
-            self.send_waiters.lock().sleep(current);
+            self.send_waiters.lock().sleep(current_task());
             // 被唤醒后重试
         }
     }
@@ -115,11 +111,7 @@ impl MessageQueue {
                 return msg;
             }
 
-            let current = {
-                let cpu = current_cpu().lock();
-                cpu.current_task.as_ref().unwrap().clone()
-            };
-            self.recv_waiters.lock().sleep(current);
+            self.recv_waiters.lock().sleep(current_task());
         }
     }
 
@@ -140,11 +132,7 @@ impl MessageQueue {
                 return msg;
             }
 
-            let current = {
-                let cpu = current_cpu().lock();
-                cpu.current_task.as_ref().unwrap().clone()
-            };
-            self.recv_waiters.lock().sleep(current);
+            self.recv_waiters.lock().sleep(current_task());
         }
     }
 

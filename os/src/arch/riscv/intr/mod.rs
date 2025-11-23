@@ -1,11 +1,20 @@
 //! RISC-V 架构的中断管理
 #![allow(unused)]
+mod softirq;
+
 use riscv::register::{
     sie,
     sstatus::{self, Sstatus},
 };
+pub use softirq::*;
 
-use crate::arch::constant::SSTATUS_SIE;
+use crate::{
+    arch::{
+        constant::{IRQ_MIN, SSTATUS_SIE},
+        mm::paddr_to_vaddr,
+    },
+    println,
+};
 
 /// 启用定时器中断
 /// 安全性: 该函数直接操作 CPU 寄存器，启用中断可能会引发竞态条件或不一致状态。
@@ -85,4 +94,9 @@ pub unsafe fn restore_interrupts(flags: usize) {
     if spie != 0 {
         unsafe { sstatus::set_sie() };
     }
+}
+
+/// 启用指定的中断号
+pub fn enable_irq(irq: usize) {
+    // Handled in PLIC driver
 }

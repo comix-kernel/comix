@@ -1,5 +1,5 @@
 use super::*;
-use crate::devices::ram_disk::RamDisk;
+use crate::device::block::ram_disk::RamDisk;
 use crate::fs::simple_fs::SimpleFs;
 use crate::vfs::file_system::FileSystem;
 use alloc::string::String;

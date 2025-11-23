@@ -1,7 +1,7 @@
 //! BlockDevice 适配器：VFS BlockDevice → ext4_rs BlockDevice
 //! 纯净版：移除了所有针对 ENOSPC 的 Hack
 
-use crate::devices::{BlockDevice as VfsBlockDevice, block_device::BlockError};
+use crate::device::block::block_device::{BlockDevice as VfsBlockDevice, BlockError};
 use crate::pr_err;
 use alloc::sync::Arc;
 use alloc::vec::Vec;

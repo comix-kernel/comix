@@ -16,12 +16,10 @@ use crate::{
         task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
     },
     mm::{
-        activate,
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
     sync::SpinLock,
-    vfs::vfs_load_elf,
 };
 
 /// 创建一个新的内核线程并返回其 Arc 包装
@@ -104,16 +102,16 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
         if let Some(task) = task_opt {
             let t = task.lock();
             if t.state == TaskState::Zombie {
-                if let Some(rv) = t.return_value {
+                if let Some(rv) = t.exit_code {
                     // SAFETY: 调用者保证了 return_value_ptr 指向的内存是合法可写的
                     unsafe {
                         if let Some(ptr) = return_value_ptr {
                             let ptr = ptr as *mut usize;
-                            ptr.write_volatile(rv);
+                            ptr.write_volatile(rv as usize);
                         }
                     }
                 }
-                TASK_MANAGER.lock().release_task(tid);
+                TASK_MANAGER.lock().release_task(task.clone());
                 return 0; // 成功结束
             }
         } else {
@@ -137,7 +135,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         .expect("kernel_execve: failed to create memory space from ELF");
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    activate(space.lock().root_ppn());
+    current_cpu().lock().switch_space(space.clone());
 
     let task = {
         let cpu = current_cpu().lock();

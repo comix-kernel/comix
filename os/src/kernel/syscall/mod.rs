@@ -17,23 +17,21 @@ use alloc::{
 use riscv::register::sstatus;
 
 use crate::{
-    arch::{lib::sbi, trap::restore},
+    arch::trap::restore,
     // fs::ROOT_FS,
     impl_syscall,
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_task, do_exit, schedule,
+        current_task, exit_process, schedule,
     },
     mm::{
-        activate,
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
     sync::SpinLock,
     vfs::{
-        DENTRY_CACHE, Dentry, DiskFile, FDFlags, File, FileMode, FsError, InodeType, LinuxDirent64,
-        OpenFlags, PipeFile, SeekWhence, Stat, dentry, get_root_dentry, inode_type_to_d_type,
-        split_path, vfs_lookup, vfs_lookup_from,
+        DENTRY_CACHE, Dentry, DiskFile, FDFlags, File, FileMode, FsError, InodeType, OpenFlags,
+        PipeFile, SeekWhence, Stat, get_root_dentry, split_path, vfs_lookup, vfs_lookup_from,
     },
 };
 
@@ -52,7 +50,7 @@ fn shutdown() -> ! {
 /// - `code`: 退出代码
 fn exit(code: i32) -> ! {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    do_exit(task, code);
+    exit_process(task, code);
     schedule();
     unreachable!("exit: exit_task should not return.");
 }
@@ -203,7 +201,7 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
         .expect("kernel_execve: failed to create memory space from ELF");
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    activate(space.lock().root_ppn());
+    current_cpu().lock().switch_space(space.clone());
 
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {
@@ -226,7 +224,12 @@ fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     // 阻塞当前任务,直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let (tid, exit_code) = task.lock().wait_for_child();
-    TASK_MANAGER.lock().release_task(tid);
+    {
+        let mut tm = TASK_MANAGER.lock();
+        if let Some(child_task) = tm.get_task(tid) {
+            tm.release_task(child_task);
+        }
+    }
     unsafe {
         sstatus::set_sum();
         *wstatus = exit_code;
