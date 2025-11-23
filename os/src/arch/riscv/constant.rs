@@ -22,3 +22,9 @@ pub const STACK_ALIGN_MASK: usize = 0xF;
 /// 用户空间地址范围常量
 pub const USER_BASE: usize = 0x0000_0000_0000_0000;
 pub const USER_TOP: usize = 0x0000_003f_ffff_ffff;
+
+pub const IRQ_MIN: usize = usize::MAX / 2;
+pub const IRQ_MAX: usize = usize::MAX;
+
+pub const TIMER: usize = usize::MAX / 2 + 1 + 5;
+pub const SUPERVISOR_EXTERNAL: usize = usize::MAX / 2 + 1 + 8;

@@ -8,7 +8,7 @@ pub mod inode;
 pub use adpaters::BlockDeviceAdapter;
 pub use inode::Ext4Inode;
 
-use crate::devices::BlockDevice as VfsBlockDevice;
+use crate::device::block::block_device::BlockDevice as VfsBlockDevice;
 use crate::pr_info;
 use crate::sync::SpinLock;
 use crate::vfs::{FileSystem, FsError, Inode, StatFs};

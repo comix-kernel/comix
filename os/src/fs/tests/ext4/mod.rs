@@ -1,5 +1,5 @@
-use crate::devices::BlockDevice as VfsBlockDevice;
-use crate::devices::ram_disk::RamDisk;
+use crate::device::block::block_device::BlockDevice as VfsBlockDevice;
+use crate::device::block::ram_disk::RamDisk;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::sync::SpinLock;
 use crate::vfs::dentry::{Dentry, DentryCache};

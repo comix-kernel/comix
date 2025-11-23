@@ -89,7 +89,7 @@ impl Scheduler for RRScheduler {
         }
 
         // 在切换前，更新当前任务与时间片
-        current_cpu().lock().current_task = Some(next_task.clone());
+        current_cpu().lock().switch_task(next_task);
         self.current_slice = self.time_slice;
 
         Some(SwitchPlan {
