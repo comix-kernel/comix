@@ -1,44 +1,41 @@
 //! RISC-V 架构的系统调用分发模块
-use crate::arch::syscall::syscall_number::*;
 use crate::kernel::syscall::*;
-use crate::println;
+use crate::pr_err;
 
 mod syscall_number;
 
 /// 分发系统调用
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
     match frame.x17_a7 {
-        SYS_SHUTDOWN => sys_shutdown(frame),
-        SYS_EXIT => sys_exit(frame),
-        SYS_WRITE => sys_write(frame),
-        SYS_READ => sys_read(frame),
-        SYS_FORK => sys_fork(frame),
-        SYS_EXEC => sys_execve(frame),
-        SYS_WAITPID => sys_wait(frame),
-        SYS_DUP => sys_dup(frame),
-        SYS_DUP3 => sys_dup3(frame),
-        SYS_OPENAT => sys_openat(frame),
-        SYS_CLOSE => sys_close(frame),
-        SYS_PIPE2 => sys_pipe2(frame),
-        SYS_GETDENTS64 => sys_getdents64(frame),
-        SYS_LSEEK => sys_lseek(frame),
-        SYS_FSTAT => sys_fstat(frame),
-        // 网络系统调用
-        SYS_GETIFADDRS => sys_getifaddrs(frame),
-        SYS_SETSOCKOPT => sys_setsockopt(frame),
-        SYS_SOCKET => sys_socket(frame),
-        SYS_BIND => sys_bind(frame),
-        SYS_LISTEN => sys_listen(frame),
-        SYS_ACCEPT => sys_accept(frame),
-        SYS_CONNECT => sys_connect(frame),
-        SYS_SEND => sys_send(frame),
-        SYS_RECV => sys_recv(frame),
-        SYS_GETSOCKOPT => sys_getsockopt(frame),
+        syscall_number::SYS_SHUTDOWN => sys_shutdown(frame),
+        syscall_number::SYS_EXIT => sys_exit(frame),
+        syscall_number::SYS_WRITE => sys_write(frame),
+        syscall_number::SYS_READ => sys_read(frame),
+        syscall_number::SYS_CLONE => sys_fork(frame),
+        syscall_number::SYS_EXECVE => sys_execve(frame),
+        syscall_number::SYS_WAIT4 => sys_wait(frame),
+        syscall_number::SYS_DUP => sys_dup(frame),
+        syscall_number::SYS_DUP3 => sys_dup3(frame),
+        syscall_number::SYS_OPENAT => sys_openat(frame),
+        syscall_number::SYS_CLOSE => sys_close(frame),
+        syscall_number::SYS_PIPE2 => sys_pipe2(frame),
+        syscall_number::SYS_GETDENTS64 => sys_getdents64(frame),
+        syscall_number::SYS_LSEEK => sys_lseek(frame),
+        syscall_number::SYS_FSTAT => sys_fstat(frame),
+        syscall_number::SYS_GETIFADDRS => sys_getifaddrs(frame),
+        syscall_number::SYS_SETSOCKOPT => sys_setsockopt(frame),
+        syscall_number::SYS_SOCKET => sys_socket(frame),
+        syscall_number::SYS_BIND => sys_bind(frame),
+        syscall_number::SYS_LISTEN => sys_listen(frame),
+        syscall_number::SYS_ACCEPT => sys_accept(frame),
+        syscall_number::SYS_CONNECT => sys_connect(frame),
+        syscall_number::SYS_SENDTO => sys_send(frame),
+        syscall_number::SYS_RECVFROM => sys_recv(frame),
+        syscall_number::SYS_GETSOCKOPT => sys_getsockopt(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
-            println!("Unknown syscall: {}", frame.x17_a7);
-            panic!("Unknown syscall");
+            pr_err!("Unknown syscall: {}", frame.x17_a7);
         }
     }
 }
