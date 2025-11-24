@@ -12,9 +12,9 @@ mod sys;
 mod task;
 mod util;
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
 
-use crate::{impl_syscall, vfs::Stat};
+use crate::{impl_syscall, uapi::resource::Rlimit, vfs::Stat};
 use fs::*;
 use io::*;
 use ipc::*;
@@ -24,7 +24,7 @@ use sys::*;
 use task::*;
 
 // 系统调用实现注册
-impl_syscall!(sys_shutdown, shutdown, noreturn, ());
+impl_syscall!(sys_reboot, reboot, (c_int, c_int, c_int, *mut c_void));
 impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
@@ -43,7 +43,14 @@ impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
 impl_syscall!(sys_pipe2, pipe2, (*mut i32, u32));
 impl_syscall!(sys_fstat, fstat, (usize, *mut Stat));
 impl_syscall!(sys_getdents64, getdents64, (usize, *mut u8, usize));
-// 网络系统调用注册
+impl_syscall!(sys_sethostname, set_hostname, (*mut c_char, usize));
+impl_syscall!(sys_getrlimit, getrlimit, (c_int, *mut Rlimit));
+impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
+impl_syscall!(
+    sys_prlimit,
+    prlimit,
+    (c_int, c_int, *const Rlimit, *mut Rlimit)
+);
 impl_syscall!(sys_socket, socket, (i32, i32, i32));
 impl_syscall!(sys_bind, bind, (i32, *const u8, u32));
 impl_syscall!(sys_listen, listen, (i32, i32));

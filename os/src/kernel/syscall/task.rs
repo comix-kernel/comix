@@ -36,7 +36,7 @@ use crate::{
 /// 除非进程中有其他线程调用 execve() 或等待其子线程终止(TODO: 该行为待验证)
 /// # 参数
 /// - `code`: 退出代码
-pub fn exit(code: c_int) -> ! {
+pub fn exit(code: c_int) -> c_int {
     let task = current_task();
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
