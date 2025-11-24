@@ -22,7 +22,8 @@ pub use global_allocator::init_heap;
 
 use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
-use crate::mm::address::Ppn;
+use crate::mm::address::{Ppn, UsizeConvert};
+use crate::println;
 
 unsafe extern "C" {
     // 链接器脚本中定义的内核结束地址
@@ -44,6 +45,7 @@ pub fn init() {
     // 计算页对齐后的物理内存起始地址。
     // 分配器将管理 [start, end) 范围内的内存。
     let start = ekernel_paddr.div_ceil(PAGE_SIZE) * PAGE_SIZE; // 页对齐
+
     let end = MEMORY_END;
 
     // 初始化物理帧分配器
@@ -59,9 +61,32 @@ pub fn init() {
 
         use crate::{kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock};
 
+        // 记录切换前的 satp 值
+        let old_satp: usize;
+        unsafe {
+            core::arch::asm!("csrr {0}, satp", out(reg) old_satp);
+        }
+        println!("[MM] Before space switch - satp: 0x{:x}", old_satp);
+
         let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
-        // let root_ppn = with_kernel_space(|space| space.root_ppn());
+        let root_ppn = space.lock().root_ppn();
+        println!(
+            "[MM] New kernel space root PPN: 0x{:x}",
+            root_ppn.as_usize()
+        );
+
         current_cpu().lock().switch_space(space);
+
+        // 记录切换后的 satp 值
+        let new_satp: usize;
+        unsafe {
+            core::arch::asm!("csrr {0}, satp", out(reg) new_satp);
+        }
+        println!("[MM] After space switch - satp: 0x{:x}", new_satp);
+        println!(
+            "[MM] Expected satp: 0x{:x}",
+            (root_ppn.as_usize() | (8 << 60))
+        );
     }
 }
 

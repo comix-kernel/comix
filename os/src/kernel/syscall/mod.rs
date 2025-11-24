@@ -697,6 +697,55 @@ impl_syscall!(sys_pipe2, pipe2, (*mut i32, u32));
 impl_syscall!(sys_fstat, fstat, (usize, *mut Stat));
 impl_syscall!(sys_getdents64, getdents64, (usize, *mut u8, usize));
 
+pub mod net_syscall;
+
+// 网络系统调用注册
+impl_syscall!(sys_socket, net_syscall::socket, (i32, i32, i32));
+impl_syscall!(sys_bind, net_syscall::bind, (i32, *const u8, u32));
+impl_syscall!(sys_listen, net_syscall::listen, (i32, i32));
+impl_syscall!(sys_accept, net_syscall::accept, (i32, *mut u8, *mut u32));
+impl_syscall!(sys_connect, net_syscall::connect, (i32, *const u8, u32));
+impl_syscall!(sys_send, net_syscall::send, (i32, *const u8, usize, i32));
+impl_syscall!(sys_recv, net_syscall::recv, (i32, *mut u8, usize, i32));
+impl_syscall!(sys_getifaddrs, net_syscall::getifaddrs, (*mut *mut u8));
+impl_syscall!(sys_freeifaddrs, net_syscall::freeifaddrs, (*mut u8));
+impl_syscall!(
+    sys_setsockopt,
+    net_syscall::setsockopt,
+    (i32, i32, i32, *const u8, u32)
+);
+impl_syscall!(
+    sys_getsockopt,
+    net_syscall::getsockopt,
+    (i32, i32, i32, *mut u8, *mut u32)
+);
+impl_syscall!(
+    sys_accept4,
+    net_syscall::accept4,
+    (i32, *mut u8, *mut u32, i32)
+);
+impl_syscall!(
+    sys_sendto,
+    net_syscall::sendto,
+    (i32, *const u8, usize, i32, *const u8, u32)
+);
+impl_syscall!(
+    sys_recvfrom,
+    net_syscall::recvfrom,
+    (i32, *mut u8, usize, i32, *mut u8, *mut u32)
+);
+impl_syscall!(
+    sys_getsockname,
+    net_syscall::getsockname,
+    (i32, *mut u8, *mut u32)
+);
+impl_syscall!(
+    sys_getpeername,
+    net_syscall::getpeername,
+    (i32, *mut u8, *mut u32)
+);
+impl_syscall!(sys_ioctl, net_syscall::ioctl, (i32, u32, *mut u8));
+
 fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> {
     // 必须在 unsafe 块中进行，因为依赖 C 的正确性
     let c_str = unsafe {

@@ -240,6 +240,10 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 }
                 // 创建新的叶子 PTE，设置 PPN 和标志位 (VALID 必须设置)
                 *pte = PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::VALID);
+
+                // 刷新 TLB 确保新映射对 CPU 可见
+                // 这对于已激活的页表尤其重要，可防止 TLB 中的过时条目
+                Self::tlb_flush(vpn);
                 return Ok(());
             } else {
                 // 中间级别 - 需要继续向下遍历
