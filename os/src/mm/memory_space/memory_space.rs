@@ -174,54 +174,21 @@ impl MemorySpace {
         )?;
 
         // 4c. 映射内核堆
-        let sheap_addr = ebss as usize;
-        let eheap_addr = ekernel as usize;
-        println!("[MemorySpace] Mapping kernel heap:");
-        println!("  sheap (VA): 0x{:x}", sheap_addr);
-        println!("  eheap (VA): 0x{:x}", eheap_addr);
-        println!(
-            "  Heap size: {} MB",
-            (eheap_addr - sheap_addr) / (1024 * 1024)
-        );
-
         Self::map_kernel_section(
             self,
-            sheap_addr,
-            eheap_addr,
+            ebss as usize,    // sheap
+            ekernel as usize, // eheap
             AreaType::KernelHeap,
             UniversalPTEFlag::kernel_rw(),
         )?;
-        println!("[MemorySpace] Kernel heap mapped successfully");
 
-        // 5. 映射物理内存（从 ekernel 到 FDT 起始地址的直接映射）
-        // FDT (Flattened Device Tree) 位于 0x87e00000，不应该被映射为可分配内存
-        const FDT_START_PADDR: usize = 0x87e00000;
+        // 5. 映射物理内存（从 ekernel 到 MEMORY_END 的直接映射）
         let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
         let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
-        let phys_mem_end_vaddr = paddr_to_vaddr(FDT_START_PADDR); // 使用 FDT 起始地址
+        let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
 
-        println!("[MemorySpace] Mapping physical memory:");
-        println!("  ekernel_paddr:       0x{:x}", ekernel_paddr);
-        println!("  phys_mem_start_vaddr: 0x{:x}", phys_mem_start_vaddr);
-        println!(
-            "  phys_mem_end_vaddr:   0x{:x} (FDT protected)",
-            phys_mem_end_vaddr
-        );
-        println!(
-            "  Size: {} MB",
-            (phys_mem_end_vaddr - phys_mem_start_vaddr) / (1024 * 1024)
-        );
-
-        let phys_mem_start = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_start_vaddr));
-        let phys_mem_end = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_end_vaddr));
-
-        println!("  Start VPN: 0x{:x}", phys_mem_start.as_usize());
-        println!("  End VPN:   0x{:x}", phys_mem_end.as_usize());
-        println!(
-            "  Total pages: {}",
-            phys_mem_end.as_usize() - phys_mem_start.as_usize()
-        );
-
+        let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_start_vaddr));
+        let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_end_vaddr));
         let mut phys_mem_area = MappingArea::new(
             VpnRange::new(phys_mem_start, phys_mem_end),
             AreaType::KernelHeap,
@@ -229,38 +196,8 @@ impl MemorySpace {
             UniversalPTEFlag::kernel_rw(),
         );
 
-        println!("[MemorySpace] About to map physical memory area...");
         phys_mem_area.map(&mut self.page_table)?;
-        println!("[MemorySpace] Physical memory area mapped successfully");
         self.areas.push(phys_mem_area);
-
-        // 6. 映射 FDT (Flattened Device Tree) 区域为只读
-        // FDT 不能被分配为可用内存，但需要被映射以便内核读取设备树信息
-        const FDT_SIZE: usize = 0x10000; // 64KB should be enough for FDT
-        let fdt_vaddr_start = paddr_to_vaddr(FDT_START_PADDR);
-        let fdt_vaddr_end = paddr_to_vaddr(FDT_START_PADDR + FDT_SIZE);
-
-        println!("[MemorySpace] Mapping FDT region:");
-        println!(
-            "  FDT PA: 0x{:x} - 0x{:x}",
-            FDT_START_PADDR,
-            FDT_START_PADDR + FDT_SIZE
-        );
-        println!("  FDT VA: 0x{:x} - 0x{:x}", fdt_vaddr_start, fdt_vaddr_end);
-
-        let fdt_vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(fdt_vaddr_start));
-        let fdt_vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(fdt_vaddr_end));
-
-        let mut fdt_area = MappingArea::new(
-            VpnRange::new(fdt_vpn_start, fdt_vpn_end),
-            AreaType::KernelRodata, // Read-only for safety
-            MapType::Direct,
-            UniversalPTEFlag::kernel_r(), // Read-only
-        );
-
-        fdt_area.map(&mut self.page_table)?;
-        println!("[MemorySpace] FDT region mapped successfully");
-        self.areas.push(fdt_area);
 
         // 暂时移除自动 MMIO 映射
         // // 6. 映射 MMIO 区域
