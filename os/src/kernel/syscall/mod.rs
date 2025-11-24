@@ -233,7 +233,7 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     // 阻塞当前任务,直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    
+
     let (tid, exit_code) = loop {
         let wait_child_ptr = {
             let mut t = task.lock();
