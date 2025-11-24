@@ -80,8 +80,20 @@ pub fn rest_init() {
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
     super::trap::init();
+
     create_kthreadd();
-    kernel_execve("/init", &["init"], &[]);
+
+    // 初始化 Ext4 文件系统（从真实块设备）
+    // 必须在任务上下文中进行,因为 VFS 需要 current_task()
+    if let Err(e) = crate::fs::init_ext4_from_block_device() {
+        println!(
+            "[Init] Warning: Failed to initialize Ext4 filesystem: {:?}",
+            e
+        );
+        println!("[Init] Continuing without filesystem...");
+    }
+
+    kernel_execve("/home/user/bin/init", &["init"], &[]);
 }
 
 /// 内核守护线程
@@ -137,8 +149,8 @@ pub fn main(hartid: usize) {
     // Initialize memory management (frame allocator + heap + kernel page table)
     mm::init();
 
-    // Initialize Simple FS
-    crate::fs::init_simple_fs().expect("Failed to initialize VFS");
+    // Initialize Simple FS (暂时禁用)
+    // crate::fs::init_simple_fs().expect("Failed to initialize VFS");
 
     println!("[Boot] Hello, world!");
     println!("[Boot] RISC-V Hart {} is up!", hartid);

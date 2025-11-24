@@ -232,36 +232,26 @@ impl Task {
         }
     }
 
-    /// 等待子进程状态变化，目前只有退出
-    pub fn wait_for_child(&mut self) -> (u32, i32) {
-        loop {
-            let mut children_guard = self.children.lock();
-            if let Some(idx) = children_guard
-                .iter()
-                .position(|ch| ch.lock().state == TaskState::Zombie)
-            {
-                let child = children_guard.swap_remove(idx);
-                drop(children_guard);
-
-                let (tid, code) = {
-                    let g = child.lock();
-                    (g.tid, g.exit_code.unwrap_or_default())
-                };
-                return (tid, code);
-            }
+    /// 检查是否有僵尸子进程
+    /// 如果有，回收并返回 (tid, exit_code)
+    /// 如果没有，返回 None
+    /// 注意：此函数不阻塞，调用者需持有锁
+    pub fn check_child_exit_locked(&mut self) -> Option<(u32, i32)> {
+        let mut children_guard = self.children.lock();
+        if let Some(idx) = children_guard
+            .iter()
+            .position(|ch| ch.lock().state == TaskState::Zombie)
+        {
+            let child = children_guard.swap_remove(idx);
             drop(children_guard);
 
-            let current_task = {
-                use crate::kernel::cpu::current_cpu;
-                current_cpu()
-                    .lock()
-                    .current_task
-                    .as_ref()
-                    .expect("wait_for_child: no current task")
-                    .clone()
+            let (tid, code) = {
+                let g = child.lock();
+                (g.tid, g.exit_code.unwrap_or_default())
             };
-            self.wait_child.sleep(current_task);
+            return Some((tid, code));
         }
+        None
     }
 
     pub fn notify_child_exit(&mut self) {

@@ -10,11 +10,14 @@
 //! - **Inode**：存储层，无状态，方法带 offset 参数（如 `read_at`）
 //! - **File**：会话层，有状态，方法不带 offset 参数（如 `read`）
 
+use core::any::Any;
+
 use crate::arch::timer::get_time;
 use crate::config::CLOCK_FREQ;
-use crate::vfs::error::FsError;
+use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
+use alloc::sync::Weak;
 use alloc::vec::Vec;
 
 /// 文件类型
@@ -141,7 +144,7 @@ pub struct InodeMetadata {
 /// - 所有读写方法必须携带 `offset` 参数（体现随机访问能力）
 /// - 不维护会话状态（offset 由上层 File 维护）
 /// - 支持目录操作（lookup、create、mkdir、unlink）
-pub trait Inode: Send + Sync {
+pub trait Inode: Send + Sync + Any {
     /// 获取文件元数据
     fn metadata(&self) -> Result<InodeMetadata, FsError>;
 
@@ -164,10 +167,45 @@ pub trait Inode: Send + Sync {
     /// 在目录中创建子目录
     fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError>;
 
-    /// 删除目录项
+    /// 创建符号链接
     ///
-    /// 仅删除目录项，不一定删除 Inode（取决于引用计数）。
-    fn unlink(&self, name: &str) -> Result<(), FsError>;
+    /// 提供默认Err，以避免为SimpleFS实现新语义
+    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 创建硬链接
+    ///
+    /// 提供默认Err，以避免为SimpleFS实现新语义
+    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 删除普通文件/链接
+    ///
+    /// 提供默认Err，以避免为SimpleFS实现新语义
+    fn unlink(&self, name: &str) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 删除目录
+    ///
+    /// 提供默认Err，以避免为SimpleFS实现新语义
+    fn rmdir(&self, name: &str) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 重命名/移动 (原子操作)
+    ///
+    /// 提供默认Err，以避免为SimpleFS实现新语义
+    fn rename(
+        &self,
+        old_name: &str,
+        new_parent: Arc<dyn Inode>,
+        new_name: &str,
+    ) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
 
     /// 列出目录内容
     fn readdir(&self) -> Result<Vec<DirEntry>, FsError>;
@@ -177,4 +215,36 @@ pub trait Inode: Send + Sync {
 
     /// 同步文件数据到存储设备
     fn sync(&self) -> Result<(), FsError>;
+
+    /// 设置 Dentry（可选方法）
+    fn set_dentry(&self, _dentry: Weak<Dentry>) {}
+
+    /// 获取 Dentry（可选方法）
+    fn get_dentry(&self) -> Option<Arc<Dentry>> {
+        None
+    }
+
+    /// 向下转型为 &dyn Any，用于支持 downcast
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// 为 Arc<dyn Inode> 提供向下转型辅助方法
+impl dyn Inode {
+    /// 尝试向下转型为具体的 Inode 类型
+    pub fn downcast_arc<T: Inode>(self: Arc<Self>) -> Result<Arc<T>, Arc<Self>> {
+        if (*self).as_any().is::<T>() {
+            // SAFETY: 已经通过 is::<T>() 检查了类型
+            unsafe {
+                let ptr = Arc::into_raw(self);
+                Ok(Arc::from_raw(ptr as *const T))
+            }
+        } else {
+            Err(self)
+        }
+    }
+
+    /// 尝试获取具体类型的引用
+    pub fn downcast_ref<T: Inode>(&self) -> Option<&T> {
+        self.as_any().downcast_ref::<T>()
+    }
 }
