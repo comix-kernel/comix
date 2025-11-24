@@ -8,7 +8,10 @@ mod syscall_number;
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
     match frame.x17_a7 {
         syscall_number::SYS_SHUTDOWN => sys_shutdown(frame),
+        syscall_number::SYS_GETPID => sys_getpid(frame),
+        syscall_number::SYS_GETPPID => sys_getppid(frame),
         syscall_number::SYS_EXIT => sys_exit(frame),
+        syscall_number::SYS_EXIT_GROUP => sys_exit_group(frame),
         syscall_number::SYS_WRITE => sys_write(frame),
         syscall_number::SYS_READ => sys_read(frame),
         syscall_number::SYS_CLONE => sys_fork(frame),

@@ -22,6 +22,7 @@ mod mm;
 mod sync;
 mod test;
 mod tool;
+mod uapi;
 mod vfs;
 #[macro_use]
 mod log;
