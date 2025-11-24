@@ -46,16 +46,7 @@ pub fn init() {
     // 分配器将管理 [start, end) 范围内的内存。
     let start = ekernel_paddr.div_ceil(PAGE_SIZE) * PAGE_SIZE; // 页对齐
 
-    // FDT (Flattened Device Tree) 位于物理地址 0x87e00000
-    // 为了避免分配器分配到 FDT 区域，将内存结束地址设置为 FDT 起始地址
-    const FDT_START: usize = 0x87e00000;
-    let end = FDT_START; // 使用 FDT 起始地址而不是 MEMORY_END
-
-    println!("[MM] Frame allocator range: 0x{:x} - 0x{:x}", start, end);
-    println!(
-        "[MM] FDT protection: excluding FDT region at 0x{:x}",
-        FDT_START
-    );
+    let end = MEMORY_END;
 
     // 初始化物理帧分配器
     init_frame_allocator(start, end);
