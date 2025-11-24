@@ -5,7 +5,7 @@ use riscv::register::sstatus;
 
 use crate::{
     device::net::{
-        network_config::NetworkConfigManager, network_interface::NETWORK_INTERFACE_MANAGER,
+        config::NetworkConfigManager, interface::NETWORK_INTERFACE_MANAGER,
     },
     println,
 };

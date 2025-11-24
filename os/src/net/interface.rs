@@ -8,7 +8,8 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::net::device::NetDevice;
+use crate::device::net::net_device::{NetDevice};
+use crate::net::NetworkError;
 
 /// 网络接口配置
 pub struct InterfaceConfig {
@@ -91,9 +92,9 @@ impl NetworkInterface {
     }
 
     /// 发送数据包
-    pub fn send_packet(&mut self, data: &[u8]) -> Result<(), ()> {
+    pub fn send_packet(&mut self, data: &[u8]) -> Result<(), NetworkError> {
         if !self.config.enabled {
-            return Err(());
+            return Err(NetworkError::InterfaceDisabled);
         }
 
         match self.device.lock().send(data) {
@@ -102,17 +103,17 @@ impl NetworkInterface {
                 self.stats.tx_bytes += data.len();
                 Ok(())
             }
-            Err(_) => {
+            Err(e) => {
                 self.stats.tx_errors += 1;
-                Err(())
+                Err(NetworkError::from(e))
             }
         }
     }
 
     /// 接收数据包
-    pub fn receive_packet(&mut self, buffer: &mut [u8]) -> Result<usize, ()> {
+    pub fn receive_packet(&mut self, buffer: &mut [u8]) -> Result<usize, NetworkError> {
         if !self.config.enabled {
-            return Err(());
+            return Err(NetworkError::InterfaceDisabled);
         }
 
         match self.device.lock().receive(buffer) {
@@ -121,9 +122,9 @@ impl NetworkInterface {
                 self.stats.rx_bytes += size;
                 Ok(size)
             }
-            Err(_) => {
+            Err(e) => {
                 self.stats.rx_errors += 1;
-                Err(())
+                Err(NetworkError::from(e))
             }
         }
     }

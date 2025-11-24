@@ -253,10 +253,3 @@ pub mod icmp {
         }
     }
 }
-
-/// 协议栈初始化
-pub fn init() {
-    println!("[Network] Initializing network protocols...");
-    // 协议栈初始化代码
-    println!("[Network] Network protocols initialized");
-}

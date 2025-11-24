@@ -111,7 +111,15 @@ impl NetworkStack {
 
                 // 发送响应
                 drop(interface_lock);
-                interface.lock().send_packet(&frame);
+                match interface.lock().send_packet(&frame) {
+                    Ok(_) => {
+                        // 发送成功
+                    }
+                    Err(e) => {
+                        // 处理发送错误，例如记录日志
+                        // 在实际实现中，可能需要重试或其他错误处理
+                    }
+                }
             }
         }
     }

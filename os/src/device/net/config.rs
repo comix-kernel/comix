@@ -1,4 +1,4 @@
-use crate::device::net::network_interface::NETWORK_INTERFACE_MANAGER;
+use crate::device::net::interface::NETWORK_INTERFACE_MANAGER;
 use crate::println;
 use alloc::string::String;
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address};
@@ -21,11 +21,14 @@ impl NetworkConfigManager {
     pub fn init_default_interface() -> Result<(), NetworkConfigError> {
         println!("Initializing default network configuration...");
 
-        // 查找名为"eth0"的网络接口
-        let binding = NETWORK_INTERFACE_MANAGER.lock();
-        let interfaces = binding.get_interfaces();
+        // 先获取接口的Arc，然后释放全局锁
+        // 避免在持有NETWORK_INTERFACE_MANAGER锁时操作接口字段锁
+        let interface = {
+            let binding = NETWORK_INTERFACE_MANAGER.lock();
+            binding.get_interfaces().first().cloned()
+        }; // NETWORK_INTERFACE_MANAGER锁已释放
 
-        if let Some(interface) = interfaces.first() {
+        if let Some(interface) = interface {
             println!("Configuring interface: {}", interface.name());
 
             // 设置默认IP地址
@@ -51,11 +54,13 @@ impl NetworkConfigManager {
         ip: &str,
         prefix: u8,
     ) -> Result<(), NetworkConfigError> {
-        // 查找指定接口
-        if let Some(interface) = NETWORK_INTERFACE_MANAGER
+        // 先获取接口的Arc，然后释放全局锁
+        let interface = NETWORK_INTERFACE_MANAGER
             .lock()
             .find_interface_by_name(interface_name)
-        {
+            .cloned(); // clone Arc，然后锁自动释放
+
+        if let Some(interface) = interface {
             // 解析IP地址
             match ip.parse::<Ipv4Address>() {
                 Ok(ipv4) => {
@@ -76,11 +81,13 @@ impl NetworkConfigManager {
         interface_name: &str,
         gateway: &str,
     ) -> Result<(), NetworkConfigError> {
-        // 查找指定接口
-        if let Some(interface) = NETWORK_INTERFACE_MANAGER
+        // 先获取接口的Arc，然后释放全局锁
+        let interface = NETWORK_INTERFACE_MANAGER
             .lock()
             .find_interface_by_name(interface_name)
-        {
+            .cloned(); // clone Arc，然后锁自动释放
+
+        if let Some(interface) = interface {
             // 解析网关地址
             match gateway.parse::<Ipv4Address>() {
                 Ok(gateway_ipv4) => {
@@ -97,10 +104,13 @@ impl NetworkConfigManager {
 
     /// 获取网络接口配置信息
     pub fn get_interface_config(interface_name: &str) -> Result<String, NetworkConfigError> {
-        if let Some(interface) = NETWORK_INTERFACE_MANAGER
+        // 先获取接口的Arc，然后释放全局锁
+        let interface = NETWORK_INTERFACE_MANAGER
             .lock()
             .find_interface_by_name(interface_name)
-        {
+            .cloned(); // clone Arc，然后锁自动释放
+
+        if let Some(interface) = interface {
             let mut config = alloc::format!("Interface: {}\n", interface.name());
             config.push_str(&alloc::format!(
                 "MAC Address: {}\n",
@@ -138,11 +148,13 @@ impl NetworkConfigManager {
         gateway: &str,
         mask: &str,
     ) -> Result<(), NetworkConfigError> {
-        // 查找指定接口
-        if let Some(interface) = NETWORK_INTERFACE_MANAGER
+        // 先获取接口的Arc，然后释放全局锁
+        let interface = NETWORK_INTERFACE_MANAGER
             .lock()
             .find_interface_by_name(interface_name)
-        {
+            .cloned(); // clone Arc，然后锁自动释放
+
+        if let Some(interface) = interface {
             // 解析IP地址
             let ip_address = match ip.parse::<Ipv4Address>() {
                 Ok(ipv4) => ipv4,
