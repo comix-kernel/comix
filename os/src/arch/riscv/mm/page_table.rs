@@ -122,9 +122,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         }
 
         let mut ppn = self.root;
-        // 在 SV39 中，VPN 只有 27 位有效（39位VA - 12位页内偏移 = 27位）
-        // 必须先掩掉高位，否则符号扩展的虚拟地址会导致索引计算错误
-        // let vpn_value = vpn.as_usize() & 0x7FFFFFF;
         let vpn_value = vpn.as_usize();
 
         // 从根级别 (LEVELS-1) 遍历到目标级别 (level)
@@ -221,9 +218,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         let target_level = 0; // 仅支持 4K 页
 
         let mut current_ppn = self.root;
-        // 在 SV39 中，VPN 只有 27 位有效（39位VA - 12位页内偏移 = 27位）
-        // 必须先掩掉高位，否则符号扩展的虚拟地址会导致索引计算错误
-        let vpn_value = vpn.as_usize() & 0x7FFFFFF;
+        let vpn_value = vpn.as_usize();
 
         // 从根级别 (LEVELS-1) 遍历到目标级别 (target_level)
         for level in (target_level..Self::LEVELS).rev() {
@@ -288,9 +283,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     // 解除虚拟页号 (VPN) 映射 (Unmap)
     fn unmap(&mut self, vpn: Vpn) -> PagingResult<()> {
         let mut current_ppn = self.root;
-        // 在 SV39 中，VPN 只有 27 位有效（39位VA - 12位页内偏移 = 27位）
-        // 必须先掩掉高位，否则符号扩展的虚拟地址会导致索引计算错误
-        let vpn_value = vpn.as_usize() & 0x7FFFFFF;
+        let vpn_value = vpn.as_usize();
 
         // 遍历页表以找到叶子节点
         for level in (0..Self::LEVELS).rev() {
@@ -341,9 +334,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     // 更新指定 VPN 的页表项标志位
     fn update_flags(&mut self, vpn: Vpn, flags: UniversalPTEFlag) -> PagingResult<()> {
         let mut current_ppn = self.root;
-        // 在 SV39 中，VPN 只有 27 位有效（39位VA - 12位页内偏移 = 27位）
-        // 必须先掩掉高位，否则符号扩展的虚拟地址会导致索引计算错误
-        let vpn_value = vpn.as_usize() & 0x7FFFFFF;
+        let vpn_value = vpn.as_usize();
 
         // 遍历页表以找到叶子节点
         for level in (0..Self::LEVELS).rev() {
@@ -380,9 +371,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     // 遍历页表 (Walk)，查找指定 VPN 的映射信息
     fn walk(&self, vpn: Vpn) -> PagingResult<(Ppn, PageSize, UniversalPTEFlag)> {
         let mut ppn = self.root;
-        // 在 SV39 中，VPN 只有 27 位有效（39位VA - 12位页内偏移 = 27位）
-        // 必须先掩掉高位，否则符号扩展的虚拟地址会导致索引计算错误
-        let vpn_value = vpn.as_usize() & 0x7FFFFFF;
+        let vpn_value = vpn.as_usize();
 
         // SV39 级别划分：VPN[2] = 位[38:30], VPN[1] = 位[29:21], VPN[0] = 位[20:12]
         // 从最高级 (Level 2) 遍历到最低级 (Level 0)
