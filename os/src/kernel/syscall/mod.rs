@@ -233,7 +233,27 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
 fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
     // 阻塞当前任务,直到指定的子任务结束
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let (tid, exit_code) = task.lock().wait_for_child();
+    
+    let (tid, exit_code) = loop {
+        let wait_child_ptr = {
+            let mut t = task.lock();
+            if let Some(res) = t.check_child_exit_locked() {
+                break res;
+            }
+            // 获取 wait_child 的裸指针，以便在释放锁后使用
+            // SAFETY: task 是 Arc<SpinLock<Task>>，只要 task 还在，wait_child 就有效
+            &mut t.wait_child as *mut crate::kernel::WaitQueue
+        };
+
+        // 释放锁后睡眠
+        // SAFETY: 我们持有 task 的 Arc，所以 wait_child_ptr 是有效的
+        // 虽然有竞争风险（其他核可能同时修改 wait_child），但在 wait 场景下
+        // 主要竞争是 wake_up，WaitQueue 内部有自旋锁保护，是安全的
+        unsafe {
+            (*wait_child_ptr).sleep(task.clone());
+        }
+    };
+
     {
         let mut tm = TASK_MANAGER.lock();
         if let Some(child_task) = tm.get_task(tid) {
