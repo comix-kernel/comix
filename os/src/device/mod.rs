@@ -17,13 +17,14 @@ pub mod device_tree;
 use alloc::sync::Arc;
 pub use block::block_device::BlockDevice;
 pub use block::ram_disk::RamDisk;
-pub use net::net_device::NetDevice;
 use spin::RwLock;
 
 use crate::device::rtc::RtcDriver;
+
 use crate::device::serial::SerialDriver;
-use crate::device::{block::BlockDriver, net::NetDriver};
+use crate::device::{block::BlockDriver, net::net_device::NetDevice};
 use crate::sync::SpinLock;
+
 use alloc::{string::String, vec::Vec};
 use lazy_static::lazy_static;
 
@@ -62,7 +63,7 @@ pub trait Driver: Send + Sync {
     fn get_id(&self) -> String;
 
     /// 将驱动程序转换为网络驱动程序（如果适用）
-    fn as_net(&self) -> Option<&dyn NetDriver> {
+    fn as_net(&self) -> Option<&dyn NetDevice> {
         None
     }
 
@@ -77,17 +78,13 @@ pub trait Driver: Send + Sync {
     }
 }
 
-lazy_static! {
-    /// 网络设备管理器
-    /// 负责存储和管理系统中的所有网络设备
-    /// FIXME: 尽快迁移到 NET_DRIVERS 之后此结构将废弃
-    pub static ref NETWORK_DEVICES: SpinLock<Vec<Arc<dyn NetDevice>>> = SpinLock::new(Vec::new());
+pub fn init() {
+    device_tree::init();
 }
 
 lazy_static! {
     // NOTE: RwLock 只在初始化阶段有写操作，运行时均为读操作
     pub static ref DRIVERS: RwLock<Vec<Arc<dyn Driver>>> = RwLock::new(Vec::new());
-    pub static ref NET_DRIVERS: RwLock<Vec<Arc<dyn NetDriver>>> = RwLock::new(Vec::new());
     pub static ref BLK_DRIVERS: RwLock<Vec<Arc<dyn BlockDriver>>> = RwLock::new(Vec::new());
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
     pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
@@ -98,4 +95,9 @@ lazy_static! {
     // 内核命令行参数
     // 存储从设备树中提取的 bootargs 属性
     pub static ref CMDLINE: RwLock<String> = RwLock::new(String::new());
+}
+
+/// 注册设备驱动
+pub fn register_driver(driver: Arc<dyn Driver>) {
+    DRIVERS.write().push(driver);
 }

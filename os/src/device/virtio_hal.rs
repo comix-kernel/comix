@@ -22,8 +22,13 @@ unsafe impl Hal for VirtIOHal {
     /// 分配并清零指定数量的连续物理页用于DMA
     fn dma_alloc(pages: usize, _direction: BufferDirection) -> (PhysAddr, NonNull<u8>) {
         // 使用系统的连续物理帧分配器
-        let frame_range = crate::mm::frame_allocator::alloc_contig_frames(pages)
-            .expect("Failed to allocate contiguous frames for DMA");
+        let frame_range = match crate::mm::frame_allocator::alloc_contig_frames(pages) {
+            Some(range) => range,
+            None => {
+                // 返回空指针，让上层代码处理错误
+                return (PhysAddr::from(0u64), NonNull::dangling());
+            }
+        };
 
         // 获取起始物理页号
         let start_ppn = frame_range.start_ppn();
@@ -31,10 +36,21 @@ unsafe impl Hal for VirtIOHal {
         // 计算物理地址
         let phys_addr = PhysAddr::from(start_ppn.start_addr().as_usize() as u64);
 
-        // 在RISC-V架构中，内核空间使用直接映射
         // 将物理地址转换为虚拟地址
         let virt_addr = unsafe { start_ppn.start_addr().to_vaddr().as_mut_ptr::<u8>() };
         let virt_ptr = NonNull::new(virt_addr).unwrap();
+
+        // 清零 DMA 缓冲区（VirtIO HAL trait 要求）
+        unsafe {
+            for page_idx in 0..pages {
+                let page_start = virt_addr.add(page_idx * crate::config::PAGE_SIZE);
+
+                // 逐字节清零整个页面
+                for offset in 0..crate::config::PAGE_SIZE {
+                    core::ptr::write_volatile(page_start.add(offset), 0);
+                }
+            }
+        }
 
         // 将帧范围存储到全局映射表中
         DMA_ALLOCATIONS.lock().insert(phys_addr, frame_range);
@@ -45,8 +61,14 @@ unsafe impl Hal for VirtIOHal {
     /// 释放之前分配的DMA内存
     unsafe fn dma_dealloc(paddr: PhysAddr, _vaddr: NonNull<u8>, _pages: usize) -> i32 {
         // 从全局映射表中查找并移除对应的帧范围
-        // 当frame_range被drop时，它会自动释放分配的物理帧
-        if DMA_ALLOCATIONS.lock().remove(&paddr).is_some() {
+        // 注意：必须先释放DMA_ALLOCATIONS锁，再drop FrameRangeTracker
+        // 因为FrameRangeTracker::drop()会获取FRAME_ALLOCATOR锁
+        // 锁顺序要求：FRAME_ALLOCATOR(层级0) 必须在 DMA_ALLOCATIONS(层级7) 之前
+        let frame_range = DMA_ALLOCATIONS.lock().remove(&paddr);
+        // DMA_ALLOCATIONS锁已释放
+
+        // 现在可以安全地drop frame_range，它会获取FRAME_ALLOCATOR锁
+        if frame_range.is_some() {
             0 // 成功释放
         } else {
             -1 // 未找到对应的分配记录
@@ -59,15 +81,18 @@ unsafe impl Hal for VirtIOHal {
         let phys_addr = paddr as usize;
         let virt = paddr_to_vaddr(phys_addr);
 
-        // 确保返回有效的NonNull指针
-        NonNull::new(virt as *mut u8).unwrap()
+        // 验证虚拟地址的合法性
+        let ptr = NonNull::new(virt as *mut u8).expect("mmio_phys_to_virt returned null pointer");
+        ptr
     }
 
     /// 共享内存区域给设备，并返回设备可访问的物理地址
     unsafe fn share(buffer: NonNull<[u8]>, _direction: BufferDirection) -> PhysAddr {
         let vaddr = buffer.as_ptr() as *const u8 as usize;
         let paddr = unsafe { vaddr_to_paddr(vaddr) };
-        PhysAddr::from(paddr as u64)
+
+        let result = PhysAddr::from(paddr as u64);
+        result
     }
 
     /// 取消共享内存区域，并在必要时将数据复制回原始缓冲区
