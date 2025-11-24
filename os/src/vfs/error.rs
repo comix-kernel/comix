@@ -29,6 +29,7 @@ pub enum FsError {
     ReadOnlyFs, // -EROFS(30): 只读文件系统
     NoSpace,    // -ENOSPC(28): 设备空间不足
     IoError,    // -EIO(5): I/O 错误
+    NoDevice,   // -ENODEV(19): 设备不存在
 
     // 管道相关 (新增)
     BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
@@ -49,6 +50,7 @@ impl FsError {
             FsError::WouldBlock => -11,
             FsError::PermissionDenied => -13,
             FsError::AlreadyExists => -17,
+            FsError::NoDevice => -19,
             FsError::NotDirectory => -20,
             FsError::IsDirectory => -21,
             FsError::InvalidArgument => -22,

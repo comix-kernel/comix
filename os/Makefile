@@ -62,7 +62,7 @@ debug:
 # 目标 1: 运行测试
 test: clean-test
 	@echo "Building tests with 'cargo test --no-run'..."
-	@cargo test --no-run
+	@TEST=1 cargo test --no-run
 	@TEST_ELF=$$(find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*" ! -name "*.d" ! -name "*.bin" -type f -executable -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-); \
 	if [ -z "$$TEST_ELF" ]; then \
 		echo "Error: Could not find any test executable after build."; \
@@ -75,7 +75,7 @@ test: clean-test
 # 目标 2: 调试测试 (第一步)
 test-qemu: clean-test
 	@echo "Building tests with 'cargo test --no-run'..."
-	@cargo test --no-run
+	@TEST=1 cargo test --no-run
 	@# 关键修复：把所有逻辑都放在一个 shell 进程中执行
 	@TEST_ELF=$$(find target/riscv64gc-unknown-none-elf/debug/deps -name "os-*" ! -name "*.d" ! -name "*.bin" -type f -executable -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-); \
 	if [ -z "$$TEST_ELF" ]; then \

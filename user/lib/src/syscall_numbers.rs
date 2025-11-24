@@ -7,11 +7,11 @@
 /// 关闭系统（自定义）
 pub const SYS_SHUTDOWN: usize = 0;
 /// 退出进程（临时，应使用 93）
-pub const SYS_EXIT: usize = 1;
+pub const SYS_EXIT: usize = 93;
 /// 创建子进程（临时，应使用 220）
-pub const SYS_FORK: usize = 4;
+pub const SYS_FORK: usize = 220;
 /// 等待子进程结束（临时，应使用 260）
-pub const SYS_WAITPID: usize = 5;
+pub const SYS_WAITPID: usize = 260;
 /// 获取当前进程ID（临时）
 pub const SYS_GETPID: usize = 6;
 /// 扩展数据段（堆）（临时）
@@ -21,7 +21,7 @@ pub const SYS_SLEEP: usize = 8;
 /// 发送信号到进程（临时）
 pub const SYS_KILL: usize = 9;
 /// 执行新程序（临时，应使用 221）
-pub const SYS_EXEC: usize = 10;
+pub const SYS_EXEC: usize = 221;
 
 // ========== Linux RISC-V 64 标准系统调用 ==========
 /// dup - 复制文件描述符

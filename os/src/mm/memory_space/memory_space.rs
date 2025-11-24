@@ -401,16 +401,38 @@ impl MemorySpace {
             return Err(PagingError::InvalidAddress);
         }
 
-        let mut space = MemorySpace::new();
+        // 从当前的 memory_space 克隆，这样可以继承所有内核映射（包括 MMIO）
+        let current_space = crate::kernel::current_memory_space();
+        let mut space = current_space
+            .lock()
+            .clone_for_fork()
+            .expect("Failed to clone memory space for execve");
 
-        // ========== 方案 2：首先映射内核空间 ==========
-        // 0. 映射内核空间（所有进程共享相同的内核映射）
-        //    - 排除跳板页（将在下面以 U=1 权限映射）
-        //    - 所有内核页的 U 标志均为 0，因此用户模式无法访问它们
-        space
-            .map_kernel_space()
-            .expect("Failed to map kernel space for user process");
-        // ======================================================
+        // 移除所有用户空间区域，只保留内核空间区域
+        // 这样我们可以为新程序加载 ELF 段
+        // 先 unmap 用户空间区域，再从 areas 中移除
+        let mut areas_to_keep = alloc::vec::Vec::new();
+        for mut area in space.areas.drain(..) {
+            let is_kernel = matches!(
+                area.area_type(),
+                AreaType::KernelText
+                    | AreaType::KernelRodata
+                    | AreaType::KernelData
+                    | AreaType::KernelBss
+                    | AreaType::KernelStack
+                    | AreaType::KernelHeap
+                    | AreaType::KernelMmio
+            );
+            if is_kernel {
+                areas_to_keep.push(area);
+            } else {
+                // unmap 用户空间区域
+                let _ = area.unmap(&mut space.page_table);
+            }
+        }
+        space.areas = areas_to_keep;
+        // 重置堆顶
+        space.heap_top = None;
 
         let mut max_end_vpn = Vpn::from_usize(0);
 

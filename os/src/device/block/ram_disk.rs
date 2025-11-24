@@ -1,5 +1,8 @@
+use super::super::{DeviceType, Driver};
+use super::BlockDriver;
 use super::block_device::{BlockDevice, BlockError};
 use crate::sync::SpinLock;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -91,5 +94,34 @@ impl BlockDevice for RamDisk {
 
     fn device_id(&self) -> usize {
         self.device_id
+    }
+}
+
+impl Driver for RamDisk {
+    fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
+        false // RamDisk 不处理中断
+    }
+
+    fn device_type(&self) -> DeviceType {
+        DeviceType::Block
+    }
+
+    fn get_id(&self) -> String {
+        alloc::format!("ramdisk_{}", self.device_id)
+    }
+
+    fn as_block(&self) -> Option<&dyn BlockDriver> {
+        Some(self)
+    }
+}
+
+// 同时实现 BlockDriver 和 BlockDevice 保证兼容性
+impl BlockDriver for RamDisk {
+    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> bool {
+        BlockDevice::read_block(self, block_id, buf).is_ok()
+    }
+
+    fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
+        BlockDevice::write_block(self, block_id, buf).is_ok()
     }
 }

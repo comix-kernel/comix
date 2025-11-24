@@ -97,6 +97,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ext4_rs"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a1a97344bde15b0ace15e265dab27228d4bdc37a0bfa8548c5645d7cfa6a144"
+dependencies = [
+ "bitflags 2.10.0",
+ "log",
+]
+
+[[package]]
 name = "fdt"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -162,6 +172,7 @@ name = "os"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.10.0",
+ "ext4_rs",
  "fdt",
  "lazy_static",
  "lock_api",

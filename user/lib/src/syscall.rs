@@ -114,7 +114,7 @@ pub fn close(fd: usize) -> isize {
 /// 读取的字节数，失败时返回负值
 /// # Safety
 /// 调用者必须确保 `dirp` 指针有效且指向至少 `count` 字节的缓冲区
-pub fn getdents(fd: usize, dirp: &mut [u8], count: usize) -> isize {
+pub fn getdents(_fd: usize, _dirp: &mut [u8], _count: usize) -> isize {
     // syscall!(syscall_numbers::SYS_GETDENTS, fd, dirp.as_mut_ptr(), count)
     -1
 }
