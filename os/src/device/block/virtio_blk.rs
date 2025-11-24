@@ -6,7 +6,7 @@ use virtio_drivers::transport::mmio::MmioTransport;
 
 use crate::device::virtio_hal::VirtIOHal;
 
-use crate::device::{BLK_DRIVERS, DRIVERS, NetDevice, IRQ_MANAGER};
+use crate::device::{BLK_DRIVERS, DRIVERS, IRQ_MANAGER, NetDevice};
 use crate::println;
 use crate::sync::Mutex;
 

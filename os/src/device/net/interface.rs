@@ -1,3 +1,4 @@
+use crate::device::DeviceType;
 use crate::device::net::net_device::NetDevice;
 use crate::println;
 use crate::sync::SpinLock;
@@ -8,7 +9,6 @@ use lazy_static::lazy_static;
 use smoltcp::iface::Interface;
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
-use virtio_drivers::transport::DeviceType;
 
 /// 网络接口管理器
 pub struct NetworkInterfaceManager {
@@ -366,7 +366,7 @@ impl crate::device::Driver for NetworkInterface {
     }
 
     fn device_type(&self) -> DeviceType {
-        DeviceType::Network
+        DeviceType::Net
     }
 
     fn get_id(&self) -> alloc::string::String {
