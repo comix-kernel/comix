@@ -5,9 +5,10 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
-use smoltcp::iface::{Interface, Routes};
+use smoltcp::iface::Interface;
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
+use virtio_drivers::transport::DeviceType;
 
 /// 网络接口管理器
 pub struct NetworkInterfaceManager {
@@ -42,6 +43,60 @@ lazy_static! {
     /// 全局网络接口管理器
     pub static ref NETWORK_INTERFACE_MANAGER: SpinLock<NetworkInterfaceManager> =
         SpinLock::new(NetworkInterfaceManager::new());
+}
+
+/// Smoltcp 接口包装器，确保 Device 和 Interface 有相同的生命周期
+pub struct SmoltcpInterface {
+    device_adapter: NetDeviceAdapter,
+    iface: Interface,
+}
+
+impl SmoltcpInterface {
+    /// 创建新的 smoltcp 接口包装器
+    fn new(device: Arc<dyn NetDevice>, mac_address: EthernetAddress) -> Self {
+        let mut device_adapter = NetDeviceAdapter::new(device);
+
+        let config = smoltcp::iface::Config::new(
+            smoltcp::wire::HardwareAddress::Ethernet(mac_address)
+        );
+        let iface = Interface::new(
+            config,
+            &mut device_adapter,
+            smoltcp::time::Instant::from_millis(0),
+        );
+
+        Self {
+            device_adapter,
+            iface,
+        }
+    }
+
+    /// 轮询网络接口，处理接收和发送
+    ///
+    /// # 参数
+    /// * `timestamp` - 当前时间戳
+    /// * `sockets` - Socket 集合，用于处理网络协议栈的 socket 操作
+    ///
+    /// # 返回值
+    /// 返回轮询结果，指示是否有事件被处理
+    pub fn poll(&mut self, timestamp: Instant, sockets: &mut smoltcp::iface::SocketSet) -> smoltcp::iface::PollResult {
+        self.iface.poll(timestamp, &mut self.device_adapter, sockets)
+    }
+
+    /// 获取可变的 smoltcp Interface 引用
+    pub fn interface_mut(&mut self) -> &mut Interface {
+        &mut self.iface
+    }
+
+    /// 获取不可变的 smoltcp Interface 引用
+    pub fn interface(&self) -> &Interface {
+        &self.iface
+    }
+
+    /// 获取可变的 device adapter 引用
+    pub fn device_adapter_mut(&mut self) -> &mut NetDeviceAdapter {
+        &mut self.device_adapter
+    }
 }
 
 /// 网络接口
@@ -134,41 +189,27 @@ impl NetworkInterface {
     }
 
     /// 创建smoltcp以太网接口
-    pub fn create_smoltcp_interface(&self) -> Interface {
-        // 创建路由表
-        let mut routes = Routes::new();
-
-        // 如果设置了网关，添加默认路由
-        if let Some(gateway) = self.ipv4_gateway() {
-            routes.add_default_ipv4_route(gateway).ok();
-        }
-
-        // 创建网络设备适配器
-        let mut device_adapter = NetDeviceAdapter::new(self.device.clone());
-
-        // 创建以太网接口
-        let config = smoltcp::iface::Config::new(smoltcp::wire::HardwareAddress::Ethernet(
-            self.mac_address(),
-        ));
-        let mut iface = Interface::new(
-            config,
-            &mut device_adapter,
-            smoltcp::time::Instant::from_millis(0),
-        );
+    ///
+    /// 返回一个 SmoltcpInterface 包装器，它拥有 NetDeviceAdapter 和 Interface，
+    /// 确保两者有相同的生命周期，避免悬垂指针问题。
+    pub fn create_smoltcp_interface(&self) -> SmoltcpInterface {
+        // 创建包装器（内部会创建 device_adapter 和 interface）
+        let mut smoltcp_iface = SmoltcpInterface::new(self.device.clone(), self.mac_address());
 
         // 设置IP地址
         for ip_cidr in self.ip_addresses.lock().iter() {
-            iface.update_ip_addrs(|addrs| {
+            smoltcp_iface.interface_mut().update_ip_addrs(|addrs| {
                 addrs.push(*ip_cidr);
             });
         }
 
         // 设置路由
         if let Some(gateway) = self.ipv4_gateway() {
-            iface.routes_mut().add_default_ipv4_route(gateway).ok();
+            smoltcp_iface.interface_mut().routes_mut()
+                .add_default_ipv4_route(gateway).ok();
         }
 
-        iface
+        smoltcp_iface
     }
 }
 
@@ -235,8 +276,7 @@ impl smoltcp::phy::RxToken for NetRxToken<'_> {
     where
         F: FnOnce(&[u8]) -> R,
     {
-        let buffer = self.buffer.to_vec();
-        f(&buffer)
+        f(self.buffer)
     }
 
     fn meta(&self) -> smoltcp::phy::PacketMeta {
@@ -318,8 +358,8 @@ impl crate::device::Driver for NetworkInterface {
         }
     }
 
-    fn device_type(&self) -> virtio_drivers::transport::DeviceType {
-        virtio_drivers::transport::DeviceType::Network
+    fn device_type(&self) -> DeviceType {
+        DeviceType::Network
     }
 
     fn get_id(&self) -> alloc::string::String {
