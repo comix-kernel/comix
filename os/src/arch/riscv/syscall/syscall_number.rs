@@ -44,3 +44,23 @@ pub const SYS_READ: usize = 63;
 pub const SYS_WRITE: usize = 64;
 /// fstat - 获取文件状态
 pub const SYS_FSTAT: usize = 80;
+/// 创建套接字  
+pub const SYS_SOCKET: usize = 198;
+/// 绑定套接字  
+pub const SYS_BIND: usize = 200;
+/// 监听连接  
+pub const SYS_LISTEN: usize = 201;
+/// 接受连接  
+pub const SYS_ACCEPT: usize = 202;
+/// 连接到远程地址  
+pub const SYS_CONNECT: usize = 203;
+/// 发送数据 - 使用sendto   
+pub const SYS_SEND: usize = 206;
+/// 接收数据 - 使用recvfrom   
+pub const SYS_RECV: usize = 207;
+/// 获取网络接口地址列表
+pub const SYS_GETIFADDRS: usize = 500;
+/// 设置套接字选项
+pub const SYS_SETSOCKOPT: usize = 501;
+/// 获取套接字选项
+pub const SYS_GETSOCKOPT: usize = 502;
