@@ -17,6 +17,75 @@ pub enum NetworkConfigError {
 pub struct NetworkConfigManager;
 
 impl NetworkConfigManager {
+    /// 解析点分十进制子网掩码并计算前缀长度
+    ///
+    /// # 参数
+    /// * `mask` - 点分十进制格式的子网掩码字符串 (如 "255.255.255.0")
+    ///
+    /// # 返回值
+    /// * `Ok(u8)` - 成功时返回前缀长度 (0-32)
+    /// * `Err(NetworkConfigError)` - 失败时返回错误
+    ///
+    /// # 示例
+    /// ```
+    /// parse_subnet_mask("255.255.255.0") // 返回 Ok(24)
+    /// parse_subnet_mask("255.255.0.0")   // 返回 Ok(16)
+    /// parse_subnet_mask("255.255.255.128") // 返回 Ok(25)
+    /// parse_subnet_mask("255.255.255.3") // 返回 Err (无效掩码)
+    /// ```
+    fn parse_subnet_mask(mask: &str) -> Result<u8, NetworkConfigError> {
+        // 解析点分十进制字符串为4个字节
+        let octets: Result<alloc::vec::Vec<u8>, _> = mask
+            .split('.')
+            .map(|s| s.parse::<u8>())
+            .collect();
+
+        let octets = octets.map_err(|_| NetworkConfigError::InvalidSubnet)?;
+
+        // 必须是4个字节
+        if octets.len() != 4 {
+            return Err(NetworkConfigError::InvalidSubnet);
+        }
+
+        // 将4个字节转换为32位整数
+        let mask_u32 = ((octets[0] as u32) << 24)
+            | ((octets[1] as u32) << 16)
+            | ((octets[2] as u32) << 8)
+            | (octets[3] as u32);
+
+        // 验证掩码的有效性：必须是连续的1后跟连续的0
+        // 例如: 11111111111111111111111100000000 (0xFFFFFF00) 是有效的
+        //       11111111111111110000000011111111 (0xFFFF00FF) 是无效的
+
+        // 计算前缀长度（前导1的个数）
+        let prefix_length = mask_u32.leading_ones() as u8;
+
+        // 验证：如果有 n 个前导1，那么掩码应该等于 (0xFFFFFFFF << (32 - n))
+        // 这确保了所有的1都是连续的
+        if prefix_length == 0 {
+            // 特殊情况：掩码为 0.0.0.0
+            if mask_u32 == 0 {
+                return Ok(0);
+            } else {
+                return Err(NetworkConfigError::InvalidSubnet);
+            }
+        } else if prefix_length == 32 {
+            // 特殊情况：掩码为 255.255.255.255
+            if mask_u32 == 0xFFFFFFFF {
+                return Ok(32);
+            } else {
+                return Err(NetworkConfigError::InvalidSubnet);
+            }
+        } else {
+            // 一般情况：验证掩码格式
+            let expected_mask = 0xFFFFFFFFu32 << (32 - prefix_length);
+            if mask_u32 != expected_mask {
+                return Err(NetworkConfigError::InvalidSubnet);
+            }
+            return Ok(prefix_length);
+        }
+    }
+
     /// 初始化默认网络接口配置
     pub fn init_default_interface() -> Result<(), NetworkConfigError> {
         println!("Initializing default network configuration...");
@@ -168,18 +237,7 @@ impl NetworkConfigManager {
             };
 
             // 解析子网掩码，并计算前缀长度
-            let prefix_length = match mask {
-                "255.255.255.0" => 24,
-                "255.255.0.0" => 16,
-                "255.0.0.0" => 8,
-                "255.255.255.128" => 25,
-                "255.255.255.192" => 26,
-                "255.255.255.224" => 27,
-                "255.255.255.240" => 28,
-                "255.255.255.248" => 29,
-                "255.255.255.252" => 30,
-                _ => return Err(NetworkConfigError::InvalidSubnet),
-            };
+            let prefix_length = Self::parse_subnet_mask(mask)?;
 
             // 设置IP地址
             let ip_cidr = IpCidr::new(IpAddress::Ipv4(ip_address), prefix_length);
