@@ -144,6 +144,7 @@ impl TaskManagerTrait for TaskManager {
     }
 
     fn send_signal(&self, task: SharedTask, signal: usize) -> bool {
+        // FIXME: 如果主线程已退出, 这里无法处理
         if let Some(signal_flag) = SignalFlags::from_signal_num(signal) {
             let mut t = task.lock();
             t.pending.insert(signal_flag);

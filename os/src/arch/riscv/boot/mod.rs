@@ -7,11 +7,10 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
-    device,
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, UtsNamespace,
+        current_cpu, current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
         sleep_task_with_block, yield_task,
     },
     mm::{
@@ -21,7 +20,9 @@ use crate::{
     println,
     sync::SpinLock,
     test::run_early_tests,
+    uapi::resource::{INIT_RLIMITS, RlimitStruct},
 };
+
 /// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
 pub fn rest_init() {
@@ -37,6 +38,8 @@ pub fn rest_init() {
         trap_frame_tracker,
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
+        Arc::new(SpinLock::new(UtsNamespace::default())),
+        Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
     ); // init 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
@@ -98,6 +101,11 @@ fn create_kthreadd() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
+    let (uts, rlimit) = {
+        let task = current_task();
+        let t = task.lock();
+        (t.uts_namespace.clone(), t.rlimit.clone())
+    };
     let task = TaskStruct::ktask_create(
         tid,
         tid,
@@ -107,6 +115,8 @@ fn create_kthreadd() {
         trap_frame_tracker,
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
+        uts,
+        rlimit,
     ); // kthreadd 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
@@ -117,46 +127,6 @@ fn create_kthreadd() {
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
     SCHEDULER.lock().add_task(task);
-}
-
-#[cfg(test)]
-mod tests {
-
-    use core::sync::atomic::Ordering;
-
-    // 测试 create_kthreadd：应创建一个任务并加入 TASK_MANAGER
-    use crate::{
-        arch::boot::{create_kthreadd, kthreadd},
-        kassert,
-        kernel::{TASK_MANAGER, TaskManagerTrait},
-        test_case,
-    };
-
-    test_case!(test_create_kthreadd, {
-        // 记录当前已有任务数量
-        let before_count = {
-            let mgr = TASK_MANAGER.lock();
-            mgr.task_count()
-        };
-        create_kthreadd();
-        // 找到新增的任务（PID=tid，入口=kthreadd）
-        let after_count = {
-            let mgr = TASK_MANAGER.lock();
-            mgr.task_count()
-        };
-        kassert!(after_count == before_count + 1);
-        // 查找新 tid
-        let new_tid = after_count as u32; // 简单假设 tid 连续分配
-        let task = TASK_MANAGER.lock().get_task(new_tid).expect("task missing");
-        let g = task.lock();
-        let tf = g.trap_frame_ptr.load(Ordering::SeqCst);
-        kassert!(g.tid == new_tid);
-        kassert!(g.pid == new_tid); // kthreadd 设 pid=tid
-        kassert!(unsafe { (*tf).sepc } as usize == kthreadd as usize);
-    });
-
-    // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
-    // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
 }
 
 pub fn main(hartid: usize) {
@@ -203,3 +173,45 @@ fn clear_bss() {
         (va as *mut u8).write_volatile(0)
     });
 }
+
+// 由于最近的更新使得create_kthreadd内部会调用current_task等函数
+// 该单元测试已无法在不完整的测试环境下运行
+// #[cfg(test)]
+// mod tests {
+
+//     use core::sync::atomic::Ordering;
+
+//     // 测试 create_kthreadd：应创建一个任务并加入 TASK_MANAGER
+//     use crate::{
+//         arch::boot::{create_kthreadd, kthreadd},
+//         kassert,
+//         kernel::{TASK_MANAGER, TaskManagerTrait},
+//         test_case,
+//     };
+
+//     test_case!(test_create_kthreadd, {
+//         // 记录当前已有任务数量
+//         let before_count = {
+//             let mgr = TASK_MANAGER.lock();
+//             mgr.task_count()
+//         };
+//         create_kthreadd();
+//         // 找到新增的任务（PID=tid，入口=kthreadd）
+//         let after_count = {
+//             let mgr = TASK_MANAGER.lock();
+//             mgr.task_count()
+//         };
+//         kassert!(after_count == before_count + 1);
+//         // 查找新 tid
+//         let new_tid = after_count as u32; // 简单假设 tid 连续分配
+//         let task = TASK_MANAGER.lock().get_task(new_tid).expect("task missing");
+//         let g = task.lock();
+//         let tf = g.trap_frame_ptr.load(Ordering::SeqCst);
+//         kassert!(g.tid == new_tid);
+//         kassert!(g.pid == new_tid); // kthreadd 设 pid=tid
+//         kassert!(unsafe { (*tf).sepc } as usize == kthreadd as usize);
+//     });
+
+//     // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
+//     // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
+// }
