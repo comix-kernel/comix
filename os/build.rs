@@ -113,7 +113,7 @@ fn create_empty_image(path: &PathBuf) {
         0, 0, 0, 0, // 保留
     ];
 
-    if let Err(e) = fs::write(path, &empty_header) {
+    if let Err(e) = fs::write(path, empty_header) {
         println!(
             "cargo:warning=[build.rs] Failed to create empty image: {}",
             e
