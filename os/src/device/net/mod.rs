@@ -1,9 +1,9 @@
 use crate::{device::NetDevice, sync::SpinLock};
 use alloc::{sync::Arc, vec::Vec};
 
-pub mod net_device;
 pub mod config;
 pub mod interface;
+pub mod net_device;
 pub mod virtio_net;
 
 use lazy_static::lazy_static;
