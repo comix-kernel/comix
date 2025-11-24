@@ -13,8 +13,8 @@
 use core::any::Any;
 
 use crate::arch::timer::get_time;
-use crate::config::CLOCK_FREQ;
 use crate::vfs::{Dentry, FsError};
+use crate::kernel::CLOCK_FREQ;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -43,7 +43,7 @@ impl TimeSpec {
     /// 创建当前时间戳
     pub fn now() -> Self {
         const NSEC_PER_SEC: usize = 1000_000_000;
-        let cur_nsec = get_time() * NSEC_PER_SEC / CLOCK_FREQ;
+        let cur_nsec = get_time() * NSEC_PER_SEC / unsafe { CLOCK_FREQ };
         Self {
             sec: (cur_nsec / NSEC_PER_SEC) as i64,
             nsec: (cur_nsec % NSEC_PER_SEC) as i64,

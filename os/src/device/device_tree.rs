@@ -2,6 +2,7 @@
 
 use crate::{
     device::{CMDLINE, irq::IntcDriver},
+    kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
     pr_info, println,
 };
@@ -42,7 +43,20 @@ pub fn init() {
         "[Device] devicetree of {} is initialized",
         FDT.root().model()
     );
-    println!("[Device] now has {} CPU(s)", FDT.cpus().count());
+
+    let cpus = FDT.cpus().count();
+    // SAFETY: 这里是在单核初始化阶段设置 CPU 数量
+    unsafe { NUM_CPU = cpus };
+    println!("[Device] now has {} CPU(s)", cpus);
+
+    unsafe {
+        CLOCK_FREQ = FDT
+            .cpus()
+            .next()
+            .expect("No CPU found in device tree")
+            .timebase_frequency()
+    };
+    println!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
 
     FDT.memory().regions().for_each(|region| {
         println!(
