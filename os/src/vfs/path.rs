@@ -141,28 +141,22 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
 ///
 /// 返回：Ok(Arc<Dentry>) 路径对应的目录项；Err(FsError::NotFound) 路径不存在；Err(FsError::NotDirectory) 中间组件不是目录
 pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
-    crate::println!("[vfs_lookup] Parsing path: {}", path);
     let components = parse_path(path);
-    crate::println!("[vfs_lookup] Components: {:?}", components);
 
     // 确定起始 dentry
     let mut current_dentry = if components.first() == Some(&PathComponent::Root) {
         // 绝对路径：从根目录开始
-        crate::println!("[vfs_lookup] Starting from root");
         get_root_dentry()?
     } else {
         // 相对路径：从当前工作目录开始
-        crate::println!("[vfs_lookup] Starting from cwd");
         get_cur_dir()?
     };
 
     // 逐个解析路径组件
     for component in components {
-        crate::println!("[vfs_lookup] Resolving component: {:?}", component);
         current_dentry = resolve_component(current_dentry, component)?;
     }
 
-    crate::println!("[vfs_lookup] Path resolution complete");
     Ok(current_dentry)
 }
 
@@ -209,21 +203,14 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
         }
         PathComponent::Normal(name) => {
             // 正常文件名：查找子项
-            crate::println!("[resolve_component] Looking for: {}", name);
 
             // 1. 先检查 dentry 缓存
             if let Some(child) = base.lookup_child(&name) {
-                crate::println!("[resolve_component] Found in cache: {}", name);
                 return Ok(child);
             }
 
             // 2. 缓存未命中，通过 inode 查找
-            crate::println!(
-                "[resolve_component] Cache miss, calling inode.lookup for: {}",
-                name
-            );
             let child_inode = base.inode.lookup(&name)?;
-            crate::println!("[resolve_component] inode.lookup returned for: {}", name);
 
             // 3. 创建新的 dentry 并加入缓存
             let child_dentry = Dentry::new(name.clone(), child_inode);

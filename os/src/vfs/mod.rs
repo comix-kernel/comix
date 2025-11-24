@@ -60,26 +60,17 @@ use alloc::{vec, vec::Vec};
 ///
 /// 返回：Ok(Vec<u8>) 文件内容字节数组；Err(FsError::NotFound) 文件不存在；Err(FsError::IsDirectory) 路径指向目录
 pub fn vfs_load_elf(path: &str) -> Result<Vec<u8>, FsError> {
-    crate::println!("[vfs_load_elf] Step 1: Looking up path: {}", path);
     let dentry = vfs_lookup(path)?;
-    crate::println!("[vfs_load_elf] Step 2: Found dentry, getting metadata");
     let inode = &dentry.inode;
     let metadata = inode.metadata()?;
-    crate::println!(
-        "[vfs_load_elf] Step 3: Got metadata, size={}",
-        metadata.size
-    );
 
     // 确保是普通文件
     if metadata.inode_type != InodeType::File {
         return Err(FsError::IsDirectory);
     }
 
-    crate::println!("[vfs_load_elf] Step 4: Allocating buffer");
     let mut buf = vec![0u8; metadata.size];
-    crate::println!("[vfs_load_elf] Step 5: Reading file content");
     inode.read_at(0, &mut buf)?;
-    crate::println!("[vfs_load_elf] Step 6: Read complete");
     Ok(buf)
 }
 
