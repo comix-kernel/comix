@@ -20,6 +20,11 @@ use crate::{
         memory_space::MemorySpace,
     },
     sync::SpinLock,
+    tool::user_buffer::{read_from_user, write_to_user},
+    uapi::{
+        errno::{ENAVAIL, ESRCH},
+        resource::{RLIM_NLIMITS, Rlimit},
+    },
 };
 
 /// 线程退出系统调用
@@ -61,7 +66,7 @@ pub fn exit_group(code: c_int) -> ! {
 /// 创建当前任务的子任务（fork）
 pub fn fork() -> usize {
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (ppid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts) = {
+    let (ppid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts, rlimit) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
@@ -79,6 +84,7 @@ pub fn fork() -> usize {
             task.cwd.clone(),
             task.root.clone(),
             task.uts_namespace.clone(),
+            task.rlimit.clone(),
         )
     };
 
@@ -95,6 +101,7 @@ pub fn fork() -> usize {
         signal_handlers,
         blocked,
         uts,
+        rlimit,
     );
 
     child_task.fd_table = Arc::new(fd_table.clone_table());
@@ -205,4 +212,91 @@ pub fn get_pid() -> c_int {
 /// - 父进程 ID, 该进程要么是创建该进程的进程, 要么是重新归属的父进程
 pub fn get_ppid() -> c_int {
     current_task().lock().ppid as c_int
+}
+
+/// 获取资源限制
+/// # 参数
+/// - `resource`: 资源限制 ID
+/// - `rlim`: 指向 rlimit 结构体的指针, 用于存储获取到的资源限制
+/// # 返回值
+/// - 成功返回 0, 失败返回错误码
+pub fn getrlimit(resource: c_int, rlim: *mut Rlimit) -> c_int {
+    if resource as usize >= RLIM_NLIMITS {
+        return -ENAVAIL;
+    }
+    let rlimit = current_task().lock().rlimit.lock().limits[resource as usize];
+    unsafe {
+        write_to_user(rlim, rlimit);
+    }
+    0
+    // TODO: EPERM 和 EFAULT
+}
+
+/// 设置资源限制
+/// # 参数
+/// - `resource`: 资源限制 ID
+/// - `rlim`: 指向 rlimit 结构体的指针, 包含要设置的资源限制
+/// # 返回值
+/// - 成功返回 0, 失败返回错误码
+pub fn setrlimit(resource: c_int, rlim: *const Rlimit) -> c_int {
+    if resource as usize >= RLIM_NLIMITS {
+        return -ENAVAIL;
+    }
+    let new_limit = unsafe { read_from_user(rlim) };
+    if new_limit.rlim_cur > new_limit.rlim_max {
+        return -ENAVAIL;
+    }
+    {
+        let rlimit_lock = current_task().lock().rlimit.clone();
+        rlimit_lock.lock().limits[resource as usize] = new_limit;
+    }
+    0
+    // TODO: EPERM, EPERM 和 EFAULT
+}
+
+/// 获取或设置资源限制
+/// # 参数
+/// - `pid`: 目标进程 ID, 为 0 表示当前进程
+/// - `resource`: 资源限制 ID
+/// - `new_limit`: 指向 rlimit 结构体的指针, 包含要设置的资源限制, 若不设置则为 NULL
+/// - `old_limit`: 指向 rlimit 结构体的指针, 用于存储获取到的资源限制, 若不获取则为 NULL
+/// # 返回值
+/// - 成功返回 0, 失败返回错误码
+pub fn prlimit(
+    pid: c_int,
+    resource: c_int,
+    new_limit: *const Rlimit,
+    old_limit: *mut Rlimit,
+) -> c_int {
+    if resource as usize >= RLIM_NLIMITS {
+        return -ENAVAIL;
+    }
+    let target_task = if pid == 0 {
+        current_task()
+    } else {
+        let tm = TASK_MANAGER.lock();
+        match tm.get_task(pid as u32) {
+            Some(t) => t,
+            None => return -ESRCH,
+        }
+    };
+
+    if !old_limit.is_null() {
+        let rlimit = target_task.lock().rlimit.lock().limits[resource as usize];
+        unsafe {
+            write_to_user(old_limit, rlimit);
+        }
+    }
+
+    if !new_limit.is_null() {
+        let new_rlim = unsafe { read_from_user(new_limit) };
+        if new_rlim.rlim_cur > new_rlim.rlim_max {
+            return -ENAVAIL;
+        }
+        let rlimit_lock = target_task.lock().rlimit.clone();
+        rlimit_lock.lock().limits[resource as usize] = new_rlim;
+    }
+
+    0
+    // TODO: EPERM, EPERM 和 EFAULT
 }
