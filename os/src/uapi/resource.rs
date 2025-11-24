@@ -27,9 +27,9 @@ use rlimit_value::*;
 
 /// 资源限制 ID (Resource limit IDs)
 /// 使用枚举封装 RLIMIT_* 宏，强制类型安全。
-/// #[repr(u32)] 确保底层存储与 C 语言的整数 ID 兼容。
+/// #[repr(i32)] 确保底层存储与 C 语言的整数 ID 兼容。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ResourceId {
     /// CPU 时间限制（秒）。
     Cpu = 0,
@@ -100,7 +100,7 @@ impl Rlimit {
     }
 }
 
-// 资源限制的总数量。
+/// 资源限制的总数量。
 pub const RLIM_NLIMITS: usize = 16;
 
 /// 启动时 init 任务的默认资源限制数组。

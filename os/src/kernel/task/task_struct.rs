@@ -23,6 +23,7 @@ use crate::{
     },
     pr_debug,
     sync::SpinLock,
+    uapi::resource::RlimitStruct,
     vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
 
@@ -93,8 +94,10 @@ pub struct Task {
     pub pending: SignalFlags,
     /// 信号处理动作表
     pub signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
-
+    /// UTS 命名空间
     pub uts_namespace: Arc<SpinLock<UtsNamespace>>,
+    /// 资源限制结构体
+    pub rlimit: Arc<SpinLock<RlimitStruct>>,
 
     // === 文件系统 ===
     /// 文件描述符表
@@ -129,6 +132,7 @@ impl Task {
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
         uts_namespace: Arc<SpinLock<UtsNamespace>>,
+        rlimit: Arc<SpinLock<RlimitStruct>>,
     ) -> Self {
         let mut task = Self::new(
             tid,
@@ -141,6 +145,7 @@ impl Task {
             signal_handlers,
             blocked,
             uts_namespace,
+            rlimit,
         );
         task.context
             .set_init_context(forkret as usize, task.kstack_base);
@@ -165,6 +170,7 @@ impl Task {
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
         uts_namespace: Arc<SpinLock<UtsNamespace>>,
+        rlimit: Arc<SpinLock<RlimitStruct>>,
     ) -> Self {
         let mut task = Self::new(
             tid,
@@ -177,6 +183,7 @@ impl Task {
             signal_handlers,
             blocked,
             uts_namespace,
+            rlimit,
         );
         task.context
             .set_init_context(forkret as usize, task.kstack_base);
@@ -295,6 +302,7 @@ impl Task {
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
         uts_namespace: Arc<SpinLock<UtsNamespace>>,
+        rlimit: Arc<SpinLock<RlimitStruct>>,
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
@@ -337,6 +345,7 @@ impl Task {
             exit_code: None,
             signal_handlers,
             uts_namespace,
+            rlimit,
             blocked,
             pending: SignalFlags::empty(),
             fd_table,
@@ -347,7 +356,10 @@ impl Task {
 
     #[cfg(test)]
     pub fn new_dummy_task(tid: u32) -> Self {
-        use crate::mm::frame_allocator::{alloc_contig_frames, alloc_frame};
+        use crate::{
+            mm::frame_allocator::{alloc_contig_frames, alloc_frame},
+            uapi::resource::INIT_RLIMITS,
+        };
         let kstack_tracker =
             alloc_contig_frames(1).expect("new_dummy_task: failed to alloc kstack");
         let trap_frame_tracker = alloc_frame().expect("new_dummy_task: failed to alloc trap_frame");
@@ -362,6 +374,7 @@ impl Task {
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
             Arc::new(SpinLock::new(UtsNamespace::default())),
+            Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
         )
     }
 }
@@ -389,6 +402,7 @@ mod tests {
         kassert,
         mm::frame_allocator::{alloc_contig_frames, alloc_frame},
         test_case,
+        uapi::resource::INIT_RLIMITS,
     };
 
     // 创建内核任务的基本属性检查
@@ -405,6 +419,7 @@ mod tests {
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
             Arc::new(SpinLock::new(UtsNamespace::default())),
+            Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
         );
         kassert!(t.tid == 1);
         kassert!(t.pid == t.tid);
@@ -439,6 +454,7 @@ mod tests {
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
             Arc::new(SpinLock::new(UtsNamespace::default())),
+            Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
         );
         kassert!(t.tid == 10);
         kassert!(t.pid == 5);

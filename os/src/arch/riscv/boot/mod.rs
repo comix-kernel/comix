@@ -20,6 +20,7 @@ use crate::{
     println,
     sync::SpinLock,
     test::run_early_tests,
+    uapi::resource::{INIT_RLIMITS, RlimitStruct},
 };
 
 /// 内核的第一个任务启动函数
@@ -38,6 +39,7 @@ pub fn rest_init() {
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
         Arc::new(SpinLock::new(UtsNamespace::default())),
+        Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
     ); // init 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
@@ -99,10 +101,10 @@ fn create_kthreadd() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
-    let uts = {
+    let (uts, rlimit) = {
         let task = current_task();
         let t = task.lock();
-        t.uts_namespace.clone()
+        (t.uts_namespace.clone(), t.rlimit.clone())
     };
     let task = TaskStruct::ktask_create(
         tid,
@@ -114,6 +116,7 @@ fn create_kthreadd() {
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
         uts,
+        rlimit,
     ); // kthreadd 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);

@@ -3,10 +3,43 @@
 //! 一般来说，用户态程序通过一段位于用户地址的缓冲区与内核进行数据交换
 //! 例如，系统调用接口通常传入指向用户缓冲区的指针和长度
 //! 这个模块提供了对这类缓冲区的抽象和操作方法
+//!
+//! XXX: 目前的实现直接依赖于 RISC-V 特权级的 SUM 位来允许内核访问用户空间
+//!      未来可能需要改进为通过页表映射等方式实现更通用的用户空间访问
 
 use alloc::vec::Vec;
 use core::ptr;
 use riscv::register::sstatus;
+
+/// 向用户空间写入数据
+/// # 参数
+/// - `user_ptr`: 指向用户空间的指针
+/// - `value`: 要写入的数据
+/// # Safety
+/// 调用者必须确保 `user_ptr` 指向的内存是有效且可写的用户空间地址。
+pub unsafe fn write_to_user<T>(user_ptr: *mut T, value: T) {
+    unsafe {
+        sstatus::set_sum();
+        ptr::write_volatile(user_ptr, value);
+        sstatus::clear_sum();
+    }
+}
+
+/// 从用户空间读取数据
+/// # 参数
+/// - `user_ptr`: 指向用户空间的指针
+/// # 返回值
+/// - 读取到的数据
+/// # Safety
+/// 调用者必须确保 `user_ptr` 指向的内存是有效且可读的用户空间地址。
+pub unsafe fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
+    unsafe {
+        sstatus::set_sum();
+        let value = ptr::read_volatile(user_ptr);
+        sstatus::clear_sum();
+        value
+    }
+}
 
 /// 用户缓冲区结构体
 pub struct UserBuffer {
