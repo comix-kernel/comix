@@ -6,3 +6,4 @@
 pub mod errno;
 pub mod reboot;
 pub mod resource;
+pub mod time;

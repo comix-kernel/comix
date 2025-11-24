@@ -11,7 +11,6 @@ pub fn init() {
     device_tree::init();
 }
 
-pub const CLOCK_FREQ: usize = 12_500_000;
 pub const MEMORY_END: usize = 0x8800_0000;
 
 pub const VIRT_CPUS_MAX: usize = 4;
