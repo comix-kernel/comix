@@ -1,3 +1,11 @@
+//! 网络设备驱动模块
+//!
+//! 管理和初始化各种网络设备
+
+use crate::{
+    device::{Driver, NETWORK_DEVICES, NetDevice},
+    println,
+};
 use crate::{device::NetDevice, sync::SpinLock};
 use alloc::{sync::Arc, vec::Vec};
 

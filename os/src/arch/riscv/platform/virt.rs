@@ -1,4 +1,15 @@
-//! QEMU 平台常量
+//! RISC-V Virt 平台相关
+
+use crate::device::{bus, device_tree, irq};
+
+/// 初始化 Virt 平台相关设备
+pub fn init() {
+    // serial::uart16550::driver_init();
+    bus::virtio_mmio::driver_init();
+    irq::plic::driver_init();
+    // rtc::rtc_goldfish::driver_init();
+    device_tree::init();
+}
 
 pub const CLOCK_FREQ: usize = 12_500_000;
 pub const MEMORY_END: usize = 0x8800_0000;
