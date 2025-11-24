@@ -2,11 +2,8 @@
 //!
 //! 管理和初始化各种网络设备
 
-use crate::{
-    device::{Driver, NETWORK_DEVICES, NetDevice},
-    println,
-};
-use crate::{device::NetDevice, sync::SpinLock};
+use crate::device::NetDevice;
+use crate::sync::SpinLock;
 use alloc::{sync::Arc, vec::Vec};
 
 pub mod config;

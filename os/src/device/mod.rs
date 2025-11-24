@@ -21,8 +21,8 @@ use spin::RwLock;
 
 use crate::device::rtc::RtcDriver;
 
-use crate::device::{block::BlockDriver, net::net_device::NetDevice};
 use crate::device::serial::SerialDriver;
+use crate::device::{block::BlockDriver, net::net_device::NetDevice};
 use crate::sync::SpinLock;
 
 use alloc::{string::String, vec::Vec};
@@ -62,9 +62,8 @@ pub trait Driver: Send + Sync {
     // 每个实例的标识符应该不同
     fn get_id(&self) -> String;
 
-
     /// 将驱动程序转换为网络驱动程序（如果适用）
-    fn as_net(&self) -> Option<&dyn NetDriver> {
+    fn as_net(&self) -> Option<&dyn NetDevice> {
         None
     }
 
@@ -78,7 +77,6 @@ pub trait Driver: Send + Sync {
         None
     }
 }
-
 
 pub fn init() {
     device_tree::init();
