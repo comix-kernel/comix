@@ -218,7 +218,7 @@ pub trait Inode: Send + Sync + Any {
 
     /// 设置 Dentry（可选方法）
     fn set_dentry(&self, _dentry: Weak<Dentry>) {
-        return;
+        
     }
 
     /// 获取 Dentry（可选方法）

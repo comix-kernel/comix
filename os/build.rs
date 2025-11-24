@@ -7,7 +7,7 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -18,47 +18,46 @@ fn main() {
     // 设置路径
     let project_root = PathBuf::from(&manifest_dir).parent().unwrap().to_path_buf();
     let user_dir = project_root.join("user");
-    let user_bin_dir = user_dir.join("bin");
+    let _user_bin_dir = user_dir.join("bin");
     let img_path = PathBuf::from(&out_dir).join("simple_fs.img");
-    let tool_path = project_root.join("scripts").join("make_init_simple_fs.py");
+    let _tool_path = project_root.join("scripts").join("make_init_simple_fs.py");
 
     println!("cargo:rerun-if-changed=../user");
     println!("cargo:rerun-if-changed=../scripts/make_init_simple_fs.py");
 
-    // 步骤 1: 编译用户程序 (暂时禁用)
-    println!("cargo:warning=[build.rs] Skipping user programs build (disabled for now)...");
+    // 步骤 1: 编译用户程序
+    if user_dir.exists() {
+        println!("cargo:warning=[build.rs] Building user programs...");
+        let status = Command::new("make")
+            .current_dir(&user_dir)
+            .env("BUILD_MODE", "release")
+            // 清除可能从父目录继承的 CARGO 环境变量，避免用户程序继承 os 的构建配置
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("CARGO_BUILD_RUSTFLAGS")
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status();
 
-    // if user_dir.exists() {
-    //     let status = Command::new("make")
-    //         .current_dir(&user_dir)
-    //         .env("BUILD_MODE", "release")
-    //         // 清除可能从父目录继承的 CARGO 环境变量，避免用户程序继承 os 的构建配置
-    //         .env_remove("CARGO_ENCODED_RUSTFLAGS")
-    //         .env_remove("CARGO_BUILD_RUSTFLAGS")
-    //         // .stdout(std::process::Stdio::null()) // 抑制 make 输出
-    //         // .stderr(std::process::Stdio::null())
-    //         .status();
-    //
-    //     match status {
-    //         Ok(s) if s.success() => {
-    //             println!("cargo:warning=[build.rs] User programs built successfully");
-    //         }
-    //         Ok(s) => {
-    //             panic!(
-    //                 "User program build failed with status: {}. Aborting kernel build.",
-    //                 s
-    //             );
-    //         }
-    //         Err(e) => {
-    //             panic!(
-    //                 "Failed to execute make for user programs: {}. Aborting kernel build.",
-    //                 e
-    //             );
-    //         }
-    //     }
-    // } else {
-    //     println!("cargo:warning=[build.rs] User directory not found, skipping user build");
-    // }
+        match status {
+            Ok(s) if s.success() => {
+                println!("cargo:warning=[build.rs] User programs built successfully");
+            }
+            Ok(s) => {
+                panic!(
+                    "User program build failed with status: {}. Aborting kernel build.",
+                    s
+                );
+            }
+            Err(e) => {
+                panic!(
+                    "Failed to execute make for user programs: {}. Aborting kernel build.",
+                    e
+                );
+            }
+        }
+    } else {
+        println!("cargo:warning=[build.rs] User directory not found, skipping user build");
+    }
 
     // 步骤 2: 打包 simple_fs 镜像 (暂时禁用，直接创建空镜像)
     println!("cargo:warning=[build.rs] Creating empty simple_fs image (user programs disabled)...");
@@ -104,11 +103,33 @@ fn main() {
     // 输出镜像路径供代码使用
     println!("cargo:rustc-env=SIMPLE_FS_IMAGE={}", img_path.display());
 
-    // 步骤 3: 创建 ext4 测试镜像
-    println!("cargo:warning=[build.rs] Creating ext4 test image...");
-    let ext4_img_path = PathBuf::from(&out_dir).join("ext4_test.img");
-    create_ext4_image(&ext4_img_path);
-    println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_img_path.display());
+    // 步骤 3: 创建 ext4 镜像
+    // 检测是否为测试模式
+    let is_test = env::var("CARGO_CFG_TEST").is_ok();
+
+    // 3.1: 创建用于 include_bytes! 嵌入的镜像
+    let ext4_embed_img = PathBuf::from(&out_dir).join("ext4_test.img");
+    if is_test {
+        // 测试模式: 创建 8MB 镜像用于测试
+        println!("cargo:warning=[build.rs] Creating ext4 test image for embedding (8MB)...");
+        create_ext4_test_image(&ext4_embed_img);
+    } else {
+        // 非测试模式: 创建最小镜像 (1MB) 以减少二进制体积
+        println!("cargo:warning=[build.rs] Creating minimal ext4 image for embedding (1MB)...");
+        create_minimal_ext4_image(&ext4_embed_img);
+    }
+    println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_embed_img.display());
+
+    // 3.2: 非测试模式下创建完整的运行时镜像
+    if !is_test {
+        println!("cargo:warning=[build.rs] Creating full ext4 runtime image (128MB) at fs.img...");
+        let fs_img_path = PathBuf::from(&manifest_dir).join("fs.img");
+        create_full_ext4_image(&fs_img_path, &project_root);
+        println!(
+            "cargo:warning=[build.rs] Runtime image created: {}",
+            fs_img_path.display()
+        );
+    }
 }
 
 /// 创建空的 simple_fs 镜像
@@ -130,19 +151,115 @@ fn create_empty_image(path: &PathBuf) {
     }
 }
 
-/// 创建 ext4 测试镜像
-fn create_ext4_image(path: &PathBuf) {
-    // 8MB 镜像
-    const IMG_SIZE_MB: usize = 8;
+/// 创建 ext4 测试镜像 (8MB)
+fn create_ext4_test_image(path: &PathBuf) {
+    create_empty_ext4_image(path, 8);
+}
+
+/// 创建最小 ext4 镜像 (1MB)
+fn create_minimal_ext4_image(path: &PathBuf) {
+    create_empty_ext4_image(path, 1);
+}
+
+/// 创建空的 ext4 镜像
+fn create_empty_ext4_image(path: &PathBuf, size_mb: usize) {
     const BLOCK_SIZE: usize = 1024 * 1024;
 
     println!(
         "cargo:warning=[build.rs] Creating {}MB ext4 image at {}",
-        IMG_SIZE_MB,
+        size_mb,
         path.display()
     );
 
     // 1. 创建空文件 (dd)
+    let dd_status = Command::new("dd")
+        .arg("if=/dev/zero")
+        .arg(format!("of={}", path.display()))
+        .arg(format!("bs={}", BLOCK_SIZE))
+        .arg(format!("count={}", size_mb))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("Failed to execute dd");
+
+    if !dd_status.success() {
+        panic!("Failed to create empty disk image");
+    }
+
+    // 2. 格式化为 ext4
+    // 关键: 使用 -g 512 强制生成多个块组以避免 ext4_rs bug
+    // 每组 512 块 (2MB), 8MB 镜像 = 4 个块组
+    let mut mkfs_cmd = Command::new("mkfs.ext4");
+    mkfs_cmd
+        .arg("-F") // 强制覆盖
+        .arg("-b")
+        .arg("4096") // 块大小 4K
+        .arg("-m")
+        .arg("0") // 0% 保留空间
+        .arg("-I")
+        .arg("256"); // Inode 大小 256 字节
+
+    // 只对测试镜像 (>=8MB) 添加 -g 选项以生成多个块组
+    if size_mb >= 8 {
+        mkfs_cmd.arg("-g").arg("512"); // 每组 512 块 (2MB)
+    }
+
+    let mkfs_status = mkfs_cmd
+        .arg("-O")
+        .arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
+        .arg(path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("Failed to execute mkfs.ext4");
+
+    if mkfs_status.success() {
+        let block_groups = if size_mb >= 8 { " (multi-group)" } else { "" };
+        println!(
+            "cargo:warning=[build.rs] Ext4 image formatted successfully ({}MB{}).",
+            size_mb, block_groups
+        );
+    } else {
+        panic!("Failed to format ext4 image! Make sure 'mkfs.ext4' is installed.");
+    }
+}
+
+/// 创建完整的 ext4 镜像 (包含 data/ 和 user/bin/)
+fn create_full_ext4_image(path: &PathBuf, project_root: &Path) {
+    const IMG_SIZE_MB: usize = 1024; // 1GB
+    const BLOCK_SIZE: usize = 1024 * 1024;
+
+    println!(
+        "cargo:warning=[build.rs] Creating {}MB (1GB) full ext4 image at {}",
+        IMG_SIZE_MB,
+        path.display()
+    );
+
+    // 1. 创建临时目录用于组织文件系统内容
+    let temp_root = std::env::temp_dir().join("comix_fs_content");
+    if temp_root.exists() {
+        fs::remove_dir_all(&temp_root).ok();
+    }
+    fs::create_dir_all(&temp_root).expect("Failed to create temp directory");
+
+    // 2. 复制 data/ 目录的内容到临时根目录
+    let data_dir = project_root.join("data");
+    if data_dir.exists() {
+        copy_dir_recursive(&data_dir, &temp_root).expect("Failed to copy data directory");
+        println!("cargo:warning=[build.rs] Copied data/ to temp root");
+    }
+
+    // 3. 创建 /home/user/bin 目录并复制 user/bin
+    let home_user_bin = temp_root.join("home").join("user").join("bin");
+    fs::create_dir_all(&home_user_bin).expect("Failed to create home/user/bin");
+
+    let user_bin_src = project_root.join("user").join("bin");
+    if user_bin_src.exists() {
+        copy_dir_recursive(&user_bin_src, &home_user_bin).expect("Failed to copy user/bin");
+        println!("cargo:warning=[build.rs] Copied user/bin to /home/user/bin");
+    }
+
+    // 4. 创建空镜像
     let dd_status = Command::new("dd")
         .arg("if=/dev/zero")
         .arg(format!("of={}", path.display()))
@@ -154,41 +271,51 @@ fn create_ext4_image(path: &PathBuf) {
         .expect("Failed to execute dd");
 
     if !dd_status.success() {
-        panic!("Failed to create empty disk image");
+        panic!("Failed to create disk image");
     }
 
-    // 2. 格式化为 ext4
-    // 关键策略：通过 -g 512 强制生成多个块组 (Block Groups)
-    // 8MB / 2MB(512*4k) = 4 个块组
-    // 这样 ext4_rs 即使跳过 Group 0，也有 Group 1, 2, 3 可用
+    // 5. 使用 mkfs.ext4 -d 选项从临时目录创建文件系统
     let mkfs_status = Command::new("mkfs.ext4")
-        .arg("-F") // 强制覆盖
+        .arg("-F")
         .arg("-b")
-        .arg("4096") // 块大小 4K
-        .arg("-g")
-        .arg("512") // [关键!] 每组 512 块 (2MB)。确保 8MB 镜像有 4 个组。
+        .arg("4096")
         .arg("-m")
-        .arg("0") // 0% 保留空间，最大化可用容量
-        .arg("-I")
-        .arg("256") // Inode 大小 256 字节
-        // 特性控制 (Features):
-        // ^has_journal:   [关键!] 禁用日志。小块组无法容纳日志，且 OS 开发初期建议无日志以简化。
-        // ^resize_inode:  禁用在线调整大小预留，节省 GDT 空间。
-        // ^metadata_csum: 禁用校验和，提高与旧版驱动/ext4_rs 的兼容性。
-        // 64bit:          保持开启，现代 ext4 默认特性。
-        .arg("-O")
-        .arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
+        .arg("0")
+        .arg("-d")
+        .arg(&temp_root) // 使用临时目录作为根
         .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .expect("Failed to execute mkfs.ext4");
 
-    if mkfs_status.success() {
-        println!(
-            "cargo:warning=[build.rs] Ext4 image formatted successfully (No Journal, Multi-Group)."
-        );
-    } else {
-        panic!("Failed to format ext4 image! Make sure 'mkfs.ext4' is installed.");
+    if !mkfs_status.success() {
+        panic!("Failed to format ext4 image with data!");
     }
+
+    // 6. 清理临时目录
+    fs::remove_dir_all(&temp_root).ok();
+
+    println!("cargo:warning=[build.rs] Full ext4 image created successfully (1GB).");
+}
+
+/// 递归复制目录
+fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
 }

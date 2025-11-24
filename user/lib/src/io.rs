@@ -18,6 +18,7 @@ pub fn print(s: &[u8]) {
 /// 从标准输入 (文件描述符 0) 读取一行文本
 ///
 /// 通过循环反复调用底层的单字节读取，直到遇到换行符或缓冲区满。
+/// 支持回显输入的字符到标准输出。
 ///
 /// # 参数
 /// - `buffer`: 可变的字节切片，用于接收读取的数据。
@@ -43,12 +44,29 @@ pub fn read_line(buffer: &mut [u8]) -> usize {
             break;
         }
 
+        let ch = byte[0];
+
+        // 处理退格键
+        if ch == 8 || ch == 127 {
+            // ASCII 8 = Backspace, 127 = DEL
+            if current_pos > 0 {
+                current_pos -= 1;
+                // 回显: 退格 + 空格 + 退格
+                print(b"\x08 \x08");
+            }
+            continue;
+        }
+
         // readline不读取换行符
-        if byte[0] == b'\n' || byte[0] == b'\r' {
+        if ch == b'\n' || ch == b'\r' {
+            print(b"\n"); // 回显换行
             break;
         }
 
-        buffer[current_pos] = byte[0];
+        // 回显输入的字符
+        print(&[ch]);
+
+        buffer[current_pos] = ch;
         current_pos += 1;
     }
 

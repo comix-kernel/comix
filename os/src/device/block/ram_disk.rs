@@ -1,6 +1,6 @@
 use super::super::{DeviceType, Driver};
-use super::block_device::{BlockDevice, BlockError};
 use super::BlockDriver;
+use super::block_device::{BlockDevice, BlockError};
 use crate::sync::SpinLock;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -115,6 +115,7 @@ impl Driver for RamDisk {
     }
 }
 
+// 同时实现 BlockDriver 和 BlockDevice 保证兼容性
 impl BlockDriver for RamDisk {
     fn read_block(&self, block_id: usize, buf: &mut [u8]) -> bool {
         BlockDevice::read_block(self, block_id, buf).is_ok()

@@ -6,7 +6,7 @@
 //! - 使用 Dentry 引用而非存储路径，消除与 VFS 的冗余
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
-use crate::sync::SpinLock;
+use crate::sync::{Mutex, SpinLock};
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -17,7 +17,7 @@ use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, Inod
 /// Ext4 Inode 包装
 pub struct Ext4Inode {
     /// ext4_rs 文件系统对象
-    fs: Arc<SpinLock<ext4_rs::Ext4>>,
+    fs: Arc<Mutex<ext4_rs::Ext4>>,
 
     /// Inode 号
     ino: u32,
@@ -31,7 +31,7 @@ impl Ext4Inode {
     /// 创建新的 Ext4Inode
     ///
     /// 注意：初始创建时 dentry 为空，VFS 会在创建 Dentry 后调用 set_dentry()
-    pub fn new(fs: Arc<SpinLock<ext4_rs::Ext4>>, ino: u32) -> Self {
+    pub fn new(fs: Arc<Mutex<ext4_rs::Ext4>>, ino: u32) -> Self {
         Self {
             fs,
             ino,
@@ -78,8 +78,21 @@ impl Ext4Inode {
 
 impl Inode for Ext4Inode {
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
+        crate::println!(
+            "[Ext4Inode::metadata] About to acquire fs lock for ino={}",
+            self.ino
+        );
         let fs = self.fs.lock();
+        crate::println!(
+            "[Ext4Inode::metadata] Acquired fs lock for ino={}",
+            self.ino
+        );
+        crate::println!(
+            "[Ext4Inode::metadata] Calling get_inode_ref for ino={}",
+            self.ino
+        );
         let inode_ref = fs.get_inode_ref(self.ino);
+        crate::println!("[Ext4Inode::metadata] Got inode_ref for ino={}", self.ino);
         let inode = &inode_ref.inode;
 
         // 计算文件大小（64位）
@@ -99,6 +112,10 @@ impl Inode for Ext4Inode {
             _ => InodeType::File,
         };
 
+        crate::println!(
+            "[Ext4Inode::metadata] Returning metadata for ino={}",
+            self.ino
+        );
         Ok(InodeMetadata {
             inode_no: self.ino as usize,
             size: size as usize,
@@ -152,15 +169,19 @@ impl Inode for Ext4Inode {
     }
 
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        crate::println!("[Ext4Inode::lookup] Looking up: {}", name);
         // Check if current inode is a directory
         let metadata = self.metadata()?;
+        crate::println!("[Ext4Inode::lookup] Got metadata for: {}", name);
         if metadata.inode_type != InodeType::Directory {
             return Err(FsError::NotDirectory);
         }
 
         // 类似 create,lookup 也应该使用相对路径
         // 直接在当前目录下查找指定名称的文件
+        crate::println!("[Ext4Inode::lookup] About to acquire fs lock for: {}", name);
         let mut fs = self.fs.lock();
+        crate::println!("[Ext4Inode::lookup] Acquired fs lock for: {}", name);
         let mut parent = self.ino;
         let mut name_off = 0;
 
@@ -493,7 +514,8 @@ impl Inode for Ext4Inode {
 
         // ========== 阶段 4: 更新目录的 ".." 引用（如果需要）==========
 
-        if old_child_metadata.inode_type == InodeType::Directory && self.ino != new_parent_ext4.ino {
+        if old_child_metadata.inode_type == InodeType::Directory && self.ino != new_parent_ext4.ino
+        {
             // 只有跨目录移动时才需要更新 ".."
             let mut child_ref = fs.get_inode_ref(old_child_ext4.ino);
 
@@ -539,9 +561,7 @@ impl Inode for Ext4Inode {
             }
 
             let new_parent_links = new_parent_ref.inode.links_count();
-            new_parent_ref
-                .inode
-                .set_links_count(new_parent_links + 1);
+            new_parent_ref.inode.set_links_count(new_parent_links + 1);
 
             fs.write_back_inode(&mut child_ref);
         }

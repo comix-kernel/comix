@@ -10,7 +10,7 @@ pub use inode::Ext4Inode;
 
 use crate::device::block::BlockDriver;
 use crate::pr_info;
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 use crate::vfs::{FileSystem, FsError, Inode, StatFs};
 use alloc::sync::Arc;
 
@@ -29,7 +29,7 @@ pub struct Ext4FileSystem {
     device_id: usize,
 
     /// ext4_rs 文件系统对象
-    ext4: Arc<SpinLock<ext4_rs::Ext4>>,
+    ext4: Arc<Mutex<ext4_rs::Ext4>>,
 
     /// 根 inode
     root: Arc<dyn Inode>,
@@ -68,7 +68,7 @@ impl Ext4FileSystem {
         let ext4 = ext4_rs::Ext4::open(adapter);
         pr_info!("[Ext4] ext4_rs returned successfully");
 
-        let ext4 = Arc::new(SpinLock::new(ext4));
+        let ext4 = Arc::new(Mutex::new(ext4));
 
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
         let root = Arc::new(Ext4Inode::new(ext4.clone(), 2)); // ← 不再传 path

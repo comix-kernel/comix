@@ -178,9 +178,16 @@ fn fork() -> usize {
 fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c_char) -> isize {
     unsafe { sstatus::set_sum() };
     let path_str = get_path_safe(path).unwrap_or("");
+    crate::println!("[execve] Loading: {}", path_str);
     let data = match crate::vfs::vfs_load_elf(path_str) {
-        Ok(data) => data,
-        Err(_) => return -1,
+        Ok(data) => {
+            crate::println!("[execve] Loaded {} bytes", data.len());
+            data
+        }
+        Err(e) => {
+            crate::println!("[execve] Failed to load: {:?}", e);
+            return -1;
+        }
     };
 
     // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
@@ -196,9 +203,11 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
     };
 
     task.lock().fd_table.close_exec();
+    crate::println!("[execve] Creating memory space");
 
     let (space, entry, sp) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
+    crate::println!("[execve] Created memory space, entry=0x{:x}", entry);
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
     current_cpu().lock().switch_space(space.clone());
@@ -208,6 +217,7 @@ fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c
         let mut t = task.lock();
         t.execve(space, entry, sp, &argv_refs, &envp_refs);
     }
+    crate::println!("[execve] Restoring to user mode");
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有

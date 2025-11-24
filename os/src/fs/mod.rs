@@ -10,7 +10,9 @@ pub mod smfs;
 use alloc::string::String;
 use alloc::sync::Arc;
 
+use crate::device::BLK_DRIVERS;
 use crate::device::RamDisk;
+use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::simple_fs::SimpleFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
@@ -67,6 +69,72 @@ pub fn init_simple_fs() -> Result<(), crate::vfs::FsError> {
             for entry in entries {
                 println!("  - {} (type: {:?})", entry.name, entry.inode_type);
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// 从真实的块设备初始化 Ext4 文件系统
+///
+/// 尝试从第一个可用的块设备创建 Ext4 文件系统，并挂载为根文件系统
+pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
+    use crate::config::{EXT4_BLOCK_SIZE, FS_IMAGE_SIZE, VIRTIO_BLK_SECTOR_SIZE};
+    use crate::vfs::FsError;
+
+    println!("[Ext4] Initializing Ext4 filesystem from block device");
+
+    // 1. 获取第一个块设备驱动
+    let blk_drivers = BLK_DRIVERS.read();
+    if blk_drivers.is_empty() {
+        println!("[Ext4] No block device found");
+        return Err(FsError::NoDevice);
+    }
+
+    let block_driver = blk_drivers[0].clone();
+    drop(blk_drivers); // 释放锁
+
+    println!("[Ext4] Using block device: {}", block_driver.get_id());
+
+    // 2. 获取块设备信息
+    // Ext4 文件系统块大小 (必须与 mkfs.ext4 -b 参数一致)
+    let ext4_block_size = EXT4_BLOCK_SIZE;
+    // fs.img 大小 (由 qemu-run.sh 创建)
+    // 计算总块数 (以 Ext4 块为单位, 而非扇区)
+    let total_blocks = FS_IMAGE_SIZE / ext4_block_size;
+
+    println!(
+        "[Ext4] Ext4 block size: {}, Total blocks: {}, Image size: {} MB",
+        ext4_block_size,
+        total_blocks,
+        FS_IMAGE_SIZE / 1024 / 1024
+    );
+
+    // 3. 创建 Ext4 文件系统
+    // 注意: BlockDeviceAdapter 内部必须使用 EXT4_BLOCK_SIZE (4096)
+    let ext4_fs = Ext4FileSystem::open(block_driver, ext4_block_size, total_blocks, 0)?;
+
+    // 4. 挂载为根文件系统
+    println!("[Ext4] Mounting Ext4 as root filesystem");
+    MOUNT_TABLE.mount(
+        ext4_fs,
+        "/",
+        MountFlags::empty(),
+        Some(String::from("virtio-blk0")),
+    )?;
+
+    println!("[Ext4] Root filesystem mounted at /");
+
+    // 5. 列出根目录内容（调试用）
+    if let Ok(root_dentry) = crate::vfs::get_root_dentry() {
+        println!("[Ext4] Root directory contents:");
+        let inode = root_dentry.inode.clone();
+        if let Ok(entries) = inode.readdir() {
+            for entry in entries {
+                println!("  - {} (type: {:?})", entry.name, entry.inode_type);
+            }
+        } else {
+            println!("[Ext4] Failed to read root directory");
         }
     }
 

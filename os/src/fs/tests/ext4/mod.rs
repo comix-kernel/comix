@@ -1,6 +1,6 @@
+use crate::device::block::BlockDriver;
 use crate::device::block::block_device::BlockDevice as VfsBlockDevice;
 use crate::device::block::ram_disk::RamDisk;
-use crate::device::block::BlockDriver;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::sync::SpinLock;
 use crate::vfs::dentry::{Dentry, DentryCache};
@@ -35,11 +35,14 @@ fn get_ext4_image() -> &'static [u8] {
 /// # Returns
 /// RamDisk instance with valid ext4 filesystem
 pub fn create_test_ramdisk() -> Arc<RamDisk> {
-    const BLOCK_SIZE: usize = 4096; // Ext4 standard block size
+    use crate::config::VIRTIO_BLK_SECTOR_SIZE;
+
+    // 使用 512 字节扇区大小,与 VirtIO 块设备保持一致
+    const SECTOR_SIZE: usize = 512; // Same as VIRTIO_BLK_SECTOR_SIZE
     const DEVICE_ID: usize = 0;
 
     let image_data = get_ext4_image().to_vec();
-    RamDisk::from_bytes(image_data, BLOCK_SIZE, DEVICE_ID)
+    RamDisk::from_bytes(image_data, SECTOR_SIZE, DEVICE_ID)
 }
 
 /// Create a test Ext4 filesystem with root dentry
@@ -50,17 +53,21 @@ pub fn create_test_ramdisk() -> Arc<RamDisk> {
 /// # Returns
 /// (Ext4FileSystem, root Dentry)
 pub fn create_test_ext4_with_root() -> (Arc<Ext4FileSystem>, Arc<Dentry>) {
+    use crate::config::EXT4_BLOCK_SIZE;
+
     let ramdisk = create_test_ramdisk();
 
     // 获取 ramdisk 的参数
-    let block_size = ramdisk.block_size();
-    let total_blocks = ramdisk.total_blocks();
     let device_id = ramdisk.device_id();
+    // 注意: ramdisk 使用 512 字节扇区,但 Ext4 使用 4096 字节块
+    // 适配器会处理这个转换
+    let total_blocks = ramdisk.total_blocks();
 
     // 将 ramdisk 转换为 BlockDriver
     let block_driver: Arc<dyn BlockDriver> = ramdisk;
 
-    let fs = Ext4FileSystem::open(block_driver, block_size, total_blocks, device_id)
+    // 使用 Ext4 块大小 (4096),而不是底层设备的扇区大小 (512)
+    let fs = Ext4FileSystem::open(block_driver, EXT4_BLOCK_SIZE, total_blocks, device_id)
         .expect("Failed to create Ext4FileSystem");
 
     // 为每个测试生成唯一的虚拟根路径,避免与全局 "/" 冲突
