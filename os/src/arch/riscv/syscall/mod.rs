@@ -7,7 +7,7 @@ mod syscall_number;
 /// 分发系统调用
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
     match frame.x17_a7 {
-        syscall_number::SYS_SHUTDOWN => sys_shutdown(frame),
+        syscall_number::SYS_REBOOT => sys_reboot(frame),
         syscall_number::SYS_GETPID => sys_getpid(frame),
         syscall_number::SYS_GETPPID => sys_getppid(frame),
         syscall_number::SYS_EXIT => sys_exit(frame),
@@ -35,6 +35,10 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_SENDTO => sys_send(frame),
         syscall_number::SYS_RECVFROM => sys_recv(frame),
         syscall_number::SYS_GETSOCKOPT => sys_getsockopt(frame),
+        syscall_number::SYS_SETHOSTNAME => sys_sethostname(frame),
+        syscall_number::SYS_GETRLIMIT => sys_getrlimit(frame),
+        syscall_number::SYS_SETRLIMIT => sys_setrlimit(frame),
+        syscall_number::SYS_PRLIMIT64 => sys_prlimit(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
