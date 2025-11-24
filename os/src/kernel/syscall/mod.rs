@@ -43,7 +43,7 @@ impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
 impl_syscall!(sys_pipe2, pipe2, (*mut i32, u32));
 impl_syscall!(sys_fstat, fstat, (usize, *mut Stat));
 impl_syscall!(sys_getdents64, getdents64, (usize, *mut u8, usize));
-impl_syscall!(sys_sethostname, set_hostname, (*mut c_char, usize));
+impl_syscall!(sys_sethostname, set_hostname, (*const c_char, usize));
 impl_syscall!(sys_getrlimit, getrlimit, (c_int, *mut Rlimit));
 impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
 impl_syscall!(
@@ -64,21 +64,13 @@ impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
 impl_syscall!(sys_getpid, get_pid, ());
 impl_syscall!(sys_getppid, get_ppid, ());
 impl_syscall!(sys_exit, exit, (c_int));
-impl_syscall!(
-    sys_setsockopt,
-    setsockopt,
-    (i32, i32, i32, *const u8, u32)
-);
+impl_syscall!(sys_setsockopt, setsockopt, (i32, i32, i32, *const u8, u32));
 impl_syscall!(
     sys_getsockopt,
     getsockopt,
     (i32, i32, i32, *mut u8, *mut u32)
 );
-impl_syscall!(
-    sys_accept4,
-    accept4,
-    (i32, *mut u8, *mut u32, i32)
-);
+impl_syscall!(sys_accept4, accept4, (i32, *mut u8, *mut u32, i32));
 impl_syscall!(
     sys_sendto,
     sendto,
@@ -89,13 +81,5 @@ impl_syscall!(
     recvfrom,
     (i32, *mut u8, usize, i32, *mut u8, *mut u32)
 );
-impl_syscall!(
-    sys_getsockname,
-    getsockname,
-    (i32, *mut u8, *mut u32)
-);
-impl_syscall!(
-    sys_getpeername,
-    getpeername,
-    (i32, *mut u8, *mut u32)
-);
+impl_syscall!(sys_getsockname, getsockname, (i32, *mut u8, *mut u32));
+impl_syscall!(sys_getpeername, getpeername, (i32, *mut u8, *mut u32));

@@ -80,8 +80,7 @@ pub fn get_hostname(buf: *mut c_char, len: usize) -> c_int {
 /// - `len`: 主机名长度
 /// # 返回值
 /// 成功返回 0，失败返回负错误码
-/// HACK: 由于某些关于类型原因, 这里name不得不声明为mut指针, 实际并不会修改它指向的数据
-pub fn set_hostname(name: *mut c_char, len: usize) -> c_int {
+pub fn set_hostname(name: *const c_char, len: usize) -> c_int {
     if len > HOST_NAME_MAX {
         return -EINVAL;
     }
@@ -90,7 +89,7 @@ pub fn set_hostname(name: *mut c_char, len: usize) -> c_int {
         let t = task.lock();
         t.uts_namespace.clone()
     };
-    let name_buf = UserBuffer::new(name, len);
+    let name_buf = UserBuffer::new(name as *mut _, len);
     let name = unsafe { name_buf.copy_from_user() };
     {
         let mut uts_lock = uts.lock();
