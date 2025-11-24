@@ -105,7 +105,11 @@ fn main() {
 
     // 步骤 3: 创建 ext4 镜像
     // 检测是否为测试模式
-    let is_test = env::var("CARGO_CFG_TEST").is_ok();
+    // 注意: CARGO_CFG_TEST 只在运行测试时设置，编译时不会设置
+    // 因此我们检查 TEST 环境变量 (由 Makefile 传递) 或检查是否有测试相关的 cfg
+    let is_test = env::var("TEST").is_ok()
+        || env::var("CARGO_CFG_TEST").is_ok()
+        || env::var("PROFILE").map(|p| p == "test").unwrap_or(false);
 
     // 3.1: 创建用于 include_bytes! 嵌入的镜像
     let ext4_embed_img = PathBuf::from(&out_dir).join("ext4_test.img");
