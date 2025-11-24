@@ -13,7 +13,7 @@ use crate::{
     },
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
-        WaitQueue,
+        UtsNamespace, WaitQueue,
         task::{forkret, task_state::TaskState},
     },
     mm::{
@@ -94,6 +94,8 @@ pub struct Task {
     /// 信号处理动作表
     pub signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
 
+    pub uts_namespace: Arc<SpinLock<UtsNamespace>>,
+
     // === 文件系统 ===
     /// 文件描述符表
     pub fd_table: Arc<FDTable>,
@@ -126,6 +128,7 @@ impl Task {
         trap_frame_tracker: FrameTracker,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
+        uts_namespace: Arc<SpinLock<UtsNamespace>>,
     ) -> Self {
         let mut task = Self::new(
             tid,
@@ -137,6 +140,7 @@ impl Task {
             None,
             signal_handlers,
             blocked,
+            uts_namespace,
         );
         task.context
             .set_init_context(forkret as usize, task.kstack_base);
@@ -160,6 +164,7 @@ impl Task {
         memory_space: Arc<SpinLock<MemorySpace>>,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
+        uts_namespace: Arc<SpinLock<UtsNamespace>>,
     ) -> Self {
         let mut task = Self::new(
             tid,
@@ -171,6 +176,7 @@ impl Task {
             Some(memory_space),
             signal_handlers,
             blocked,
+            uts_namespace,
         );
         task.context
             .set_init_context(forkret as usize, task.kstack_base);
@@ -288,6 +294,7 @@ impl Task {
         memory_space: Option<Arc<SpinLock<MemorySpace>>>,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
+        uts_namespace: Arc<SpinLock<UtsNamespace>>,
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
@@ -329,6 +336,7 @@ impl Task {
             memory_space,
             exit_code: None,
             signal_handlers,
+            uts_namespace,
             blocked,
             pending: SignalFlags::empty(),
             fd_table,
@@ -353,6 +361,7 @@ impl Task {
             None,
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
+            Arc::new(SpinLock::new(UtsNamespace::default())),
         )
     }
 }
@@ -395,6 +404,7 @@ mod tests {
             trap_frame_tracker,
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
+            Arc::new(SpinLock::new(UtsNamespace::default())),
         );
         kassert!(t.tid == 1);
         kassert!(t.pid == t.tid);
@@ -428,6 +438,7 @@ mod tests {
             trap_frame_tracker,
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
+            Arc::new(SpinLock::new(UtsNamespace::default())),
         );
         kassert!(t.tid == 10);
         kassert!(t.pid == 5);

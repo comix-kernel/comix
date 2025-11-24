@@ -8,10 +8,11 @@ mod io;
 mod ipc;
 mod network;
 mod signal;
+mod sys;
 mod task;
 mod util;
 
-use core::ffi::c_char;
+use core::ffi::{c_char, c_int};
 
 use crate::{impl_syscall, vfs::Stat};
 use fs::*;
@@ -19,16 +20,12 @@ use io::*;
 use ipc::*;
 use network::*;
 use signal::*;
+use sys::*;
 use task::*;
-
-/// 关闭系统调用
-fn shutdown() -> ! {
-    crate::shutdown(false);
-}
 
 // 系统调用实现注册
 impl_syscall!(sys_shutdown, shutdown, noreturn, ());
-impl_syscall!(sys_exit, exit, noreturn, (i32));
+impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
 impl_syscall!(sys_fork, fork, ());
@@ -56,6 +53,10 @@ impl_syscall!(sys_send, send, (i32, *const u8, usize, i32));
 impl_syscall!(sys_recv, recv, (i32, *mut u8, usize, i32));
 impl_syscall!(sys_getifaddrs, getifaddrs, (*mut *mut u8));
 impl_syscall!(sys_freeifaddrs, freeifaddrs, (*mut u8));
+impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
+impl_syscall!(sys_getpid, get_pid, ());
+impl_syscall!(sys_getppid, get_ppid, ());
+impl_syscall!(sys_exit, exit, (c_int));
 impl_syscall!(
     sys_setsockopt,
     setsockopt,
@@ -91,4 +92,3 @@ impl_syscall!(
     getpeername,
     (i32, *mut u8, *mut u32)
 );
-impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));

@@ -1,6 +1,9 @@
 //! 任务相关的系统调用实现
 
-use core::{ffi::c_char, sync::atomic::Ordering};
+use core::{
+    ffi::{c_char, c_int},
+    sync::atomic::Ordering,
+};
 
 use alloc::{sync::Arc, vec::Vec};
 use riscv::register::sstatus;
@@ -9,7 +12,7 @@ use crate::{
     arch::trap::restore,
     kernel::{
         SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        exit_process, schedule,
+        current_task, exit_process, schedule,
         syscall::util::{get_args_safe, get_path_safe},
     },
     mm::{
@@ -19,12 +22,38 @@ use crate::{
     sync::SpinLock,
 };
 
-/// 进程退出系统调用
+/// 线程退出系统调用
+/// # 说明
+/// 终止调用该系统调用的执行流（即线程）
+/// 对于非主线程, 该线程立即终止。内核回收该线程的栈和其他线程特定的资源。
+/// 进程中的其他线程继续正常执行。
+/// 对于主线程, 该线程终止整个进程，
+/// 除非进程中有其他线程调用 execve() 或等待其子线程终止(TODO: 该行为待验证)
 /// # 参数
 /// - `code`: 退出代码
-pub fn exit(code: i32) -> ! {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    exit_process(task, code);
+pub fn exit(code: c_int) -> ! {
+    let task = current_task();
+    if task.lock().is_process() {
+        exit_process(task, code & 0xFF);
+    } else {
+        TASK_MANAGER.lock().exit_task(task, code & 0xFF);
+    }
+    schedule();
+    unreachable!("exit: exit_task should not return.");
+}
+
+/// 进程 (线程组) 退出系统调用
+/// # 说明
+/// exit_group() 函数将"立即"终止调用进程。该进程拥有的所有打开文件描述符均被关闭。
+/// 该进程的所有子进程将由 init(1) 进程（TODO: 或通过 prctl(2) 的
+/// PR_SET_CHILD_SUBREAPER 操作定义的最近"子进程回收器"进程）继承。
+/// 进程父进程将收到 SIGCHLD 信号。
+/// 返回值 code & 0xFF作为进程退出状态传递给父进程，
+/// 父进程可通过wait(2)系列调用之一获取该状态。
+/// # 参数
+/// - `code`: 退出代码
+pub fn exit_group(code: c_int) -> ! {
+    exit_process(current_task(), code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
 }
@@ -32,7 +61,7 @@ pub fn exit(code: i32) -> ! {
 /// 创建当前任务的子任务（fork）
 pub fn fork() -> usize {
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (ppid, space, signal_handlers, blocked, ptf, fd_table, cwd, root) = {
+    let (ppid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
@@ -49,6 +78,7 @@ pub fn fork() -> usize {
             task.fd_table.clone(),
             task.cwd.clone(),
             task.root.clone(),
+            task.uts_namespace.clone(),
         )
     };
 
@@ -64,6 +94,7 @@ pub fn fork() -> usize {
         Arc::new(SpinLock::new(space)),
         signal_handlers,
         blocked,
+        uts,
     );
 
     child_task.fd_table = Arc::new(fd_table.clone_table());
@@ -160,4 +191,18 @@ pub fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
         sstatus::clear_sum();
     }
     tid as isize
+}
+
+/// 获取当前任务的进程 ID
+/// # 返回值:
+/// - 进程 ID
+pub fn get_pid() -> c_int {
+    current_task().lock().pid as c_int
+}
+
+/// 获取当前任务的父进程 ID
+/// # 返回值:
+/// - 父进程 ID, 该进程要么是创建该进程的进程, 要么是重新归属的父进程
+pub fn get_ppid() -> c_int {
+    current_task().lock().ppid as c_int
 }
