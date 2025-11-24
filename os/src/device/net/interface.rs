@@ -56,9 +56,8 @@ impl SmoltcpInterface {
     fn new(device: Arc<dyn NetDevice>, mac_address: EthernetAddress) -> Self {
         let mut device_adapter = NetDeviceAdapter::new(device);
 
-        let config = smoltcp::iface::Config::new(
-            smoltcp::wire::HardwareAddress::Ethernet(mac_address)
-        );
+        let config =
+            smoltcp::iface::Config::new(smoltcp::wire::HardwareAddress::Ethernet(mac_address));
         let iface = Interface::new(
             config,
             &mut device_adapter,
@@ -79,8 +78,13 @@ impl SmoltcpInterface {
     ///
     /// # 返回值
     /// 返回轮询结果，指示是否有事件被处理
-    pub fn poll(&mut self, timestamp: Instant, sockets: &mut smoltcp::iface::SocketSet) -> smoltcp::iface::PollResult {
-        self.iface.poll(timestamp, &mut self.device_adapter, sockets)
+    pub fn poll(
+        &mut self,
+        timestamp: Instant,
+        sockets: &mut smoltcp::iface::SocketSet,
+    ) -> smoltcp::iface::PollResult {
+        self.iface
+            .poll(timestamp, &mut self.device_adapter, sockets)
     }
 
     /// 获取可变的 smoltcp Interface 引用
@@ -205,8 +209,11 @@ impl NetworkInterface {
 
         // 设置路由
         if let Some(gateway) = self.ipv4_gateway() {
-            smoltcp_iface.interface_mut().routes_mut()
-                .add_default_ipv4_route(gateway).ok();
+            smoltcp_iface
+                .interface_mut()
+                .routes_mut()
+                .add_default_ipv4_route(gateway)
+                .ok();
         }
 
         smoltcp_iface

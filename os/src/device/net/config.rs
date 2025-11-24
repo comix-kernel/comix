@@ -35,10 +35,8 @@ impl NetworkConfigManager {
     /// ```
     fn parse_subnet_mask(mask: &str) -> Result<u8, NetworkConfigError> {
         // 解析点分十进制字符串为4个字节
-        let octets: Result<alloc::vec::Vec<u8>, _> = mask
-            .split('.')
-            .map(|s| s.parse::<u8>())
-            .collect();
+        let octets: Result<alloc::vec::Vec<u8>, _> =
+            mask.split('.').map(|s| s.parse::<u8>()).collect();
 
         let octets = octets.map_err(|_| NetworkConfigError::InvalidSubnet)?;
 
