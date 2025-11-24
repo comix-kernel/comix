@@ -217,9 +217,7 @@ pub trait Inode: Send + Sync + Any {
     fn sync(&self) -> Result<(), FsError>;
 
     /// 设置 Dentry（可选方法）
-    fn set_dentry(&self, _dentry: Weak<Dentry>) {
-        
-    }
+    fn set_dentry(&self, _dentry: Weak<Dentry>) {}
 
     /// 获取 Dentry（可选方法）
     fn get_dentry(&self) -> Option<Arc<Dentry>> {
