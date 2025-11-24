@@ -3,10 +3,7 @@
 //! 此模块实现了操作系统的网络栈，包括网络接口抽象、协议栈实现
 //! 以及网络系统调用支持。
 
-use alloc::{sync::Arc, vec::Vec};
-use spin::Mutex;
-
-pub mod device;
+use alloc::{string::{String, ToString}, sync::Arc, vec::Vec};
 pub mod interface;
 pub mod protocol;
 pub mod stack;
@@ -15,74 +12,42 @@ use crate::println;
 
 use self::interface::NetworkInterface;
 
-/// 网络子系统全局状态
-pub struct NetworkSubsystem {
-    /// 已注册的网络接口列表
-    interfaces: Vec<Arc<Mutex<NetworkInterface>>>,
-    /// 默认网络接口
-    default_interface: Option<Arc<Mutex<NetworkInterface>>>,
+/// 网络接口错误类型
+#[derive(Debug, Clone, PartialEq)]
+pub enum NetworkError {
+    /// 接口未启用
+    InterfaceDisabled,
+    /// 接口不存在
+    InterfaceNotFound,
+    /// 发送缓冲区已满
+    SendBufferFull,
+    /// 接收缓冲区为空
+    ReceiveBufferEmpty,
+    /// 无效的配置参数
+    InvalidConfig,
+    /// 设备错误
+    DeviceError(String),
+    /// 协议错误
+    ProtocolError(String),
+    /// 其他错误
+    Other(String),
 }
 
-impl NetworkSubsystem {
-    /// 创建一个新的网络子系统实例
-    pub fn new() -> Self {
-        Self {
-            interfaces: Vec::new(),
-            default_interface: None,
-        }
-    }
-
-    /// 注册一个网络接口
-    pub fn register_interface(&mut self, interface: Arc<Mutex<NetworkInterface>>) {
-        self.interfaces.push(interface.clone());
-
-        // 如果还没有默认接口，将第一个接口设为默认
-        if self.default_interface.is_none() {
-            self.default_interface = Some(interface);
-        }
-    }
-
-    /// 获取所有网络接口
-    pub fn get_interfaces(&self) -> &[Arc<Mutex<NetworkInterface>>] {
-        &self.interfaces
-    }
-
-    /// 获取默认网络接口
-    pub fn get_default_interface(&self) -> Option<Arc<Mutex<NetworkInterface>>> {
-        self.default_interface.clone()
-    }
-}
-
-/// 网络子系统全局实例
-static mut NETWORK_SUBSYSTEM: Option<Arc<Mutex<NetworkSubsystem>>> = None;
-
-/// 初始化网络子系统
-pub fn init() {
-    println!("[Network] Initializing network subsystem...");
-
-    // 创建网络子系统实例
-    let subsystem = Arc::new(Mutex::new(NetworkSubsystem::new()));
-
-    // 初始化协议栈
-    protocol::init();
-
-    // 初始化网络设备层
-    device::init();
-
-    // 存储全局实例
-    unsafe {
-        NETWORK_SUBSYSTEM = Some(subsystem);
-    }
-
-    println!("[Network] Network subsystem initialized");
-}
-
-/// 获取网络子系统实例
-pub fn get_network_subsystem() -> Option<Arc<Mutex<NetworkSubsystem>>> {
-    unsafe {
-        match NETWORK_SUBSYSTEM {
-            Some(ref subsystem) => Some(Arc::clone(subsystem)),
-            None => None,
+impl From<crate::device::net::net_device::NetDeviceError> for NetworkError {
+    fn from(err: crate::device::net::net_device::NetDeviceError) -> Self {
+        match err {
+            crate::device::net::net_device::NetDeviceError::IoError => 
+                NetworkError::DeviceError("I/O error".to_string()),
+            crate::device::net::net_device::NetDeviceError::DeviceNotReady => 
+                NetworkError::DeviceError("Device not ready".to_string()),
+            crate::device::net::net_device::NetDeviceError::NotSupported => 
+                NetworkError::DeviceError("Operation not supported".to_string()),
+            crate::device::net::net_device::NetDeviceError::QueueFull => 
+                NetworkError::SendBufferFull,
+            crate::device::net::net_device::NetDeviceError::QueueEmpty => 
+                NetworkError::ReceiveBufferEmpty,
+            crate::device::net::net_device::NetDeviceError::AllocationFailed => 
+                NetworkError::DeviceError("Memory allocation failed".to_string()),
         }
     }
 }

@@ -73,7 +73,12 @@ pub fn alloc_frames(num: usize) -> Option<Vec<FrameTracker>> {
 ///
 /// 如果分配成功，返回 `Some(FrameRangeTracker)`；否则返回 `None`。
 pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
-    FRAME_ALLOCATOR.lock().alloc_contig_frames(num)
+    use crate::println;
+    println!("[FrameAllocator] alloc_contig_frames: requesting {} frames", num);
+    println!("[FrameAllocator] About to acquire FRAME_ALLOCATOR lock...");
+    let result = FRAME_ALLOCATOR.lock().alloc_contig_frames(num);
+    println!("[FrameAllocator] Lock released, result: {}", if result.is_some() { "Some" } else { "None" });
+    result
 }
 
 /// 分配指定数量的**连续**物理帧，并确保起始地址对齐。

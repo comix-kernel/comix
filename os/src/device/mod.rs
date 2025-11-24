@@ -19,7 +19,6 @@ use virtio_drivers::transport::DeviceType;
 
 use crate::device::rtc::RtcDriver;
 use crate::device::{block::BlockDriver, net::net_device::NetDevice};
-use crate::sync::SpinLock;
 use alloc::{string::String, vec::Vec};
 use lazy_static::lazy_static;
 
@@ -53,14 +52,6 @@ pub trait Driver: Send + Sync {
 
 pub fn init() {
     device_tree::init();
-    net::init_net_devices();
-}
-
-lazy_static! {
-    /// 网络设备管理器
-    /// 负责存储和管理系统中的所有网络设备
-    /// FIXME: 尽快迁移到 NET_DRIVERS 之后此结构将废弃
-    pub static ref NETWORK_DEVICES: SpinLock<Vec<Arc<dyn NetDevice>>> = SpinLock::new(Vec::new());
 }
 
 lazy_static! {
@@ -70,4 +61,9 @@ lazy_static! {
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
     // pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
     // pub static ref IRQ_MANAGER: RwLock<irq::IrqManager> = RwLock::new(irq::IrqManager::new(true));
+}
+
+/// 注册设备驱动
+pub fn register_driver(driver: Arc<dyn Driver>) {
+    DRIVERS.write().push(driver);
 }
