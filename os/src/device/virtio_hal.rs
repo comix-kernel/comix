@@ -28,7 +28,10 @@ unsafe impl Hal for VirtIOHal {
         println!("[VirtIOHal] Calling frame allocator...");
         let frame_range = match crate::mm::frame_allocator::alloc_contig_frames(pages) {
             Some(range) => {
-                println!("[VirtIOHal] Successfully allocated {} contiguous frames", pages);
+                println!(
+                    "[VirtIOHal] Successfully allocated {} contiguous frames",
+                    pages
+                );
                 range
             }
             None => {
@@ -52,15 +55,21 @@ unsafe impl Hal for VirtIOHal {
         println!("[VirtIOHal] Virtual address: 0x{:x}", virt_addr as usize);
 
         // 清零 DMA 缓冲区（VirtIO HAL trait 要求）
-        println!("[VirtIOHal] Starting to zero {} bytes at VA: 0x{:x}",
-                 pages * crate::config::PAGE_SIZE, virt_addr as usize);
+        println!(
+            "[VirtIOHal] Starting to zero {} bytes at VA: 0x{:x}",
+            pages * crate::config::PAGE_SIZE,
+            virt_addr as usize
+        );
 
         // 添加诊断：逐页测试写入并清零
         println!("[VirtIOHal] Clearing memory page by page...");
         unsafe {
             for page_idx in 0..pages {
                 let page_start = virt_addr.add(page_idx * crate::config::PAGE_SIZE);
-                println!("[VirtIOHal] Clearing page {} at VA: 0x{:x}", page_idx, page_start as usize);
+                println!(
+                    "[VirtIOHal] Clearing page {} at VA: 0x{:x}",
+                    page_idx, page_start as usize
+                );
 
                 // 逐字节清零整个页面
                 for offset in 0..crate::config::PAGE_SIZE {
@@ -71,12 +80,17 @@ unsafe impl Hal for VirtIOHal {
             }
             println!("[VirtIOHal] All pages cleared successfully");
         }
-        println!("[VirtIOHal] Successfully zeroed {} pages of DMA memory", pages);
+        println!(
+            "[VirtIOHal] Successfully zeroed {} pages of DMA memory",
+            pages
+        );
 
         // 将帧范围存储到全局映射表中
         DMA_ALLOCATIONS.lock().insert(phys_addr, frame_range);
-        println!("[VirtIOHal] DMA allocation complete: PA=0x{:x}, VA=0x{:x}, {} pages",
-                 phys_addr, virt_addr as usize, pages);
+        println!(
+            "[VirtIOHal] DMA allocation complete: PA=0x{:x}, VA=0x{:x}, {} pages",
+            phys_addr, virt_addr as usize, pages
+        );
 
         (phys_addr, virt_ptr)
     }
@@ -104,8 +118,10 @@ unsafe impl Hal for VirtIOHal {
         let phys_addr = paddr as usize;
         let virt = paddr_to_vaddr(phys_addr);
 
-        println!("[VirtIOHal] mmio_phys_to_virt: PA=0x{:x} -> VA=0x{:x}, size=0x{:x}",
-                 phys_addr, virt, size);
+        println!(
+            "[VirtIOHal] mmio_phys_to_virt: PA=0x{:x} -> VA=0x{:x}, size=0x{:x}",
+            phys_addr, virt, size
+        );
 
         // 验证虚拟地址的合法性
         let ptr = NonNull::new(virt as *mut u8).expect("mmio_phys_to_virt returned null pointer");
@@ -119,8 +135,13 @@ unsafe impl Hal for VirtIOHal {
         let vaddr = buffer.as_ptr() as *const u8 as usize;
         let paddr = unsafe { vaddr_to_paddr(vaddr) };
 
-        println!("[VirtIOHal] share: VA=0x{:x} -> PA=0x{:x}, len={}, direction={:?}",
-                 vaddr, paddr, buffer.len(), direction);
+        println!(
+            "[VirtIOHal] share: VA=0x{:x} -> PA=0x{:x}, len={}, direction={:?}",
+            vaddr,
+            paddr,
+            buffer.len(),
+            direction
+        );
 
         let result = PhysAddr::from(paddr as u64);
         println!("[VirtIOHal] share: returning PA=0x{:x}", result);
@@ -129,8 +150,12 @@ unsafe impl Hal for VirtIOHal {
 
     /// 取消共享内存区域，并在必要时将数据复制回原始缓冲区
     unsafe fn unshare(paddr: PhysAddr, buffer: NonNull<[u8]>, direction: BufferDirection) {
-        println!("[VirtIOHal] unshare: PA=0x{:x}, len={}, direction={:?}",
-                 paddr, buffer.len(), direction);
+        println!(
+            "[VirtIOHal] unshare: PA=0x{:x}, len={}, direction={:?}",
+            paddr,
+            buffer.len(),
+            direction
+        );
         // 简化实现，由于使用直接映射，不需要额外操作
     }
 }
