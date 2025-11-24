@@ -32,5 +32,13 @@ pub const MEMORY_END: usize = 0x88000000; // 128MB for QEMU RISC-V virt
 
 pub const DEFAULT_MAX_FDS: usize = 256;
 
+// Ext4 filesystem constants
+/// Ext4 文件系统块大小 (必须与 mkfs.ext4 -b 参数一致)
+pub const EXT4_BLOCK_SIZE: usize = 4096;
+/// VirtIO 块设备扇区大小 (标准扇区大小)
+pub const VIRTIO_BLK_SECTOR_SIZE: usize = 512;
+/// 文件系统镜像大小 (与 qemu-run.sh 中的 fs.img 大小一致)
+pub const FS_IMAGE_SIZE: usize = 1024 * 1024 * 1024; // 1 GB
+
 use crate::arch::constant::SV39_BOT_HALF_TOP;
 pub use crate::arch::platform::virt::*;

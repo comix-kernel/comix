@@ -5,15 +5,15 @@ BIN_FILE="${ELF_FILE%.*}.bin"
 # 1. 转换为纯二进制
 rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
 
-# 2. 创建或检查 fs.img (128MB Ext4 文件系统)
+# 2. 检查 fs.img (1GB Ext4 文件系统)
+# 镜像应该由 build.rs 在编译时创建
 if [ ! -f "fs.img" ]; then
-    echo "Creating 128MB Ext4 filesystem image..."
-    # 创建空白镜像
-    dd if=/dev/zero of=fs.img bs=1M count=128 >/dev/null 2>&1 || { echo "Error: 'dd' failed to create disk image." >&2; exit 1; }
-    # 格式化为 Ext4，参数参考 GitHub feat/fs/ext4 分支
-    mkfs.ext4 -F -b 4096 -m 0 fs.img >/dev/null 2>&1 || { echo "Error: 'mkfs.ext4' failed to format disk image." >&2; exit 1; }
-    echo "fs.img created successfully (128MB Ext4, 4KB blocks, 0% reserved)"
+    echo "Error: fs.img not found!"
+    echo "Please run 'cargo build' first to generate the filesystem image."
+    exit 1
 fi
+
+echo "Using existing fs.img (1GB Ext4 filesystem)"
 
 # 3. 运行 QEMU
 QEMU_ARGS="-machine virt \
@@ -42,7 +42,7 @@ fi
 
 echo "MMIO devices enabled:"
 echo "  - UART16550      @ 0x10000000"
-echo "  - Virtio Block   @ 0x10001000 (fs.img - 128MB Ext4)"
+echo "  - Virtio Block   @ 0x10001000 (fs.img - 1GB Ext4)"
 echo "  - Virtio Network @ 0x10002000"
 echo "  - PLIC           @ 0x0C000000 (virt machine built-in)"
 echo "  - TEST/RTC       @ 0x00100000 (virt machine built-in)"

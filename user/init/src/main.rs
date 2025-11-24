@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::ffi::CStr;
 use lib::{
     execve, exit, fork,
     io::{print, read_line},
@@ -9,6 +8,8 @@ use lib::{
 };
 
 #[unsafe(no_mangle)]
+/// # Safety
+/// This is the entry point for the init process. Must be called by the kernel loader.
 pub unsafe extern "C" fn _start() -> ! {
     let mut buf = [0u8; 1024];
     loop {
@@ -35,11 +36,11 @@ pub unsafe extern "C" fn _start() -> ! {
                 if fork() == 0 {
                     print(b"Hello from child process!\n");
                     let argv = [
-                        CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
+                        c"/home/user/bin/hello".as_ptr(),
                         core::ptr::null(),
                     ];
                     execve(
-                        CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
+                        c"/home/user/bin/hello".as_ptr(),
                         argv.as_ptr(),
                         core::ptr::null(),
                     );
@@ -62,15 +63,27 @@ pub unsafe extern "C" fn _start() -> ! {
             b"help" => print(b"Available commands: help, exit, bug1, bug2, shutdown, hello\n"),
             b"shutdown" => shutdown(),
             b"hello" => {
-                let argv = [
-                    CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
-                    core::ptr::null(),
-                ];
-                execve(
-                    CStr::from_bytes_with_nul(b"hello\0").unwrap().as_ptr(),
-                    argv.as_ptr(),
-                    core::ptr::null(),
-                );
+                // 使用 fork + execve 模式,避免替换 init 进程
+                let pid = fork();
+                if pid == 0 {
+                    // 子进程: 执行 hello 程序
+                    let argv = [
+                        c"/home/user/bin/hello".as_ptr(),
+                        core::ptr::null(),
+                    ];
+                    execve(
+                        c"/home/user/bin/hello".as_ptr(),
+                        argv.as_ptr(),
+                        core::ptr::null(),
+                    );
+                    // 如果 execve 失败,退出子进程
+                    print(b"Failed to execute hello\n");
+                    exit(-1);
+                } else {
+                    // 父进程: 等待子进程完成
+                    let mut status: i32 = 0;
+                    waitpid(pid, &mut status, 0);
+                }
             }
             b"fork" => {
                 if fork() == 0 {

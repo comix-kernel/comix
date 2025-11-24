@@ -1,90 +1,125 @@
 //! BlockDevice 适配器：BlockDriver → ext4_rs BlockDevice
-//! 纯净版：移除了所有针对 ENOSPC 的 Hack
+//!
+//! 负责在 Ext4 文件系统块大小 (4096 字节) 和 VirtIO 块设备扇区大小 (512 字节) 之间转换
 
+use crate::config::VIRTIO_BLK_SECTOR_SIZE;
 use crate::device::block::BlockDriver;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 pub struct BlockDeviceAdapter {
     inner: Arc<dyn BlockDriver>,
+    /// Ext4 文件系统块大小 (通常是 4096)
     block_size: usize,
+    /// 底层设备扇区大小 (VirtIO 使用 512)
+    sector_size: usize,
 }
 
 impl BlockDeviceAdapter {
     pub fn new(device: Arc<dyn BlockDriver>, block_size: usize) -> Self {
+        let sector_size = VIRTIO_BLK_SECTOR_SIZE;
         crate::println!(
-            "[Ext4Adapter] Created adapter with block_size: {}",
-            block_size
+            "[Ext4Adapter] Created adapter: ext4_block_size={}, sector_size={}",
+            block_size,
+            sector_size
         );
+
+        // 确保块大小是扇区大小的整数倍
+        assert!(
+            block_size % sector_size == 0,
+            "Block size must be a multiple of sector size"
+        );
+
         Self {
             inner: device,
             block_size,
+            sector_size,
         }
     }
 }
 
 impl ext4_rs::BlockDevice for BlockDeviceAdapter {
     fn read_offset(&self, offset: usize) -> Vec<u8> {
-        let block_id = offset / self.block_size;
-        let block_offset = offset % self.block_size;
+        // ext4_rs 期望读取从 offset 开始的 block_size 字节数据
+        // 我们需要将这个请求转换为多个扇区读取
 
-        // 标准读取逻辑
-        let mut buf = alloc::vec![0u8; self.block_size];
-        if self.inner.read_block(block_id, &mut buf) {
-            // 移除了所有 if offset == 1024 (Superblock Spoofing) 的代码
-            // 移除了所有 if block_id == 1 (GDT Spoofing) 的代码
-            // 移除了所有 mask RO_COMPAT 的代码 (如果在 mkfs 时处理得当)
+        // 计算起始扇区和扇区内偏移
+        let start_sector = offset / self.sector_size;
+        let sector_offset = offset % self.sector_size;
 
-            // 处理跨块读取的逻辑保持不变
-            if block_offset == 0 {
-                buf
-            } else {
-                let mut result = buf[block_offset..].to_vec();
-                let mut next_buf = alloc::vec![0u8; self.block_size];
-                if self.inner.read_block(block_id + 1, &mut next_buf) {
-                    result.extend_from_slice(&next_buf[..block_offset]);
-                }
-                result
+        // 计算需要读取多少个扇区才能获得 block_size 字节的数据
+        let bytes_needed = self.block_size;
+        let sectors_needed =
+            (sector_offset + bytes_needed + self.sector_size - 1) / self.sector_size;
+
+        // 读取所有需要的扇区
+        let mut buffer = alloc::vec![0u8; sectors_needed * self.sector_size];
+        for i in 0..sectors_needed {
+            let sector_id = start_sector + i;
+            let buf_offset = i * self.sector_size;
+            let sector_buf = &mut buffer[buf_offset..buf_offset + self.sector_size];
+
+            if !self.inner.read_block(sector_id, sector_buf) {
+                crate::pr_err!(
+                    "[Ext4Adapter] Read error at sector {} (offset {})",
+                    sector_id,
+                    offset
+                );
+                return alloc::vec![0u8; self.block_size];
             }
-        } else {
-            crate::pr_err!("[Ext4Adapter] Read error at offset {}", offset);
-            alloc::vec![0u8; self.block_size]
         }
+
+        // 从读取的数据中提取所需的 block_size 字节
+        buffer[sector_offset..sector_offset + self.block_size].to_vec()
     }
 
     fn write_offset(&self, offset: usize, data: &[u8]) {
-        // 写入逻辑本来就是正常的，不需要改动
-        let block_id = offset / self.block_size;
-        let block_offset = offset % self.block_size;
+        // ext4_rs 期望将 data 写入从 offset 开始的位置
+        // data 的长度通常等于 block_size
 
-        if block_offset == 0 && data.len() == self.block_size {
-            if !self.inner.write_block(block_id, data) {
-                crate::pr_err!("[Ext4Adapter] Write error at offset {}", offset);
+        // 计算起始扇区和扇区内偏移
+        let start_sector = offset / self.sector_size;
+        let sector_offset = offset % self.sector_size;
+
+        // 计算需要写入多少个扇区
+        let bytes_to_write = data.len();
+        let sectors_needed =
+            (sector_offset + bytes_to_write + self.sector_size - 1) / self.sector_size;
+
+        // 读取-修改-写入
+        let mut buffer = alloc::vec![0u8; sectors_needed * self.sector_size];
+
+        // 1. 读取所有受影响的扇区
+        for i in 0..sectors_needed {
+            let sector_id = start_sector + i;
+            let buf_offset = i * self.sector_size;
+            let sector_buf = &mut buffer[buf_offset..buf_offset + self.sector_size];
+
+            if !self.inner.read_block(sector_id, sector_buf) {
+                crate::pr_err!(
+                    "[Ext4Adapter] Read error at sector {} (for write, offset {})",
+                    sector_id,
+                    offset
+                );
+                return;
             }
-            return;
         }
 
-        let mut buf = alloc::vec![0u8; self.block_size];
-        if self.inner.read_block(block_id, &mut buf) {
-            let space_in_block = self.block_size - block_offset;
-            let write_len = data.len().min(space_in_block);
-            buf[block_offset..block_offset + write_len].copy_from_slice(&data[..write_len]);
+        // 2. 修改缓冲区
+        buffer[sector_offset..sector_offset + bytes_to_write].copy_from_slice(data);
 
-            if !self.inner.write_block(block_id, &buf) {
-                crate::pr_err!("[Ext4Adapter] Write error at offset {}", offset);
-            }
+        // 3. 写回所有扇区
+        for i in 0..sectors_needed {
+            let sector_id = start_sector + i;
+            let buf_offset = i * self.sector_size;
+            let sector_data = &buffer[buf_offset..buf_offset + self.sector_size];
 
-            if write_len < data.len() {
-                let remaining_data = &data[write_len..];
-                let next_block_id = block_id + 1;
-                let mut next_buf = alloc::vec![0u8; self.block_size];
-                if self.inner.read_block(next_block_id, &mut next_buf) {
-                    let next_write_len = remaining_data.len().min(self.block_size);
-                    next_buf[..next_write_len].copy_from_slice(&remaining_data[..next_write_len]);
-                    if !self.inner.write_block(next_block_id, &next_buf) {
-                        crate::pr_err!("[Ext4Adapter] Write error at offset {}", offset);
-                    }
-                }
+            if !self.inner.write_block(sector_id, sector_data) {
+                crate::pr_err!(
+                    "[Ext4Adapter] Write error at sector {} (offset {})",
+                    sector_id,
+                    offset
+                );
             }
         }
     }

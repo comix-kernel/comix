@@ -16,8 +16,7 @@ fn test_ext4_rename_file_same_dir() {
 
     // Write some content
     let content = b"test content";
-    file.write_at(0, content)
-        .expect("Failed to write to file");
+    file.write_at(0, content).expect("Failed to write to file");
 
     // Rename the file
     root.rename("oldname.txt", root.clone(), "newname.txt")
@@ -93,8 +92,7 @@ fn test_ext4_rename_file_cross_dir() {
         .expect("Failed to create file");
 
     let content = b"move me";
-    file.write_at(0, content)
-        .expect("Failed to write to file");
+    file.write_at(0, content).expect("Failed to write to file");
 
     // Move file from dir1 to dir2
     dir1.rename("file.txt", dir2.clone(), "moved.txt")
@@ -104,9 +102,7 @@ fn test_ext4_rename_file_cross_dir() {
     assert!(dir1.lookup("file.txt").is_err());
 
     // File should exist in dir2
-    let moved_file = dir2
-        .lookup("moved.txt")
-        .expect("Failed to find moved file");
+    let moved_file = dir2.lookup("moved.txt").expect("Failed to find moved file");
 
     // Content should be preserved
     let mut buf = [0u8; 7];
