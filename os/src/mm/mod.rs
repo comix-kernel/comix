@@ -52,7 +52,10 @@ pub fn init() {
     let end = FDT_START; // 使用 FDT 起始地址而不是 MEMORY_END
 
     println!("[MM] Frame allocator range: 0x{:x} - 0x{:x}", start, end);
-    println!("[MM] FDT protection: excluding FDT region at 0x{:x}", FDT_START);
+    println!(
+        "[MM] FDT protection: excluding FDT region at 0x{:x}",
+        FDT_START
+    );
 
     // 初始化物理帧分配器
     init_frame_allocator(start, end);
@@ -76,7 +79,10 @@ pub fn init() {
 
         let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
         let root_ppn = space.lock().root_ppn();
-        println!("[MM] New kernel space root PPN: 0x{:x}", root_ppn.as_usize());
+        println!(
+            "[MM] New kernel space root PPN: 0x{:x}",
+            root_ppn.as_usize()
+        );
 
         current_cpu().lock().switch_space(space);
 
@@ -86,7 +92,10 @@ pub fn init() {
             core::arch::asm!("csrr {0}, satp", out(reg) new_satp);
         }
         println!("[MM] After space switch - satp: 0x{:x}", new_satp);
-        println!("[MM] Expected satp: 0x{:x}", (root_ppn.as_usize() | (8 << 60)));
+        println!(
+            "[MM] Expected satp: 0x{:x}",
+            (root_ppn.as_usize() | (8 << 60))
+        );
     }
 }
 

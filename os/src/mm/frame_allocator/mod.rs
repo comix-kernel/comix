@@ -74,10 +74,16 @@ pub fn alloc_frames(num: usize) -> Option<Vec<FrameTracker>> {
 /// 如果分配成功，返回 `Some(FrameRangeTracker)`；否则返回 `None`。
 pub fn alloc_contig_frames(num: usize) -> Option<FrameRangeTracker> {
     use crate::println;
-    println!("[FrameAllocator] alloc_contig_frames: requesting {} frames", num);
+    println!(
+        "[FrameAllocator] alloc_contig_frames: requesting {} frames",
+        num
+    );
     println!("[FrameAllocator] About to acquire FRAME_ALLOCATOR lock...");
     let result = FRAME_ALLOCATOR.lock().alloc_contig_frames(num);
-    println!("[FrameAllocator] Lock released, result: {}", if result.is_some() { "Some" } else { "None" });
+    println!(
+        "[FrameAllocator] Lock released, result: {}",
+        if result.is_some() { "Some" } else { "None" }
+    );
     result
 }
 

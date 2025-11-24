@@ -8,7 +8,7 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::device::net::net_device::{NetDevice};
+use crate::device::net::net_device::NetDevice;
 use crate::net::NetworkError;
 
 /// 网络接口配置
