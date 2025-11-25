@@ -1,6 +1,6 @@
 //! syslog 所需的 Commands
 
-use crate::uapi::errno::{EINVAL};
+use crate::uapi::errno::EINVAL;
 
 /// syslog 系统调用操作类型
 ///
@@ -106,10 +106,7 @@ impl SyslogAction {
     /// * `false` - 忽略 bufp 和 len 参数
     #[inline]
     pub const fn requires_buffer(self) -> bool {
-        matches!(
-            self,
-            Self::Read | Self::ReadAll | Self::ReadClear
-        )
+        matches!(self, Self::Read | Self::ReadAll | Self::ReadClear)
     }
 
     /// 检查操作是否需要特权
@@ -122,10 +119,7 @@ impl SyslogAction {
     /// * `false` - 可能允许非特权访问（需要进一步检查 dmesg_restrict）
     #[inline]
     pub const fn requires_privilege(self) -> bool {
-        !matches!(
-            self,
-            Self::ReadAll | Self::SizeBuffer
-        )
+        !matches!(self, Self::ReadAll | Self::SizeBuffer)
     }
 
     /// 检查操作是否会修改日志缓冲区
@@ -133,10 +127,7 @@ impl SyslogAction {
     /// 用于并发控制和日志审计。
     #[inline]
     pub const fn is_destructive(self) -> bool {
-        matches!(
-            self,
-            Self::Read | Self::ReadClear | Self::Clear
-        )
+        matches!(self, Self::Read | Self::ReadClear | Self::Clear)
     }
 
     /// 检查操作是否影响控制台输出

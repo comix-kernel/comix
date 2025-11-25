@@ -9,7 +9,10 @@ use crate::{
         HOST_NAME_MAX, current_task,
         syscall::util::{check_syslog_permission, validate_syslog_args},
     },
-    log::{read_log, log_len, get_console_level, set_console_level, format_log_entry, LogLevel, DEFAULT_CONSOLE_LEVEL},
+    log::{
+        DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, log_len, read_log,
+        set_console_level,
+    },
     pr_alert,
     tool::user_buffer::UserBuffer,
     uapi::{
@@ -19,7 +22,7 @@ use crate::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
         },
-    }
+    },
 };
 
 /// 重启系统调用
@@ -370,8 +373,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
         }
 
         // 空操作（这些操作在 Linux 中也是 NOP）
-        SyslogAction::Close | SyslogAction::Open => {
-            0
-        }
+        SyslogAction::Close | SyslogAction::Open => 0,
     }
 }
