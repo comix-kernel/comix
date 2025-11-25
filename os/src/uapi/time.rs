@@ -13,6 +13,32 @@ pub struct timespec {
     pub tv_nsec: c_long,
 }
 
+impl timespec {
+    /// 将 timespec 转换为指定频率的刻度数。
+    /// # 参数:
+    /// - `freq`: 频率（每秒刻度数）
+    /// # 返回值:
+    /// - 刻度数
+    pub fn into_freq(&self, freq: usize) -> usize {
+        (self.tv_sec as usize * freq) + (self.tv_nsec as usize * freq / 1_000_000_000)
+    }
+
+    /// 通过指定频率的刻度数创建 timespec。
+    /// # 参数:
+    /// - `ticks`: 刻度数
+    /// - `freq`: 频率（每秒刻度数）
+    /// # 返回值:
+    /// - 对应的 timespec 结构体
+    pub fn from_freq(ticks: usize, freq: usize) -> Self {
+        let sec = ticks / freq;
+        let nsec = (ticks % freq) * 1_000_000_000 / freq;
+        Self {
+            tv_sec: sec as c_long,
+            tv_nsec: nsec as c_long,
+        }
+    }
+}
+
 /// 用于指定秒和微秒精度的时间间隔。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

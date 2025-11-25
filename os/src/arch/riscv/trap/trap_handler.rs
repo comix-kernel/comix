@@ -11,9 +11,9 @@ use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
 
 use crate::arch::syscall::dispatch_syscall;
-use crate::arch::timer::TIMER_TICKS;
+use crate::arch::timer::{TIMER_TICKS, get_time};
 use crate::arch::trap::restore;
-use crate::kernel::{SCHEDULER, schedule};
+use crate::kernel::{SCHEDULER, TIMER_QUEUE, schedule, wake_up_with_block};
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，
@@ -123,6 +123,9 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+    while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
+        wake_up_with_block(task);
+    }
     if SCHEDULER.lock().update_time_slice() {
         schedule();
     }

@@ -16,25 +16,27 @@ const MSEC_PER_SEC: usize = 1000;
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
 
 /// 获取当前tick数
+#[inline]
 pub fn get_ticks() -> usize {
     TIMER_TICKS.load(Ordering::Relaxed)
 }
 
 /// 获取当前硬件时钟周期数时间
+#[inline]
 pub fn get_time() -> usize {
     time::read()
 }
 
 /// 获取当前时间（以毫秒为单位）
+#[inline]
 pub fn get_time_ms() -> usize {
-    // SAFETY: CLOCK_FREQ 在内核初始化阶段被正确设置且之后不会更改
-    time::read() * MSEC_PER_SEC / unsafe { CLOCK_FREQ }
+    time::read() * MSEC_PER_SEC / clock_freq()
 }
 
 /// 设置定时器中断
+#[inline]
 pub fn set_next_trigger() {
-    // SAFETY: CLOCK_FREQ 在内核初始化阶段被正确设置且之后不会更改
-    let next = get_time() + unsafe { CLOCK_FREQ } / TICKS_PER_SEC;
+    let next = get_time() + clock_freq() / TICKS_PER_SEC;
     set_timer(next);
 }
 
@@ -43,6 +45,13 @@ pub fn init() {
     set_next_trigger();
     // Safe: 只在内核初始化阶段调用，确保唯一性
     unsafe { crate::arch::intr::enable_timer_interrupt() };
+}
+
+/// 获取时钟频率
+#[inline]
+pub fn clock_freq() -> usize {
+    // SAFETY: CLOCK_FREQ 在内核初始化阶段被正确设置且之后不会更改
+    unsafe { CLOCK_FREQ }
 }
 
 #[cfg(test)]
