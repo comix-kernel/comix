@@ -136,10 +136,25 @@ impl LogCore {
         self.buffer.read()
     }
 
+    /// 非破坏性读取：按索引 peek 日志条目，不移动读指针
+    pub fn _peek_log(&self, index: usize) -> Option<LogEntry> {
+        self.buffer.peek(index)
+    }
+
+    /// 获取当前可读取的起始索引
+    pub fn _log_reader_index(&self) -> usize {
+        self.buffer.reader_index()
+    }
+
+    /// 获取当前写入位置
+    pub fn _log_writer_index(&self) -> usize {
+        self.buffer.writer_index()
+    }
+
     /// 返回未读日志条目的数量
     pub fn _log_len(&self) -> usize {
         self.buffer.len()
-    }
+}
 
     /// 返回未读日志的总字节数（格式化后）
     pub fn _log_unread_bytes(&self) -> usize {

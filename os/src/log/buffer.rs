@@ -319,6 +319,66 @@ impl GlobalLogBuffer {
     pub(super) fn dropped_count(&self) -> usize {
         self.reader_data.dropped.load(Ordering::Relaxed)
     }
+
+    /// 非破坏性读取：按索引 peek 日志条目，不移动读指针
+    ///
+    /// 此方法允许读取缓冲区中的日志而不删除它们，主要用于
+    /// `SyslogAction::ReadAll` 操作。
+    ///
+    /// # 参数
+    /// * `index` - 全局序列号（从 1 开始，与内部 seq 对应）
+    ///
+    /// # 返回值
+    /// * `Some(LogEntry)` - 如果条目存在且有效
+    /// * `None` - 如果索引超出范围或条目已被覆盖
+    ///
+    /// # 并发安全
+    /// 此方法是完全无锁的，可以与 write 和 read 并发调用。
+    pub(super) fn peek(&self, index: usize) -> Option<LogEntry> {
+        let current_write = self.writer_data.write_seq.load(Ordering::Acquire);
+        let current_read = self.reader_data.read_seq.load(Ordering::Acquire);
+
+        // 检查索引是否在有效范围内
+        // 有效范围: [current_read, current_write)
+        if index < current_read || index >= current_write {
+            return None;
+        }
+
+        // 检查是否已被覆盖（环形缓冲区溢出）
+        // 如果 writer 已经超过 reader + BUFFER_SIZE，则旧数据可能被覆盖
+        if current_write >= current_read + MAX_LOG_ENTRIES {
+            // 缓冲区已满，旧数据可能被覆盖
+            let oldest_valid = current_write.saturating_sub(MAX_LOG_ENTRIES);
+            if index < oldest_valid {
+                return None; // 数据已被覆盖
+            }
+        }
+
+        // 计算缓冲区索引
+        let slot = index % MAX_LOG_ENTRIES;
+        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) as *const LogEntry };
+
+        // 检查序列号是否匹配（确保数据有效）
+        const EMPTY: LogEntry = LogEntry::empty();
+        unsafe {
+            if !EMPTY.is_ready(slot_ptr, index) {
+                return None;
+            }
+        }
+
+        // 克隆并返回条目
+        Some(unsafe { (*slot_ptr).clone() })
+    }
+
+    /// 获取当前可读取的起始索引（读指针位置）
+    pub(super) fn reader_index(&self) -> usize {
+        self.reader_data.read_seq.load(Ordering::Acquire)
+    }
+
+    /// 获取当前写入位置（下一个要写入的索引）
+    pub(super) fn writer_index(&self) -> usize {
+        self.writer_data.write_seq.load(Ordering::Acquire)
+    }
 }
 
 /// 将日志条目写入全局缓冲区（内部使用）
@@ -351,5 +411,25 @@ pub fn log_len() -> usize {
 #[inline]
 pub fn log_unread_bytes() -> usize {
     GLOBAL_LOG_BUFFER.unread_bytes()
+}
+
+/// 非破坏性读取：按索引 peek 日志条目
+///
+/// 不移动读指针，允许重复读取同一条目。
+#[inline]
+pub fn peek_log(index: usize) -> Option<LogEntry> {
+    GLOBAL_LOG_BUFFER.peek(index)
+}
+
+/// 获取当前可读取的起始索引
+#[inline]
+pub fn log_reader_index() -> usize {
+    GLOBAL_LOG_BUFFER.reader_index()
+}
+
+/// 获取当前写入位置
+#[inline]
+pub fn log_writer_index() -> usize {
+    GLOBAL_LOG_BUFFER.writer_index()
 }
 

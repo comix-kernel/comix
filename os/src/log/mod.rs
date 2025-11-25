@@ -100,6 +100,21 @@ pub fn read_log() -> Option<LogEntry> {
     GLOBAL_LOG._read_log()
 }
 
+/// 非破坏性读取：按索引 peek 日志条目，不移动读指针
+pub fn peek_log(index: usize) -> Option<LogEntry> {
+    GLOBAL_LOG._peek_log(index)
+}
+
+/// 获取当前可读取的起始索引
+pub fn log_reader_index() -> usize {
+    GLOBAL_LOG._log_reader_index()
+}
+
+/// 获取当前写入位置
+pub fn log_writer_index() -> usize {
+    GLOBAL_LOG._log_writer_index()
+}
+
 /// 返回未读日志条目的数量
 pub fn log_len() -> usize {
     GLOBAL_LOG._log_len()
