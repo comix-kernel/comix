@@ -9,8 +9,8 @@ use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, UtsNamespace,
-        current_cpu, current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
+        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
+        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
         sleep_task_with_block, yield_task,
     },
     mm::{
@@ -20,7 +20,10 @@ use crate::{
     println,
     sync::SpinLock,
     test::run_early_tests,
-    uapi::resource::{INIT_RLIMITS, RlimitStruct},
+    uapi::{
+        resource::{INIT_RLIMITS, RlimitStruct},
+        uts_namespace::UtsNamespace,
+    },
 };
 
 /// 内核的第一个任务启动函数

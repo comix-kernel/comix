@@ -4,7 +4,7 @@ use core::ffi::{c_char, c_int, c_void};
 
 use crate::{
     arch::lib::sbi::shutdown,
-    kernel::{HOST_NAME_MAX, current_task},
+    kernel::current_task,
     pr_alert,
     tool::user_buffer::UserBuffer,
     uapi::{
@@ -13,6 +13,7 @@ use crate::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
         },
+        uts_namespace::HOST_NAME_MAX,
     },
 };
 
