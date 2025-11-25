@@ -141,6 +141,11 @@ impl LogCore {
         self.buffer.len()
     }
 
+    /// 返回未读日志的总字节数（格式化后）
+    pub fn _log_unread_bytes(&self) -> usize {
+        self.buffer.unread_bytes()
+    }
+
     /// 返回由于缓冲区溢出而丢弃的日志计数
     pub fn _log_dropped_count(&self) -> usize {
         self.buffer.dropped_count()
@@ -195,10 +200,11 @@ impl LogCore {
     /// 此方法在早期启动时即可使用，因为它仅使用栈和 core::fmt::Write，
     /// 不依赖堆分配器。
     ///
-    /// **重要**：此函数的格式化逻辑必须与 `format_log_entry` 保持一致。
-    /// 如果修改了日志输出格式，需要同步更新两处：
+    /// **重要**: 此函数的格式化逻辑必须与 `format_log_entry` 和 `buffer::calculate_formatted_length` 保持一致。
+    /// 如果修改了日志输出格式，需要同步更新三处：
     /// - `direct_print_entry` (此函数) - 用于早期启动的控制台输出
     /// - `format_log_entry` - 用于 syslog 系统调用
+    /// - `buffer::calculate_formatted_length` - 用于精确字节计数
     fn direct_print_entry(&self, entry: &LogEntry) {
         use core::fmt::Write;
 
@@ -231,10 +237,11 @@ unsafe impl Sync for LogCore {}
 /// 主要用于 syslog 系统调用等运行时场景。早期启动时的控制台输出使用
 /// `direct_print_entry` 方法，该方法不依赖堆分配。
 ///
-/// **重要**：此函数的格式化逻辑必须与 `direct_print_entry` 保持一致。
-/// 如果修改了日志输出格式，需要同步更新两处：
+/// **重要**：此函数的格式化逻辑必须与 `direct_print_entry` 和 `buffer::calculate_formatted_length` 保持一致。
+/// 如果修改了日志输出格式，需要同步更新三处：
 /// - `direct_print_entry` - 用于早期启动的控制台输出（无堆分配）
 /// - `format_log_entry` (此函数) - 用于 syslog 系统调用（使用堆分配）
+/// - `buffer::calculate_formatted_length` - 用于精确字节计数
 ///
 /// # 格式
 /// ```

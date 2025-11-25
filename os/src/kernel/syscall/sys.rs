@@ -303,15 +303,9 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
 
         // 查询操作
         SyslogAction::SizeUnread => {
-            // 返回未读日志的字节数
-            //
-            // 注意：这是估算值，因为日志条目的格式化长度
-            //       在实际读取前无法精确计算。
-            //
-            // TODO: 在 log 模块中维护精确的字节计数器
-            const AVG_LOG_SIZE: usize = 80; // 平均每条日志 80 字节
-            let unread_count = log_len();
-            (unread_count * AVG_LOG_SIZE) as isize
+            // 返回未读日志的精确字节数
+            use crate::log::log_unread_bytes;
+            log_unread_bytes() as isize
         }
 
         SyslogAction::SizeBuffer => {

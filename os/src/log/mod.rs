@@ -105,6 +105,11 @@ pub fn log_len() -> usize {
     GLOBAL_LOG._log_len()
 }
 
+/// 返回未读日志的总字节数（格式化后）
+pub fn log_unread_bytes() -> usize {
+    GLOBAL_LOG._log_unread_bytes()
+}
+
 /// 返回已丢弃日志的计数
 pub fn log_dropped_count() -> usize {
     GLOBAL_LOG._log_dropped_count()
