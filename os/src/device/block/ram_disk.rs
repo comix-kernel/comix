@@ -124,4 +124,8 @@ impl BlockDriver for RamDisk {
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
         BlockDevice::write_block(self, block_id, buf).is_ok()
     }
+
+    fn flush(&self) -> bool {
+        true
+    }
 }
