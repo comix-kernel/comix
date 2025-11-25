@@ -221,16 +221,16 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
     let cur_pgid = cur_task.lock().pgid;
     let match_pid = |child_task: &SharedTask| {
         match pid {
-            -1 => true, // 匹配所有子进程
-            0 => child_task.lock().pgid == cur_pgid, // 匹配进程组
-            p if p > 0 => child_task.lock().pid == p as u32, // 匹配特定 PID
+            -1 => true,                                           // 匹配所有子进程
+            0 => child_task.lock().pgid == cur_pgid,              // 匹配进程组
+            p if p > 0 => child_task.lock().pid == p as u32,      // 匹配特定 PID
             p if p < -1 => child_task.lock().pgid == (-p) as u32, // 匹配特定进程组 |pid|
             _ => unreachable!("wait4: unreachable pid match case."),
         }
     };
     let check_exited = opt.contains(WaitFlags::EXITED)
         || (!opt.contains(WaitFlags::STOPPED) && !opt.contains(WaitFlags::CONTINUED));
-    
+
     let zombie: fn(TaskState) -> bool = if check_exited {
         |ch| ch == TaskState::Zombie
     } else {
@@ -257,10 +257,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
     let task = loop {
         {
             let mut t = cur_task.lock();
-            if let Some(res) = t.check_child(
-                cond,
-                !opt.contains(WaitFlags::NOWAIT),
-            ) {
+            if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
                 break res;
             } else {
                 if opt.contains(WaitFlags::NOHANG) {

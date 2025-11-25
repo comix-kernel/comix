@@ -331,7 +331,7 @@ impl Task {
             tid,
             pid,
             ppid,
-            pgid,  
+            pgid,
             children,
             wait_child: Arc::new(SpinLock::new(WaitQueue::new())),
             kstack_base,
