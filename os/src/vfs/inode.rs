@@ -13,8 +13,8 @@
 use core::any::Any;
 
 use crate::arch::timer::get_time;
-use crate::vfs::{Dentry, FsError};
 use crate::kernel::CLOCK_FREQ;
+use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -56,9 +56,9 @@ impl TimeSpec {
     }
 }
 
-/// 文件权限和类型（与 POSIX 兼容）
 bitflags::bitflags! {
     #[derive(Debug, Clone)]
+    /// 文件权限和类型（与 POSIX 兼容）
     pub struct FileMode: u32 {
         // 文件类型掩码
         const S_IFMT   = 0o170000;  // 文件类型掩码

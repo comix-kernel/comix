@@ -9,9 +9,15 @@ use alloc::{sync::Arc, vec::Vec};
 use riscv::register::sstatus;
 
 use crate::{
-    arch::{timer::{clock_freq, get_time}, trap::restore},
+    arch::{
+        timer::{clock_freq, get_time},
+        trap::restore,
+    },
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block, syscall::util::{get_args_safe, get_path_safe}, yield_task
+        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskState,
+        TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block,
+        syscall::util::{get_args_safe, get_path_safe},
+        yield_task,
     },
     mm::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
@@ -21,7 +27,9 @@ use crate::{
     tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
         errno::{EINTR, EINVAL, ESRCH},
-        resource::{RLIM_NLIMITS, Rlimit}, time::timespec,
+        resource::{RLIM_NLIMITS, Rlimit, Rusage},
+        time::timespec,
+        wait::{WaitFlags, WaitStatus},
     },
 };
 
@@ -64,11 +72,12 @@ pub fn exit_group(code: c_int) -> ! {
 /// 创建当前任务的子任务（fork）
 pub fn fork() -> usize {
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (ppid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts, rlimit) = {
+    let (ppid, pgid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts, rlimit) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
             task.pid,
+            task.pgid,
             task.memory_space
                 .as_ref()
                 .unwrap()
@@ -92,6 +101,7 @@ pub fn fork() -> usize {
         tid,
         tid,
         ppid,
+        pgid,
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
@@ -178,44 +188,114 @@ pub fn execve(
     -1
 }
 
-/// 等待子进程状态变化
-/// TODO: 目前只支持等待退出且只有阻塞模式
-pub fn wait(_tid: u32, wstatus: *mut i32, _opt: usize) -> isize {
+/// 等待子进程状态变化（wait4）
+/// # 说明
+/// 状态变化包括：
+///     1. 子进程已终止；
+///     2. 子进程被信号停止；
+///     3. 子进程被信号恢复。
+/// 对于已终止的子进程，执行等待操作可以让系统释放与该子进程关联的资源；
+/// # 参数
+/// - `pid`:
+///     1. > 0 表示需要等待的子进程ID
+///     2. 0 表示等待同一进程组的任意子进程
+///     3. -1 表示等待任意子进程
+///     4. < -1 表示等待进程组ID等于 pid 绝对值的任意子进程
+/// - `wstatus`: 指向存储子进程状态的整数指针
+/// - `options`: 等待选项标志
+/// - `rusage`: 指向存储资源使用情况的 rusage 结构体指针
+/// # 返回值
+/// - 成功返回子进程 ID, 如果设置了 NOHANG 标志且没有满足条件的子进程，则立即返回 0，失败返回负错误码
+/// TODO:
+/// 1. rusage 参数的处理
+/// 2. 信号处理
+/// 3. 错误处理
+pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusage) -> c_int {
     // 阻塞当前任务,直到指定的子任务结束
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let cur_task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let opt = if let Some(opt) = WaitFlags::from_bits(options as usize) {
+        opt
+    } else {
+        return -EINVAL;
+    };
+    let cur_pgid = cur_task.lock().pgid;
+    let match_pid = |child_task: &SharedTask| {
+        match pid {
+            -1 => true, // 匹配所有子进程
+            0 => child_task.lock().pgid == cur_pgid, // 匹配进程组
+            p if p > 0 => child_task.lock().pid == p as u32, // 匹配特定 PID
+            p if p < -1 => child_task.lock().pgid == (-p) as u32, // 匹配特定进程组 |pid|
+            _ => unreachable!("wait4: unreachable pid match case."),
+        }
+    };
+    let check_exited = opt.contains(WaitFlags::EXITED)
+        || (!opt.contains(WaitFlags::STOPPED) && !opt.contains(WaitFlags::CONTINUED));
+    
+    let zombie: fn(TaskState) -> bool = if check_exited {
+        |ch| ch == TaskState::Zombie
+    } else {
+        |_ch| false
+    };
+    let continued: fn(TaskState) -> bool = if opt.contains(WaitFlags::CONTINUED) {
+        |ch| ch == TaskState::Running
+    } else {
+        |_ch| false
+    };
+    let stopped: fn(TaskState) -> bool = if opt.contains(WaitFlags::STOPPED) {
+        |ch| ch == TaskState::Stopped
+    } else {
+        |_ch| false
+    };
+    let cond = |ch: &SharedTask| {
+        if !match_pid(ch) {
+            return false;
+        }
+        let state = ch.lock().state;
+        zombie(state) || continued(state) || stopped(state)
+    };
 
-    let (tid, exit_code) = loop {
-        let wait_child_ptr = {
-            let mut t = task.lock();
-            if let Some(res) = t.check_child_exit_locked() {
+    let task = loop {
+        {
+            let mut t = cur_task.lock();
+            if let Some(res) = t.check_child(
+                cond,
+                !opt.contains(WaitFlags::NOWAIT),
+            ) {
                 break res;
+            } else {
+                if opt.contains(WaitFlags::NOHANG) {
+                    return 0;
+                }
             }
-            // 获取 wait_child 的裸指针，以便在释放锁后使用
-            // SAFETY: task 是 Arc<SpinLock<Task>>，只要 task 还在，wait_child 就有效
-            &mut t.wait_child as *mut crate::kernel::WaitQueue
-        };
+            t.wait_child.lock().sleep(cur_task.clone());
+        }
+        // 在没有持有任何锁的情况下调用调度相关操作
+        yield_task();
+    };
 
-        // 释放锁后睡眠
-        // SAFETY: 我们持有 task 的 Arc，所以 wait_child_ptr 是有效的
-        // 虽然有竞争风险（其他核可能同时修改 wait_child），但在 wait 场景下
-        // 主要竞争是 wake_up，WaitQueue 内部有自旋锁保护，是安全的
-        unsafe {
-            (*wait_child_ptr).sleep(task.clone());
+    let (tid, state, exit_code) = {
+        let t = task.lock();
+        (t.tid, t.state, t.exit_code)
+    };
+
+    let status = match state {
+        TaskState::Zombie => {
+            // TODO: 处理信号退出的情况
+            WaitStatus::exit_code(exit_code.expect("Zombie must set exit code.") as u8, 0)
+        }
+        TaskState::Stopped => {
+            WaitStatus::stop_code(0) // TODO: 停止信号
+        }
+        TaskState::Running => WaitStatus::continued_code(),
+        _ => {
+            unreachable!("wait4: unexpected task state.")
         }
     };
 
-    {
-        let mut tm = TASK_MANAGER.lock();
-        if let Some(child_task) = tm.get_task(tid) {
-            tm.release_task(child_task);
-        }
-    }
     unsafe {
-        sstatus::set_sum();
-        *wstatus = exit_code;
-        sstatus::clear_sum();
+        write_to_user(wstatus, status.raw());
     }
-    tid as isize
+    tid as c_int
 }
 
 /// 获取当前任务的进程 ID
@@ -346,7 +426,9 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
             // XXX: 提前唤醒是否一定是因为信号？
             result = -EINTR;
             dur
-        } else { 0 };
+        } else {
+            0
+        };
         let rem_ts = timespec::from_freq(remaining_ticks, clock_freq());
         unsafe {
             write_to_user(rem, rem_ts);

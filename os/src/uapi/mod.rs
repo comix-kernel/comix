@@ -8,3 +8,4 @@ pub mod reboot;
 pub mod resource;
 pub mod time;
 pub mod uts_namespace;
+pub mod wait;
