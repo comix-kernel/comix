@@ -1,3 +1,7 @@
+//! 定义与时间相关的结构和常量。
+//!
+//! 这些定义用于系统调用如 `clock_gettime`, `nanosleep`, `timer_create` 等。
+
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 

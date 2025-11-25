@@ -12,7 +12,8 @@ use crate::{
         reboot::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
-        }, uts_namespace::HOST_NAME_MAX,
+        },
+        uts_namespace::HOST_NAME_MAX,
     },
 };
 

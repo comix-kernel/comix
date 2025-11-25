@@ -14,7 +14,14 @@ mod util;
 
 use core::ffi::{c_char, c_int, c_void};
 
-use crate::{impl_syscall, uapi::{resource::Rlimit, time::timespec}, vfs::Stat};
+use crate::{
+    impl_syscall,
+    uapi::{
+        resource::{Rlimit, Rusage},
+        time::timespec,
+    },
+    vfs::Stat,
+};
 use fs::*;
 use io::*;
 use ipc::*;
@@ -34,7 +41,7 @@ impl_syscall!(
     execve,
     (*const u8, *const *const u8, *const *const u8)
 );
-impl_syscall!(sys_wait, wait, (u32, *mut i32, usize));
+impl_syscall!(sys_wait4, wait4, (c_int, *mut c_int, c_int, *mut Rusage));
 impl_syscall!(sys_close, close, (usize));
 impl_syscall!(sys_lseek, lseek, (usize, isize, usize));
 impl_syscall!(sys_openat, openat, (i32, *const c_char, u32, u32));
