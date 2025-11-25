@@ -35,8 +35,8 @@
 //!
 //! - **定时器**：通过 `arch::timer::get_time()` 收集时间戳
 //! - **控制台**：通过 `console::Stdout` 输出（通常是 UART）
-//! - **CPU ID**：多核支持（TODO: 实现 `arch::cpu::current_cpu_id()`）
-//! - **任务 ID**：任务跟踪（TODO: 实现任务管理集成）
+//! - **CPU ID**：通过 `arch::kernel::cpu::cpu_id()` 获取当前 CPU ID
+//! - **任务 ID**：通过 `kernel::cpu::current_cpu()` 获取当前任务的 tid（若无任务则为 0）
 //!
 //! # 使用示例
 //!
@@ -66,8 +66,12 @@ mod level;
 mod log_core;
 pub mod macros;
 
+pub use config::{
+    DEFAULT_CONSOLE_LEVEL, DEFAULT_LOG_LEVEL, GLOBAL_LOG_BUFFER_SIZE, MAX_LOG_MESSAGE_LENGTH,
+};
 pub use entry::LogEntry;
 pub use level::LogLevel;
+pub use log_core::format_log_entry;
 
 // ========== 全局单例 ==========
 
