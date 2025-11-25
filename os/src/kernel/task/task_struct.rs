@@ -13,7 +13,7 @@ use crate::{
     },
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
-        UtsNamespace, WaitQueue,
+        WaitQueue,
         task::{forkret, task_state::TaskState},
     },
     mm::{
@@ -23,7 +23,7 @@ use crate::{
     },
     pr_debug,
     sync::SpinLock,
-    uapi::resource::RlimitStruct,
+    uapi::{resource::RlimitStruct, uts_namespace::UtsNamespace},
     vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
 
