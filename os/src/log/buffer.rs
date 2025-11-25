@@ -92,7 +92,13 @@ fn calculate_formatted_length(entry: &LogEntry) -> usize {
     // 分隔符和换行: level后1个空格 + timestamp后1个空格 + context后1个空格 = 3
     let separators_len = 3;
 
-    color_start_len + level_len + timestamp_len + context_len + message_len + color_reset_len + separators_len
+    color_start_len
+        + level_len
+        + timestamp_len
+        + context_len
+        + message_len
+        + color_reset_len
+        + separators_len
 }
 
 /// 缓存行填充封装器，用于防止伪共享
@@ -231,7 +237,8 @@ impl GlobalLogBuffer {
 
         // step6: 增加未读字节计数
         let formatted_len = calculate_formatted_length(entry);
-        self.unread_bytes.fetch_add(formatted_len, Ordering::Release);
+        self.unread_bytes
+            .fetch_add(formatted_len, Ordering::Release);
     }
 
     /// 处理缓冲区溢出，必要时推进读取指针
@@ -294,7 +301,8 @@ impl GlobalLogBuffer {
 
         // 减少未读字节计数
         let formatted_len = calculate_formatted_length(&entry_data);
-        self.unread_bytes.fetch_sub(formatted_len, Ordering::Release);
+        self.unread_bytes
+            .fetch_sub(formatted_len, Ordering::Release);
 
         self.reader_data
             .read_seq
@@ -432,4 +440,3 @@ pub fn log_reader_index() -> usize {
 pub fn log_writer_index() -> usize {
     GLOBAL_LOG_BUFFER.writer_index()
 }
-

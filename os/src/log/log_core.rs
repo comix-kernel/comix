@@ -154,7 +154,7 @@ impl LogCore {
     /// 返回未读日志条目的数量
     pub fn _log_len(&self) -> usize {
         self.buffer.len()
-}
+    }
 
     /// 返回未读日志的总字节数（格式化后）
     pub fn _log_unread_bytes(&self) -> usize {
