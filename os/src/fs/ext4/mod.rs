@@ -97,9 +97,12 @@ impl FileSystem for Ext4FileSystem {
     }
 
     fn sync(&self) -> Result<(), FsError> {
-        // TODO: ext4_rs 可能需要实现 sync 方法
-        // BlockDriver trait 不提供 flush 方法,这里暂时返回 Ok
-        Ok(())
+        // 调用底层块设备的 flush 方法，将缓存刷新到磁盘
+        if self.device.flush() {
+            Ok(())
+        } else {
+            Err(FsError::IoError)
+        }
     }
 
     fn statfs(&self) -> Result<StatFs, FsError> {

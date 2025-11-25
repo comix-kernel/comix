@@ -29,4 +29,11 @@ pub trait BlockDriver: Driver {
     fn write_block(&self, _block_id: usize, _buf: &[u8]) -> bool {
         unimplemented!("not a block driver")
     }
+
+    /// 刷新到磁盘
+    /// # 返回值：
+    /// 如果刷新成功则返回 true，否则返回 false
+    fn flush(&self) -> bool {
+        unimplemented!("not a block driver")
+    }
 }
