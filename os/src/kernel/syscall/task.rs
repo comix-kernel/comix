@@ -237,7 +237,7 @@ pub fn get_ppid() -> c_int {
 /// - `resource`: 资源限制 ID
 /// - `rlim`: 指向 rlimit 结构体的指针, 用于存储获取到的资源限制
 /// # 返回值
-/// - 成功返回 0, 失败返回错误码
+/// - 成功返回 0, 失败返回负错误码
 pub fn getrlimit(resource: c_int, rlim: *mut Rlimit) -> c_int {
     if resource as usize >= RLIM_NLIMITS {
         return -EINVAL;
@@ -255,7 +255,7 @@ pub fn getrlimit(resource: c_int, rlim: *mut Rlimit) -> c_int {
 /// - `resource`: 资源限制 ID
 /// - `rlim`: 指向 rlimit 结构体的指针, 包含要设置的资源限制
 /// # 返回值
-/// - 成功返回 0, 失败返回错误码
+/// - 成功返回 0, 失败返回负错误码
 pub fn setrlimit(resource: c_int, rlim: *const Rlimit) -> c_int {
     if resource as usize >= RLIM_NLIMITS {
         return -EINVAL;
@@ -279,7 +279,7 @@ pub fn setrlimit(resource: c_int, rlim: *const Rlimit) -> c_int {
 /// - `new_limit`: 指向 rlimit 结构体的指针, 包含要设置的资源限制, 若不设置则为 NULL
 /// - `old_limit`: 指向 rlimit 结构体的指针, 用于存储获取到的资源限制, 若不获取则为 NULL
 /// # 返回值
-/// - 成功返回 0, 失败返回错误码
+/// - 成功返回 0, 失败返回负错误码
 pub fn prlimit(
     pid: c_int,
     resource: c_int,
