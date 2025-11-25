@@ -13,7 +13,7 @@ use crate::{
     },
     ipc::{SignalFlags, SignalHandlerTable},
     kernel::{
-        UtsNamespace, WaitQueue,
+        WaitQueue,
         task::{forkret, task_state::TaskState},
     },
     mm::{
@@ -23,7 +23,7 @@ use crate::{
     },
     pr_debug,
     sync::SpinLock,
-    uapi::resource::RlimitStruct,
+    uapi::{resource::RlimitStruct, uts_namespace::UtsNamespace},
     vfs::{Dentry, FDTable, create_stdio_files, get_root_dentry},
 };
 
@@ -68,10 +68,12 @@ pub struct Task {
     pub pid: u32,
     /// 父任务的id
     pub ppid: u32,
+    /// 任务的进程组id
+    pub pgid: u32,
     /// 任务的子任务列表
     pub children: Arc<SpinLock<Vec<SharedTask>>>,
     /// 任务的等待队列
-    pub wait_child: WaitQueue,
+    pub wait_child: Arc<SpinLock<WaitQueue>>,
     /// 内核栈基址
     pub kstack_base: usize,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
@@ -138,6 +140,7 @@ impl Task {
             tid,
             pid,
             ppid,
+            tid, // 内核线程不属于常规意义的进程组
             children,
             kstack_tracker,
             trap_frame_tracker,
@@ -163,6 +166,7 @@ impl Task {
         tid: u32,
         pid: u32,
         ppid: u32,
+        pgid: u32,
         children: Arc<SpinLock<Vec<Arc<SpinLock<Task>>>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
@@ -176,6 +180,7 @@ impl Task {
             tid,
             pid,
             ppid,
+            pgid,
             children,
             kstack_tracker,
             trap_frame_tracker,
@@ -232,30 +237,31 @@ impl Task {
         }
     }
 
-    /// 检查是否有僵尸子进程
-    /// 如果有，回收并返回 (tid, exit_code)
-    /// 如果没有，返回 None
+    /// 检查是否有满足条件的子任务
+    /// # 参数
+    /// * `cond`: 用于检查子任务的条件闭包
+    /// * `remove`: 是否在找到后从子任务列表中移除该僵尸子任务(如果是)
+    /// # 返回值
+    /// 如果有，返回该子任务的共享句柄. 如果没有，返回 None
     /// 注意：此函数不阻塞，调用者需持有锁
-    pub fn check_child_exit_locked(&mut self) -> Option<(u32, i32)> {
+    pub fn check_child(
+        &mut self,
+        mut cond: impl FnMut(&SharedTask) -> bool,
+        remove: bool,
+    ) -> Option<SharedTask> {
         let mut children_guard = self.children.lock();
-        if let Some(idx) = children_guard
-            .iter()
-            .position(|ch| ch.lock().state == TaskState::Zombie)
-        {
-            let child = children_guard.swap_remove(idx);
-            drop(children_guard);
-
-            let (tid, code) = {
-                let g = child.lock();
-                (g.tid, g.exit_code.unwrap_or_default())
-            };
-            return Some((tid, code));
+        if let Some(idx) = children_guard.iter().position(cond) {
+            let child = children_guard[idx].clone();
+            if remove && child.lock().state == TaskState::Zombie {
+                children_guard.remove(idx);
+            }
+            return Some(child);
         }
         None
     }
 
     pub fn notify_child_exit(&mut self) {
-        self.wait_child.wake_up_one();
+        self.wait_child.lock().wake_up_one();
     }
 
     /// 判断该任务是否为内核线程
@@ -285,6 +291,7 @@ impl Task {
         tid: u32,
         pid: u32,
         ppid: u32,
+        pgid: u32,
         children: Arc<SpinLock<Vec<SharedTask>>>,
         kstack_tracker: FrameRangeTracker,
         trap_frame_tracker: FrameTracker,
@@ -322,11 +329,11 @@ impl Task {
             processor_id: 0,
             state: TaskState::Running,
             tid,
-            // pid: tid,
             pid,
             ppid,
+            pgid,
             children,
-            wait_child: WaitQueue::new(),
+            wait_child: Arc::new(SpinLock::new(WaitQueue::new())),
             kstack_base,
             kstack_tracker,
             trap_frame_tracker,
@@ -356,6 +363,7 @@ impl Task {
         Self::new(
             tid,
             tid,
+            0,
             0,
             Task::empty_children(),
             kstack_tracker,

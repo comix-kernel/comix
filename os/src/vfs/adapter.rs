@@ -81,12 +81,12 @@ impl Stat {
             st_blksize: 512,
             __pad2: 0,
             st_blocks: meta.blocks as i64,
-            st_atime_sec: meta.atime.sec,
-            st_atime_nsec: meta.atime.nsec,
-            st_mtime_sec: meta.mtime.sec,
-            st_mtime_nsec: meta.mtime.nsec,
-            st_ctime_sec: meta.ctime.sec,
-            st_ctime_nsec: meta.ctime.nsec,
+            st_atime_sec: meta.atime.tv_sec,
+            st_atime_nsec: meta.atime.tv_nsec,
+            st_mtime_sec: meta.mtime.tv_sec,
+            st_mtime_nsec: meta.mtime.tv_nsec,
+            st_ctime_sec: meta.ctime.tv_sec,
+            st_ctime_nsec: meta.ctime.tv_nsec,
             __unused: [0; 2],
         }
     }

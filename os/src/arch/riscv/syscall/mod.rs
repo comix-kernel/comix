@@ -16,7 +16,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_READ => sys_read(frame),
         syscall_number::SYS_CLONE => sys_fork(frame),
         syscall_number::SYS_EXECVE => sys_execve(frame),
-        syscall_number::SYS_WAIT4 => sys_wait(frame),
+        syscall_number::SYS_WAIT4 => sys_wait4(frame),
         syscall_number::SYS_DUP => sys_dup(frame),
         syscall_number::SYS_DUP3 => sys_dup3(frame),
         syscall_number::SYS_OPENAT => sys_openat(frame),
@@ -39,6 +39,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_GETRLIMIT => sys_getrlimit(frame),
         syscall_number::SYS_SETRLIMIT => sys_setrlimit(frame),
         syscall_number::SYS_PRLIMIT64 => sys_prlimit(frame),
+        syscall_number::SYS_NANOSLEEP => sys_nanosleep(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS

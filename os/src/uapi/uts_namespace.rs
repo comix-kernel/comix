@@ -7,7 +7,8 @@ pub const UTS_DOMAINNAME_MAX_LEN: usize = 64;
 
 /// UTS 命名空间结构体
 /// 用于隔离不同任务的主机名和域名设置
-#[derive(Debug)]
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UtsNamespace {
     /// 主机名
     pub nodename: Vec<u8>,
