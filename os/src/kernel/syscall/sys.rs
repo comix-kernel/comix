@@ -139,16 +139,9 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
     }
 
     match action {
-        // 读取操作
-        SyslogAction::Read | SyslogAction::ReadAll => {
+        // 破坏性读取操作
+        SyslogAction::Read => {
             // Read: 破坏性读取（移除已读条目）
-            // ReadAll: 非破坏性读取（保留条目）
-            //
-            // 注意：当前两者实现相同，因为 log 模块的 read_log()
-            //       总是破坏性的。要实现真正的非破坏性读取，需要
-            //       log 模块提供 peek_log(index) API。
-            // TODO: 为 ReadAll 实现真正的非破坏性读取
-
             let buf_len = len as usize;
             let mut total_written = 0;
 
@@ -199,6 +192,68 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 }
 
                 total_written += bytes.len();
+            }
+
+            // 关闭用户空间访问
+            unsafe { sstatus::clear_sum() };
+
+            total_written as isize
+        }
+
+        // 非破坏性读取操作
+        SyslogAction::ReadAll => {
+            // ReadAll: 非破坏性读取（保留条目）
+            use crate::log::{log_reader_index, log_writer_index, peek_log};
+
+            let buf_len = len as usize;
+            let mut total_written = 0;
+
+            // 获取当前可读范围
+            let start_index = log_reader_index();
+            let end_index = log_writer_index();
+
+            // 开启用户空间访问
+            unsafe { sstatus::set_sum() };
+
+            // 遍历所有可用的日志条目
+            let mut current_index = start_index;
+            while current_index < end_index && total_written < buf_len {
+                // TODO: 暂时移除，等待信号系统实现
+                /*
+                // 检查信号中断
+                if has_pending_signal() {
+                    if total_written == 0 {
+                        unsafe { sstatus::clear_sum() };
+                        return -(EINTR as isize);
+                    } else {
+                        break;
+                    }
+                }
+                */
+
+                let entry = match peek_log(current_index) {
+                    Some(e) => e,
+                    None => break, // 条目已被覆盖或无效
+                };
+
+                let formatted = format_log_entry(&entry);
+                let bytes = formatted.as_bytes();
+
+                if total_written + bytes.len() > buf_len {
+                    // 缓冲区不足，停止读取
+                    break;
+                }
+
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        bytes.as_ptr(),
+                        bufp.add(total_written),
+                        bytes.len(),
+                    );
+                }
+
+                total_written += bytes.len();
+                current_index += 1;
             }
 
             // 关闭用户空间访问
