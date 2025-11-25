@@ -12,8 +12,7 @@
 
 use core::any::Any;
 
-use crate::arch::timer::get_time;
-use crate::kernel::CLOCK_FREQ;
+use crate::uapi::time::timespec;
 use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -30,30 +29,6 @@ pub enum InodeType {
     BlockDevice, // 块设备
     Fifo,        // 命名管道
     Socket,      // 套接字
-}
-
-/// 时间戳结构
-#[derive(Debug, Clone, Copy)]
-pub struct TimeSpec {
-    pub sec: i64,  // 秒
-    pub nsec: i64, // 纳秒
-}
-
-impl TimeSpec {
-    /// 创建当前时间戳
-    pub fn now() -> Self {
-        const NSEC_PER_SEC: usize = 1000_000_000;
-        let cur_nsec = get_time() * NSEC_PER_SEC / unsafe { CLOCK_FREQ };
-        Self {
-            sec: (cur_nsec / NSEC_PER_SEC) as i64,
-            nsec: (cur_nsec % NSEC_PER_SEC) as i64,
-        }
-    }
-
-    /// 创建零时间戳
-    pub fn zero() -> Self {
-        Self { sec: 0, nsec: 0 }
-    }
 }
 
 bitflags::bitflags! {
@@ -128,9 +103,9 @@ pub struct InodeMetadata {
     pub uid: u32,              // 用户 ID
     pub gid: u32,              // 组 ID
     pub size: usize,           // 文件大小（字节）
-    pub atime: TimeSpec,       // 访问时间
-    pub mtime: TimeSpec,       // 修改时间
-    pub ctime: TimeSpec,       // 状态改变时间
+    pub atime: timespec,       // 访问时间
+    pub mtime: timespec,       // 修改时间
+    pub ctime: timespec,       // 状态改变时间
     pub nlinks: usize,         // 硬链接数
     pub blocks: usize,         // 占用的块数（512B 为单位）
 }
