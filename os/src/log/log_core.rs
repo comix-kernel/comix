@@ -190,22 +190,79 @@ impl LogCore {
         level as u8 <= self.console_level.load(Ordering::Acquire)
     }
 
-    /// 使用 ANSI 颜色直接将日志条目打印到控制台
+    /// 使用 ANSI 颜色直接将日志条目打印到控制台（无堆分配）
+    ///
+    /// 此方法在早期启动时即可使用，因为它仅使用栈和 core::fmt::Write，
+    /// 不依赖堆分配器。
+    ///
+    /// **重要**：此函数的格式化逻辑必须与 `format_log_entry` 保持一致。
+    /// 如果修改了日志输出格式，需要同步更新两处：
+    /// - `direct_print_entry` (此函数) - 用于早期启动的控制台输出
+    /// - `format_log_entry` - 用于 syslog 系统调用
     fn direct_print_entry(&self, entry: &LogEntry) {
         use core::fmt::Write;
 
         let mut stdout = Stdout;
+        // 直接格式化输出，不使用堆分配
         let _ = write!(
             stdout,
-            "{}{} ",
+            "{}{} [{:12}] [CPU{}/T{:3}] {}{}",
             entry.level().color_code(),
-            entry.level().as_str()
+            entry.level().as_str(),
+            entry.timestamp(),
+            entry.cpu_id(),
+            entry.task_id(),
+            entry.message(),
+            entry.level().reset_color_code()
         );
-        let _ = stdout.write_str(entry.message());
-        let _ = write!(stdout, "{}", entry.level().reset_color_code());
         let _ = writeln!(stdout);
     }
 }
 
 // 标记为 Sync 允许在 static 中使用
 unsafe impl Sync for LogCore {}
+
+/// 格式化日志条目为字符串（带 ANSI 颜色和上下文信息）
+///
+/// 将 LogEntry 格式化为用户可读的字符串，用于 syslog 系统调用等场景。
+/// 包含 ANSI 颜色代码、时间戳、CPU ID、任务 ID 等上下文信息。
+///
+/// **注意**：此函数使用堆分配（`alloc::format!`），仅在堆分配器初始化后可用。
+/// 主要用于 syslog 系统调用等运行时场景。早期启动时的控制台输出使用
+/// `direct_print_entry` 方法，该方法不依赖堆分配。
+///
+/// **重要**：此函数的格式化逻辑必须与 `direct_print_entry` 保持一致。
+/// 如果修改了日志输出格式，需要同步更新两处：
+/// - `direct_print_entry` - 用于早期启动的控制台输出（无堆分配）
+/// - `format_log_entry` (此函数) - 用于 syslog 系统调用（使用堆分配）
+///
+/// # 格式
+/// ```
+/// <color_code>[LEVEL] [timestamp] [CPU<id>/T<tid>] message<reset>
+/// ```
+///
+/// # 示例
+/// ```
+/// \x1b[37m[INFO] [      123456] [CPU0/T  1] Kernel initialized\x1b[0m
+/// \x1b[31m[ERR] [      789012] [CPU0/T  5] Failed to mount /dev/sda1\x1b[0m
+/// ```
+///
+/// # 参数
+/// * `entry` - 要格式化的日志条目
+///
+/// # 返回值
+/// 格式化后的字符串（包含 ANSI 颜色代码和上下文信息）
+pub fn format_log_entry(entry: &LogEntry) -> alloc::string::String {
+    use alloc::format;
+
+    format!(
+        "{}{} [{:12}] [CPU{}/T{:3}] {}{}",
+        entry.level().color_code(),
+        entry.level().as_str(),
+        entry.timestamp(),
+        entry.cpu_id(),
+        entry.task_id(),
+        entry.message(),
+        entry.level().reset_color_code()
+    )
+}

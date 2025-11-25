@@ -85,7 +85,7 @@ impl LogLevel {
     /// 将 u8 值转换为日志级别
     ///
     /// 如果该值无效，则返回默认日志级别。
-    pub(super) fn from_u8(level: u8) -> Self {
+    pub fn from_u8(level: u8) -> Self {
         match level {
             0 => Self::Emergency,
             1 => Self::Alert,
@@ -98,5 +98,13 @@ impl LogLevel {
 
             _ => super::config::DEFAULT_LOG_LEVEL,
         }
+    }
+
+    /// 将日志级别转换为 u8 值
+    ///
+    /// # 返回值
+    /// 日志级别对应的数值 (0-7)
+    pub const fn to_u8(self) -> u8 {
+        self as u8
     }
 }
