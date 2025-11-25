@@ -413,12 +413,15 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
     let mut result = 0;
     let task = current_task();
     let trigger = get_time() + req.into_freq(clock_freq());
-    TIMER_QUEUE.lock().push(trigger, task.clone());
+
+    let mut timer_q = TIMER_QUEUE.lock();
+    timer_q.push(trigger, task.clone());
     sleep_task_with_block(task, true);
+    drop(timer_q);
     yield_task();
 
     if !rem.is_null() {
-        let dur = trigger - get_time();
+        let dur = trigger.saturating_sub(get_time());
         let remaining_ticks = if dur > 0 {
             // XXX: 提前唤醒是否一定是因为信号？
             result = -EINTR;

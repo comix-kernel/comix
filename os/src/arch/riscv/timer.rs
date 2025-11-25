@@ -30,7 +30,7 @@ pub fn get_time() -> usize {
 /// 获取当前时间（以毫秒为单位）
 #[inline]
 pub fn get_time_ms() -> usize {
-    time::read() * MSEC_PER_SEC / clock_freq()
+    (time::read() as u128 * MSEC_PER_SEC as u128 / clock_freq() as u128) as usize
 }
 
 /// 设置定时器中断

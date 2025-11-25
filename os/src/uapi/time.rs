@@ -7,7 +7,9 @@
 
 use core::ffi::{c_int, c_long};
 
-/// 用于指定秒和纳秒精度的时间间隔。
+use crate::arch::timer::{clock_freq, get_time};
+
+/// 用于指定秒和纳秒精度的时间
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct timespec {
@@ -24,7 +26,9 @@ impl timespec {
     /// # 返回值:
     /// - 刻度数
     pub fn into_freq(&self, freq: usize) -> usize {
-        (self.tv_sec as usize * freq) + (self.tv_nsec as usize * freq / 1_000_000_000)
+        let sec_ticks = (self.tv_sec as u128) * (freq as u128);
+        let nsec_ticks = (self.tv_nsec as u128) * (freq as u128) / 1_000_000_000;
+        (sec_ticks + nsec_ticks) as usize
     }
 
     /// 通过指定频率的刻度数创建 timespec。
@@ -41,9 +45,27 @@ impl timespec {
             tv_nsec: nsec as c_long,
         }
     }
+
+    /// 获取当前时间的 timespec。
+    /// # 返回值:
+    /// - 当前时间的 timespec 结构体
+    pub fn now() -> Self {
+        let time = get_time();
+        Self::from_freq(time, clock_freq())
+    }
+
+    /// 创建零时间的 timespec。
+    /// # 返回值:
+    /// - 零时间的 timespec 结构体
+    pub fn zero() -> Self {
+        Self {
+            tv_sec: 0,
+            tv_nsec: 0,
+        }
+    }
 }
 
-/// 用于指定秒和微秒精度的时间间隔。
+/// 用于指定秒和微秒精度的时间。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct timeval {
