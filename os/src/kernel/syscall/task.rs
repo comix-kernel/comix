@@ -9,11 +9,9 @@ use alloc::{sync::Arc, vec::Vec};
 use riscv::register::sstatus;
 
 use crate::{
-    arch::trap::restore,
+    arch::{timer::{clock_freq, get_time}, trap::restore},
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_task, exit_process, schedule,
-        syscall::util::{get_args_safe, get_path_safe},
+        SCHEDULER, Scheduler, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block, syscall::util::{get_args_safe, get_path_safe}, yield_task
     },
     mm::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
@@ -22,8 +20,8 @@ use crate::{
     sync::SpinLock,
     tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
-        errno::{ENAVAIL, ESRCH},
-        resource::{RLIM_NLIMITS, Rlimit},
+        errno::{EINTR, EINVAL, ESRCH},
+        resource::{RLIM_NLIMITS, Rlimit}, time::timespec,
     },
 };
 
@@ -242,7 +240,7 @@ pub fn get_ppid() -> c_int {
 /// - 成功返回 0, 失败返回错误码
 pub fn getrlimit(resource: c_int, rlim: *mut Rlimit) -> c_int {
     if resource as usize >= RLIM_NLIMITS {
-        return -ENAVAIL;
+        return -EINVAL;
     }
     let rlimit = current_task().lock().rlimit.lock().limits[resource as usize];
     unsafe {
@@ -260,11 +258,11 @@ pub fn getrlimit(resource: c_int, rlim: *mut Rlimit) -> c_int {
 /// - 成功返回 0, 失败返回错误码
 pub fn setrlimit(resource: c_int, rlim: *const Rlimit) -> c_int {
     if resource as usize >= RLIM_NLIMITS {
-        return -ENAVAIL;
+        return -EINVAL;
     }
     let new_limit = unsafe { read_from_user(rlim) };
     if new_limit.rlim_cur > new_limit.rlim_max {
-        return -ENAVAIL;
+        return -EINVAL;
     }
     {
         let rlimit_lock = current_task().lock().rlimit.clone();
@@ -289,7 +287,7 @@ pub fn prlimit(
     old_limit: *mut Rlimit,
 ) -> c_int {
     if resource as usize >= RLIM_NLIMITS {
-        return -ENAVAIL;
+        return -EINVAL;
     }
     let target_task = if pid == 0 {
         current_task()
@@ -311,7 +309,7 @@ pub fn prlimit(
     if !new_limit.is_null() {
         let new_rlim = unsafe { read_from_user(new_limit) };
         if new_rlim.rlim_cur > new_rlim.rlim_max {
-            return -ENAVAIL;
+            return -EINVAL;
         }
         let rlimit_lock = target_task.lock().rlimit.clone();
         rlimit_lock.lock().limits[resource as usize] = new_rlim;
@@ -319,4 +317,42 @@ pub fn prlimit(
 
     0
     // TODO: EPERM, EPERM 和 EFAULT
+}
+
+/// 高精度睡眠（纳秒级别）
+/// # 参数
+/// - `duration`: 指向 timespec 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 timespec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
+    let req = unsafe { read_from_user(duration) };
+    if req.tv_sec == 0 && req.tv_nsec == 0 {
+        return 0;
+    }
+    if req.tv_sec < 0 || req.tv_nsec < 0 || req.tv_nsec > 999999999 {
+        return -EINVAL;
+    }
+    let mut result = 0;
+    let task = current_task();
+    let trigger = get_time() + req.into_freq(clock_freq());
+    TIMER_QUEUE.lock().push(trigger, task.clone());
+    sleep_task_with_block(task, true);
+    yield_task();
+
+    if !rem.is_null() {
+        let dur = trigger - get_time();
+        let remaining_ticks = if dur > 0 {
+            // XXX: 提前唤醒是否一定是因为信号？
+            result = -EINTR;
+            dur
+        } else { 0 };
+        let rem_ts = timespec::from_freq(remaining_ticks, clock_freq());
+        unsafe {
+            write_to_user(rem, rem_ts);
+        }
+    }
+
+    result
+    // TODO: EFAULT
 }

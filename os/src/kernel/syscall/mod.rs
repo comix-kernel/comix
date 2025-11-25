@@ -14,7 +14,7 @@ mod util;
 
 use core::ffi::{c_char, c_int, c_void};
 
-use crate::{impl_syscall, uapi::resource::Rlimit, vfs::Stat};
+use crate::{impl_syscall, uapi::{resource::Rlimit, time::timespec}, vfs::Stat};
 use fs::*;
 use io::*;
 use ipc::*;
@@ -83,3 +83,4 @@ impl_syscall!(
 );
 impl_syscall!(sys_getsockname, getsockname, (i32, *mut u8, *mut u32));
 impl_syscall!(sys_getpeername, getpeername, (i32, *mut u8, *mut u32));
+impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
