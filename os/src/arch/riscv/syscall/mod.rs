@@ -14,7 +14,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_EXIT_GROUP => sys_exit_group(frame),
         syscall_number::SYS_WRITE => sys_write(frame),
         syscall_number::SYS_READ => sys_read(frame),
-        syscall_number::SYS_CLONE => sys_fork(frame),
+        syscall_number::SYS_CLONE => sys_clone(frame),
         syscall_number::SYS_EXECVE => sys_execve(frame),
         syscall_number::SYS_WAIT4 => sys_wait4(frame),
         syscall_number::SYS_DUP => sys_dup(frame),

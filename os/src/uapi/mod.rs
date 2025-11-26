@@ -9,6 +9,7 @@ pub mod fs;
 pub mod log;
 pub mod reboot;
 pub mod resource;
+pub mod sched;
 pub mod time;
 pub mod uts_namespace;
 pub mod wait;
