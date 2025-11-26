@@ -11,7 +11,11 @@ use crate::{
         syscall::util::{create_file_at, get_path_safe, resolve_at_path},
     },
     vfs::{
-        DiskFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path, vfs_lookup,
+        DiskFile, Dentry, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path, vfs_lookup,
+    },
+    uapi::{
+        errno::{EINVAL, EACCES, ENOENT},
+        fs::{FileSystemType, LinuxStatFs, AtFlags, X_OK, F_OK, R_OK, W_OK},
     },
 };
 
@@ -384,4 +388,353 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
 
     // 返回写入的字节数
     written as isize
+}
+
+pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
+    // 参数校验
+    if buf.is_null() {
+        return -(EINVAL as isize);
+    }
+
+    // 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(path) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 验证路径存在
+    if vfs_lookup(&path_str).is_err() {
+        return -(EINVAL as isize);
+    }
+
+    // 通过 MOUNT_TABLE 查找文件系统
+    use crate::vfs::MOUNT_TABLE;
+    let mount_point = match MOUNT_TABLE.find_mount(&path_str) {
+        Some(mp) => mp,
+        None => return -(EINVAL as isize),
+    };
+
+    // 获取文件系统统计信息
+    let fs_stat = match mount_point.fs.statfs() {
+        Ok(s) => s,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 转换为 Linux statfs 结构
+    let fs_type = FileSystemType::from_str(mount_point.fs.fs_type());
+
+    let statfs_buf = LinuxStatFs {
+        f_type: fs_type.magic(),
+        f_bsize: fs_stat.block_size as i64,
+        f_blocks: fs_stat.total_blocks as u64,
+        f_bfree: fs_stat.free_blocks as u64,
+        f_bavail: fs_stat.available_blocks as u64,
+        f_files: fs_stat.total_inodes as u64,
+        f_ffree: fs_stat.free_inodes as u64,
+        f_fsid: [
+            (fs_stat.fsid & 0xFFFFFFFF) as i32,
+            (fs_stat.fsid >> 32) as i32,
+        ],
+        f_namelen: fs_stat.max_filename_len as i64,
+        f_frsize: fs_stat.block_size as i64, // 片段大小等于块大小
+        f_flags: 0, // TODO: 添加挂载标志支持
+        f_spare: [0; 4],
+    };
+
+    // 写回用户空间
+    unsafe {
+        sstatus::set_sum();
+        core::ptr::write(buf, statfs_buf);
+        sstatus::clear_sum();
+    }
+
+    0
+}
+
+pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> isize {
+    // 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 解析标志
+    let at_flags = match AtFlags::from_bits(flags) {
+        Some(f) => f,
+        None => return -(EINVAL as isize),
+    };
+
+    // 查找文件
+    let dentry = if at_flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        // 不跟随符号链接：需要特殊处理最后一级路径
+        let (dir_path, filename) = match split_path(&path_str) {
+            Ok(p) => p,
+            Err(e) => return e.to_errno(),
+        };
+
+        // 解析到父目录
+        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        };
+
+        // 在父目录中查找文件名（不跟随符号链接）
+        if let Some(child) = parent_dentry.lookup_child(&filename) {
+            child
+        } else {
+            let child_inode = match parent_dentry.inode.lookup(&filename) {
+                Ok(i) => i,
+                Err(e) => return e.to_errno(),
+            };
+            let child_dentry = Dentry::new(filename.clone(), child_inode);
+            parent_dentry.add_child(child_dentry.clone());
+            child_dentry
+        }
+    } else {
+        // 跟随符号链接（默认行为）
+        match resolve_at_path(dirfd, &path_str) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        }
+    };
+
+    // 获取文件元数据
+    let meta = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    // F_OK 模式：仅检查文件是否存在
+    if mode == F_OK {
+        return 0;
+    }
+
+    // 检查权限
+    // TODO: 完整的权限检查需要考虑：
+    // - 进程的 uid/euid/gid/egid
+    // - 文件的 uid/gid/mode
+    // - Capabilities (CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH)
+    // - AT_EACCESS 标志（使用有效 UID 而非实际 UID）
+    //
+    // 临时实现：简化的权限检查
+
+    // 简化版：只检查文件权限位，假设当前用户有权限
+    if (mode & R_OK) != 0 {
+        // 检查是否有任何读权限位
+        if !meta.mode.contains(FileMode::S_IRUSR)
+            && !meta.mode.contains(FileMode::S_IRGRP)
+            && !meta.mode.contains(FileMode::S_IROTH)
+        {
+            return -(EACCES as isize);
+        }
+    }
+
+    if (mode & W_OK) != 0 {
+        // 检查是否有任何写权限位
+        if !meta.mode.contains(FileMode::S_IWUSR)
+            && !meta.mode.contains(FileMode::S_IWGRP)
+            && !meta.mode.contains(FileMode::S_IWOTH)
+        {
+            return -(EACCES as isize);
+        }
+    }
+
+    if (mode & X_OK) != 0 {
+        // 检查是否有任何执行权限位
+        if !meta.mode.contains(FileMode::S_IXUSR)
+            && !meta.mode.contains(FileMode::S_IXGRP)
+            && !meta.mode.contains(FileMode::S_IXOTH)
+        {
+            return -(EACCES as isize);
+        }
+    }
+
+    0
+}
+
+pub fn readlinkat(
+    dirfd: i32,
+    pathname: *const c_char,
+    buf: *mut u8,
+    bufsiz: usize,
+) -> isize {
+    // 参数校验
+    if buf.is_null() || bufsiz == 0 {
+        return -(EINVAL as isize);
+    }
+
+    // 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 查找符号链接（不跟随最后一级的符号链接）
+    let dentry = {
+        let (dir_path, filename) = match split_path(&path_str) {
+            Ok(p) => p,
+            Err(e) => return e.to_errno(),
+        };
+
+        // 解析到父目录（路径中间的符号链接会被跟随）
+        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        };
+
+        // 在父目录中查找文件名（不跟随符号链接）
+        if let Some(child) = parent_dentry.lookup_child(&filename) {
+            child
+        } else {
+            let child_inode = match parent_dentry.inode.lookup(&filename) {
+                Ok(i) => i,
+                Err(e) => return e.to_errno(),
+            };
+            let child_dentry = Dentry::new(filename.clone(), child_inode);
+            parent_dentry.add_child(child_dentry.clone());
+            child_dentry
+        }
+    };
+
+    // 验证是符号链接
+    let meta = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    if meta.inode_type != InodeType::Symlink {
+        return -(EINVAL as isize);
+    }
+
+    // 读取符号链接目标（使用 read_at）
+    let read_size = core::cmp::min(meta.size, bufsiz);
+    let mut temp_buf = alloc::vec![0u8; read_size];
+
+    let bytes_read = match dentry.inode.read_at(0, &mut temp_buf) {
+        Ok(n) => n,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 复制到用户空间（注意：readlink 不添加 null 终止符）
+    unsafe {
+        sstatus::set_sum();
+        core::ptr::copy_nonoverlapping(temp_buf.as_ptr(), buf, bytes_read);
+        sstatus::clear_sum();
+    }
+
+    bytes_read as isize
+}
+
+pub fn newfstatat(
+    dirfd: i32,
+    pathname: *const c_char,
+    statbuf: *mut Stat,
+    flags: u32,
+) -> isize {
+    // 参数校验
+    if statbuf.is_null() {
+        return -(EINVAL as isize);
+    }
+
+    // 解析路径
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 解析标志
+    let at_flags = match AtFlags::from_bits(flags) {
+        Some(f) => f,
+        None => return -(EINVAL as isize),
+    };
+
+    // 处理 AT_EMPTY_PATH 标志
+    if path_str.is_empty() && at_flags.contains(AtFlags::EMPTY_PATH) {
+        if dirfd == AT_FDCWD {
+            return -(EINVAL as isize);
+        }
+        // 对 dirfd 执行 fstat
+        return fstat(dirfd as usize, statbuf);
+    }
+
+    // 查找文件
+    let dentry = if at_flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        // 不跟随符号链接：需要特殊处理最后一级路径
+        let (dir_path, filename) = match split_path(&path_str) {
+            Ok(p) => p,
+            Err(e) => return e.to_errno(),
+        };
+
+        // 解析到父目录
+        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        };
+
+        // 在父目录中查找文件名（不跟随符号链接）
+        // 先检查 dentry 缓存
+        if let Some(child) = parent_dentry.lookup_child(&filename) {
+            child
+        } else {
+            // 缓存未命中，通过 inode 查找
+            let child_inode = match parent_dentry.inode.lookup(&filename) {
+                Ok(i) => i,
+                Err(e) => return e.to_errno(),
+            };
+
+            // 创建新的 dentry
+            let child_dentry = Dentry::new(filename.clone(), child_inode);
+            parent_dentry.add_child(child_dentry.clone());
+            child_dentry
+        }
+    } else {
+        // 跟随符号链接（默认行为）
+        match resolve_at_path(dirfd, &path_str) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        }
+    };
+
+    // 获取文件元数据
+    let metadata = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 转换为 Stat 结构
+    let stat = Stat::from_metadata(&metadata);
+
+    // 写回用户空间
+    unsafe {
+        sstatus::set_sum();
+        core::ptr::write(statbuf, stat);
+        sstatus::clear_sum();
+    }
+
+    0
 }

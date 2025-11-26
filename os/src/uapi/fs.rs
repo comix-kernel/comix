@@ -176,7 +176,7 @@ impl RenameFlags {
 /// - `f_spare`: 保留字段（填充）
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct StatFs {
+pub struct LinuxStatFs {
     pub f_type: i64,
     pub f_bsize: i64,
     pub f_blocks: u64,
@@ -191,7 +191,7 @@ pub struct StatFs {
     pub f_spare: [i64; 4],
 }
 
-impl StatFs {
+impl LinuxStatFs {
     /// 创建零初始化的 statfs 结构
     pub const fn zeroed() -> Self {
         Self {
