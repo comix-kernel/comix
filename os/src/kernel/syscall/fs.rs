@@ -10,12 +10,13 @@ use crate::{
         current_cpu, current_task,
         syscall::util::{create_file_at, get_path_safe, resolve_at_path},
     },
-    vfs::{
-        DiskFile, Dentry, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path, vfs_lookup,
-    },
     uapi::{
-        errno::{EINVAL, EACCES, ENOENT},
-        fs::{FileSystemType, LinuxStatFs, AtFlags, X_OK, F_OK, R_OK, W_OK},
+        errno::{EACCES, EINVAL, ENOENT},
+        fs::{AtFlags, F_OK, FileSystemType, LinuxStatFs, R_OK, W_OK, X_OK},
+    },
+    vfs::{
+        Dentry, DiskFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
+        vfs_lookup,
     },
 };
 
@@ -442,7 +443,7 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
         ],
         f_namelen: fs_stat.max_filename_len as i64,
         f_frsize: fs_stat.block_size as i64, // 片段大小等于块大小
-        f_flags: 0, // TODO: 添加挂载标志支持
+        f_flags: 0,                          // TODO: 添加挂载标志支持
         f_spare: [0; 4],
     };
 
@@ -564,12 +565,7 @@ pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> 
     0
 }
 
-pub fn readlinkat(
-    dirfd: i32,
-    pathname: *const c_char,
-    buf: *mut u8,
-    bufsiz: usize,
-) -> isize {
+pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usize) -> isize {
     // 参数校验
     if buf.is_null() || bufsiz == 0 {
         return -(EINVAL as isize);
@@ -643,12 +639,7 @@ pub fn readlinkat(
     bytes_read as isize
 }
 
-pub fn newfstatat(
-    dirfd: i32,
-    pathname: *const c_char,
-    statbuf: *mut Stat,
-    flags: u32,
-) -> isize {
+pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags: u32) -> isize {
     // 参数校验
     if statbuf.is_null() {
         return -(EINVAL as isize);
@@ -844,6 +835,187 @@ pub fn utimensat(
     // 设置时间戳
     if let Err(e) = dentry.inode.set_times(atime_opt, mtime_opt) {
         return e.to_errno();
+    }
+
+    0
+}
+
+/// 重命名或移动文件/目录
+pub fn renameat2(
+    olddirfd: i32,
+    oldpath: *const c_char,
+    newdirfd: i32,
+    newpath: *const c_char,
+    flags: u32,
+) -> isize {
+    use crate::uapi::{
+        errno::{EEXIST, ENOTDIR},
+        fs::RenameFlags,
+    };
+
+    // 解析标志
+    let rename_flags = match RenameFlags::from_bits(flags) {
+        Some(f) => f,
+        None => return -(EINVAL as isize),
+    };
+
+    // 检查标志组合的合法性
+    if !rename_flags.is_valid() {
+        return -(EINVAL as isize);
+    }
+
+    // 解析旧路径
+    unsafe { sstatus::set_sum() };
+    let old_path_str = match get_path_safe(oldpath) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+
+    // 解析新路径
+    let new_path_str = match get_path_safe(newpath) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 分割路径为 (父目录, 文件名)
+    let (old_dir_path, old_name) = match split_path(&old_path_str) {
+        Ok(p) => p,
+        Err(e) => return e.to_errno(),
+    };
+
+    let (new_dir_path, new_name) = match split_path(&new_path_str) {
+        Ok(p) => p,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 查找父目录
+    let old_parent = match resolve_at_path(olddirfd, &old_dir_path) {
+        Ok(Some(d)) => d,
+        Ok(None) => return -(ENOENT as isize),
+        Err(e) => return e.to_errno(),
+    };
+
+    let new_parent = match resolve_at_path(newdirfd, &new_dir_path) {
+        Ok(Some(d)) => d,
+        Ok(None) => return -(ENOENT as isize),
+        Err(e) => return e.to_errno(),
+    };
+
+    // 验证父目录是目录
+    let old_parent_meta = match old_parent.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+    if old_parent_meta.inode_type != InodeType::Directory {
+        return -(ENOTDIR as isize);
+    }
+
+    let new_parent_meta = match new_parent.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+    if new_parent_meta.inode_type != InodeType::Directory {
+        return -(ENOTDIR as isize);
+    }
+
+    // 查找源文件(验证存在)
+    let _old_inode = match old_parent.inode.lookup(&old_name) {
+        Ok(inode) => inode,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 处理不同的重命名标志
+    if rename_flags.contains(RenameFlags::EXCHANGE) {
+        // 原子交换两个文件
+        // 使用临时文件名实现交换: file1 <-> file2
+        // 步骤: file1 -> temp, file2 -> file1, temp -> file2
+
+        // 验证目标文件存在
+        let _new_inode = match new_parent.inode.lookup(&new_name) {
+            Ok(inode) => inode,
+            Err(_) => return -(ENOENT as isize), // EXCHANGE 要求目标必须存在
+        };
+
+        // 生成临时文件名(使用时间戳或特殊前缀避免冲突)
+        let temp_name = alloc::format!(".rename_temp_{}_{}", old_name, new_name);
+
+        // 步骤1: old_name -> temp_name
+        if let Err(e) = old_parent
+            .inode
+            .rename(&old_name, old_parent.inode.clone(), &temp_name)
+        {
+            return e.to_errno();
+        }
+
+        // 步骤2: new_name -> old_name
+        if let Err(e) = new_parent
+            .inode
+            .rename(&new_name, old_parent.inode.clone(), &old_name)
+        {
+            // 回滚步骤1
+            let _ = old_parent
+                .inode
+                .rename(&temp_name, old_parent.inode.clone(), &old_name);
+            return e.to_errno();
+        }
+
+        // 步骤3: temp_name -> new_name
+        if let Err(e) = old_parent
+            .inode
+            .rename(&temp_name, new_parent.inode.clone(), &new_name)
+        {
+            // 回滚步骤2和步骤1
+            let _ = old_parent
+                .inode
+                .rename(&old_name, new_parent.inode.clone(), &new_name);
+            let _ = old_parent
+                .inode
+                .rename(&temp_name, old_parent.inode.clone(), &old_name);
+            return e.to_errno();
+        }
+
+        // 更新 dentry 缓存
+        old_parent.remove_child(&old_name);
+        old_parent.remove_child(&temp_name);
+        new_parent.remove_child(&new_name);
+    } else if rename_flags.contains(RenameFlags::NOREPLACE) {
+        // 目标存在时失败
+        if new_parent.inode.lookup(&new_name).is_ok() {
+            return -(EEXIST as isize);
+        }
+
+        // 执行重命名
+        if let Err(e) = old_parent
+            .inode
+            .rename(&old_name, new_parent.inode.clone(), &new_name)
+        {
+            return e.to_errno();
+        }
+
+        // 更新 dentry 缓存
+        old_parent.remove_child(&old_name);
+    } else if rename_flags.contains(RenameFlags::WHITEOUT) {
+        // WHITEOUT 暂不支持(需要 Union FS 支持)
+        return FsError::NotSupported.to_errno();
+    } else {
+        // 普通重命名/移动(允许覆盖目标)
+        if let Err(e) = old_parent
+            .inode
+            .rename(&old_name, new_parent.inode.clone(), &new_name)
+        {
+            return e.to_errno();
+        }
+
+        // 更新 dentry 缓存
+        old_parent.remove_child(&old_name);
+        new_parent.remove_child(&new_name);
     }
 
     0

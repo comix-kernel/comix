@@ -644,11 +644,7 @@ impl Inode for Ext4Inode {
         self
     }
 
-    fn set_times(
-        &self,
-        atime: Option<TimeSpec>,
-        mtime: Option<TimeSpec>,
-    ) -> Result<(), FsError> {
+    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
         let mut fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
