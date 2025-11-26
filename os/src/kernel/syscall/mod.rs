@@ -12,7 +12,7 @@ mod sys;
 mod task;
 mod util;
 
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_ulong, c_void};
 
 use crate::{
     impl_syscall,
@@ -36,7 +36,11 @@ impl_syscall!(sys_reboot, reboot, (c_int, c_int, c_int, *mut c_void));
 impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
-impl_syscall!(sys_fork, fork, ());
+impl_syscall!(
+    sys_clone,
+    clone,
+    (c_ulong, c_ulong, *mut c_int, *mut c_int, c_ulong)
+);
 impl_syscall!(
     sys_execve,
     execve,

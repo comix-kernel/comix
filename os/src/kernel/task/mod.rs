@@ -16,6 +16,7 @@ pub use ktask::*;
 pub use process::*;
 pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
 pub use task_state::TaskState;
+pub use task_struct::FsStruct;
 pub use task_struct::SharedTask;
 pub use task_struct::Task as TaskStruct;
 pub use work_queue::*;
