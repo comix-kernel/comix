@@ -39,7 +39,7 @@ use crate::{
 #[allow(dead_code)]
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tid = TASK_MANAGER.lock().allocate_tid();
-    let (pid, ppid, signal_handlers, blocked, uts, rlimit, fd_table, fs) = {
+    let (pid, ppid, signal_handlers, blocked, signal, uts, rlimit, fd_table, fs) = {
         let cur_cpu = current_cpu().lock();
         let cur_task = cur_cpu.current_task.as_ref().unwrap();
         let cur_task = cur_task.lock();
@@ -48,6 +48,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
             cur_task.ppid,
             cur_task.signal_handlers.clone(),
             cur_task.blocked,
+            cur_task.shared_pending.clone(),
             cur_task.uts_namespace.clone(),
             cur_task.rlimit.clone(),
             cur_task.fd_table.clone(),
@@ -68,6 +69,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         trap_frame_tracker,
         signal_handlers,
         blocked,
+        signal,
         uts,
         rlimit,
         fd_table,

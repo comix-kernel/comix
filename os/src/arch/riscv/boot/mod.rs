@@ -7,7 +7,7 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
-    ipc::{SignalFlags, SignalHandlerTable},
+    ipc::{SignalFlags, SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
@@ -56,6 +56,7 @@ pub fn rest_init() {
         trap_frame_tracker,
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
+        Arc::new(SpinLock::new(SignalPending::empty())),
         Arc::new(SpinLock::new(UtsNamespace::default())),
         Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
         Arc::new(fd_table),
@@ -152,6 +153,7 @@ fn create_kthreadd() {
         trap_frame_tracker,
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
+        Arc::new(SpinLock::new(SignalPending::empty())),
         uts,
         rlimit,
         Arc::new(fd_table),

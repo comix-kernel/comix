@@ -2,6 +2,12 @@
 //!
 //! 提供软件中断机制，用于发送异步通知给进程
 //! 处理信号的捕获、屏蔽和默认行为.
+//! # 信号投递流程
+//! - **检查：** 内核在返回用户态前，检查私有 `pending` 和共享 `pending`，找到**最高优先级且未被阻塞**的信号 S。
+//! - **投递：** 内核将 S 从 `pending` 队列中移除，构建 S 的上下文，并修改 PC/SP 指向信号处理函数。
+//! - **返回：** 内核退出，任务在用户态执行信号处理函数。
+//! - **循环：** 当信号处理函数执行完毕，通过 `rt_sigreturn` 返回内核后，内核会**再次**进入检查流程。
+//!             此时，它可能会发现队列中还有第二个未决信号，然后开始第二次单次投递。
 
 use bitflags::bitflags;
 
@@ -178,45 +184,65 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
         handler_addr => {
             // 自定义处理器：构造用户栈上下文并跳转
             // **将 action.mask 传递给安装跳板函数**
-            install_user_signal_trampoline(task, sig_num, handler_addr, action.mask);
+            install_user_signal_trap_frame(task, sig_num, handler_addr, action.mask);
         }
     }
 }
 
 /// 在返回用户态前检查信号并处理
+/// # 说明:
+/// 该函数会检查当前任务的私有和共享待处理信号集合，
+/// 找出第一个可投递的信号并进行处理。
+/// 如果没有可投递的信号，则直接返回。
 pub fn check_signal() {
     let task = current_task();
-    loop {
-        let (sig_flag, action) = {
-            let mut t = task.lock();
-            let pending_copy = t.pending.clone();
-            let blocked_copy = t.blocked.clone();
-            let Some(flag) = first_deliverable_signal(pending_copy, blocked_copy) else {
-                break;
-            };
+    let (sig_flag, action) = {
+        let mut t = task.lock();
+        let pending_copy = t.pending.clone();
+        let shared_pending_copy = t.shared_pending.lock().clone();
+        let blocked_copy = t.blocked.clone();
+        if let Some(flag) = first_deliverable_signal(pending_copy.signals, blocked_copy) {
             let num = signal_from_flag(flag).unwrap();
             let action = {
                 let handlers = t.signal_handlers.lock();
                 handlers.actions[num]
             };
-            t.pending.remove(flag);
+            t.pending.signals.remove(flag);
             (flag, action)
-        };
-
-        handle_one_signal(sig_flag, action, &task);
-
-        // 若任务已退出或停止且为终止类信号，停止继续处理
+        } else if let Some(flag) =
+            first_deliverable_signal(shared_pending_copy.signals, blocked_copy)
         {
-            let t = task.lock();
-            if t.state == TaskState::Zombie {
-                break;
-            }
+            let num = signal_from_flag(flag).unwrap();
+            let action = {
+                let handlers = t.signal_handlers.lock();
+                handlers.actions[num]
+            };
+            t.shared_pending.lock().signals.remove(flag);
+            (flag, action)
+        } else {
+            return;
         }
-    }
+    };
+
+    handle_one_signal(sig_flag, action, &task);
 }
 
-/// 设置信号用户态处理跳板
-fn install_user_signal_trampoline(
+/// 设置信号用户态处理栈帧
+/// # 说明:
+/// 当信号投递时，内核在信号栈上从高地址到低地址通常依次构建以下结构：
+///     1. 返回地址： 指向 C 库中的一个特殊函数（称为 sigreturn 或信号 trampoline），而不是直接返回原程序。
+///     2. siginfo_t 结构体。 该结构体包含有关信号的信息（如信号编号、发送者等）。
+///     3. ucontext_t 结构体。 该结构体保存了被信号中断时的处理器状态（寄存器等）。
+///     4. 信号处理函数的参数： 准备好传递给用户注册的信号处理函数的参数
+///        （通常是信号编号、siginfo_t* 指针和 ucontext_t* 指针）。
+/// 当信号处理函数返回时，它实际上会跳转到栈上的 sigreturn 函数，该函数会调用 rt_sigreturn 系统调用。
+/// 内核接收到这个调用后，会从栈上加载 ucontext_t 结构体，恢复所有保存的寄存器状态，从而使程序恢复到被中断时的执行点。
+/// # 参数:
+/// * `task`: 目标任务
+/// * `sig_num`: 信号编号
+/// * `entry`: 用户信号处理函数入口地址
+/// * `action_mask`: 信号处理函数的屏蔽字
+fn install_user_signal_trap_frame(
     task: &SharedTask,
     sig_num: usize,
     entry: usize,
@@ -329,3 +355,76 @@ fn sig_continue(sig_num: usize) {
 
 /// 默认行为：忽略信号
 fn sig_ignore(sig_num: usize) {}
+
+/// 待处理信号结构体
+#[derive(Debug, Clone)]
+pub struct SignalPending {
+    /// 待处理非实时信号集合
+    pub signals: SignalFlags,
+    // /// 待处理实时信号队列
+    // pub rt_signals: RtSignalQueue,
+}
+
+impl SignalPending {
+    /// 创建一个空的待处理信号集合
+    pub fn empty() -> Self {
+        Self {
+            signals: SignalFlags::empty(),
+            // rt_signals: RtSignalQueue::new(),
+        }
+    }
+}
+
+/// 用户态信号处理上下文结构体
+/// 该结构体包含恢复进程执行所需的所有状态。它是 POSIX 标准定义的上下文结构体之一。
+#[repr(C)]
+struct UContext {
+    /// 旧的 TrapFrame，上下文切换前的寄存器状态
+    pub old_trap_frame: TrapFrame,
+    /// 信号掩码
+    /// 信号处理函数执行时生效的新的阻塞信号集。
+    /// 这是由 sigaction 注册信号处理函数时指定的 sa_mask 字段确定的。
+    pub us_sigmask: SignalFlags,
+    /// 备用栈信息
+    /// 记录当前激活的栈信息（如果正在使用备用信号栈）。
+    pub uc_stack: SignalStack,
+    /// 上下文链接
+    /// 指向下一个 ucontext_t 结构体的指针。
+    /// 用于处理嵌套的信号处理程序或在 makecontext() 等非本地跳转时使用。
+    pub uc_link: usize,
+}
+
+/// 信号信息结构体
+/// 该结构体用于向信号处理函数传递有关信号的信息。
+#[repr(C)]
+struct SignalInfo {
+    /// 信号编号
+    pub si_signo: usize,
+    // /// 信号的来源代码
+    // pub si_code: isize,
+    // /// 错误号
+    // pub csi_errno: isize,
+    /// 发送者进程 ID
+    pub si_pid: usize,
+    // /// 发送者用户 ID
+    // pub si_uid: usize,
+}
+
+/// 信号栈信息结构体
+/// 该结构体用于描述备用信号栈的信息。
+#[repr(C)]
+struct SignalStack {
+    /// 栈顶地址
+    pub ss_sp: usize,
+    /// 栈大小
+    pub ss_size: usize,
+    /// 栈状态标志
+    pub ss_flags: usize,
+}
+
+/// 获取当前任务的待处理信号集合（私有 + 共享）
+pub fn do_sigpending() -> SignalFlags {
+    let task = current_task();
+    let t = task.lock();
+    t.pending.signals | t.shared_pending.lock().signals
+}

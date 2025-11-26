@@ -11,7 +11,7 @@ use crate::{
         kernel::{context::Context, task::setup_stack_layout},
         trap::TrapFrame,
     },
-    ipc::{SignalFlags, SignalHandlerTable},
+    ipc::{SignalFlags, SignalHandlerTable, SignalPending},
     kernel::{
         WaitQueue,
         task::{forkret, task_state::TaskState},
@@ -92,8 +92,10 @@ pub struct Task {
     trap_frame_tracker: FrameTracker,
     /// 信号屏蔽字
     pub blocked: SignalFlags,
-    /// 待处理信号集合
-    pub pending: SignalFlags,
+    /// 私有待处理信号集合
+    pub pending: SignalPending,
+    /// 待处理信号队列
+    pub shared_pending: Arc<SpinLock<SignalPending>>,
     /// 信号处理动作表
     pub signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
     /// 退出信号, 当任务退出时发送给父任务的信号
@@ -145,6 +147,7 @@ impl Task {
         trap_frame_tracker: FrameTracker,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
+        signal: Arc<SpinLock<SignalPending>>,
         uts_namespace: Arc<SpinLock<UtsNamespace>>,
         rlimit: Arc<SpinLock<RlimitStruct>>,
         fd_table: Arc<FDTable>,
@@ -161,6 +164,7 @@ impl Task {
             None,
             signal_handlers,
             blocked,
+            signal,
             0, // 内核线程退出不通过IPC发送信号
             uts_namespace,
             rlimit,
@@ -190,6 +194,7 @@ impl Task {
         memory_space: Arc<SpinLock<MemorySpace>>,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
+        signal: Arc<SpinLock<SignalPending>>,
         exit_signal: u8,
         uts_namespace: Arc<SpinLock<UtsNamespace>>,
         rlimit: Arc<SpinLock<RlimitStruct>>,
@@ -207,6 +212,7 @@ impl Task {
             Some(memory_space),
             signal_handlers,
             blocked,
+            signal,
             exit_signal,
             uts_namespace,
             rlimit,
@@ -321,6 +327,7 @@ impl Task {
         memory_space: Option<Arc<SpinLock<MemorySpace>>>,
         signal_handlers: Arc<SpinLock<SignalHandlerTable>>,
         blocked: SignalFlags,
+        shared_pending: Arc<SpinLock<SignalPending>>,
         exit_signal: u8,
         uts_namespace: Arc<SpinLock<UtsNamespace>>,
         rlimit: Arc<SpinLock<RlimitStruct>>,
@@ -353,7 +360,8 @@ impl Task {
             uts_namespace,
             rlimit,
             blocked,
-            pending: SignalFlags::empty(),
+            pending: SignalPending::empty(),
+            shared_pending,
             fd_table,
             fs,
         }
@@ -380,6 +388,7 @@ impl Task {
             None,
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
             SignalFlags::empty(),
+            Arc::new(SpinLock::new(SignalPending::empty())),
             0,
             Arc::new(SpinLock::new(UtsNamespace::default())),
             Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),

@@ -81,6 +81,7 @@ const CURRENTLY_SUPPORTED_FLAGS: CloneFlags = CloneFlags::from_bits_truncate(
         | CloneFlags::VM.bits()
         | CloneFlags::FS.bits()
         | CloneFlags::FILES.bits()
+        | CloneFlags::SIGHAND.bits()
         | CloneFlags::PARENT.bits()
         | CloneFlags::THREAD.bits()
         | CloneFlags::PARENT_SETTID.bits()
