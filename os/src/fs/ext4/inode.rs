@@ -643,4 +643,31 @@ impl Inode for Ext4Inode {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
+
+    fn set_times(
+        &self,
+        atime: Option<TimeSpec>,
+        mtime: Option<TimeSpec>,
+    ) -> Result<(), FsError> {
+        let mut fs = self.fs.lock();
+
+        // 获取 inode 引用（可变）
+        let mut inode_ref = fs.get_inode_ref(self.ino);
+        let inode = &mut inode_ref.inode;
+
+        // 更新访问时间
+        if let Some(at) = atime {
+            inode.atime = at.tv_sec as u32;
+        }
+
+        // 更新修改时间
+        if let Some(mt) = mtime {
+            inode.mtime = mt.tv_sec as u32;
+            // 修改时间改变时，也更新 ctime
+            inode.ctime = TimeSpec::now().tv_sec as u32;
+        }
+
+        // inode_ref 在 drop 时会自动写回磁盘
+        Ok(())
+    }
 }

@@ -738,3 +738,113 @@ pub fn newfstatat(
 
     0
 }
+
+pub fn utimensat(
+    dirfd: i32,
+    pathname: *const c_char,
+    times: *const crate::uapi::fs::TimeSpec,
+    flags: u32,
+) -> isize {
+    use crate::uapi::fs::TimeSpec;
+
+    // 解析路径
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 解析标志
+    let at_flags = match AtFlags::from_bits(flags) {
+        Some(f) => f,
+        None => return -(EINVAL as isize),
+    };
+
+    // 查找文件
+    let dentry = if at_flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        // 不跟随符号链接
+        let (dir_path, filename) = match split_path(&path_str) {
+            Ok(p) => p,
+            Err(e) => return e.to_errno(),
+        };
+
+        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        };
+
+        if let Some(child) = parent_dentry.lookup_child(&filename) {
+            child
+        } else {
+            let child_inode = match parent_dentry.inode.lookup(&filename) {
+                Ok(i) => i,
+                Err(e) => return e.to_errno(),
+            };
+            let child_dentry = Dentry::new(filename.clone(), child_inode);
+            parent_dentry.add_child(child_dentry.clone());
+            child_dentry
+        }
+    } else {
+        // 跟随符号链接
+        match resolve_at_path(dirfd, &path_str) {
+            Ok(Some(d)) => d,
+            Ok(None) => return -(ENOENT as isize),
+            Err(e) => return e.to_errno(),
+        }
+    };
+
+    // 解析时间参数
+    let (atime_opt, mtime_opt) = if times.is_null() {
+        // NULL 表示将两个时间都设置为当前时间
+        let now = TimeSpec::now();
+        (Some(now), Some(now))
+    } else {
+        unsafe {
+            sstatus::set_sum();
+            let user_times = core::slice::from_raw_parts(times, 2);
+
+            // 验证时间结构
+            if let Err(e) = user_times[0].validate() {
+                sstatus::clear_sum();
+                return -(e as isize);
+            }
+            if let Err(e) = user_times[1].validate() {
+                sstatus::clear_sum();
+                return -(e as isize);
+            }
+
+            // 处理访问时间
+            let atime_opt = if user_times[0].is_omit() {
+                None // 不修改
+            } else if user_times[0].is_now() {
+                Some(TimeSpec::now())
+            } else {
+                Some(user_times[0])
+            };
+
+            // 处理修改时间
+            let mtime_opt = if user_times[1].is_omit() {
+                None
+            } else if user_times[1].is_now() {
+                Some(TimeSpec::now())
+            } else {
+                Some(user_times[1])
+            };
+
+            sstatus::clear_sum();
+            (atime_opt, mtime_opt)
+        }
+    };
+
+    // 设置时间戳
+    if let Err(e) = dentry.inode.set_times(atime_opt, mtime_opt) {
+        return e.to_errno();
+    }
+
+    0
+}
