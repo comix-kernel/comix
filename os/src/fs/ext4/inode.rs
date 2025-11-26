@@ -105,16 +105,16 @@ impl Inode for Ext4Inode {
             size: size as usize,
             blocks: inode.blocks as usize,
             atime: TimeSpec {
-                sec: inode.atime as i64,
-                nsec: 0,
+                tv_sec: inode.atime as i64,
+                tv_nsec: 0,
             },
             mtime: TimeSpec {
-                sec: inode.mtime as i64,
-                nsec: 0,
+                tv_sec: inode.mtime as i64,
+                tv_nsec: 0,
             },
             ctime: TimeSpec {
-                sec: inode.ctime as i64,
-                nsec: 0,
+                tv_sec: inode.ctime as i64,
+                tv_nsec: 0,
             },
             inode_type,
             mode: FileMode::from_bits_truncate(mode as u32),

@@ -5,10 +5,10 @@
 
 use crate::config::DEFAULT_MAX_FDS;
 use crate::sync::SpinLock;
-use crate::vfs::{File, FsError, OpenFlags};
+use crate::uapi::fcntl::{FdFlags, OpenFlags};
+use crate::vfs::{File, FsError};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bitflags::bitflags;
 use core::fmt;
 
 /// 文件描述符表
@@ -22,35 +22,21 @@ pub struct FDTable {
     files: SpinLock<Vec<Option<Arc<dyn File>>>>,
 
     /// 文件描述符标志数组（与 files 索引对应）
-    /// 默认值为 FDFlags::empty()
-    fd_flags: SpinLock<Vec<FDFlags>>,
+    /// 默认值为 FdFlags::empty()
+    fd_flags: SpinLock<Vec<FdFlags>>,
 
     /// 最大文件描述符数量
     max_fds: usize,
 }
 
-bitflags::bitflags! {
-    /// 文件描述符标志（FD 级别的属性）
-    ///
-    /// 这些标志是每个文件描述符独立的属性，即使多个 FD 指向同一个文件对象，
-    /// 它们也可以有不同的 FD 标志。
-    ///
-    /// 对应 POSIX 的 `fcntl(F_GETFD/F_SETFD)` 操作。
-    #[derive(Debug, Clone)]
-    pub struct FDFlags: u32 {
-        /// exec 时关闭此文件描述符
-        const FD_CLOEXEC = 1;
-    }
-}
-
-impl FDFlags {
+impl FdFlags {
     /// 从 OpenFlags 中提取 FD 标志（用于兼容性）
     ///
     /// `O_CLOEXEC` 在 open() 时可以指定，但本质上是 FD 标志。
     pub fn from_open_flags(flags: OpenFlags) -> Self {
-        let mut fd_flags = FDFlags::empty();
+        let mut fd_flags = FdFlags::empty();
         if flags.contains(OpenFlags::O_CLOEXEC) {
-            fd_flags |= FDFlags::FD_CLOEXEC;
+            fd_flags |= FdFlags::CLOEXEC;
         }
         fd_flags
     }
@@ -80,11 +66,11 @@ impl FDTable {
 
     /// 分配一个新的文件描述符（默认无 FD 标志）
     pub fn alloc(&self, file: Arc<dyn File>) -> Result<usize, FsError> {
-        self.alloc_with_flags(file, FDFlags::empty())
+        self.alloc_with_flags(file, FdFlags::empty())
     }
 
     /// 分配一个新的文件描述符并指定 FD 标志
-    pub fn alloc_with_flags(&self, file: Arc<dyn File>, flags: FDFlags) -> Result<usize, FsError> {
+    pub fn alloc_with_flags(&self, file: Arc<dyn File>, flags: FdFlags) -> Result<usize, FsError> {
         let mut files = self.files.lock();
         let mut fd_flags = self.fd_flags.lock();
 
@@ -110,7 +96,7 @@ impl FDTable {
 
     /// 在指定的 FD 位置安装文件（默认无 FD 标志）
     pub fn install_at(&self, fd: usize, file: Arc<dyn File>) -> Result<(), FsError> {
-        self.install_at_with_flags(fd, file, FDFlags::empty())
+        self.install_at_with_flags(fd, file, FdFlags::empty())
     }
 
     /// 在指定的 FD 位置安装文件并指定 FD 标志
@@ -118,7 +104,7 @@ impl FDTable {
         &self,
         fd: usize,
         file: Arc<dyn File>,
-        flags: FDFlags,
+        flags: FdFlags,
     ) -> Result<(), FsError> {
         let mut files = self.files.lock();
         let mut fd_flags = self.fd_flags.lock();
@@ -130,7 +116,7 @@ impl FDTable {
         // 扩展数组到指定大小
         while files.len() <= fd {
             files.push(None);
-            fd_flags.push(FDFlags::empty());
+            fd_flags.push(FdFlags::empty());
         }
 
         // 替换（旧文件会自动通过 Arc 释放）
@@ -158,7 +144,7 @@ impl FDTable {
         }
 
         files[fd] = None;
-        fd_flags[fd] = FDFlags::empty();
+        fd_flags[fd] = FdFlags::empty();
         Ok(())
     }
 
@@ -204,7 +190,7 @@ impl FDTable {
         let _ = self.close(new_fd);
 
         // 提取 FD 标志
-        let fd_flags = FDFlags::from_open_flags(flags);
+        let fd_flags = FdFlags::from_open_flags(flags);
 
         self.install_at_with_flags(new_fd, file, fd_flags)?;
         Ok(new_fd)
@@ -230,9 +216,9 @@ impl FDTable {
         let mut fd_flags = self.fd_flags.lock();
 
         for (slot, flags) in files.iter_mut().zip(fd_flags.iter_mut()) {
-            if flags.contains(FDFlags::FD_CLOEXEC) {
+            if flags.contains(FdFlags::CLOEXEC) {
                 *slot = None;
-                *flags = FDFlags::empty();
+                *flags = FdFlags::empty();
             }
         }
     }

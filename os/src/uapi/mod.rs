@@ -4,5 +4,8 @@
 
 #![allow(dead_code)]
 pub mod errno;
+pub mod fcntl;
+pub mod fs;
+pub mod mm;
 pub mod reboot;
 pub mod resource;
