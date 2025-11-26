@@ -5,3 +5,7 @@ mod str;
 pub mod user_buffer;
 
 pub use str::*;
+
+pub fn if_null<T>(ptr: *const T) -> bool {
+    ptr.is_null()
+}

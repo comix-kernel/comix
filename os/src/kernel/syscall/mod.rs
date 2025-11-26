@@ -124,3 +124,4 @@ impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
 impl_syscall!(sys_sigpending, sigpending, (*mut c_ulong));
+impl_syscall!(sys_sigprocmask, sigprocmask, (c_int, *const c_ulong, *mut c_ulong));

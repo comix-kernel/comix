@@ -13,3 +13,4 @@ pub mod sched;
 pub mod time;
 pub mod uts_namespace;
 pub mod wait;
+pub mod signal;
