@@ -83,6 +83,8 @@ Log 子系统采用四层架构，从上到下依次为用户层、模块入口�
 │                    外部依赖 (External Dependencies)             │
 │                                                                 │
 │  · arch::timer::get_time() - 获取时间戳                        │
+│  · arch::kernel::cpu::cpu_id() - 获取当前 CPU ID               │
+│  · kernel::cpu::current_cpu() - 获取当前任务信息               │
 │  · console::Stdout - 控制台输出接口                            │
 │  · core::sync::atomic - 原子操作                               │
 └─────────────────────────────────────────────────────────────────┘
@@ -469,6 +471,74 @@ if is_level_enabled(LogLevel::Info) {
 4. **可扩展性**：无锁设计在多核环境下扩展性更好，不会因为锁竞争限制并行度
 
 **权衡**：无锁算法的正确性验证更困难，需要仔细处理内存序和边界条件。但一旦正确实现，性能和可靠性都优于锁方案。
+
+### 为什么实现 syslog 系统调用？
+
+**决策**：提供与 Linux 兼容的 `syslog(2)` 系统调用，而不是自定义的日志读取接口。
+
+**理由**：
+
+1. **兼容性**：现有的 Unix 工具（如 `dmesg`、`syslogd`）可以直接工作，无需修改
+2. **标准化**：遵循 POSIX 和 Linux 的惯例，降低学习成本
+3. **完整性**：支持破坏性/非破坏性读取、级别控制、缓冲区查询等完整功能
+4. **用户空间可见**：允许用户空间程序访问内核日志，支持日志工具开发
+
+**实现要点**：
+
+- 支持 11 种操作类型（OPEN/CLOSE/READ/READ_ALL/READ_CLEAR/CLEAR/CONSOLE_OFF/ON/LEVEL/SIZE_UNREAD/SIZE_BUFFER）
+- 兼容 Linux 的级别映射（1-8 vs 0-7）
+- 精确的字节计数（`SIZE_UNREAD` 返回格式化后的实际字节数）
+- 非破坏性读取（`READ_ALL` 使用 `peek_log` 实现）
+- 权限检查框架（待用户管理系统完善）
+
+**权衡**：需要维护额外的系统调用接口，但换来的兼容性和功能完整性是值得的。
+
+### 为什么需要非破坏性读取？
+
+**决策**：添加 `peek_log()` 和相关 API 支持非破坏性读取，不移动读指针。
+
+**理由**：
+
+1. **syslog 兼容性**：Linux `SYSLOG_ACTION_READ_ALL` 需要非破坏性读取
+2. **多次查看**：允许用户多次查看相同的日志，不会因为读取而丢失
+3. **监控场景**：日志监控工具可以周期性扫描日志而不影响其他读取者
+4. **调试友好**：调试时可以反复查看相同的日志条目
+
+**实现**：
+
+- `peek_log(index)` 按索引读取，不移动读指针
+- `log_reader_index()` 和 `log_writer_index()` 获取可读范围
+- 并发安全：与 write 和 read 完全并发
+- 环形缓冲区逻辑：正确处理索引越界和覆盖情况
+
+**权衡**：增加了 API 复杂度，但提供了更大的灵活性。
+
+### 为什么需要精确字节计数？
+
+**决策**：实时维护未读日志的格式化字节数（`unread_bytes`），而不是运行时计算。
+
+**理由**：
+
+1. **性能优化**：`SIZE_UNREAD` 系统调用需要立即返回，不能遍历所有日志计算
+2. **缓冲区分配**：用户空间可以精确分配缓冲区大小，避免浪费或不足
+3. **实时性**：原子计数器可以 O(1) 时间返回结果
+4. **Linux 兼容**：Linux `SYSLOG_ACTION_SIZE_UNREAD` 也返回精确字节数
+
+**实现**：
+
+- 写入时增加字节数：`unread_bytes.fetch_add(formatted_len)`
+- 读取时减少字节数：`unread_bytes.fetch_sub(formatted_len)`
+- `calculate_formatted_length()` 精确计算格式化长度，与实际输出保持一致
+- 三处同步：字节计数计算、控制台输出格式、syslog 格式化
+
+**权衡**：需要额外的原子计数器和精确的长度计算，但避免了运行时遍历的开销。
+
+**重要维护点**：
+
+如果修改日志输出格式，必须同步更新三处：
+1. `buffer::calculate_formatted_length` - 字节长度计算
+2. `log_core::direct_print_entry` - 控制台输出格式
+3. `log_core::format_log_entry` - syslog 字符串格式化
 
 ## 性能考量
 
