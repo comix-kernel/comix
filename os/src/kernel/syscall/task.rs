@@ -13,6 +13,7 @@ use crate::{
         timer::{clock_freq, get_time},
         trap::restore,
     },
+    ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskState,
         TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block,
@@ -98,7 +99,20 @@ pub fn clone(
         return -ENOSYS;
     }
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (c_pid, c_ppid, c_pgid, space, signal_handlers, blocked, ptf, fd_table, fs, uts, rlimit) = {
+    let (
+        c_pid,
+        c_ppid,
+        c_pgid,
+        space,
+        signal_handlers,
+        blocked,
+        signal,
+        ptf,
+        fd_table,
+        fs,
+        uts,
+        rlimit,
+    ) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
@@ -110,6 +124,7 @@ pub fn clone(
                 .expect("fork: can only call fork on a user task."),
             task.signal_handlers.clone(),
             task.blocked,
+            task.shared_pending.clone(),
             task.trap_frame_ptr.load(Ordering::SeqCst),
             task.fd_table.clone(),
             task.fs.clone(),
@@ -148,6 +163,14 @@ pub fn clone(
     } else {
         tid
     };
+    let (signal, signal_handler) = if requested_flags.contains(CloneFlags::SIGHAND) {
+        (signal, signal_handlers)
+    } else {
+        (
+            Arc::new(SpinLock::new(SignalPending::empty())),
+            Arc::new(SpinLock::new(SignalHandlerTable::new())),
+        )
+    };
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
@@ -160,8 +183,9 @@ pub fn clone(
         kstack_tracker,
         trap_frame_tracker,
         space,
-        signal_handlers,
+        signal_handler,
         blocked,
+        signal,
         exit_signal,
         uts,
         rlimit,
