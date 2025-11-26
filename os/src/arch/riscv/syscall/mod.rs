@@ -41,6 +41,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_PRLIMIT64 => sys_prlimit(frame),
         syscall_number::SYS_NANOSLEEP => sys_nanosleep(frame),
         syscall_number::SYS_RT_SIGPENDING => sys_sigpending(frame),
+        syscall_number::SYS_RT_SIGPROCMASK => sys_sigprocmask(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
