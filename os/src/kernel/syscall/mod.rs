@@ -83,3 +83,5 @@ impl_syscall!(
 );
 impl_syscall!(sys_getsockname, getsockname, (i32, *mut u8, *mut u32));
 impl_syscall!(sys_getpeername, getpeername, (i32, *mut u8, *mut u32));
+impl_syscall!(sys_readlinkat, readlinkat, (i32, *const c_char, *mut u8, usize));
+impl_syscall!(sys_newfstatat, newfstatat, (i32, *const c_char, *mut Stat, u32));

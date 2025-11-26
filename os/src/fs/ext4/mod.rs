@@ -71,7 +71,7 @@ impl Ext4FileSystem {
         let ext4 = Arc::new(Mutex::new(ext4));
 
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
-        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2)); // ← 不再传 path
+        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2));
 
         let fs = Arc::new(Ext4FileSystem {
             device,
