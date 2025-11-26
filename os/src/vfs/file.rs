@@ -14,6 +14,7 @@
 //! - [`PipeFile`](crate::vfs::PipeFile) - 管道，流式设备，不支持 seek
 //! - [`StdinFile`](crate::vfs::StdinFile) / [`StdoutFile`](crate::vfs::StdoutFile) - 标准 I/O
 
+use crate::uapi::fcntl::{OpenFlags, SeekWhence};
 use crate::vfs::{Dentry, FsError, Inode, InodeMetadata};
 use alloc::sync::Arc;
 
@@ -80,63 +81,5 @@ pub trait File: Send + Sync {
     /// 默认返回`FsError::NotSupported`,适用于DiskFile
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
-    }
-}
-
-/// 文件偏移量设置模式
-///
-/// 对应 POSIX 的 `SEEK_SET`、`SEEK_CUR`、`SEEK_END`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(usize)]
-pub enum SeekWhence {
-    /// 从文件开头计算
-    Set = 0,
-    /// 从当前位置计算
-    Cur = 1,
-    /// 从文件末尾计算
-    End = 2,
-}
-
-impl SeekWhence {
-    /// 从 usize 转换（0=Set, 1=Cur, 2=End）
-    pub fn from_usize(value: usize) -> Option<Self> {
-        match value {
-            0 => Some(SeekWhence::Set),
-            1 => Some(SeekWhence::Cur),
-            2 => Some(SeekWhence::End),
-            _ => None,
-        }
-    }
-}
-
-bitflags::bitflags! {
-    /// 文件打开标志（与 POSIX 兼容）
-    #[derive(Clone)]
-    pub struct OpenFlags: u32 {
-        const O_RDONLY    = 0o0;        // 只读
-        const O_WRONLY    = 0o1;        // 只写
-        const O_RDWR      = 0o2;        // 读写
-        const O_ACCMODE   = 0o3;        // 访问模式掩码
-        const O_CREAT     = 0o100;      // 不存在则创建
-        const O_EXCL      = 0o200;      // 与 O_CREAT 配合，必须不存在
-        const O_TRUNC     = 0o1000;     // 截断到 0
-        const O_APPEND    = 0o2000;     // 追加模式
-        const O_NONBLOCK  = 0o4000;     // 非阻塞 I/O
-        const O_DIRECTORY = 0o200000;   // 必须是目录
-        const O_CLOEXEC   = 0o2000000;  // exec 时关闭
-    }
-}
-
-impl OpenFlags {
-    /// 检查是否可读（O_RDONLY 或 O_RDWR）
-    pub fn readable(&self) -> bool {
-        let mode = self.bits() & OpenFlags::O_ACCMODE.bits();
-        mode == OpenFlags::O_RDONLY.bits() || mode == OpenFlags::O_RDWR.bits()
-    }
-
-    /// 检查是否可写（O_WRONLY 或 O_RDWR）
-    pub fn writable(&self) -> bool {
-        let mode = self.bits() & OpenFlags::O_ACCMODE.bits();
-        mode == OpenFlags::O_WRONLY.bits() || mode == OpenFlags::O_RDWR.bits()
     }
 }
