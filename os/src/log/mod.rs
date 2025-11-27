@@ -35,8 +35,8 @@
 //!
 //! - **定时器**：通过 `arch::timer::get_time()` 收集时间戳
 //! - **控制台**：通过 `console::Stdout` 输出（通常是 UART）
-//! - **CPU ID**：多核支持（TODO: 实现 `arch::cpu::current_cpu_id()`）
-//! - **任务 ID**：任务跟踪（TODO: 实现任务管理集成）
+//! - **CPU ID**：通过 `arch::kernel::cpu::cpu_id()` 获取当前 CPU ID
+//! - **任务 ID**：通过 `kernel::cpu::current_cpu()` 获取当前任务的 tid（若无任务则为 0）
 //!
 //! # 使用示例
 //!
@@ -66,8 +66,12 @@ mod level;
 mod log_core;
 pub mod macros;
 
+pub use config::{
+    DEFAULT_CONSOLE_LEVEL, DEFAULT_LOG_LEVEL, GLOBAL_LOG_BUFFER_SIZE, MAX_LOG_MESSAGE_LENGTH,
+};
 pub use entry::LogEntry;
 pub use level::LogLevel;
+pub use log_core::format_log_entry;
 
 // ========== 全局单例 ==========
 
@@ -96,9 +100,29 @@ pub fn read_log() -> Option<LogEntry> {
     GLOBAL_LOG._read_log()
 }
 
+/// 非破坏性读取：按索引 peek 日志条目，不移动读指针
+pub fn peek_log(index: usize) -> Option<LogEntry> {
+    GLOBAL_LOG._peek_log(index)
+}
+
+/// 获取当前可读取的起始索引
+pub fn log_reader_index() -> usize {
+    GLOBAL_LOG._log_reader_index()
+}
+
+/// 获取当前写入位置
+pub fn log_writer_index() -> usize {
+    GLOBAL_LOG._log_writer_index()
+}
+
 /// 返回未读日志条目的数量
 pub fn log_len() -> usize {
     GLOBAL_LOG._log_len()
+}
+
+/// 返回未读日志的总字节数（格式化后）
+pub fn log_unread_bytes() -> usize {
+    GLOBAL_LOG._log_unread_bytes()
 }
 
 /// 返回已丢弃日志的计数

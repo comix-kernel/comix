@@ -17,6 +17,9 @@ Log 子系统的核心特点是**双路输出策略**：日志既会被缓存到
 - **零动态分配**：所有数据结构在编译期确定大小，无堆内存分配，适合裸机环境
 - **彩色控制台输出**：根据日志级别使用不同的 ANSI 颜色，提高可读性
 - **早期过滤优化**：在宏展开阶段检查级别，避免格式化被禁用的日志，降低性能开销
+- **syslog 系统调用**：提供兼容 Linux 的 `syslog` 系统调用，允许用户空间程序读取和控制内核日志
+- **非破坏性读取**：支持 peek 操作，可以读取日志而不从缓冲区删除它们
+- **精确字节计数**：实时追踪未读日志的格式化字节数，支持缓冲区状态查询
 
 ## 模块结构
 
@@ -35,7 +38,9 @@ os/src/log/
     ├── basic.rs        # 基本读写和 FIFO 测试
     ├── filter.rs       # 日志级别过滤测试
     ├── overflow.rs     # 缓冲区溢出测试
-    └── format.rs       # 消息格式化测试
+    ├── format.rs       # 消息格式化测试
+    ├── byte_counting.rs # 字节计数测试
+    └── nondestructive_read.rs # 非破坏性读取测试
 ```
 
 ### 模块职责
@@ -162,15 +167,26 @@ set_console_level(LogLevel::Error);
 从环形缓冲区读取缓存的日志：
 
 ```rust
-use log::{read_log, log_len, log_dropped_count};
+use log::{read_log, log_len, log_dropped_count, log_unread_bytes};
 
-// 检查有多少条日志
+// 检查有多少条日志和未读字节数
 let count = log_len();
-println!("Buffered logs: {}", count);
+let bytes = log_unread_bytes();
+println!("Buffered logs: {}, unread bytes: {}", count, bytes);
 
-// 顺序读取所有日志
+// 顺序读取所有日志（破坏性读取）
 while let Some(entry) = read_log() {
     println!("{}", entry);
+}
+
+// 非破坏性读取（不移除日志）
+use log::{peek_log, log_reader_index, log_writer_index};
+let start = log_reader_index();
+let end = log_writer_index();
+for index in start..end {
+    if let Some(entry) = peek_log(index) {
+        println!("{}", entry);
+    }
 }
 
 // 检查是否有日志被丢弃
@@ -178,6 +194,33 @@ let dropped = log_dropped_count();
 if dropped > 0 {
     println!("Warning: {} logs were dropped due to buffer overflow", dropped);
 }
+```
+
+### syslog 系统调用
+
+用户空间程序可以通过 `syslog` 系统调用读取和控制内核日志：
+
+```c
+#include <sys/klog.h>
+
+// 读取内核日志（破坏性）
+char buf[8192];
+int len = syscall(SYS_syslog, SYSLOG_ACTION_READ, buf, sizeof(buf));
+
+// 读取所有日志（非破坏性）
+len = syscall(SYS_syslog, SYSLOG_ACTION_READ_ALL, buf, sizeof(buf));
+
+// 查询未读字节数
+int unread = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_UNREAD, NULL, 0);
+
+// 查询缓冲区总大小
+int size = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_BUFFER, NULL, 0);
+
+// 设置控制台日志级别
+int old_level = syscall(SYS_syslog, SYSLOG_ACTION_CONSOLE_LEVEL, NULL, 5);
+
+// 清空日志缓冲区
+syscall(SYS_syslog, SYSLOG_ACTION_CLEAR, NULL, 0);
 ```
 
 ## 相关资源
@@ -199,6 +242,8 @@ if dropped > 0 {
 ### 依赖模块
 
 - **arch::timer**：提供时间戳功能（`get_time()`）
+- **arch::kernel::cpu**：提供 CPU ID 获取功能（`cpu_id()`）
+- **kernel::cpu**：提供当前任务信息（`current_cpu()` → `current_task`）
 - **console::Stdout**：控制台输出接口
 
 ### 测试

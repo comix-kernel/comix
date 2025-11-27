@@ -1,14 +1,23 @@
 //! 系统相关系统调用实现
 
 use core::ffi::{c_char, c_int, c_void};
+use riscv::register::sstatus;
 
 use crate::{
     arch::lib::sbi::shutdown,
-    kernel::current_task,
+    kernel::{
+        current_task,
+        syscall::util::{check_syslog_permission, validate_syslog_args},
+    },
+    log::{
+        DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, log_len, read_log,
+        set_console_level,
+    },
     pr_alert,
     tool::user_buffer::UserBuffer,
     uapi::{
         errno::{EINVAL, ENAMETOOLONG},
+        log::SyslogAction,
         reboot::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
@@ -98,4 +107,273 @@ pub fn set_hostname(name: *const c_char, len: usize) -> c_int {
     }
     0
     // TODO: EPERM 和 EFAULT
+}
+
+/// 读取和控制内核日志缓冲区
+/// # 参数
+/// * `type_` - 操作类型 (0-10)，详见 `SyslogAction`
+/// * `bufp` - 用户空间缓冲区指针（某些操作需要）
+/// * `len` - 缓冲区长度或命令参数（取决于操作类型）
+///
+/// # 返回值
+/// * **成功**：
+///   - 类型 2/3/4: 读取的字节数
+///   - 类型 8: 旧的 console_loglevel (1-8)
+///   - 类型 9: 未读字节数
+///   - 类型 10: 缓冲区总大小
+///   - 其他: 0
+/// * **失败**：负的 errno
+///   - `-EINVAL`: 无效参数
+///   - `-EPERM`: 权限不足
+///   - `-EINTR`: 被信号中断
+///   - `-EFAULT`: 无效的用户空间指针
+pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
+    // 将原始 i32 转换为类型安全的 enum
+    let action = match SyslogAction::from_i32(type_) {
+        Ok(a) => a,
+        Err(e) => return -(e as isize),
+    };
+
+    if let Err(e) = validate_syslog_args(action, bufp, len) {
+        return -(e as isize);
+    }
+
+    if let Err(e) = check_syslog_permission(action) {
+        return -(e as isize);
+    }
+
+    match action {
+        // 破坏性读取操作
+        SyslogAction::Read => {
+            // Read: 破坏性读取（移除已读条目）
+            let buf_len = len as usize;
+            let mut total_written = 0;
+
+            // 开启用户空间访问
+            unsafe { sstatus::set_sum() };
+
+            while total_written < buf_len {
+                // TODO: 暂时移除，等待信号系统实现
+                /*
+                // 检查信号中断
+                if has_pending_signal() {
+                    if total_written == 0 {
+                        // 未读取任何数据，返回 EINTR
+                        unsafe { sstatus::clear_sum() };
+                        return -(EINTR as isize);
+                    } else {
+                        // 已读取部分数据，返回已读字节数
+                        break;
+                    }
+                }
+                */
+
+                // 读取下一条日志
+                let entry = match read_log() {
+                    Some(e) => e,
+                    None => break, // 没有更多日志
+                };
+
+                // 格式化日志条目
+                let formatted = format_log_entry(&entry);
+                let bytes = formatted.as_bytes();
+
+                // 检查剩余空间
+                if total_written + bytes.len() > buf_len {
+                    // 缓冲区不足，停止读取
+                    // 注意：此条目已从缓冲区移除但未返回给用户
+                    // 这是 Linux 的行为
+                    break;
+                }
+
+                // 复制到用户空间
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        bytes.as_ptr(),
+                        bufp.add(total_written),
+                        bytes.len(),
+                    );
+                }
+
+                total_written += bytes.len();
+            }
+
+            // 关闭用户空间访问
+            unsafe { sstatus::clear_sum() };
+
+            total_written as isize
+        }
+
+        // 非破坏性读取操作
+        SyslogAction::ReadAll => {
+            // ReadAll: 非破坏性读取（保留条目）
+            use crate::log::{log_reader_index, log_writer_index, peek_log};
+
+            let buf_len = len as usize;
+            let mut total_written = 0;
+
+            // 获取当前可读范围
+            let start_index = log_reader_index();
+            let end_index = log_writer_index();
+
+            // 开启用户空间访问
+            unsafe { sstatus::set_sum() };
+
+            // 遍历所有可用的日志条目
+            let mut current_index = start_index;
+            while current_index < end_index && total_written < buf_len {
+                // TODO: 暂时移除，等待信号系统实现
+                /*
+                // 检查信号中断
+                if has_pending_signal() {
+                    if total_written == 0 {
+                        unsafe { sstatus::clear_sum() };
+                        return -(EINTR as isize);
+                    } else {
+                        break;
+                    }
+                }
+                */
+
+                let entry = match peek_log(current_index) {
+                    Some(e) => e,
+                    None => break, // 条目已被覆盖或无效
+                };
+
+                let formatted = format_log_entry(&entry);
+                let bytes = formatted.as_bytes();
+
+                if total_written + bytes.len() > buf_len {
+                    // 缓冲区不足，停止读取
+                    break;
+                }
+
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        bytes.as_ptr(),
+                        bufp.add(total_written),
+                        bytes.len(),
+                    );
+                }
+
+                total_written += bytes.len();
+                current_index += 1;
+            }
+
+            // 关闭用户空间访问
+            unsafe { sstatus::clear_sum() };
+
+            total_written as isize
+        }
+
+        SyslogAction::ReadClear => {
+            // 先读取所有日志（使用与 ReadAll 相同的逻辑）
+            let buf_len = len as usize;
+            let mut total_written = 0;
+
+            unsafe { sstatus::set_sum() };
+
+            while total_written < buf_len {
+                let entry = match read_log() {
+                    Some(e) => e,
+                    None => break,
+                };
+
+                let formatted = format_log_entry(&entry);
+                let bytes = formatted.as_bytes();
+
+                if total_written + bytes.len() > buf_len {
+                    break;
+                }
+
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        bytes.as_ptr(),
+                        bufp.add(total_written),
+                        bytes.len(),
+                    );
+                }
+
+                total_written += bytes.len();
+            }
+
+            unsafe { sstatus::clear_sum() };
+
+            // 清空剩余的日志
+            while read_log().is_some() {}
+
+            total_written as isize
+        }
+
+        // 缓冲区控制
+        SyslogAction::Clear => {
+            // 清空日志缓冲区
+            while read_log().is_some() {}
+            0
+        }
+
+        // 控制台输出控制
+        SyslogAction::ConsoleOff => {
+            // 禁用控制台输出
+            // 设置为 0，只显示 level <= 0 的消息（即只有 EMERG）
+            set_console_level(LogLevel::Emergency);
+            0
+        }
+
+        SyslogAction::ConsoleOn => {
+            // 启用控制台输出
+            // 恢复到默认级别（Warning = 4）
+            set_console_level(DEFAULT_CONSOLE_LEVEL);
+            0
+        }
+
+        SyslogAction::ConsoleLevel => {
+            // 设置控制台日志级别
+            //
+            // Linux 语义：
+            //   console_loglevel = N 表示显示 level < N 的消息
+            //   范围：1-8
+            //
+            // comix 的 log 模块语义：
+            //   console_level = N 表示显示 level <= N 的消息
+            //   范围：0-7
+            //
+            // 转换关系：
+            //   Linux len=1 -> 只显示 level < 1 (即 EMERG(0))
+            //              -> comix 的 console_level = 0 (Emergency)
+            //   Linux len=8 -> 显示 level < 8 (即 0-7 全部)
+            //              -> comix 的 console_level = 7 (Debug)
+            //
+            // 公式：console_level_u8 = len - 1
+
+            let new_level_u8 = (len - 1) as u8; // 1-8 -> 0-7
+            let new_level = LogLevel::from_u8(new_level_u8);
+
+            // 获取旧值
+            let old_level = get_console_level();
+            let old_level_u8 = old_level.to_u8();
+
+            // 设置新值
+            set_console_level(new_level);
+
+            // 返回旧值（转换回 1-8 范围）
+            (old_level_u8 + 1) as isize
+        }
+
+        // 查询操作
+        SyslogAction::SizeUnread => {
+            // 返回未读日志的精确字节数
+            use crate::log::log_unread_bytes;
+            log_unread_bytes() as isize
+        }
+
+        SyslogAction::SizeBuffer => {
+            // 返回日志缓冲区的总大小
+            use crate::log::GLOBAL_LOG_BUFFER_SIZE;
+            GLOBAL_LOG_BUFFER_SIZE as isize
+        }
+
+        // 空操作（这些操作在 Linux 中也是 NOP）
+        SyslogAction::Close | SyslogAction::Open => 0,
+    }
 }
