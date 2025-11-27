@@ -155,7 +155,7 @@ impl TrapFrame {
     /// - `self` 必须指向一个可写的内存区域，大小至少为 `size_of::<TrapFrame>()`
     /// - `self` 和 `parent_frame` 不能内存重叠
     /// - 调用后 `self` 将包含 `parent_frame` 的精确副本（除了修改的字段）
-    pub unsafe fn set_fork_trap_frame(&mut self, parent_frame: &TrapFrame) {
+    pub unsafe fn set_fork_trap_frame(&mut self, parent_frame: &TrapFrame, sp: usize) {
         // SAFETY: 调用者确保：
         // 1. parent_frame 有效且可读
         // 2. self 有效且可写
@@ -168,6 +168,7 @@ impl TrapFrame {
                 core::mem::size_of::<TrapFrame>(),
             );
         }
+        self.x2_sp = sp;
         // 子进程返回值为0
         self.x10_a0 = 0;
     }
