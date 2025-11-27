@@ -31,6 +31,7 @@ use crate::{
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
         time::timespec,
+        types::StackT,
         wait::{WaitFlags, WaitStatus},
     },
 };
@@ -107,6 +108,7 @@ pub fn clone(
         signal_handlers,
         blocked,
         signal,
+        signal_stack,
         ptf,
         fd_table,
         fs,
@@ -125,6 +127,7 @@ pub fn clone(
             task.signal_handlers.clone(),
             task.blocked,
             task.shared_pending.clone(),
+            task.signal_stack.clone(),
             task.trap_frame_ptr.load(Ordering::SeqCst),
             task.fd_table.clone(),
             task.fs.clone(),
@@ -163,12 +166,13 @@ pub fn clone(
     } else {
         tid
     };
-    let (signal, signal_handler) = if requested_flags.contains(CloneFlags::SIGHAND) {
-        (signal, signal_handlers)
+    let (signal, signal_handler, signal_stack) = if requested_flags.contains(CloneFlags::SIGHAND) {
+        (signal, signal_handlers, signal_stack)
     } else {
         (
             Arc::new(SpinLock::new(SignalPending::empty())),
             Arc::new(SpinLock::new(SignalHandlerTable::new())),
+            Arc::new(SpinLock::new(StackT::default())),
         )
     };
 
@@ -186,6 +190,7 @@ pub fn clone(
         signal_handler,
         blocked,
         signal,
+        signal_stack,
         exit_signal,
         uts,
         rlimit,
