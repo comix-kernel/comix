@@ -333,53 +333,6 @@ impl SignalPending {
     }
 }
 
-/// 用户态信号处理上下文结构体
-/// 该结构体包含恢复进程执行所需的所有状态。它是 POSIX 标准定义的上下文结构体之一。
-#[repr(C)]
-struct UContext {
-    /// 旧的 TrapFrame，上下文切换前的寄存器状态
-    pub old_trap_frame: TrapFrame,
-    /// 信号掩码
-    /// 信号处理函数执行时生效的新的阻塞信号集。
-    /// 这是由 sigaction 注册信号处理函数时指定的 sa_mask 字段确定的。
-    pub us_sigmask: SignalFlags,
-    /// 备用栈信息
-    /// 记录当前激活的栈信息（如果正在使用备用信号栈）。
-    pub uc_stack: SignalStack,
-    /// 上下文链接
-    /// 指向下一个 ucontext_t 结构体的指针。
-    /// 用于处理嵌套的信号处理程序或在 makecontext() 等非本地跳转时使用。
-    pub uc_link: usize,
-}
-
-/// 信号信息结构体
-/// 该结构体用于向信号处理函数传递有关信号的信息。
-#[repr(C)]
-struct SignalInfo {
-    /// 信号编号
-    pub si_signo: usize,
-    // /// 信号的来源代码
-    // pub si_code: isize,
-    // /// 错误号
-    // pub csi_errno: isize,
-    /// 发送者进程 ID
-    pub si_pid: usize,
-    // /// 发送者用户 ID
-    // pub si_uid: usize,
-}
-
-/// 信号栈信息结构体
-/// 该结构体用于描述备用信号栈的信息。
-#[repr(C)]
-struct SignalStack {
-    /// 栈顶地址
-    pub ss_sp: usize,
-    /// 栈大小
-    pub ss_size: usize,
-    /// 栈状态标志
-    pub ss_flags: usize,
-}
-
 /// 获取当前任务的待处理信号集合（私有 + 共享）
 pub fn do_sigpending() -> SignalFlags {
     let task = current_task();

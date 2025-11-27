@@ -44,6 +44,12 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_RT_SIGPROCMASK => sys_rt_sigprocmask(frame),
         syscall_number::SYS_RT_SIGACTION => sys_rt_sigaction(frame),
         syscall_number::SYS_RT_SIGTIMEDWAIT => sys_rt_sigtimedwait(frame),
+        syscall_number::SYS_RT_SIGSUSPEND => sys_rt_sigsuspend(frame),
+        syscall_number::SYS_RT_SIGRETURN => sys_rt_sigreturn(frame),
+        syscall_number::SYS_SIGALTSTACK => sys_sigaltstack(frame),
+        syscall_number::SYS_KILL => sys_kill(frame),
+        syscall_number::SYS_TKILL => sys_tkill(frame),
+        syscall_number::SYS_TGKILL => sys_tgkill(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS

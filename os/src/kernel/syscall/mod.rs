@@ -21,7 +21,7 @@ use crate::{
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         time::timespec,
-        types::SigSetT,
+        types::{SigSetT, StackT},
     },
     vfs::Stat,
 };
@@ -141,3 +141,9 @@ impl_syscall!(
     rt_sigtimedwait,
     (*const SigSetT, *mut SigInfoT, *const timespec, c_uint)
 );
+impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
+impl_syscall!(sys_rt_sigreturn, rt_sigreturn, ());
+impl_syscall!(sys_sigaltstack, signal_stack, (*const StackT, *mut StackT));
+impl_syscall!(sys_kill, kill, (c_int, c_int));
+impl_syscall!(sys_tkill, tkill, (c_int, c_int));
+impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));

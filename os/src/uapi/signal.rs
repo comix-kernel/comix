@@ -4,13 +4,13 @@
 //! 以及信号屏蔽操作等。
 
 use core::{
-    ffi::{c_char, c_int, c_long, c_uint, c_void},
+    ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_ulonglong, c_void},
     fmt::Debug,
 };
 
 use bitflags::bitflags;
 
-use crate::uapi::types::{ClockT, PidT, SigSetT, UidT};
+use crate::uapi::types::{ClockT, PidT, SigSetT, SizeT, UidT};
 
 /// 信号集合的大小（以字节为单位）
 pub const SIGSET_SIZE: usize = core::mem::size_of::<SigSetT>();
@@ -414,4 +414,56 @@ pub union __FirstFault {
 pub struct __AddrBnd {
     pub si_lower: *mut c_void,
     pub si_upper: *mut c_void,
+}
+
+/// 用户态信号处理上下文结构体
+/// 该结构体包含恢复进程执行所需的所有状态。
+#[repr(C)]
+struct UContextT {
+    /// 标志位
+    pub uc_flags: c_ulong,
+    /// 链接到下一个上下文
+    pub uc_link: *mut UContextT,
+    /// 信号栈信息
+    pub uc_stack: SignalStack,
+    /// 信号掩码
+    pub uc_sigmask: SigSetT,
+    /// 机器上下文
+    pub uc_mcontext: MContextT,
+}
+
+/// 信号栈信息结构体
+/// 该结构体用于描述备用信号栈的信息。
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SignalStack {
+    /// 栈顶地址, 对应 C 中的 void *ss_sp
+    pub ss_sp: usize,
+    /// 栈状态标志
+    pub ss_flags: c_int,
+    /// 栈大小
+    pub ss_size: SizeT,
+}
+
+/// 最小信号栈大小
+pub const MINSIGSTKSZ: usize = 2048;
+/// 默认信号栈大小
+pub const SIGSTKSZ: usize = 8192;
+// 信号栈标志位
+/// 信号栈正在使用中
+pub const SS_ONSTACK: usize = 1;
+/// 信号栈被禁用
+pub const SS_DISABLE: usize = 2;
+/// 自动解除信号栈
+pub const SS_AUTODISARM: usize = 1 << 31;
+/// 信号栈标志位掩码
+pub const SS_FLAG_BITS: usize = SS_AUTODISARM;
+
+pub struct MContextT {
+    /// 通用寄存器数组
+    pub gregs: [c_ulong; 32],
+    /// 浮点寄存器数组
+    /// XXX: 实际并未使用浮点寄存器
+    ///      且注意struct pending?
+    pub fpregs: [c_ulonglong; 66],
 }
