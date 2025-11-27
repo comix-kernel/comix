@@ -1,8 +1,8 @@
 //! 简单的文件系统实现（用于测试/调试）
 
-use crate::device::BlockDevice;
 use crate::sync::SpinLock;
 use crate::vfs::*;
+use crate::{device::BlockDevice, uapi::time::timespec};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -295,9 +295,9 @@ impl Inode for SimpleFsInode {
             uid: 0,
             gid: 0,
             size: data.len(),
-            atime: TimeSpec::now(),
-            mtime: TimeSpec::now(),
-            ctime: TimeSpec::now(),
+            atime: timespec::now(),
+            mtime: timespec::now(),
+            ctime: timespec::now(),
             nlinks: 1,
             blocks: (data.len() + 511) / 512,
         })
