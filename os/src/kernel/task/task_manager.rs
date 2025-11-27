@@ -9,9 +9,9 @@
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::kernel::{TaskState, exit_task_with_block, wake_up_with_block};
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
+use crate::kernel::{TaskState, exit_task_with_block, wake_up_with_block};
 use crate::sync::SpinLock;
 use crate::uapi::signal::SignalFlags;
 

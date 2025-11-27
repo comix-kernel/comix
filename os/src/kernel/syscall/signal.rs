@@ -8,7 +8,8 @@ use crate::{
     arch::timer::clock_freq,
     ipc::{create_siginfo_for_signal, do_sigpending},
     kernel::{
-        SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task, sleep_task_with_graud_and_block, yield_task
+        SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task,
+        sleep_task_with_graud_and_block, yield_task,
     },
     sync::SpinLock,
     tool::user_buffer::{read_from_user, write_to_user},
