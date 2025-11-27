@@ -7,12 +7,13 @@
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
 use crate::sync::{Mutex, SpinLock};
+use crate::uapi::time::timespec;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use ext4_rs::InodeFileType;
 
-use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType, TimeSpec};
+use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
 
 /// Ext4 Inode 包装
 pub struct Ext4Inode {
@@ -104,15 +105,15 @@ impl Inode for Ext4Inode {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
-            atime: TimeSpec {
+            atime: timespec {
                 tv_sec: inode.atime as i64,
                 tv_nsec: 0,
             },
-            mtime: TimeSpec {
+            mtime: timespec {
                 tv_sec: inode.mtime as i64,
                 tv_nsec: 0,
             },
-            ctime: TimeSpec {
+            ctime: timespec {
                 tv_sec: inode.ctime as i64,
                 tv_nsec: 0,
             },
@@ -644,7 +645,7 @@ impl Inode for Ext4Inode {
         self
     }
 
-    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
+    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError> {
         let mut fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
@@ -660,7 +661,7 @@ impl Inode for Ext4Inode {
         if let Some(mt) = mtime {
             inode.mtime = mt.tv_sec as u32;
             // 修改时间改变时，也更新 ctime
-            inode.ctime = TimeSpec::now().tv_sec as u32;
+            inode.ctime = timespec::now().tv_sec as u32;
         }
 
         // inode_ref 在 drop 时会自动写回磁盘

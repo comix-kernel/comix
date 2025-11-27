@@ -264,6 +264,338 @@ fn process_log_entry(entry: LogEntry) {
 }
 ```
 
+### 非破坏性读取
+
+使用 `peek_log()` 可以读取日志而不删除它们：
+
+```rust
+use log::{peek_log, log_reader_index, log_writer_index};
+
+// 获取可读范围
+let start = log_reader_index();
+let end = log_writer_index();
+
+println!("Available logs: {}", end - start);
+
+// 遍历所有日志（不删除）
+for index in start..end {
+    if let Some(entry) = peek_log(index) {
+        println!("Log #{}: {}", index, entry);
+    }
+}
+
+// 可以再次读取相同的日志
+for index in start..end {
+    if let Some(entry) = peek_log(index) {
+        // 处理日志，但它们仍保留在缓冲区中
+        if entry.level() <= LogLevel::Error {
+            send_alert(&entry);
+        }
+    }
+}
+```
+
+### 查询缓冲区状态
+
+```rust
+use log::{log_len, log_unread_bytes, log_dropped_count};
+
+// 查询未读日志数量和字节数
+let count = log_len();
+let bytes = log_unread_bytes();
+let dropped = log_dropped_count();
+
+println!("Buffered logs: {} entries, {} bytes", count, bytes);
+println!("Dropped logs: {}", dropped);
+
+// 检查缓冲区使用率
+let capacity = 58;  // 约58条
+let usage_percent = (count * 100) / capacity;
+if usage_percent > 80 {
+    pr_warn!("Log buffer is {}% full", usage_percent);
+}
+```
+
+## 使用 syslog 系统调用
+
+用户空间程序可以通过 `syslog` 系统调用读取和控制内核日志。
+
+### 基本用法
+
+```c
+#include <sys/klog.h>
+#include <sys/syscall.h>
+#include <stdio.h>
+#include <unistd.h>
+
+int main() {
+    char buf[8192];
+
+    // 读取内核日志（破坏性）
+    int len = syscall(SYS_syslog, 2, buf, sizeof(buf));
+    if (len > 0) {
+        write(STDOUT_FILENO, buf, len);
+    }
+
+    return 0;
+}
+```
+
+### 非破坏性读取
+
+```c
+#include <sys/klog.h>
+#include <sys/syscall.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define SYSLOG_ACTION_READ_ALL 3
+#define SYSLOG_ACTION_SIZE_UNREAD 9
+
+int main() {
+    // 1. 查询需要多少空间
+    int size = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_UNREAD, NULL, 0);
+    if (size < 0) {
+        perror("syslog");
+        return 1;
+    }
+
+    printf("Unread logs: %d bytes\n", size);
+
+    // 2. 分配足够的缓冲区
+    char *buf = malloc(size + 1);
+    if (!buf) {
+        perror("malloc");
+        return 1;
+    }
+
+    // 3. 读取所有日志（非破坏性）
+    int len = syscall(SYS_syslog, SYSLOG_ACTION_READ_ALL, buf, size);
+    if (len < 0) {
+        perror("syslog");
+        free(buf);
+        return 1;
+    }
+
+    // 4. 显示日志
+    buf[len] = '\0';
+    printf("%s", buf);
+
+    free(buf);
+    return 0;
+}
+```
+
+### 控制控制台输出
+
+```c
+#define SYSLOG_ACTION_CONSOLE_OFF 6
+#define SYSLOG_ACTION_CONSOLE_ON 7
+#define SYSLOG_ACTION_CONSOLE_LEVEL 8
+
+// 禁用控制台输出（只记录到缓冲区）
+syscall(SYS_syslog, SYSLOG_ACTION_CONSOLE_OFF, NULL, 0);
+
+// 启用控制台输出
+syscall(SYS_syslog, SYSLOG_ACTION_CONSOLE_ON, NULL, 0);
+
+// 设置控制台级别为 Warning (4)
+int old_level = syscall(SYS_syslog, SYSLOG_ACTION_CONSOLE_LEVEL, NULL, 5);
+printf("Old console level: %d\n", old_level);
+```
+
+### 清空日志缓冲区
+
+```c
+#define SYSLOG_ACTION_CLEAR 5
+
+// 清空所有日志
+int ret = syscall(SYS_syslog, SYSLOG_ACTION_CLEAR, NULL, 0);
+if (ret < 0) {
+    perror("syslog");
+}
+```
+
+### 实现 dmesg 工具
+
+完整的 `dmesg` 工具实现示例：
+
+```c
+// dmesg.c - 简化的 dmesg 实现
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <errno.h>
+
+#define SYSLOG_ACTION_READ 2
+#define SYSLOG_ACTION_READ_ALL 3
+#define SYSLOG_ACTION_READ_CLEAR 4
+#define SYSLOG_ACTION_CLEAR 5
+#define SYSLOG_ACTION_CONSOLE_LEVEL 8
+#define SYSLOG_ACTION_SIZE_UNREAD 9
+#define SYSLOG_ACTION_SIZE_BUFFER 10
+
+static void usage(const char *prog) {
+    fprintf(stderr, "Usage: %s [options]\n", prog);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -c        Clear the ring buffer\n");
+    fprintf(stderr, "  -C        Clear after reading\n");
+    fprintf(stderr, "  -r        Print raw (do not consume)\n");
+    fprintf(stderr, "  -n <level> Set console log level (1-8)\n");
+    fprintf(stderr, "  -s        Show buffer size\n");
+    exit(1);
+}
+
+int main(int argc, char *argv[]) {
+    int opt;
+    int action = SYSLOG_ACTION_READ_ALL;  // 默认非破坏性读取
+    int clear_only = 0;
+    int show_size = 0;
+    int set_level = 0;
+    int level = 0;
+
+    // 解析命令行参数
+    while ((opt = getopt(argc, argv, "cCrn:s")) != -1) {
+        switch (opt) {
+            case 'c':
+                clear_only = 1;
+                break;
+            case 'C':
+                action = SYSLOG_ACTION_READ_CLEAR;
+                break;
+            case 'r':
+                action = SYSLOG_ACTION_READ_ALL;
+                break;
+            case 'n':
+                set_level = 1;
+                level = atoi(optarg);
+                if (level < 1 || level > 8) {
+                    fprintf(stderr, "Invalid level: %d (must be 1-8)\n", level);
+                    return 1;
+                }
+                break;
+            case 's':
+                show_size = 1;
+                break;
+            default:
+                usage(argv[0]);
+        }
+    }
+
+    // 设置控制台级别
+    if (set_level) {
+        int ret = syscall(SYS_syslog, SYSLOG_ACTION_CONSOLE_LEVEL, NULL, level);
+        if (ret < 0) {
+            perror("syslog");
+            return 1;
+        }
+        printf("Console level set to %d (was %d)\n", level, ret);
+        if (!show_size && !clear_only && action == SYSLOG_ACTION_READ_ALL) {
+            return 0;  // 只设置级别，不读取日志
+        }
+    }
+
+    // 显示缓冲区大小
+    if (show_size) {
+        int size = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_BUFFER, NULL, 0);
+        int unread = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_UNREAD, NULL, 0);
+        if (size < 0 || unread < 0) {
+            perror("syslog");
+            return 1;
+        }
+        printf("Buffer size: %d bytes\n", size);
+        printf("Unread: %d bytes\n", unread);
+        return 0;
+    }
+
+    // 清空缓冲区
+    if (clear_only) {
+        int ret = syscall(SYS_syslog, SYSLOG_ACTION_CLEAR, NULL, 0);
+        if (ret < 0) {
+            perror("syslog");
+            return 1;
+        }
+        return 0;
+    }
+
+    // 查询未读字节数
+    int size = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_UNREAD, NULL, 0);
+    if (size < 0) {
+        perror("syslog");
+        return 1;
+    }
+
+    if (size == 0) {
+        // 没有日志
+        return 0;
+    }
+
+    // 分配缓冲区
+    char *buf = malloc(size + 1);
+    if (!buf) {
+        perror("malloc");
+        return 1;
+    }
+
+    // 读取日志
+    int len = syscall(SYS_syslog, action, buf, size);
+    if (len < 0) {
+        perror("syslog");
+        free(buf);
+        return 1;
+    }
+
+    // 输出日志
+    if (len > 0) {
+        buf[len] = '\0';
+        printf("%s", buf);
+    }
+
+    free(buf);
+    return 0;
+}
+```
+
+**编译和使用**：
+
+```bash
+# 编译
+gcc -o dmesg dmesg.c
+
+# 查看内核日志
+./dmesg
+
+# 查看并清空
+./dmesg -C
+
+# 只清空
+./dmesg -c
+
+# 显示缓冲区状态
+./dmesg -s
+
+# 设置控制台级别
+./dmesg -n 5  # 设置为 Notice
+```
+
+### syslog 操作类型完整列表
+
+| 值 | 宏定义 | 描述 | 参数 |
+|----|--------|------|------|
+| 0 | SYSLOG_ACTION_CLOSE | 关闭日志（NOP） | - |
+| 1 | SYSLOG_ACTION_OPEN | 打开日志（NOP） | - |
+| 2 | SYSLOG_ACTION_READ | 破坏性读取 | buf, len |
+| 3 | SYSLOG_ACTION_READ_ALL | 非破坏性读取 | buf, len |
+| 4 | SYSLOG_ACTION_READ_CLEAR | 读取并清空 | buf, len |
+| 5 | SYSLOG_ACTION_CLEAR | 清空缓冲区 | - |
+| 6 | SYSLOG_ACTION_CONSOLE_OFF | 禁用控制台 | - |
+| 7 | SYSLOG_ACTION_CONSOLE_ON | 启用控制台 | - |
+| 8 | SYSLOG_ACTION_CONSOLE_LEVEL | 设置级别 | len (1-8) |
+| 9 | SYSLOG_ACTION_SIZE_UNREAD | 查询未读字节 | - |
+| 10 | SYSLOG_ACTION_SIZE_BUFFER | 查询缓冲区大小 | - |
+
 ## 格式化复杂数据
 
 ### 基本格式化选项

@@ -211,61 +211,6 @@ impl LinuxStatFs {
     }
 }
 
-/// Linux timespec 结构体
-///
-/// 用于 `utimensat` 系统调用
-/// 参考：include/uapi/linux/time.h
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct TimeSpec {
-    /// 秒
-    pub tv_sec: i64,
-
-    /// 纳秒（0-999999999，或特殊值）
-    pub tv_nsec: i64,
-}
-
-impl TimeSpec {
-    /// 特殊值：设置为当前时间（UTIME_NOW）
-    pub const UTIME_NOW: i64 = (1i64 << 30) - 1; // 1073741823
-
-    /// 特殊值：不改变此时间（UTIME_OMIT）
-    pub const UTIME_OMIT: i64 = (1i64 << 30) - 2; // 1073741822
-
-    /// 验证 timespec 的有效性
-    ///
-    /// # 返回值
-    /// - `Ok(())`: 有效
-    /// - `Err(EINVAL)`: 无效
-    pub fn validate(&self) -> Result<(), i32> {
-        use crate::uapi::errno::EINVAL;
-
-        // 检查特殊值
-        if self.tv_nsec == Self::UTIME_NOW || self.tv_nsec == Self::UTIME_OMIT {
-            return Ok(());
-        }
-
-        // 检查纳秒范围
-        if self.tv_nsec < 0 || self.tv_nsec >= 1_000_000_000 {
-            return Err(EINVAL);
-        }
-
-        Ok(())
-    }
-
-    /// 检查是否为 UTIME_NOW
-    #[inline]
-    pub fn is_now(&self) -> bool {
-        self.tv_nsec == Self::UTIME_NOW
-    }
-
-    /// 检查是否为 UTIME_OMIT
-    #[inline]
-    pub fn is_omit(&self) -> bool {
-        self.tv_nsec == Self::UTIME_OMIT
-    }
-}
-
 /// Linux stat 结构 (RISC-V 64位)
 ///
 /// 必须与Linux内核的stat64结构完全匹配

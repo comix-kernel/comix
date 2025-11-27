@@ -2,15 +2,24 @@
 //!
 //! 包含 CPU 结构体及其相关操作
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 
-use crate::config::NUM_CPU;
 use crate::mm::activate;
 use crate::{kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::SpinLock};
-use core::array;
 use lazy_static::lazy_static;
 
+pub static mut NUM_CPU: usize = 1;
+pub static mut CLOCK_FREQ: usize = 12_500_000;
+
 lazy_static! {
-    pub static ref CPUS: [SpinLock<Cpu>; NUM_CPU] = array::from_fn(|_| SpinLock::new(Cpu::new()));
+    pub static ref CPUS: Vec<SpinLock<Cpu>> = {
+        let num_cpu = unsafe { NUM_CPU };
+        let mut cpus = Vec::with_capacity(num_cpu);
+        for _ in 0..num_cpu {
+            cpus.push(SpinLock::new(Cpu::new()));
+        }
+        cpus
+    };
 }
 
 /// CPU 结构体

@@ -11,6 +11,7 @@ use alloc::{
 
 use crate::{
     kernel::current_task,
+    uapi::{errno::EINVAL, log::SyslogAction},
     vfs::{
         DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, get_root_dentry, split_path,
         vfs_lookup_from,
@@ -149,4 +150,125 @@ pub fn create_file_at(dirfd: i32, path: &str, mode: u32) -> Result<Arc<Dentry>, 
     DENTRY_CACHE.insert(&child_dentry);
 
     Ok(child_dentry)
+}
+
+/// 验证 syslog 系统调用参数
+///
+/// 根据操作类型检查参数的有效性。
+///
+/// # 验证规则
+/// - **Read/ReadAll/ReadClear**: bufp != NULL, len >= 0
+/// - **ConsoleLevel**: len 必须在 1-8 范围内
+/// - **其他操作**: 忽略 bufp 和 len
+///
+/// # 返回值
+/// * `Ok(())` - 参数有效
+/// * `Err(EINVAL)` - 参数无效
+pub fn validate_syslog_args(action: SyslogAction, bufp: *mut u8, len: i32) -> Result<(), i32> {
+    match action {
+        SyslogAction::Read | SyslogAction::ReadAll | SyslogAction::ReadClear => {
+            // 这些操作需要有效的缓冲区
+            if bufp.is_null() {
+                return Err(EINVAL);
+            }
+            if len < 0 {
+                return Err(EINVAL);
+            }
+            // len == 0 是合法的，只是不会读取任何数据
+        }
+
+        SyslogAction::ConsoleLevel => {
+            // Linux 要求 console_loglevel 在 1-8 范围内
+            // 参考：kernel/printk/printk.c
+            if len < 1 || len > 8 {
+                return Err(EINVAL);
+            }
+        }
+
+        _ => {
+            // 其他操作不需要验证 bufp 和 len
+        }
+    }
+
+    Ok(())
+}
+
+/// 检查 syslog 操作权限
+///
+/// # 权限规则（完全遵循 Linux）
+/// 1. **特殊情况：ReadAll 和 SizeBuffer**
+///    - 如果 `dmesg_restrict == 0`：允许所有用户访问
+///    - 如果 `dmesg_restrict != 0`：需要特权
+/// 2. **其他操作**：
+///    - 需要以下任一权限：
+///      - `euid == 0` (root 用户)
+///      - `CAP_SYSLOG` (推荐)
+///      - `CAP_SYS_ADMIN` (向后兼容)
+///
+/// # 返回值
+/// * `Ok(())` - 有权限
+/// * `Err(EPERM)` - 权限不足
+pub fn check_syslog_permission(action: SyslogAction) -> Result<(), i32> {
+    // TODO: 等待完成用户管理和能力模型后再实现完整的权限检查
+    //
+    // 完整实现应该包括：
+    // 1. 检查 dmesg_restrict sysctl (ReadAll 和 SizeBuffer 特殊处理)
+    // 2. 检查 euid == 0 (root 用户)
+    // 3. 检查 CAP_SYSLOG 能力
+    // 4. 检查 CAP_SYS_ADMIN 能力 (向后兼容)
+    //
+    // 临时实现：允许所有操作（开发阶段）
+
+    // 特殊处理：ReadAll 和 SizeBuffer 可能允许非特权访问
+    if matches!(action, SyslogAction::ReadAll | SyslogAction::SizeBuffer) {
+        // 检查 dmesg_restrict sysctl
+        let dmesg_restrict = get_dmesg_restrict();
+        if dmesg_restrict == 0 {
+            return Ok(()); // 允许非特权访问
+        }
+    }
+
+    // TODO: 完整的权限检查实现
+    // 临时方案：暂时允许所有操作
+    Ok(())
+
+    /* 完整实现参考（等待用户管理模块）：
+
+    // 获取当前任务
+    let task = current_task();
+    let task_locked = task.lock();
+
+    // 检查是否为 root
+    if task_locked.euid == 0 {
+        return Ok(());
+    }
+
+    // 检查 CAP_SYSLOG (Linux 2.6.38+)
+    if task_locked.capabilities.has_effective(Capability::CAP_SYSLOG) {
+        return Ok(());
+    }
+
+    // 检查 CAP_SYS_ADMIN (向后兼容)
+    if task_locked.capabilities.has_effective(Capability::CAP_SYS_ADMIN) {
+        return Ok(());
+    }
+
+    // 权限不足
+    Err(EPERM)
+    */
+}
+
+/// 获取 dmesg_restrict sysctl 值
+///
+/// # 返回值
+/// * `0` - 允许所有用户读取内核日志
+/// * `1` - 只允许特权用户读取
+///
+/// # TODO
+/// 目前硬编码为 0，需要实现真实的 sysctl 支持。
+#[inline]
+fn get_dmesg_restrict() -> u32 {
+    // TODO: 从 sysctl 系统读取真实值
+    // 参考路径: /proc/sys/kernel/dmesg_restrict
+    0
 }

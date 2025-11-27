@@ -3,30 +3,7 @@
 //! 用于处理数据结构之间的转换
 
 use super::{InodeMetadata, InodeType};
-use crate::uapi::fs::{LinuxDirent64, Stat, TimeSpec};
-
-/// TimeSpec 内核扩展方法
-impl TimeSpec {
-    /// 创建当前时间戳
-    pub fn now() -> Self {
-        use crate::arch::timer::get_time;
-        use crate::config::CLOCK_FREQ;
-        const NSEC_PER_SEC: usize = 1000_000_000;
-        let cur_nsec = get_time() * NSEC_PER_SEC / CLOCK_FREQ;
-        Self {
-            tv_sec: (cur_nsec / NSEC_PER_SEC) as i64,
-            tv_nsec: (cur_nsec % NSEC_PER_SEC) as i64,
-        }
-    }
-
-    /// 创建零时间戳
-    pub fn zero() -> Self {
-        Self {
-            tv_sec: 0,
-            tv_nsec: 0,
-        }
-    }
-}
+use crate::uapi::fs::{LinuxDirent64, Stat};
 
 /// Stat 结构适配方法
 impl Stat {

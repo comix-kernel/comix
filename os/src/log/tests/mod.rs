@@ -17,6 +17,8 @@ macro_rules! test_log {
 
 // ========== Sub-modules ==========
 mod basic;
+mod byte_counting;
 mod filter;
 mod format;
 mod overflow;
+mod peek;

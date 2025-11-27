@@ -1,6 +1,59 @@
 //! 资源限制相关的常量和类型定义。
 
-use core::usize;
+use core::{ffi::c_long, usize};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+/// 进程或其子进程的资源使用统计。
+pub struct Rusage {
+    /// ru_utime: 用户模式下消耗的 CPU 时间。
+    pub ru_utime: timeval,
+
+    /// ru_stime: 内核模式下消耗的 CPU 时间。
+    pub ru_stime: timeval,
+
+    /// ru_maxrss: 最大常驻内存集大小 (Maximum Resident Set Size)，单位：千字节 (KB)。
+    pub ru_maxrss: c_long,
+
+    /// ru_ixrss: 积分共享内存大小 (Integral Shared Memory Size)。
+    pub ru_ixrss: c_long,
+
+    /// ru_idrss: 积分非共享数据大小 (Integral Unshared Data Size)。
+    pub ru_idrss: c_long,
+
+    /// ru_isrss: 积分非共享栈大小 (Integral Unshared Stack Size)。
+    pub ru_isrss: c_long,
+
+    /// ru_minflt: 页回收次数 (Page Reclaims)，即次要页错误 (Minor Faults)。
+    pub ru_minflt: c_long,
+
+    /// ru_majflt: 页错误次数 (Page Faults)，即主要页错误 (Major Faults)。
+    pub ru_majflt: c_long,
+
+    /// ru_nswap: 交换次数 (Swaps)。
+    pub ru_nswap: c_long,
+
+    /// ru_inblock: 块输入操作次数 (Block Input Operations)。
+    pub ru_inblock: c_long,
+
+    /// ru_oublock: 块输出操作次数 (Block Output Operations)。
+    pub ru_oublock: c_long,
+
+    /// ru_msgsnd: 发送的消息次数 (Messages Sent)。
+    pub ru_msgsnd: c_long,
+
+    /// ru_msgrcv: 接收的消息次数 (Messages Received)。
+    pub ru_msgrcv: c_long,
+
+    /// ru_nsignals: 接收到的信号次数 (Signals Received)。
+    pub ru_nsignals: c_long,
+
+    /// ru_nvcsw: 自愿上下文切换次数 (Voluntary Context Switches)。
+    pub ru_nvcsw: c_long,
+
+    /// ru_nivcsw: 非自愿上下文切换次数 (Involuntary Context Switches)。
+    pub ru_nivcsw: c_long,
+}
 
 /// 资源限制值相关的定义。
 pub mod rlimit_value {
@@ -24,6 +77,8 @@ pub mod rlimit_value {
 }
 
 use rlimit_value::*;
+
+use crate::uapi::time::timeval;
 
 /// 资源限制 ID (Resource limit IDs)
 /// 使用枚举封装 RLIMIT_* 宏，强制类型安全。

@@ -33,15 +33,11 @@ impl WaitQueue {
         }
     }
 
-    /// 把任务加入等待队列，并在释放队列锁后调用 sleep_task（可能导致调度）
+    /// 把任务加入等待队列，并调用 sleep_task（不会导致调度）
     pub fn sleep(&mut self, task: SharedTask) {
-        {
-            let _g = self.lock.lock();
-            self.tasks.add_task(task.clone());
-            sleep_task_with_block(task, true);
-        }
-        // 在没有持有 wait-queue 锁的情况下调用调度相关操作
-        yield_task();
+        let _g = self.lock.lock();
+        self.tasks.add_task(task.clone());
+        sleep_task_with_block(task, true);
     }
 
     /// 从等待队列中移除指定任务并在锁释放后唤醒

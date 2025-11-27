@@ -13,6 +13,7 @@ use crate::{
     uapi::{
         errno::{EACCES, EINVAL, ENOENT},
         fs::{AtFlags, F_OK, FileSystemType, LinuxStatFs, R_OK, W_OK, X_OK},
+        time::timespec,
     },
     vfs::{
         Dentry, DiskFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
@@ -733,11 +734,9 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
 pub fn utimensat(
     dirfd: i32,
     pathname: *const c_char,
-    times: *const crate::uapi::fs::TimeSpec,
+    times: *const timespec,
     flags: u32,
 ) -> isize {
-    use crate::uapi::fs::TimeSpec;
-
     // 解析路径
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(pathname) {
@@ -792,7 +791,7 @@ pub fn utimensat(
     // 解析时间参数
     let (atime_opt, mtime_opt) = if times.is_null() {
         // NULL 表示将两个时间都设置为当前时间
-        let now = TimeSpec::now();
+        let now = timespec::now();
         (Some(now), Some(now))
     } else {
         unsafe {
@@ -813,7 +812,7 @@ pub fn utimensat(
             let atime_opt = if user_times[0].is_omit() {
                 None // 不修改
             } else if user_times[0].is_now() {
-                Some(TimeSpec::now())
+                Some(timespec::now())
             } else {
                 Some(user_times[0])
             };
@@ -822,7 +821,7 @@ pub fn utimensat(
             let mtime_opt = if user_times[1].is_omit() {
                 None
             } else if user_times[1].is_now() {
-                Some(TimeSpec::now())
+                Some(timespec::now())
             } else {
                 Some(user_times[1])
             };
