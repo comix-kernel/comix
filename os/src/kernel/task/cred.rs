@@ -1,8 +1,5 @@
 use crate::kernel::task::CapabilitySet;
-
-/// 用户 ID 常量
-pub const ROOT_UID: u32 = 0;
-pub const ROOT_GID: u32 = 0;
+use crate::uapi::cred::{ROOT_GID, ROOT_UID};
 
 /// 进程凭证结构
 #[derive(Clone, Copy, Debug)]
