@@ -101,6 +101,12 @@ pub struct Task {
     /// 资源限制结构体
     pub rlimit: Arc<SpinLock<RlimitStruct>>,
 
+    // === 权限和凭证 ===
+    /// 任务凭证（用户、组、能力）
+    pub credential: super::Credential,
+    /// 文件创建掩码
+    pub umask: u32,
+
     // === 文件系统 ===
     /// 文件描述符表
     pub fd_table: Arc<FDTable>,
@@ -345,6 +351,8 @@ impl Task {
             rlimit,
             blocked,
             pending: SignalFlags::empty(),
+            credential: super::Credential::root(),
+            umask: 0o022,
             fd_table,
             cwd,
             root,

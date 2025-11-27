@@ -4,8 +4,8 @@
 //! 并由任务管理器维护所有任务的信息
 use core::sync::atomic::Ordering;
 
-mod capability;
-mod credential;
+mod cap;
+mod cred;
 mod ktask;
 mod process;
 mod task_manager;
@@ -14,6 +14,8 @@ mod task_struct;
 mod tid_allocator;
 mod work_queue;
 
+pub use cap::*;
+pub use cred::*;
 pub use ktask::*;
 pub use process::*;
 pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
@@ -21,7 +23,6 @@ pub use task_state::TaskState;
 pub use task_struct::SharedTask;
 pub use task_struct::Task as TaskStruct;
 pub use work_queue::*;
-pub use capability::*;
 
 
 use alloc::sync::Arc;
