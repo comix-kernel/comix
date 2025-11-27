@@ -9,8 +9,17 @@
 - [宏接口](#宏接口)
 - [写入 API](#写入-api)
 - [读取 API](#读取-api)
+  - [read_log](#read_log) - 破坏性读取
+  - [peek_log](#peek_log) - 非破坏性读取
+  - [log_len](#log_len) - 日志条目数量
+  - [log_unread_bytes](#log_unread_bytes) - 未读字节数
+  - [log_reader_index](#log_reader_index) - 读指针位置
+  - [log_writer_index](#log_writer_index) - 写指针位置
+  - [log_dropped_count](#log_dropped_count) - 丢弃计数
 - [配置 API](#配置-api)
 - [核心类型](#核心类型)
+- [系统调用](#系统调用)
+  - [syslog](#syslog) - 用户空间日志控制
 
 ---
 
@@ -428,6 +437,178 @@ if log_dropped_count() > 1000 {
 - 这是累计计数，不会重置
 - 非零值表示日志读取速度跟不上写入速度
 - 频繁丢弃日志表示系统存在性能问题或配置不当
+
+---
+
+### peek_log
+
+**位置**：`os/src/log/mod.rs:103-105`
+
+**签名**：
+```rust
+pub fn peek_log(index: usize) -> Option<LogEntry>
+```
+
+**功能**：非破坏性读取：按索引 peek 日志条目，不移动读指针。允许读取缓冲区中的日志而不删除它们，主要用于 `SyslogAction::ReadAll` 操作。
+
+**参数**：
+- `index: usize` - 全局序列号（从读指针开始计数）
+
+**返回值**：
+- `Option<LogEntry>` - 成功返回 `Some(LogEntry)`，索引超出范围或条目已被覆盖返回 `None`
+
+**使用示例**：
+```rust
+use log::{peek_log, log_reader_index, log_writer_index};
+
+// 读取所有可用日志（不删除）
+let start = log_reader_index();
+let end = log_writer_index();
+
+for index in start..end {
+    if let Some(entry) = peek_log(index) {
+        println!("{}", entry);
+        // 日志仍保留在缓冲区中
+    }
+}
+
+// 可以重复读取
+for index in start..end {
+    if let Some(entry) = peek_log(index) {
+        // 再次读取相同的日志
+        process_entry(&entry);
+    }
+}
+```
+
+**注意事项**：
+- 不移除日志，可以重复读取
+- 索引必须在 `[log_reader_index(), log_writer_index())` 范围内
+- 如果缓冲区已满并发生覆盖，旧索引可能返回 `None`
+- 并发安全：可以与 write 并发调用
+
+---
+
+### log_reader_index
+
+**位置**：`os/src/log/mod.rs:108-110`
+
+**签名**：
+```rust
+pub fn log_reader_index() -> usize
+```
+
+**功能**：获取当前可读取的起始索引（读指针位置）。
+
+**参数**：无
+
+**返回值**：
+- `usize` - 当前读指针位置（全局序列号）
+
+**使用示例**：
+```rust
+use log::{log_reader_index, log_writer_index, peek_log};
+
+// 获取可读范围
+let start = log_reader_index();
+let end = log_writer_index();
+let count = end - start;
+
+println!("Available logs: {} (from {} to {})", count, start, end);
+
+// 遍历所有可用日志
+for index in start..end {
+    if let Some(entry) = peek_log(index) {
+        println!("Log #{}: {}", index, entry);
+    }
+}
+```
+
+**注意事项**：
+- 返回值是快照，可能在使用过程中发生变化
+- 配合 `log_writer_index()` 使用可以获取可读范围
+
+---
+
+### log_writer_index
+
+**位置**：`os/src/log/mod.rs:113-115`
+
+**签名**：
+```rust
+pub fn log_writer_index() -> usize
+```
+
+**功能**：获取当前写入位置（下一个要写入的索引）。
+
+**参数**：无
+
+**返回值**：
+- `usize` - 当前写指针位置（全局序列号）
+
+**使用示例**：
+```rust
+use log::{log_reader_index, log_writer_index};
+
+// 计算未读日志数量
+let start = log_reader_index();
+let end = log_writer_index();
+let unread_count = end - start;
+
+println!("Unread logs: {}", unread_count);
+
+// 检查缓冲区使用率
+let capacity = 58;  // 缓冲区容量约 58 条
+let usage_percent = (unread_count * 100) / capacity;
+println!("Buffer usage: {}%", usage_percent);
+```
+
+**注意事项**：
+- 返回值是快照，其他 CPU 可能并发写入导致值变化
+- 配合 `log_reader_index()` 使用可以获取可读范围
+
+---
+
+### log_unread_bytes
+
+**位置**：`os/src/log/mod.rs:118-120`
+
+**签名**：
+```rust
+pub fn log_unread_bytes() -> usize
+```
+
+**功能**：返回未读日志的总字节数（格式化后）。精确计算所有未读日志格式化为字符串后的总字节数，用于 `SyslogAction::SizeUnread` 系统调用。
+
+**参数**：无
+
+**返回值**：
+- `usize` - 未读日志的总字节数（格式化后）
+
+**使用示例**：
+```rust
+use log::{log_len, log_unread_bytes};
+
+// 查询缓冲区状态
+let count = log_len();
+let bytes = log_unread_bytes();
+
+println!("Buffered logs: {} entries, {} bytes", count, bytes);
+
+// 分配足够的缓冲区读取所有日志
+let mut buffer = vec![0u8; bytes];
+// ... 使用 syslog 系统调用读取 ...
+
+// 检查是否需要刷新日志
+if bytes > 4096 {
+    println!("Log buffer has {} bytes, consider flushing", bytes);
+}
+```
+
+**注意事项**：
+- 返回值是精确的字节数，包括 ANSI 颜色代码、时间戳等格式化内容
+- 每次 `read_log()` 会减少相应的字节数
+- 并发安全：使用原子操作维护计数
 
 ---
 
@@ -937,9 +1118,177 @@ Log 子系统可以在中断处理程序中安全使用：
 
 ---
 
+## 系统调用
+
+### syslog
+
+**位置**：`os/src/kernel/syscall/sys.rs:127-378`
+
+**签名**：
+```rust
+pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize
+```
+
+**功能**：读取和控制内核日志缓冲区。完全兼容 Linux `syslog(2)` 系统调用,允许用户空间程序查询、读取和控制内核日志。
+
+**参数**：
+- `type_: i32` - 操作类型 (0-10),详见 `SyslogAction`
+- `bufp: *mut u8` - 用户空间缓冲区指针（某些操作需要）
+- `len: i32` - 缓冲区长度或命令参数（取决于操作类型）
+
+**返回值**：
+* **成功**：
+  - 类型 2/3/4: 读取的字节数
+  - 类型 8: 旧的 console_loglevel (1-8)
+  - 类型 9: 未读字节数
+  - 类型 10: 缓冲区总大小
+  - 其他: 0
+* **失败**：负的 errno
+  - `-EINVAL`: 无效参数
+  - `-EPERM`: 权限不足
+  - `-EINTR`: 被信号中断
+  - `-EFAULT`: 无效的用户空间指针
+
+**操作类型** (`SyslogAction`):
+
+| 值 | 名称 | 描述 |
+|----|------|------|
+| 0 | CLOSE | 关闭日志（NOP） |
+| 1 | OPEN | 打开日志（NOP） |
+| 2 | READ | 破坏性读取日志 |
+| 3 | READ_ALL | 非破坏性读取所有日志 |
+| 4 | READ_CLEAR | 读取并清空日志 |
+| 5 | CLEAR | 清空日志缓冲区 |
+| 6 | CONSOLE_OFF | 禁用控制台输出 |
+| 7 | CONSOLE_ON | 启用控制台输出 |
+| 8 | CONSOLE_LEVEL | 设置控制台日志级别 |
+| 9 | SIZE_UNREAD | 查询未读字节数 |
+| 10 | SIZE_BUFFER | 查询缓冲区总大小 |
+
+**使用示例**：
+
+```c
+#include <sys/klog.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+// 1. 读取内核日志（破坏性）
+char buf[8192];
+int len = syscall(SYS_syslog, 2, buf, sizeof(buf));
+if (len > 0) {
+    write(STDOUT_FILENO, buf, len);
+}
+
+// 2. 读取所有日志（非破坏性）
+len = syscall(SYS_syslog, 3, buf, sizeof(buf));
+
+// 3. 查询未读字节数
+int unread = syscall(SYS_syslog, 9, NULL, 0);
+printf("Unread bytes: %d\n", unread);
+
+// 4. 查询缓冲区总大小
+int size = syscall(SYS_syslog, 10, NULL, 0);
+printf("Buffer size: %d\n", size);
+
+// 5. 设置控制台日志级别（1-8）
+// 返回旧的级别
+int old_level = syscall(SYS_syslog, 8, NULL, 5);  // 设置为 5 (Notice)
+printf("Old level: %d\n", old_level);
+
+// 6. 清空日志缓冲区
+syscall(SYS_syslog, 5, NULL, 0);
+
+// 7. 禁用控制台输出
+syscall(SYS_syslog, 6, NULL, 0);
+
+// 8. 启用控制台输出
+syscall(SYS_syslog, 7, NULL, 0);
+```
+
+**日志级别映射**:
+
+Linux `console_loglevel` 使用 1-8 的值,其中数值越小优先级越高：
+- `console_loglevel = N` 表示显示级别 < N 的消息
+- Comix 内部使用 0-7 (LogLevel::Emergency 到 Debug)
+- 转换公式：`comix_level = linux_level - 1`
+
+| Linux Level | Comix Level | 显示级别 |
+|-------------|-------------|----------|
+| 1 | 0 (Emergency) | 只显示 Emergency |
+| 2 | 1 (Alert) | Emergency, Alert |
+| 3 | 2 (Critical) | Emergency, Alert, Critical |
+| 4 | 3 (Error) | Emergency ~ Error |
+| 5 | 4 (Warning) | Emergency ~ Warning |
+| 6 | 5 (Notice) | Emergency ~ Notice |
+| 7 | 6 (Info) | Emergency ~ Info |
+| 8 | 7 (Debug) | 显示所有级别 |
+
+**权限要求**：
+
+1. **特殊情况：ReadAll 和 SizeBuffer**
+   - 如果 `dmesg_restrict == 0`：允许所有用户访问
+   - 如果 `dmesg_restrict != 0`：需要特权
+2. **其他操作**：需要以下任一权限：
+   - `euid == 0` (root 用户)
+   - `CAP_SYSLOG` (推荐)
+   - `CAP_SYS_ADMIN` (向后兼容)
+
+**注意事项**：
+- READ (类型 2) 是破坏性的，读取后日志从缓冲区删除
+- READ_ALL (类型 3) 是非破坏性的，可以重复读取
+- CONSOLE_LEVEL 的参数范围是 1-8，超出范围返回 `-EINVAL`
+- SIZE_UNREAD 返回的是精确的格式化后字节数，可用于分配缓冲区
+- 当前权限检查未完全实现，等待用户管理系统完善
+
+**用户空间工具示例** (`dmesg` 实现):
+
+```c
+// 简化的 dmesg 工具实现
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#define SYSLOG_ACTION_READ_ALL 3
+#define SYSLOG_ACTION_SIZE_UNREAD 9
+
+int main() {
+    // 查询需要多少空间
+    int size = syscall(SYS_syslog, SYSLOG_ACTION_SIZE_UNREAD, NULL, 0);
+    if (size < 0) {
+        perror("syslog");
+        return 1;
+    }
+
+    // 分配缓冲区
+    char *buf = malloc(size + 1);
+    if (!buf) {
+        perror("malloc");
+        return 1;
+    }
+
+    // 读取所有日志（非破坏性）
+    int len = syscall(SYS_syslog, SYSLOG_ACTION_READ_ALL, buf, size);
+    if (len < 0) {
+        perror("syslog");
+        free(buf);
+        return 1;
+    }
+
+    // 显示日志
+    buf[len] = '\0';
+    printf("%s", buf);
+
+    free(buf);
+    return 0;
+}
+```
+
+---
+
 ## 相关文档
 
 - [整体架构](architecture.md) - Log 子系统的设计和架构
-- [使用指南](usage.md) - 详细的使用示例和最佳实践
+- [使用指南](usage.md) - 详细的使用示例和最佳实践，包括 syslog 使用
 - [日志级别](level.md) - 日志级别的语义和使用建议
 - [缓冲区和条目](buffer_and_entry.md) - 环形缓冲区和日志条目的实现细节

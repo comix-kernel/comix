@@ -12,7 +12,7 @@
 
 use core::any::Any;
 
-use crate::uapi::fs::TimeSpec;
+use crate::uapi::time::timespec;
 use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -31,9 +31,9 @@ pub enum InodeType {
     Socket,      // 套接字
 }
 
-/// 文件权限和类型（与 POSIX 兼容）
 bitflags::bitflags! {
     #[derive(Debug, Clone)]
+    /// 文件权限和类型（与 POSIX 兼容）
     pub struct FileMode: u32 {
         // 文件类型掩码
         const S_IFMT   = 0o170000;  // 文件类型掩码
@@ -103,9 +103,9 @@ pub struct InodeMetadata {
     pub uid: u32,              // 用户 ID
     pub gid: u32,              // 组 ID
     pub size: usize,           // 文件大小（字节）
-    pub atime: TimeSpec,       // 访问时间
-    pub mtime: TimeSpec,       // 修改时间
-    pub ctime: TimeSpec,       // 状态改变时间
+    pub atime: timespec,       // 访问时间
+    pub mtime: timespec,       // 修改时间
+    pub ctime: timespec,       // 状态改变时间
     pub nlinks: usize,         // 硬链接数
     pub blocks: usize,         // 占用的块数（512B 为单位）
 }
@@ -205,8 +205,8 @@ pub trait Inode: Send + Sync + Any {
     /// 设置文件时间戳
     fn set_times(
         &self,
-        _atime: Option<crate::uapi::fs::TimeSpec>,
-        _mtime: Option<crate::uapi::fs::TimeSpec>,
+        _atime: Option<timespec>,
+        _mtime: Option<timespec>,
     ) -> Result<(), FsError> {
         // 默认实现：不支持
         Err(FsError::NotSupported)

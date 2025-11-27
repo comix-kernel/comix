@@ -7,11 +7,11 @@
 mod cpu;
 mod scheduler;
 mod task;
-mod uts_namespace;
+mod timer_queue;
 
 pub mod syscall;
 
-pub use cpu::current_cpu;
+pub use cpu::*;
 pub use scheduler::*;
 pub use task::*;
-pub use uts_namespace::*;
+pub use timer_queue::*;

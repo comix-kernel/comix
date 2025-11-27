@@ -21,9 +21,6 @@ pub const USER_STACK_TOP: usize = SV39_BOT_HALF_TOP - PAGE_SIZE; // leave anothe
 /// Maximum heap size (prevent OOM)
 pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024; // 64MB
 
-// TODO: 这里之后应该改成从设备获取 CPU 数量
-pub const NUM_CPU: usize = 4;
-
 // memory layout constants
 // temporarily set for QEMU RISC-V virt machine
 // FIXME: refactor it to arch/riscv because it's platform-dependent
