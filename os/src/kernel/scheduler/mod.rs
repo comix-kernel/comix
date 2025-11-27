@@ -9,9 +9,9 @@ use lazy_static::lazy_static;
 
 use crate::{
     arch::kernel::{context::Context, switch},
-    kernel::{current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    kernel::{TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     pr_debug,
-    sync::SpinLock,
+    sync::{SpinLock, SpinLockGuard},
 };
 
 pub use task_queue::TaskQueue;
@@ -60,6 +60,15 @@ pub trait Scheduler {
     /// 参数:
     /// * `task`: 需要终止的任务
     fn exit_task(&mut self, task: SharedTask);
+    /// 带保护地阻塞任务
+    /// 修改任务状态并从运行队列中移除
+    /// 参数:
+    /// * `task`: 需要阻塞的任务（带锁保护）
+    /// * `stask`: 需要阻塞的任务（共享指针）
+    /// * `receive_signal`: 是否可被信号中断
+    /// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
+    ///       尽量不要使用该函数，除非你非常清楚自己在做什么
+    fn sleep_task_with_graud(&mut self, task: &mut SpinLockGuard<'_, TaskStruct>, stask: SharedTask, receive_signal: bool);
 }
 
 /// 执行一次调度操作，切换到下一个任务
@@ -109,4 +118,16 @@ pub fn wake_up_with_block(task: SharedTask) {
 /// * `task`: 需要终止的任务
 pub fn exit_task_with_block(task: SharedTask) {
     SCHEDULER.lock().exit_task(task);
+}
+
+/// 带保护地阻塞任务
+/// 修改任务状态并从运行队列中移除
+/// 参数:
+/// * `task`: 需要阻塞的任务（带锁保护）
+/// * `stask`: 需要阻塞的任务（共享指针）
+/// * `receive_signal`: 是否可被信号中断
+/// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
+///       尽量不要使用该函数，除非你非常清楚自己在做什么
+pub fn sleep_task_with_graud_and_block(task: &mut SpinLockGuard<'_, TaskStruct>, stask: SharedTask, receive_signal: bool) {
+    SCHEDULER.lock().sleep_task_with_graud(task, stask, receive_signal);
 }
