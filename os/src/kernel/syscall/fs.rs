@@ -1077,7 +1077,11 @@ pub fn renameat2(
             }
 
             // 回滚步骤1: temp_name -> old_name
-            crate::pr_debug!("[renameat2] Rollback 2/2: '{}' -> '{}'", temp_name, old_name);
+            crate::pr_debug!(
+                "[renameat2] Rollback 2/2: '{}' -> '{}'",
+                temp_name,
+                old_name
+            );
             match old_parent
                 .inode
                 .rename(&temp_name, old_parent.inode.clone(), &old_name)
@@ -1097,11 +1101,11 @@ pub fn renameat2(
             }
 
             if rollback_success {
-                crate::pr_info!("[renameat2] Full rollback successful: files restored to original state");
-            } else {
-                crate::pr_err!(
-                    "[renameat2] CRITICAL: Partial or complete rollback failure!"
+                crate::pr_info!(
+                    "[renameat2] Full rollback successful: files restored to original state"
                 );
+            } else {
+                crate::pr_err!("[renameat2] CRITICAL: Partial or complete rollback failure!");
                 crate::pr_err!(
                     "[renameat2] File system is in INCONSISTENT STATE. Manual recovery may be required."
                 );
