@@ -10,12 +10,10 @@ use alloc::{
 };
 
 use crate::{
-    kernel::current_task,
-    uapi::{errno::EINVAL, log::SyslogAction},
-    vfs::{
+    arch::timer::clock_freq, ipc::create_siginfo_for_signal, kernel::{SharedTask, TIMER_QUEUE, current_task, sleep_task_with_block, yield_task}, uapi::{errno::{EAGAIN, EINVAL}, log::SyslogAction, signal::{SigInfoT, SignalFlags}, time::timespec}, vfs::{
         DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, get_root_dentry, split_path,
         vfs_lookup_from,
-    },
+    }
 };
 
 /// 从用户空间获取路径字符串
@@ -273,4 +271,89 @@ fn get_dmesg_restrict() -> u32 {
     // TODO: 从 sysctl 系统读取真实值
     // 参考路径: /proc/sys/kernel/dmesg_restrict
     0
+}
+
+/// 在任务中等待指定信号的到来
+/// # 参数
+/// * `task` - 任务引用
+/// * `signal` - 要等待的信号集合
+/// * `timeout` - 可选的超时时间
+/// # 返回值
+/// * 成功时返回收到的信号编号及其信息
+/// * 失败时返回负的错误码
+pub fn wait_for_signal(
+    task: SharedTask,
+    signal: SignalFlags,
+    timeout: Option<timespec>,
+) -> Result<(u8, SigInfoT), i32> {
+    let mut t = task.lock();
+    if let Some(timeout) = timeout {
+        if timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1_000_000_000 {
+            return Err(-EINVAL);
+        }
+        if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
+            // 轮询, 不阻塞
+            if t.pending.has_deliverable_signal(signal)
+                || t.shared_pending.lock().has_deliverable_signal(signal)
+            {
+                let flag = t
+                    .pending
+                    .first_deliverable_signal(signal)
+                    .or_else(|| t.shared_pending.lock().first_deliverable_signal(signal))
+                    .unwrap();
+                let sig_num = flag.to_signal_number();
+                t.pending.signals.remove(flag);
+                return Ok((sig_num as u8, create_siginfo_for_signal(flag)));
+            } else {
+                Err(-EAGAIN)
+            }
+        } else {
+            // 带超时的阻塞等待
+            let start = timespec::now();
+            while !t.pending.has_deliverable_signal(signal)
+                && !t.shared_pending.lock().has_deliverable_signal(signal)
+            {
+                let now = timespec::now();
+                if now - start > timeout {
+                    return Err(-EAGAIN); // 超时返回
+                }
+                TIMER_QUEUE
+                    .lock()
+                    .push(timeout.into_freq(clock_freq()), task.clone());
+                sleep_task_with_block(task.clone(), true);
+                drop(t);
+                yield_task();
+                t = task.lock();
+            }
+            let flag = t
+                .pending
+                .first_deliverable_signal(signal)
+                .or_else(|| t.shared_pending.lock().first_deliverable_signal(signal))
+                .unwrap();
+            let sig_num = flag.to_signal_number();
+            t.pending.signals.remove(flag);
+            return Ok((sig_num as u8, create_siginfo_for_signal(flag)));
+        }
+    } else {
+        // 阻塞等待
+        while t
+            .pending
+            .first_target_signal(signal)
+            .or_else(|| t.shared_pending.lock().first_target_signal(signal))
+            .is_none()
+        {
+            sleep_task_with_block(task.clone(), true);
+            drop(t);
+            yield_task();
+            t = task.lock();
+        }
+        let flag = t
+            .pending
+            .first_target_signal(signal)
+            .or_else(|| t.shared_pending.lock().first_target_signal(signal))
+            .unwrap();
+        let sig_num = flag.to_signal_number();
+        t.pending.signals.remove(flag);
+        return Ok((sig_num as u8, create_siginfo_for_signal(flag)));
+    }
 }

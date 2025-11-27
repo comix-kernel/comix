@@ -7,7 +7,7 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
-    ipc::{SignalFlags, SignalHandlerTable, SignalPending},
+    ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
@@ -22,6 +22,7 @@ use crate::{
     test::run_early_tests,
     uapi::{
         resource::{INIT_RLIMITS, RlimitStruct},
+        signal::SignalFlags,
         uts_namespace::UtsNamespace,
     },
     vfs::{create_stdio_files, fd_table, get_root_dentry},

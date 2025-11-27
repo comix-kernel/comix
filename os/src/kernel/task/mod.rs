@@ -23,9 +23,9 @@ pub use work_queue::*;
 
 use alloc::sync::Arc;
 
-use crate::ipc::_SIGCHLD;
 use crate::mm::memory_space::MemorySpace;
 use crate::sync::SpinLock;
+use crate::uapi::signal::NUM_SIGCHLD;
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
@@ -100,7 +100,7 @@ pub fn notify_parent(task: SharedTask) {
 
     let t = TASK_MANAGER.lock();
     let p = t.get_task(ppid).unwrap();
-    t.send_signal(p, _SIGCHLD);
+    t.send_signal(p, NUM_SIGCHLD);
 }
 
 /// 获取当前任务的文件描述符表

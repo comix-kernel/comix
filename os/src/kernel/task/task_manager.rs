@@ -9,11 +9,11 @@
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::ipc::SignalFlags;
 use crate::kernel::exit_task_with_block;
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
 use crate::sync::SpinLock;
+use crate::uapi::signal::SignalFlags;
 
 use lazy_static::lazy_static;
 
