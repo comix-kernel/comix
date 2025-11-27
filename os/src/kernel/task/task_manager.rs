@@ -9,7 +9,7 @@
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::kernel::exit_task_with_block;
+use crate::kernel::{TaskState, exit_task_with_block, wake_up_with_block};
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
 use crate::sync::SpinLock;
@@ -163,6 +163,10 @@ impl TaskManagerTrait for TaskManager {
         if let Some(signal_flag) = SignalFlags::from_signal_num(signal) {
             let mut t = task.lock();
             t.pending.signals.insert(signal_flag);
+            if t.state == TaskState::Interruptible {
+                drop(t);
+                wake_up_with_block(task.clone());
+            }
             true
         } else {
             false

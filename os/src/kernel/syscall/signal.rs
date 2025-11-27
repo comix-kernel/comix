@@ -8,8 +8,7 @@ use crate::{
     arch::timer::clock_freq,
     ipc::{create_siginfo_for_signal, do_sigpending},
     kernel::{
-        SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task,
-        sleep_task_with_block, yield_task,
+        SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task, sleep_task_with_graud_and_block, yield_task
     },
     sync::SpinLock,
     tool::user_buffer::{read_from_user, write_to_user},
@@ -209,8 +208,7 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
         let mut t = task.lock();
         old_set = t.blocked;
         t.blocked = new_set;
-        // XXX: 不一定被目标信号唤醒?
-        sleep_task_with_block(task.clone(), true);
+        sleep_task_with_graud_and_block(&mut t, task.clone(), true);
     }
     yield_task();
     {
@@ -414,7 +412,7 @@ fn wait_for_signal(
                 TIMER_QUEUE
                     .lock()
                     .push(timeout.into_freq(clock_freq()), task.clone());
-                sleep_task_with_block(task.clone(), true);
+                sleep_task_with_graud_and_block(&mut t, task.clone(), true);
                 drop(t);
                 yield_task();
                 t = task.lock();
@@ -436,7 +434,7 @@ fn wait_for_signal(
             .or_else(|| t.shared_pending.lock().first_target_signal(signal))
             .is_none()
         {
-            sleep_task_with_block(task.clone(), true);
+            sleep_task_with_graud_and_block(&mut t, task.clone(), true);
             drop(t);
             yield_task();
             t = task.lock();
