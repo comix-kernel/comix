@@ -101,21 +101,28 @@ impl Inode for Ext4Inode {
             _ => InodeType::File,
         };
 
+        // 解析时间戳(包含纳秒精度)
+        // extra 字段格式: (nanosec << 2) | epoch_bits
+        // 我们只需要纳秒部分: extra >> 2
+        let atime_nsec = (inode.i_atime_extra >> 2) as i64;
+        let mtime_nsec = (inode.i_mtime_extra >> 2) as i64;
+        let ctime_nsec = (inode.i_ctime_extra >> 2) as i64;
+
         Ok(InodeMetadata {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
             atime: timespec {
                 tv_sec: inode.atime as i64,
-                tv_nsec: 0,
+                tv_nsec: atime_nsec,
             },
             mtime: timespec {
                 tv_sec: inode.mtime as i64,
-                tv_nsec: 0,
+                tv_nsec: mtime_nsec,
             },
             ctime: timespec {
                 tv_sec: inode.ctime as i64,
-                tv_nsec: 0,
+                tv_nsec: ctime_nsec,
             },
             inode_type,
             mode: FileMode::from_bits_truncate(mode as u32),
@@ -643,5 +650,35 @@ impl Inode for Ext4Inode {
 
     fn as_any(&self) -> &dyn core::any::Any {
         self
+    }
+
+    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError> {
+        let mut fs = self.fs.lock();
+
+        // 获取 inode 引用（可变）
+        let mut inode_ref = fs.get_inode_ref(self.ino);
+        let inode = &mut inode_ref.inode;
+
+        // 更新访问时间
+        if let Some(at) = atime {
+            inode.atime = at.tv_sec as u32;
+            // 设置纳秒精度: (nanosec << 2) | epoch_bits
+            // epoch_bits 通常为 0，所以直接左移 2 位
+            inode.i_atime_extra = ((at.tv_nsec as u32) << 2) & 0xFFFFFFFC;
+        }
+
+        // 更新修改时间
+        if let Some(mt) = mtime {
+            inode.mtime = mt.tv_sec as u32;
+            inode.i_mtime_extra = ((mt.tv_nsec as u32) << 2) & 0xFFFFFFFC;
+
+            // 修改时间改变时，也更新 ctime
+            let now = timespec::now();
+            inode.ctime = now.tv_sec as u32;
+            inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
+        }
+
+        // inode_ref 在 drop 时会自动写回磁盘
+        Ok(())
     }
 }

@@ -20,6 +20,12 @@ pub struct timespec {
 }
 
 impl timespec {
+    /// 特殊值：设置为当前时间（UTIME_NOW，用于 utimensat）
+    pub const UTIME_NOW: c_long = (1i64 << 30) - 1; // 1073741823
+
+    /// 特殊值：不改变此时间（UTIME_OMIT，用于 utimensat）
+    pub const UTIME_OMIT: c_long = (1i64 << 30) - 2; // 1073741822
+
     /// 将 timespec 转换为指定频率的刻度数。
     /// # 参数:
     /// - `freq`: 频率（每秒刻度数）
@@ -62,6 +68,39 @@ impl timespec {
             tv_sec: 0,
             tv_nsec: 0,
         }
+    }
+
+    /// 验证 timespec 的有效性（用于 utimensat）
+    ///
+    /// # 返回值
+    /// - `Ok(())`: 有效
+    /// - `Err(EINVAL)`: 无效
+    pub fn validate(&self) -> Result<(), i32> {
+        use crate::uapi::errno::EINVAL;
+
+        // 检查特殊值
+        if self.tv_nsec == Self::UTIME_NOW || self.tv_nsec == Self::UTIME_OMIT {
+            return Ok(());
+        }
+
+        // 检查纳秒范围
+        if self.tv_nsec < 0 || self.tv_nsec >= 1_000_000_000 {
+            return Err(EINVAL);
+        }
+
+        Ok(())
+    }
+
+    /// 检查是否为 UTIME_NOW（用于 utimensat）
+    #[inline]
+    pub fn is_now(&self) -> bool {
+        self.tv_nsec == Self::UTIME_NOW
+    }
+
+    /// 检查是否为 UTIME_OMIT（用于 utimensat）
+    #[inline]
+    pub fn is_omit(&self) -> bool {
+        self.tv_nsec == Self::UTIME_OMIT
     }
 }
 
