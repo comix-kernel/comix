@@ -731,12 +731,7 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     0
 }
 
-pub fn utimensat(
-    dirfd: i32,
-    pathname: *const c_char,
-    times: *const timespec,
-    flags: u32,
-) -> isize {
+pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const timespec, flags: u32) -> isize {
     // 解析路径
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(pathname) {
