@@ -14,7 +14,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_EXIT_GROUP => sys_exit_group(frame),
         syscall_number::SYS_WRITE => sys_write(frame),
         syscall_number::SYS_READ => sys_read(frame),
-        syscall_number::SYS_CLONE => sys_fork(frame),
+        syscall_number::SYS_CLONE => sys_clone(frame),
         syscall_number::SYS_EXECVE => sys_execve(frame),
         syscall_number::SYS_WAIT4 => sys_wait4(frame),
         syscall_number::SYS_DUP => sys_dup(frame),
@@ -40,6 +40,16 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_SETRLIMIT => sys_setrlimit(frame),
         syscall_number::SYS_PRLIMIT64 => sys_prlimit(frame),
         syscall_number::SYS_NANOSLEEP => sys_nanosleep(frame),
+        syscall_number::SYS_RT_SIGPENDING => sys_rt_sigpending(frame),
+        syscall_number::SYS_RT_SIGPROCMASK => sys_rt_sigprocmask(frame),
+        syscall_number::SYS_RT_SIGACTION => sys_rt_sigaction(frame),
+        syscall_number::SYS_RT_SIGTIMEDWAIT => sys_rt_sigtimedwait(frame),
+        syscall_number::SYS_RT_SIGSUSPEND => sys_rt_sigsuspend(frame),
+        syscall_number::SYS_RT_SIGRETURN => sys_rt_sigreturn(frame),
+        syscall_number::SYS_SIGALTSTACK => sys_sigaltstack(frame),
+        syscall_number::SYS_KILL => sys_kill(frame),
+        syscall_number::SYS_TKILL => sys_tkill(frame),
+        syscall_number::SYS_TGKILL => sys_tgkill(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS

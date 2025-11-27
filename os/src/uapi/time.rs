@@ -5,13 +5,16 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use core::ffi::{c_int, c_long};
+use core::{
+    ffi::{c_int, c_long},
+    ops::Sub,
+};
 
 use crate::arch::timer::{clock_freq, get_time};
 
 /// 用于指定秒和纳秒精度的时间
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct timespec {
     /// 秒 (seconds)
     pub tv_sec: c_long,
@@ -101,6 +104,26 @@ impl timespec {
     #[inline]
     pub fn is_omit(&self) -> bool {
         self.tv_nsec == Self::UTIME_OMIT
+    }
+}
+
+impl Sub for timespec {
+    type Output = timespec;
+
+    fn sub(self, other: timespec) -> timespec {
+        let sec = self.tv_sec - other.tv_sec;
+        let nsec = self.tv_nsec - other.tv_nsec;
+        if nsec < 0 {
+            timespec {
+                tv_sec: sec - 1,
+                tv_nsec: nsec + 1_000_000_000,
+            }
+        } else {
+            timespec {
+                tv_sec: sec,
+                tv_nsec: nsec,
+            }
+        }
     }
 }
 

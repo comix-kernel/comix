@@ -12,14 +12,16 @@ mod sys;
 mod task;
 mod util;
 
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
 
 use crate::{
     impl_syscall,
     uapi::{
         fs::LinuxStatFs,
         resource::{Rlimit, Rusage},
+        signal::{SigInfoT, SignalAction},
         time::timespec,
+        types::{SigSetT, StackT},
     },
     vfs::Stat,
 };
@@ -36,7 +38,11 @@ impl_syscall!(sys_reboot, reboot, (c_int, c_int, c_int, *mut c_void));
 impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
-impl_syscall!(sys_fork, fork, ());
+impl_syscall!(
+    sys_clone,
+    clone,
+    (c_ulong, c_ulong, *mut c_int, *mut c_int, c_ulong)
+);
 impl_syscall!(
     sys_execve,
     execve,
@@ -119,3 +125,25 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
+impl_syscall!(sys_rt_sigpending, rt_sigpending, (*mut SigSetT, c_uint));
+impl_syscall!(
+    sys_rt_sigprocmask,
+    rt_sigprocmask,
+    (c_int, *const SigSetT, *mut SigSetT, c_uint)
+);
+impl_syscall!(
+    sys_rt_sigaction,
+    rt_sigaction,
+    (c_int, *const SignalAction, *mut SignalAction)
+);
+impl_syscall!(
+    sys_rt_sigtimedwait,
+    rt_sigtimedwait,
+    (*const SigSetT, *mut SigInfoT, *const timespec, c_uint)
+);
+impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
+impl_syscall!(sys_rt_sigreturn, rt_sigreturn, ());
+impl_syscall!(sys_sigaltstack, signal_stack, (*const StackT, *mut StackT));
+impl_syscall!(sys_kill, kill, (c_int, c_int));
+impl_syscall!(sys_tkill, tkill, (c_int, c_int));
+impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));
