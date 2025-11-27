@@ -11,7 +11,7 @@ use crate::{
         kernel::{context::Context, task::setup_stack_layout},
         trap::TrapFrame,
     },
-    ipc::{SignalFlags, SignalHandlerTable, SignalPending},
+    ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         WaitQueue,
         task::{forkret, task_state::TaskState},
@@ -23,7 +23,7 @@ use crate::{
     },
     pr_debug,
     sync::SpinLock,
-    uapi::{resource::RlimitStruct, uts_namespace::UtsNamespace},
+    uapi::{resource::RlimitStruct, signal::SignalFlags, uts_namespace::UtsNamespace},
     vfs::{Dentry, FDTable},
 };
 

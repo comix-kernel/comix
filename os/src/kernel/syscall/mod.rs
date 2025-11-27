@@ -12,14 +12,16 @@ mod sys;
 mod task;
 mod util;
 
-use core::ffi::{c_char, c_int, c_ulong, c_void};
+use core::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
 
 use crate::{
     impl_syscall,
     uapi::{
         fs::LinuxStatFs,
         resource::{Rlimit, Rusage},
+        signal::{SigInfoT, SignalAction},
         time::timespec,
+        types::SigSetT,
     },
     vfs::Stat,
 };
@@ -123,5 +125,19 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
-impl_syscall!(sys_sigpending, sigpending, (*mut c_ulong));
-impl_syscall!(sys_sigprocmask, sigprocmask, (c_int, *const c_ulong, *mut c_ulong));
+impl_syscall!(sys_rt_sigpending, rt_sigpending, (*mut SigSetT, c_uint));
+impl_syscall!(
+    sys_rt_sigprocmask,
+    rt_sigprocmask,
+    (c_int, *const SigSetT, *mut SigSetT, c_uint)
+);
+impl_syscall!(
+    sys_rt_sigaction,
+    rt_sigaction,
+    (c_int, *const SignalAction, *mut SignalAction)
+);
+impl_syscall!(
+    sys_rt_sigtimedwait,
+    rt_sigtimedwait,
+    (*const SigSetT, *mut SigInfoT, *const timespec, c_uint)
+);
