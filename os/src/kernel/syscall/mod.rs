@@ -90,4 +90,5 @@ impl_syscall!(
 );
 impl_syscall!(sys_getsockname, getsockname, (i32, *mut u8, *mut u32));
 impl_syscall!(sys_getpeername, getpeername, (i32, *mut u8, *mut u32));
+impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
