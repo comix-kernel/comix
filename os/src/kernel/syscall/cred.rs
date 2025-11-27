@@ -59,29 +59,17 @@ pub fn setuid(uid: u32) -> isize {
 ///
 /// 在单 root 用户系统中，只允许设置为 0（root 组）
 pub fn setgid(gid: u32) -> isize {
-    if gid == ROOT_GID {
-        0
-    } else {
-        -EPERM as isize
-    }
+    if gid == ROOT_GID { 0 } else { -EPERM as isize }
 }
 
 /// 设置有效用户 ID
 pub fn seteuid(euid: u32) -> isize {
-    if euid == ROOT_UID {
-        0
-    } else {
-        -EPERM as isize
-    }
+    if euid == ROOT_UID { 0 } else { -EPERM as isize }
 }
 
 /// 设置有效组 ID
 pub fn setegid(egid: u32) -> isize {
-    if egid == ROOT_GID {
-        0
-    } else {
-        -EPERM as isize
-    }
+    if egid == ROOT_GID { 0 } else { -EPERM as isize }
 }
 
 /// 同时设置真实、有效和保存的用户 ID
