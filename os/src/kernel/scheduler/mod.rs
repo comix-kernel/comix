@@ -68,7 +68,12 @@ pub trait Scheduler {
     /// * `receive_signal`: 是否可被信号中断
     /// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
     ///       尽量不要使用该函数，除非你非常清楚自己在做什么
-    fn sleep_task_with_graud(&mut self, task: &mut SpinLockGuard<'_, TaskStruct>, stask: SharedTask, receive_signal: bool);
+    fn sleep_task_with_graud(
+        &mut self,
+        task: &mut SpinLockGuard<'_, TaskStruct>,
+        stask: SharedTask,
+        receive_signal: bool,
+    );
 }
 
 /// 执行一次调度操作，切换到下一个任务
@@ -128,6 +133,12 @@ pub fn exit_task_with_block(task: SharedTask) {
 /// * `receive_signal`: 是否可被信号中断
 /// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
 ///       尽量不要使用该函数，除非你非常清楚自己在做什么
-pub fn sleep_task_with_graud_and_block(task: &mut SpinLockGuard<'_, TaskStruct>, stask: SharedTask, receive_signal: bool) {
-    SCHEDULER.lock().sleep_task_with_graud(task, stask, receive_signal);
+pub fn sleep_task_with_graud_and_block(
+    task: &mut SpinLockGuard<'_, TaskStruct>,
+    stask: SharedTask,
+    receive_signal: bool,
+) {
+    SCHEDULER
+        .lock()
+        .sleep_task_with_graud(task, stask, receive_signal);
 }
