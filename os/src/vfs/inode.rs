@@ -203,11 +203,7 @@ pub trait Inode: Send + Sync + Any {
     fn as_any(&self) -> &dyn Any;
 
     /// 设置文件时间戳
-    fn set_times(
-        &self,
-        _atime: Option<timespec>,
-        _mtime: Option<timespec>,
-    ) -> Result<(), FsError> {
+    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
         // 默认实现：不支持
         Err(FsError::NotSupported)
     }
