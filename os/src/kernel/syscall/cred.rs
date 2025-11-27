@@ -3,8 +3,9 @@
 //! 在单 root 用户系统中，这些系统调用存储值但不实际限制权限
 
 use crate::kernel::task::current_task;
+use crate::tool::user_buffer::{validate_user_ptr_mut, write_to_user};
 use crate::uapi::cred::{GID_UNCHANGED, ROOT_GID, ROOT_UID, UID_UNCHANGED};
-use crate::uapi::errno::{EFAULT, EINVAL, EPERM};
+use crate::uapi::errno::{EFAULT, EPERM};
 
 /// 获取真实用户 ID
 ///
@@ -129,22 +130,37 @@ pub fn setresgid(rgid: u32, egid: u32, sgid: u32) -> isize {
 ///
 /// # 返回值
 /// * 0 - 成功
-/// * -1 - 失败（指针无效）
+/// * -EFAULT - 指针无效（指向内核空间或不可写）
+///
+/// # 安全性
+/// 此函数会验证所有指针是否指向有效的用户空间地址，
+/// 防止恶意用户程序传入内核空间地址导致内核内存被破坏。
 pub fn getresuid(ruid: *mut u32, euid: *mut u32, suid: *mut u32) -> isize {
+    // 验证所有指针的有效性
+    if !ruid.is_null() && !validate_user_ptr_mut(ruid) {
+        return -(EFAULT as isize);
+    }
+    if !euid.is_null() && !validate_user_ptr_mut(euid) {
+        return -(EFAULT as isize);
+    }
+    if !suid.is_null() && !validate_user_ptr_mut(suid) {
+        return -(EFAULT as isize);
+    }
+
     let task = current_task();
     let task_inner = task.lock();
     let cred = &task_inner.credential;
 
-    // TODO: 应该检查指针的有效性
+    // 安全地写入用户空间
     unsafe {
         if !ruid.is_null() {
-            *ruid = cred.uid;
+            write_to_user(ruid, cred.uid);
         }
         if !euid.is_null() {
-            *euid = cred.euid;
+            write_to_user(euid, cred.euid);
         }
         if !suid.is_null() {
-            *suid = cred.suid;
+            write_to_user(suid, cred.suid);
         }
     }
     0
@@ -159,22 +175,37 @@ pub fn getresuid(ruid: *mut u32, euid: *mut u32, suid: *mut u32) -> isize {
 ///
 /// # 返回值
 /// * 0 - 成功
-/// * -1 - 失败（指针无效）
+/// * -EFAULT - 指针无效（指向内核空间或不可写）
+///
+/// # 安全性
+/// 此函数会验证所有指针是否指向有效的用户空间地址，
+/// 防止恶意用户程序传入内核空间地址导致内核内存被破坏。
 pub fn getresgid(rgid: *mut u32, egid: *mut u32, sgid: *mut u32) -> isize {
+    // 验证所有指针的有效性
+    if !rgid.is_null() && !validate_user_ptr_mut(rgid) {
+        return -(EFAULT as isize);
+    }
+    if !egid.is_null() && !validate_user_ptr_mut(egid) {
+        return -(EFAULT as isize);
+    }
+    if !sgid.is_null() && !validate_user_ptr_mut(sgid) {
+        return -(EFAULT as isize);
+    }
+
     let task = current_task();
     let task_inner = task.lock();
     let cred = &task_inner.credential;
 
-    // TODO: 应该检查指针的有效性
+    // 安全地写入用户空间
     unsafe {
         if !rgid.is_null() {
-            *rgid = cred.gid;
+            write_to_user(rgid, cred.gid);
         }
         if !egid.is_null() {
-            *egid = cred.egid;
+            write_to_user(egid, cred.egid);
         }
         if !sgid.is_null() {
-            *sgid = cred.sgid;
+            write_to_user(sgid, cred.sgid);
         }
     }
     0
