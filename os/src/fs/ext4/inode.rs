@@ -7,12 +7,13 @@
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
 use crate::sync::{Mutex, SpinLock};
+use crate::uapi::time::timespec;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use ext4_rs::InodeFileType;
 
-use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType, TimeSpec};
+use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
 
 /// Ext4 Inode 包装
 pub struct Ext4Inode {
@@ -104,17 +105,17 @@ impl Inode for Ext4Inode {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
-            atime: TimeSpec {
-                sec: inode.atime as i64,
-                nsec: 0,
+            atime: timespec {
+                tv_sec: inode.atime as i64,
+                tv_nsec: 0,
             },
-            mtime: TimeSpec {
-                sec: inode.mtime as i64,
-                nsec: 0,
+            mtime: timespec {
+                tv_sec: inode.mtime as i64,
+                tv_nsec: 0,
             },
-            ctime: TimeSpec {
-                sec: inode.ctime as i64,
-                nsec: 0,
+            ctime: timespec {
+                tv_sec: inode.ctime as i64,
+                tv_nsec: 0,
             },
             inode_type,
             mode: FileMode::from_bits_truncate(mode as u32),
