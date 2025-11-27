@@ -53,6 +53,10 @@ impl BlockDriver for VirtIOBlkDriver {
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
         self.0.lock().write_blocks(block_id, buf).is_ok()
     }
+
+    fn flush(&self) -> bool {
+        self.0.lock().flush().is_ok()
+    }
 }
 
 /// 初始化 VirtIO 块设备驱动

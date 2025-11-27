@@ -17,6 +17,7 @@ use core::ffi::{c_char, c_int, c_void};
 use crate::{
     impl_syscall,
     uapi::{
+        fs::LinuxStatFs,
         resource::{Rlimit, Rusage},
         time::timespec,
     },
@@ -90,5 +91,31 @@ impl_syscall!(
 );
 impl_syscall!(sys_getsockname, getsockname, (i32, *mut u8, *mut u32));
 impl_syscall!(sys_getpeername, getpeername, (i32, *mut u8, *mut u32));
+impl_syscall!(
+    sys_readlinkat,
+    readlinkat,
+    (i32, *const c_char, *mut u8, usize)
+);
+impl_syscall!(
+    sys_newfstatat,
+    newfstatat,
+    (i32, *const c_char, *mut Stat, u32)
+);
+impl_syscall!(
+    sys_utimensat,
+    utimensat,
+    (i32, *const c_char, *const timespec, u32)
+);
+impl_syscall!(
+    sys_renameat2,
+    renameat2,
+    (i32, *const c_char, i32, *const c_char, u32)
+);
+impl_syscall!(sys_chdir, chdir, (*const c_char));
+impl_syscall!(sys_getcwd, getcwd, (*mut u8, usize));
+impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
+impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
+impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
+impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));

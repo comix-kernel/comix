@@ -5,7 +5,7 @@ use riscv::register::sstatus;
 
 use crate::{
     kernel::{current_cpu, current_task},
-    vfs::{FDFlags, File, FsError, OpenFlags, PipeFile},
+    vfs::{FdFlags, File, FsError, OpenFlags, PipeFile},
 };
 
 pub fn dup(oldfd: usize) -> isize {
@@ -45,7 +45,7 @@ pub fn pipe2(pipefd: *mut i32, flags: u32) -> isize {
     }
 
     let fd_flags =
-        FDFlags::from_open_flags(OpenFlags::from_bits(flags).unwrap_or(OpenFlags::empty()));
+        FdFlags::from_open_flags(OpenFlags::from_bits(flags).unwrap_or(OpenFlags::empty()));
 
     let (pipe_read, pipe_write) = PipeFile::create_pair();
 

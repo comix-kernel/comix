@@ -71,7 +71,7 @@ impl Ext4FileSystem {
         let ext4 = Arc::new(Mutex::new(ext4));
 
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
-        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2)); // ← 不再传 path
+        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2));
 
         let fs = Arc::new(Ext4FileSystem {
             device,
@@ -97,9 +97,12 @@ impl FileSystem for Ext4FileSystem {
     }
 
     fn sync(&self) -> Result<(), FsError> {
-        // TODO: ext4_rs 可能需要实现 sync 方法
-        // BlockDriver trait 不提供 flush 方法,这里暂时返回 Ok
-        Ok(())
+        // 调用底层块设备的 flush 方法，将缓存刷新到磁盘
+        if self.device.flush() {
+            Ok(())
+        } else {
+            Err(FsError::IoError)
+        }
     }
 
     fn statfs(&self) -> Result<StatFs, FsError> {
