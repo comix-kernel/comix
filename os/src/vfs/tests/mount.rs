@@ -58,3 +58,44 @@ test_case!(test_umount_fs, {
     // 如果没有根挂载点，应该返回 None
     // 如果有根挂载点，应该返回根而不是 /test_umount2
 });
+
+// P3 Overmount 测试
+
+test_case!(test_overmount, {
+    // 创建两个文件系统
+    let fs1 = create_test_simplefs();
+    let fs2 = create_test_simplefs();
+
+    // 在同一路径挂载两次
+    let result1 = MOUNT_TABLE.mount(fs1, "/overmount_test", MountFlags::empty(), None);
+    kassert!(result1.is_ok());
+
+    let result2 = MOUNT_TABLE.mount(fs2, "/overmount_test", MountFlags::empty(), None);
+    kassert!(result2.is_ok()); // 应该支持 overmount
+
+    // 查找挂载点应该返回最新的
+    let mount = MOUNT_TABLE.find_mount("/overmount_test");
+    kassert!(mount.is_some());
+
+    // 卸载一次，应该还能找到挂载点（下层的）
+    let umount_result = MOUNT_TABLE.umount("/overmount_test");
+    kassert!(umount_result.is_ok());
+
+    let mount_after = MOUNT_TABLE.find_mount("/overmount_test");
+    kassert!(mount_after.is_some()); // 应该还有下层挂载
+
+    // 再卸载一次，这次应该彻底没有了
+    let umount_result2 = MOUNT_TABLE.umount("/overmount_test");
+    kassert!(umount_result2.is_ok());
+
+    let mount_final = MOUNT_TABLE.find_mount("/overmount_test");
+    if let Some(m) = mount_final {
+        kassert!(m.mount_path != "/overmount_test");
+    }
+});
+
+test_case!(test_umount_root_should_fail, {
+    // 尝试卸载根文件系统应该失败
+    let result = MOUNT_TABLE.umount("/");
+    kassert!(result.is_err());
+});

@@ -197,7 +197,7 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
         PathComponent::Parent => {
             // ".." 表示父目录
             match base.parent() {
-                Some(parent) => Ok(parent),
+                Some(parent) => check_mount_point(parent),
                 None => Ok(base), // 根目录的父目录是自己
             }
         }
@@ -206,7 +206,8 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
 
             // 1. 先检查 dentry 缓存
             if let Some(child) = base.lookup_child(&name) {
-                return Ok(child);
+                // 即使缓存命中，也要检查挂载点（可能后来挂载了）
+                return check_mount_point(child);
             }
 
             // 2. 缓存未命中，通过 inode 查找
@@ -219,9 +220,30 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
             // 4. 加入全局缓存
             crate::vfs::DENTRY_CACHE.insert(&child_dentry);
 
-            Ok(child_dentry)
+            // 5. 检查是否有挂载点
+            check_mount_point(child_dentry)
         }
     }
+}
+
+/// 检查给定的 dentry 是否有挂载点，如果有则返回挂载点的根 dentry
+fn check_mount_point(dentry: Arc<Dentry>) -> Result<Arc<Dentry>, FsError> {
+    // 快速路径：检查 dentry 本地缓存
+    if let Some(mounted_root) = dentry.get_mount() {
+        return Ok(mounted_root);
+    }
+
+    // 慢速路径：查找挂载表（首次访问或缓存失效）
+    let full_path = dentry.full_path();
+    if let Some(mount_point) = crate::vfs::MOUNT_TABLE.find_mount(&full_path) {
+        if mount_point.mount_path == full_path {
+            // 更新 dentry 的挂载缓存
+            dentry.set_mount(&mount_point.root);
+            return Ok(mount_point.root.clone());
+        }
+    }
+
+    Ok(dentry)
 }
 
 /// 获取当前任务的工作目录
