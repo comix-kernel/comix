@@ -50,6 +50,8 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_KILL => sys_kill(frame),
         syscall_number::SYS_TKILL => sys_tkill(frame),
         syscall_number::SYS_TGKILL => sys_tgkill(frame),
+        syscall_number::SYS_UNAME => sys_uname(frame),
+        syscall_number::SYS_GETTID => sys_gettid(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
