@@ -10,7 +10,10 @@ use core::{
 
 use bitflags::bitflags;
 
-use crate::uapi::types::{ClockT, PidT, SigSetT, SizeT, UidT};
+use crate::{
+    arch::trap::TrapFrame,
+    uapi::types::{ClockT, PidT, SigSetT, SizeT, UidT},
+};
 
 /// 信号集合的大小（以字节为单位）
 pub const SIGSET_SIZE: usize = core::mem::size_of::<SigSetT>();
@@ -49,7 +52,6 @@ pub struct SignalAction {
     /// 信号处理行为标志 (如 SA_SIGINFO, SA_RESETHAND)。
     /// 注意：这里使用 i32 或 c_int 更符合 C 的 int 类型。
     pub sa_flags: c_int,
-    // 注意：如果您的 SaFlags 是 u32, 这里也可以使用 u32/i32 保证内存大小和符号兼容性
     /// C: `void (*sa_restorer)(void)`
     /// 信号恢复函数指针。通常由 C 库设置，用于从信号处理器返回。
     pub sa_restorer: SaRestorerPtr,
@@ -312,6 +314,20 @@ pub struct SigInfoT {
     pub __si_fields: __SiFields,
 }
 
+impl SigInfoT {
+    /// 创建一个新的、空的 SigInfoT 实例，所有字段初始化为零。
+    pub fn new() -> Self {
+        Self {
+            si_signo: 0,
+            si_errno: 0,
+            si_code: 0,
+            __si_fields: __SiFields {
+                __pad: [0; __SIGINFO_PAD_SIZE],
+            },
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union Sigval {
@@ -419,7 +435,8 @@ pub struct __AddrBnd {
 /// 用户态信号处理上下文结构体
 /// 该结构体包含恢复进程执行所需的所有状态。
 #[repr(C)]
-struct UContextT {
+#[derive(Clone, Copy, Debug)]
+pub struct UContextT {
     /// 标志位
     pub uc_flags: c_ulong,
     /// 链接到下一个上下文
@@ -430,6 +447,43 @@ struct UContextT {
     pub uc_sigmask: SigSetT,
     /// 机器上下文
     pub uc_mcontext: MContextT,
+}
+
+impl UContextT {
+    /// 创建一个新的 UContextT 实例，所有字段初始化为零或默认值。
+    pub fn default() -> Self {
+        Self {
+            uc_flags: 0,
+            uc_link: core::ptr::null_mut(),
+            uc_stack: SignalStack::default(),
+            uc_sigmask: 0,
+            uc_mcontext: MContextT::new(),
+        }
+    }
+
+    /// 创建一个新的 UContextT 实例，使用指定的字段值。
+    /// # 参数:
+    /// * `flags`: 上下文标志
+    /// * `link`: 指向下一个上下文的指针
+    /// * `stack`: 信号栈信息
+    /// * `sigmask`: 信号掩码
+    /// * `mcontext`: 机器上下文
+    /// # 返回值: 新的 UContextT 实例
+    pub fn new(
+        flags: c_ulong,
+        link: *mut UContextT,
+        stack: SignalStack,
+        sigmask: SigSetT,
+        mcontext: MContextT,
+    ) -> Self {
+        Self {
+            uc_flags: flags,
+            uc_link: link,
+            uc_stack: stack,
+            uc_sigmask: sigmask,
+            uc_mcontext: mcontext,
+        }
+    }
 }
 
 /// 信号栈信息结构体
@@ -459,6 +513,9 @@ pub const SS_AUTODISARM: usize = 1 << 31;
 /// 信号栈标志位掩码
 pub const SS_FLAG_BITS: usize = SS_AUTODISARM;
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+/// 机器上下文结构体
 pub struct MContextT {
     /// 通用寄存器数组
     pub gregs: [c_ulong; 32],
@@ -467,3 +524,23 @@ pub struct MContextT {
     ///      且注意struct pending?
     pub fpregs: [c_ulonglong; 66],
 }
+
+impl MContextT {
+    /// 创建一个新的 MContextT 实例，所有寄存器初始化为零。
+    pub fn new() -> Self {
+        Self {
+            gregs: [0; 32],
+            fpregs: [0; 66],
+        }
+    }
+
+    /// 从 TrapFrame 创建 MContextT 实例
+    pub fn from_trap_frame(tf: &TrapFrame) -> Self {
+        tf.to_mcontext()
+    }
+}
+
+/// uc_mcontext_ext has valid high gprs
+pub const UC_GPRS_HIGH: usize = 1;
+/// uc_mcontext_ext has valid vector regs
+pub const UC_VXRS: usize = 2;

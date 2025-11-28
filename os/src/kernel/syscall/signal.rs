@@ -1,11 +1,14 @@
 //! 信号相关的系统调用实现
 
-use core::ffi::{c_int, c_uint, c_ulong};
+use core::{
+    ffi::{c_int, c_uint, c_ulong},
+    sync::atomic::Ordering,
+};
 
 use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
-    arch::timer::clock_freq,
+    arch::{timer::clock_freq, trap::restore},
     ipc::{create_siginfo_for_signal, do_sigpending},
     kernel::{
         SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task,
@@ -16,8 +19,8 @@ use crate::{
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
-            MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE, SS_AUTODISARM,
-            SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
+            MContextT, MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE,
+            SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
         },
         time::timespec,
         types::{SigSetT, StackT},
@@ -223,11 +226,14 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
 /// 利用先前保存在用户空间栈上的信息，
 /// 恢复进程的信号掩码，切换栈，并恢复进程的上下文（处理器标志和寄存器，
 /// 包括栈指针和指令指针），以便进程从被信号中断的位置恢复执行。
-/// # 返回值：
-/// * 成功时返回 0
-/// * 失败时返回负的错误码
-pub fn rt_sigreturn() -> c_int {
-    0
+pub fn rt_sigreturn() -> ! {
+    let tfp = current_task().lock().trap_frame_ptr.load(Ordering::SeqCst);
+    let tf = unsafe { &mut *tfp };
+    let mcontext_addr = tf.x2_sp;
+    let mcontext: MContextT = unsafe { read_from_user(mcontext_addr as *const MContextT) };
+    tf.restore_from_mcontext(&mcontext);
+    unsafe { restore(tf) }
+    unreachable!("rt_sigreturn should not return");
 }
 
 /// 设置或获取备用信号处理栈的信息

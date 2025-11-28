@@ -1,5 +1,7 @@
 use riscv::register::sstatus;
 
+use crate::uapi::signal::MContextT;
+
 /// 陷阱帧结构体，保存寄存器状态
 #[repr(C)] // 确保 Rust 不会重新排列字段
 #[derive(Debug, Clone, Copy)]
@@ -171,5 +173,82 @@ impl TrapFrame {
         self.x2_sp = sp;
         // 子进程返回值为0
         self.x10_a0 = 0;
+    }
+
+    /// 将 TrapFrame 转换为 MContextT 结构体
+    pub fn to_mcontext(&self) -> MContextT {
+        MContextT {
+            gregs: [
+                self.x1_ra as u64,
+                self.x2_sp as u64,
+                self.x3_gp as u64,
+                self.x4_tp as u64,
+                self.x5_t0 as u64,
+                self.x6_t1 as u64,
+                self.x7_t2 as u64,
+                self.x8_s0 as u64,
+                self.x9_s1 as u64,
+                self.x10_a0 as u64,
+                self.x11_a1 as u64,
+                self.x12_a2 as u64,
+                self.x13_a3 as u64,
+                self.x14_a4 as u64,
+                self.x15_a5 as u64,
+                self.x16_a6 as u64,
+                self.x17_a7 as u64,
+                self.x18_s2 as u64,
+                self.x19_s3 as u64,
+                self.x20_s4 as u64,
+                self.x21_s5 as u64,
+                self.x22_s6 as u64,
+                self.x23_s7 as u64,
+                self.x24_s8 as u64,
+                self.x25_s9 as u64,
+                self.x26_s10 as u64,
+                self.x27_s11 as u64,
+                self.x28_t3 as u64,
+                self.x29_t4 as u64,
+                self.x30_t5 as u64,
+                self.x31_t6 as u64,
+                self.sepc as u64,
+            ],
+            fpregs: [0; 66],
+        }
+    }
+
+    /// 从 MContextT 恢复 TrapFrame
+    pub fn restore_from_mcontext(&mut self, mcontext: &MContextT) {
+        self.x1_ra = mcontext.gregs[0] as usize;
+        self.x2_sp = mcontext.gregs[1] as usize;
+        self.x3_gp = mcontext.gregs[2] as usize;
+        self.x4_tp = mcontext.gregs[3] as usize;
+        self.x5_t0 = mcontext.gregs[4] as usize;
+        self.x6_t1 = mcontext.gregs[5] as usize;
+        self.x7_t2 = mcontext.gregs[6] as usize;
+        self.x8_s0 = mcontext.gregs[7] as usize;
+        self.x9_s1 = mcontext.gregs[8] as usize;
+        self.x10_a0 = mcontext.gregs[9] as usize;
+        self.x11_a1 = mcontext.gregs[10] as usize;
+        self.x12_a2 = mcontext.gregs[11] as usize;
+        self.x13_a3 = mcontext.gregs[12] as usize;
+        self.x14_a4 = mcontext.gregs[13] as usize;
+        self.x15_a5 = mcontext.gregs[14] as usize;
+        self.x16_a6 = mcontext.gregs[15] as usize;
+        self.x17_a7 = mcontext.gregs[16] as usize;
+        self.x18_s2 = mcontext.gregs[17] as usize;
+        self.x19_s3 = mcontext.gregs[18] as usize;
+        self.x20_s4 = mcontext.gregs[19] as usize;
+        self.x21_s5 = mcontext.gregs[20] as usize;
+        self.x22_s6 = mcontext.gregs[21] as usize;
+        self.x23_s7 = mcontext.gregs[22] as usize;
+        self.x24_s8 = mcontext.gregs[23] as usize;
+        self.x25_s9 = mcontext.gregs[24] as usize;
+        self.x26_s10 = mcontext.gregs[25] as usize;
+        self.x27_s11 = mcontext.gregs[26] as usize;
+        self.x28_t3 = mcontext.gregs[27] as usize;
+        self.x29_t4 = mcontext.gregs[28] as usize;
+        self.x30_t5 = mcontext.gregs[29] as usize;
+        self.x31_t6 = mcontext.gregs[30] as usize;
+        self.sepc = mcontext.gregs[31] as usize;
     }
 }

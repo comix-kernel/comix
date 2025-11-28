@@ -12,12 +12,13 @@
 use bitflags::bitflags;
 
 use crate::{
-    arch::{kernel::cpu, trap::TrapFrame},
+    arch::{kernel::cpu, trap::{TrapFrame, sigreturn_trampoline_address}},
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
         exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block, yield_task,
     },
     pr_err,
+    tool::{address::align_down, user_buffer::write_to_user},
     uapi::signal::*,
 };
 
@@ -143,24 +144,25 @@ pub fn check_signal() {
     handle_one_signal(sig_flag, action, &task);
 }
 
+/// 为信号创建 siginfo_t 结构体
+/// # 参数:
+/// * `flag`: 信号标志
+/// TODO: 填充更多字段
 pub fn create_siginfo_for_signal(flag: SignalFlags) -> SigInfoT {
     let sig_num = flag.to_signal_number();
-    SigInfoT {
-        si_signo: sig_num as i32,
-        si_errno: todo!(),
-        si_code: todo!(),
-        __si_fields: todo!(),
-    }
+    let mut sig_info = SigInfoT::new();
+    sig_info.si_signo = sig_num as i32;
+    sig_info.si_code = 0;
+    sig_info.si_errno = 0;
+    sig_info
 }
 
 /// 设置信号用户态处理栈帧
 /// # 说明:
 /// 当信号投递时，内核在信号栈上从高地址到低地址通常依次构建以下结构：
-///     1. 返回地址： 指向 C 库中的一个特殊函数（称为 sigreturn 或信号 trampoline），而不是直接返回原程序。
-///     2. siginfo_t 结构体。 该结构体包含有关信号的信息（如信号编号、发送者等）。
-///     3. ucontext_t 结构体。 该结构体保存了被信号中断时的处理器状态（寄存器等）。
-///     4. 信号处理函数的参数： 准备好传递给用户注册的信号处理函数的参数
-///        （通常是信号编号、siginfo_t* 指针和 ucontext_t* 指针）。
+///     1. siginfo_t 结构体。 该结构体包含有关信号的信息（如信号编号、发送者等）。
+///     2. ucontext_t 结构体。 该结构体保存了被信号中断时的处理器状态（寄存器等）。
+///     3. 返回地址： 指向 C 库中的一个特殊函数（称为 sigreturn 或信号 trampoline），而不是直接返回原程序。
 /// 当信号处理函数返回时，它实际上会跳转到栈上的 sigreturn 函数，该函数会调用 rt_sigreturn 系统调用。
 /// 内核接收到这个调用后，会从栈上加载 ucontext_t 结构体，恢复所有保存的寄存器状态，从而使程序恢复到被中断时的执行点。
 /// # 参数:
@@ -174,21 +176,49 @@ fn install_user_signal_trap_frame(
     entry: isize,
     action_mask: SignalFlags,
 ) {
-    use core::mem::size_of;
     let mut t = task.lock();
     let tp = t.trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
         let tf = &mut *tp;
-        let user_sp = tf.x2_sp;
-        let frame_size = size_of::<TrapFrame>();
-        let mask_size = size_of::<SignalFlags>();
-        // 16 字节对齐
-        let total = (frame_size + mask_size + 15) & !15;
-        let frame_addr = user_sp.checked_sub(total).expect("signal frame overflow");
-        let frame_ptr = frame_addr as *mut TrapFrame;
-        frame_ptr.write(*tf); // 保存旧上下文
-        let mask_ptr = (frame_addr + frame_size) as *mut SignalFlags;
-        mask_ptr.write(t.blocked.clone());
+        let siginfo = create_siginfo_for_signal(SignalFlags::from_signal_num(sig_num).unwrap());
+        let uc = UContextT::new(
+            0,           // TODO: flags未实现
+            0 as *mut _, // TODO: link未实现
+            t.signal_stack.lock().clone(),
+            t.blocked.to_sigset_t(),
+            MContextT::from_trap_frame(tf),
+        );
+        // 构建用户栈帧
+        // TODO: 处理备用信号栈
+        // 内核决定是否使用备用信号栈取决于:
+        // 1. 备用栈已分配和启用
+        // 2. 信号处理动作明确要求使用备用栈
+        // 3. 当前线程不在备用栈上 (防止递归溢出)
+        let mut current_sp = tf.x2_sp;
+
+        current_sp = align_down(current_sp, align_of::<SigInfoT>());
+        let sig_info_addr = current_sp - size_of::<SigInfoT>();
+        current_sp = sig_info_addr;
+
+        current_sp = align_down(current_sp, align_of::<UContextT>());
+        let ucontext_addr = current_sp - size_of::<UContextT>();
+        current_sp = ucontext_addr;
+
+        current_sp = align_down(current_sp, align_of::<usize>()) - size_of::<usize>();
+        let return_addr_slot = current_sp;
+
+        // HACK: 保证返回地址和 ucontext_t 结构体地址之间没有间隙
+        //       以便于在 rt_sigreturn 直接读取 ucontext_t
+        let ucontext_addr = current_sp + size_of::<usize>();
+
+        let final_sp = current_sp;
+
+        write_to_user(sig_info_addr as *mut SigInfoT, siginfo);
+        write_to_user(ucontext_addr as *mut UContextT, uc);
+        write_to_user(
+            return_addr_slot as *mut usize,
+            sigreturn_trampoline_address(),
+        );
 
         // 更新 blocked（跳过不可屏蔽信号）
         if sig_num != NUM_SIGKILL && sig_num != NUM_SIGSTOP {
@@ -199,7 +229,7 @@ fn install_user_signal_trap_frame(
         // 设置用户处理器入口
         tf.sepc = entry as usize;
         tf.x10_a0 = sig_num;
-        tf.x2_sp = frame_addr;
+        tf.x2_sp = final_sp;
     }
 }
 

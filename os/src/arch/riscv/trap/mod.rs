@@ -14,6 +14,7 @@ pub use trap_frame::TrapFrame;
 
 global_asm!(include_str!("trap_entry.S"));
 global_asm!(include_str!("boot_trap_entry.S"));
+global_asm!(include_str!("sigreturn.S"));
 
 /// 初始化引导时的陷阱处理程序
 pub fn init_boot_trap() {
@@ -30,6 +31,11 @@ pub fn init() {
 /// 该函数涉及直接操作处理器状态，必须确保传入的 TrapFrame 是有效且正确的。
 pub unsafe fn restore(trap_frame: &TrapFrame) {
     unsafe { __restore(trap_frame) };
+}
+
+/// 获取信号返回的 trampoline 地址
+pub fn sigreturn_trampoline_address() -> usize {
+    __sigreturn_trampoline as usize
 }
 
 fn set_trap_entry() {
@@ -50,4 +56,5 @@ unsafe extern "C" {
     unsafe fn boot_trap_entry();
     unsafe fn trap_entry();
     unsafe fn __restore(trap_frame: &TrapFrame);
+    unsafe fn __sigreturn_trampoline();
 }
