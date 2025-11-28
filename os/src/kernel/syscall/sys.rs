@@ -10,19 +10,19 @@ use crate::{
         syscall::util::{check_syslog_permission, validate_syslog_args},
     },
     log::{
-        DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, log_len, read_log,
+        DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, read_log,
         set_console_level,
     },
     pr_alert,
-    tool::user_buffer::UserBuffer,
+    tool::{cstr_copy, user_buffer::{UserBuffer, write_to_user}},
     uapi::{
-        errno::{EINVAL, ENAMETOOLONG},
+        errno::EINVAL,
         log::SyslogAction,
         reboot::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
         },
-        uts_namespace::HOST_NAME_MAX,
+        uts_namespace::{UTS_NAME_LEN, UtsNamespace},
     },
 };
 
@@ -65,22 +65,17 @@ pub fn reboot(magic: c_int, magic2: c_int, op: c_int, _arg: *mut c_void) -> c_in
 /// # 返回值
 /// 成功返回 0，失败返回负错误码
 /// 注意: 没有GETHOSTNAME系统调用, 该功能实际属于SYS_UNAME或sysinfo
-pub fn get_hostname(buf: *mut c_char, len: usize) -> c_int {
-    let mut result = 0;
-    let task = current_task();
-    let mut name = {
+pub fn uname(buf: *mut UtsNamespace) -> c_int {
+    let uts = {
+        let task = current_task();
         let t = task.lock();
-        t.uts_namespace.lock().nodename.clone()
+        t.uts_namespace.clone()
     };
-    name.push(0);
-    if name.len() > len {
-        result = -ENAMETOOLONG;
-    }
-    let buffer = UserBuffer::new(buf, len);
+    let uts_lock = uts.lock();
     unsafe {
-        buffer.copy_to_user(&name);
+        write_to_user(buf, uts_lock.clone());
     }
-    result
+    0
     // TODO: EPERM 和 EFAULT
 }
 
@@ -91,7 +86,7 @@ pub fn get_hostname(buf: *mut c_char, len: usize) -> c_int {
 /// # 返回值
 /// 成功返回 0，失败返回负错误码
 pub fn set_hostname(name: *const c_char, len: usize) -> c_int {
-    if len > HOST_NAME_MAX {
+    if len > UTS_NAME_LEN {
         return -EINVAL;
     }
     let uts = {
@@ -103,7 +98,7 @@ pub fn set_hostname(name: *const c_char, len: usize) -> c_int {
     let name = unsafe { name_buf.copy_from_user() };
     {
         let mut uts_lock = uts.lock();
-        uts_lock.nodename = name;
+        cstr_copy(name.as_ptr(), &mut uts_lock.nodename, len);
     }
     0
     // TODO: EPERM 和 EFAULT

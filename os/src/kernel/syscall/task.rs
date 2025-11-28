@@ -528,3 +528,7 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
     result
     // TODO: EFAULT
 }
+
+pub fn gettid() -> c_int {
+    current_task().lock().tid as c_int
+}

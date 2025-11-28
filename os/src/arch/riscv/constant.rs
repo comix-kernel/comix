@@ -1,5 +1,9 @@
 //! RISC-V 架构相关的常量定义
 #![allow(unused)]
+
+/// 架构名称字符串
+pub const ARCH: &str = "riscv64";
+
 /// riscv sstatus 寄存器中 SIE 位的掩码
 pub const SSTATUS_SIE: usize = 1 << 1;
 /// riscv sstatus 寄存器中 SPIE 位的掩码
