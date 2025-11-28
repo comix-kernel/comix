@@ -228,6 +228,8 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
 fn get_cur_dir() -> Result<Arc<Dentry>, FsError> {
     current_task()
         .lock()
+        .fs
+        .lock()
         .cwd
         .clone()
         .ok_or(FsError::NotSupported)
