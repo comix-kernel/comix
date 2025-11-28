@@ -274,3 +274,63 @@ fn get_dmesg_restrict() -> u32 {
     // 参考路径: /proc/sys/kernel/dmesg_restrict
     0
 }
+
+/// 刷新所有块设备
+///
+/// # 返回值
+/// 如果所有设备成功刷新返回 Ok(()),否则返回第一个错误
+pub fn flush_all_block_devices() -> Result<(), isize> {
+    use crate::{device::BLK_DRIVERS, uapi::errno::EIO};
+
+    let drivers = BLK_DRIVERS.read();
+
+    if drivers.is_empty() {
+        // 没有块设备也算成功(无事可做)
+        return Ok(());
+    }
+
+    for driver in drivers.iter() {
+        if !driver.flush() {
+            // VirtIO flush 失败
+            return Err(-EIO as isize);
+        }
+    }
+
+    Ok(())
+}
+
+/// 从文件描述符获取对应的块设备并刷新
+///
+/// 通过 fd -> dentry -> 路径 -> 挂载点 -> 文件系统 -> 同步
+///
+/// # 参数
+/// - `fd`: 文件描述符
+///
+/// # 返回值
+/// - Ok(()): 刷新成功
+/// - Err(-EBADF): 无效的文件描述符
+/// - Err(-EINVAL): fd 不支持同步(如 pipe、socket)
+/// - Err(-EIO): 块设备刷新失败
+pub fn flush_block_device_by_fd(fd: usize) -> Result<(), isize> {
+    use crate::{uapi::errno::EIO, vfs::MOUNT_TABLE};
+
+    // 1. 获取文件对象
+    let task = current_task();
+    let file = task.lock().fd_table.get(fd).map_err(|e| e.to_errno())?;
+
+    // 2. 获取 dentry (如果不支持则说明是管道等特殊文件)
+    let dentry = file.dentry().map_err(|e| e.to_errno())?;
+
+    // 3. 获取文件的完整路径
+    let path = dentry.full_path();
+
+    // 4. 通过路径查找对应的挂载点
+    let mount_point = MOUNT_TABLE
+        .find_mount(&path)
+        .ok_or_else(|| FsError::NotSupported.to_errno())?;
+
+    // 5. 调用文件系统的 sync 方法
+    mount_point.fs.sync().map_err(|_| -EIO as isize)?;
+
+    Ok(())
+}

@@ -126,6 +126,10 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
+impl_syscall!(sys_sync, sync, ());
+impl_syscall!(sys_syncfs, syncfs, (usize));
+impl_syscall!(sys_fsync, fsync, (usize));
+impl_syscall!(sys_fdatasync, fdatasync, (usize));
 impl_syscall!(sys_rt_sigpending, rt_sigpending, (*mut SigSetT, c_uint));
 impl_syscall!(
     sys_rt_sigprocmask,
