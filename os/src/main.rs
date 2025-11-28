@@ -52,14 +52,14 @@ pub extern "C" fn rust_main(_hartid: usize) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     if let Some(location) = info.location() {
-        println!(
+        earlyprintln!(
             "Panicked at {}:{} {}",
             location.file(),
             location.line(),
             info.message()
         );
     } else {
-        println!("Panicked: {}", info.message());
+        earlyprintln!("Panicked: {}", info.message());
     }
     shutdown(true)
 }

@@ -22,6 +22,7 @@ use crate::{
         signal::{SigInfoT, SignalAction},
         time::timespec,
         types::{SigSetT, StackT},
+        uts_namespace::UtsNamespace,
     },
     vfs::Stat,
 };
@@ -147,3 +148,5 @@ impl_syscall!(sys_sigaltstack, signal_stack, (*const StackT, *mut StackT));
 impl_syscall!(sys_kill, kill, (c_int, c_int));
 impl_syscall!(sys_tkill, tkill, (c_int, c_int));
 impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));
+impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
+impl_syscall!(sys_gettid, gettid, ());
