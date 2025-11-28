@@ -256,13 +256,13 @@ pub fn chdir(path: *const c_char) -> isize {
     }
 
     // 更新当前工作目录
-    current_task().lock().cwd = Some(dentry);
+    current_task().lock().fs.lock().cwd = Some(dentry);
     0
 }
 
 pub fn getcwd(buf: *mut u8, size: usize) -> isize {
     // 获取当前工作目录dentry
-    let cwd_dentry = match current_task().lock().cwd.clone() {
+    let cwd_dentry = match current_task().lock().fs.lock().cwd.clone() {
         Some(d) => d,
         None => return FsError::NotSupported.to_errno(),
     };

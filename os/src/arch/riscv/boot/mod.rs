@@ -7,9 +7,9 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
-    ipc::{SignalFlags, SignalHandlerTable},
+    ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
+        FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
         sleep_task_with_block, yield_task,
     },
@@ -22,8 +22,10 @@ use crate::{
     test::run_early_tests,
     uapi::{
         resource::{INIT_RLIMITS, RlimitStruct},
+        signal::SignalFlags,
         uts_namespace::UtsNamespace,
     },
+    vfs::{create_stdio_files, fd_table, get_root_dentry},
 };
 
 /// 内核的第一个任务启动函数
@@ -32,6 +34,20 @@ pub fn rest_init() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
+    let fd_table = fd_table::FDTable::new();
+    let (stdin, stdout, stderr) = create_stdio_files();
+    fd_table
+        .install_at(0, stdin)
+        .expect("Failed to install stdin");
+    fd_table
+        .install_at(1, stdout)
+        .expect("Failed to install stdout");
+    fd_table
+        .install_at(2, stderr)
+        .expect("Failed to install stderr");
+    let cwd = get_root_dentry().ok();
+    let root = cwd.clone();
+    let fs = Arc::new(SpinLock::new(FsStruct::new(cwd, root)));
     let mut task = TaskStruct::ktask_create(
         tid,
         tid,
@@ -41,8 +57,11 @@ pub fn rest_init() {
         trap_frame_tracker,
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
+        Arc::new(SpinLock::new(SignalPending::empty())),
         Arc::new(SpinLock::new(UtsNamespace::default())),
         Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
+        Arc::new(fd_table),
+        fs,
     ); // init 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
@@ -116,10 +135,15 @@ fn create_kthreadd() {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
-    let (uts, rlimit) = {
+    let (uts, rlimit, fd_table, fs) = {
         let task = current_task();
         let t = task.lock();
-        (t.uts_namespace.clone(), t.rlimit.clone())
+        (
+            t.uts_namespace.clone(),
+            t.rlimit.clone(),
+            t.fd_table.clone_table(),
+            t.fs.lock().clone(),
+        )
     };
     let task = TaskStruct::ktask_create(
         tid,
@@ -130,8 +154,11 @@ fn create_kthreadd() {
         trap_frame_tracker,
         Arc::new(SpinLock::new(SignalHandlerTable::new())),
         SignalFlags::empty(),
+        Arc::new(SpinLock::new(SignalPending::empty())),
         uts,
         rlimit,
+        Arc::new(fd_table),
+        Arc::new(SpinLock::new(fs)),
     ); // kthreadd 没有父任务
 
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);

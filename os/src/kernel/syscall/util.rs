@@ -96,6 +96,8 @@ pub fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, Fs
     } else if dirfd == super::fs::AT_FDCWD {
         current_task()
             .lock()
+            .fs
+            .lock()
             .cwd
             .clone()
             .ok_or(FsError::NotSupported)?
