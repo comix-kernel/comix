@@ -3,8 +3,8 @@
 use crate::{
     config::{VirtDevice, mmio_of},
     device::device_tree::FDT,
-    mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
     earlyprintln,
+    mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
 };
 use core::ptr::{read_volatile, write_volatile};
 
@@ -259,7 +259,10 @@ impl PcieHost {
     pub fn enumerate(&self) {
         earlyprintln!(
             "[PCIe] ECAM @ {:#x} (size {:#x}), MMIO @ {:#x} (size {:#x})",
-            self.ecam_paddr, self.ecam_size, self.mmio_base, self.mmio_size
+            self.ecam_paddr,
+            self.ecam_size,
+            self.mmio_base,
+            self.mmio_size
         );
 
         for bus in self.bus_start..=self.bus_end {

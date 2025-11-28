@@ -245,7 +245,10 @@ impl NetworkConfigManager {
 
             earlyprintln!(
                 "Set interface config for {}: IP={}/{}, Gateway={}",
-                interface_name, ip, prefix_length, gateway
+                interface_name,
+                ip,
+                prefix_length,
+                gateway
             );
             Ok(())
         } else {

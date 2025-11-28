@@ -21,7 +21,8 @@ use crate::{
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         time::timespec,
-        types::{SigSetT, StackT}, uts_namespace::UtsNamespace,
+        types::{SigSetT, StackT},
+        uts_namespace::UtsNamespace,
     },
     vfs::Stat,
 };

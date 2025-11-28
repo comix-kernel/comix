@@ -6,18 +6,27 @@ use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
-    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap}, earlyprintln, ipc::{SignalHandlerTable, SignalPending}, kernel::{
+    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
+    earlyprintln,
+    ipc::{SignalHandlerTable, SignalPending},
+    kernel::{
         FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
         sleep_task_with_block, yield_task,
-    }, mm::{
+    },
+    mm::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
-    }, println, sync::SpinLock, test::run_early_tests, uapi::{
+    },
+    println,
+    sync::SpinLock,
+    test::run_early_tests,
+    uapi::{
         resource::{INIT_RLIMITS, RlimitStruct},
         signal::SignalFlags,
         uts_namespace::UtsNamespace,
-    }, vfs::{create_stdio_files, fd_table, get_root_dentry}
+    },
+    vfs::{create_stdio_files, fd_table, get_root_dentry},
 };
 
 /// 内核的第一个任务启动函数

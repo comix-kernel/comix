@@ -20,39 +20,23 @@ pub fn console_putchar(c: usize) {
 /// 使用 sbi 调用从控制台获取字符(qemu uart handler)
 /// 返回值：字符的 ASCII 码
 pub fn console_getchar() -> usize {
-    MAIN_CONSOLE
-        .read()
-        .as_ref()
-        .unwrap()
-        .read_char() as usize
+    MAIN_CONSOLE.read().as_ref().unwrap().read_char() as usize
 }
 
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        MAIN_CONSOLE
-            .read()
-            .as_ref()
-            .unwrap()
-            .write_str(s);
+        MAIN_CONSOLE.read().as_ref().unwrap().write_str(s);
         Ok(())
     }
 }
 
 impl Stdin {
     pub fn read_char(&mut self) -> char {
-        MAIN_CONSOLE
-            .read()
-            .as_ref()
-            .unwrap()
-            .read_char()
+        MAIN_CONSOLE.read().as_ref().unwrap().read_char()
     }
 
     pub fn read_line(&mut self, buf: &mut String) {
-        MAIN_CONSOLE
-            .read()
-            .as_ref()
-            .unwrap()
-            .read_line(buf);
+        MAIN_CONSOLE.read().as_ref().unwrap().read_line(buf);
     }
 }
 

@@ -1,7 +1,10 @@
 //! 设备树模块
 
 use crate::{
-    device::{CMDLINE, irq::IntcDriver}, earlyprintln, kernel::{CLOCK_FREQ, NUM_CPU}, mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
+    device::{CMDLINE, irq::IntcDriver},
+    earlyprintln,
+    kernel::{CLOCK_FREQ, NUM_CPU},
+    mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 use fdt::{Fdt, node::FdtNode};

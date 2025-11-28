@@ -1,7 +1,7 @@
 //! 控制台驱动模块
 
-pub mod uart_console;
 pub mod frame_console;
+pub mod uart_console;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use spin::RwLock;

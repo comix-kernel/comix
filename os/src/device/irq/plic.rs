@@ -111,7 +111,10 @@ pub fn init_dt(dt: &FdtNode) {
             .write()
             .insert(phandle.try_into().unwrap(), plic);
     } else {
-        earlyprintln!("[Device] PLIC device tree node {} has no 'reg' property", dt.name);
+        earlyprintln!(
+            "[Device] PLIC device tree node {} has no 'reg' property",
+            dt.name
+        );
     }
 }
 
