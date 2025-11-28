@@ -14,7 +14,10 @@ use crate::{
         set_console_level,
     },
     pr_alert,
-    tool::{cstr_copy, user_buffer::{UserBuffer, write_to_user}},
+    tool::{
+        cstr_copy,
+        user_buffer::{UserBuffer, write_to_user},
+    },
     uapi::{
         errno::EINVAL,
         log::SyslogAction,

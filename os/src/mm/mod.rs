@@ -59,7 +59,9 @@ pub fn init() {
     {
         use alloc::sync::Arc;
 
-        use crate::{earlyprintln, kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock};
+        use crate::{
+            earlyprintln, kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock,
+        };
 
         // 记录切换前的 satp 值
         let old_satp: usize;

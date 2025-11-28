@@ -15,7 +15,10 @@ use crate::{
     device::{
         block::virtio_blk, device_tree::DEVICE_TREE_REGISTRY, gpu::virtio_gpu, input::virtio_input,
         net::virtio_net,
-    }, earlyprintln, kernel::current_memory_space, mm::address::{Paddr, UsizeConvert}
+    },
+    earlyprintln,
+    kernel::current_memory_space,
+    mm::address::{Paddr, UsizeConvert},
 };
 
 pub fn driver_init() {
@@ -34,7 +37,10 @@ fn virtio_probe(node: &FdtNode) {
         let paddr = reg.starting_address as usize;
         let size = reg.size.unwrap_or(0);
         if size == 0 {
-            earlyprintln!("[Device] Virtio MMIO device tree node {} has no size", node.name);
+            earlyprintln!(
+                "[Device] Virtio MMIO device tree node {} has no size",
+                node.name
+            );
             return;
         }
         //判 断 virtio 设 备 类 型

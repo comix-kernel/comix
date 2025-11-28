@@ -2,7 +2,8 @@ mod guard;
 pub mod macros;
 pub mod net_test;
 use crate::{
-    arch::intr::{are_interrupts_enabled, disable_interrupts, enable_interrupts}, earlyprintln
+    arch::intr::{are_interrupts_enabled, disable_interrupts, enable_interrupts},
+    earlyprintln,
 };
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
