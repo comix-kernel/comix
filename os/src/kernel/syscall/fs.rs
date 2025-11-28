@@ -1165,3 +1165,132 @@ pub fn renameat2(
 
     0
 }
+
+/// mount - 挂载文件系统
+///
+/// # 系统调用号
+/// 40 (SYS_MOUNT)
+///
+/// # 简化实现说明
+/// - 只支持 ext4 文件系统（忽略 filesystemtype 参数）
+/// - 使用第一个可用的块设备（忽略 source 参数）
+/// - 忽略所有 mountflags（但保留以保持 ABI 兼容）
+/// - 忽略 data 参数
+pub fn mount(
+    _source: *const c_char,
+    target: *const c_char,
+    _filesystemtype: *const c_char,
+    _mountflags: u64,
+    _data: *const core::ffi::c_void,
+) -> isize {
+    use crate::config::EXT4_BLOCK_SIZE;
+    use crate::fs::ext4::Ext4FileSystem;
+    use crate::kernel::syscall::util::get_first_block_device;
+    use crate::vfs::{MountFlags as VfsMountFlags, MOUNT_TABLE};
+    use alloc::string::String;
+
+    // 1. 启用用户空间内存访问
+    unsafe { riscv::register::sstatus::set_sum() };
+
+    // 2. 解析目标路径
+    let target_str = match get_path_safe(target) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { riscv::register::sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+
+    unsafe { riscv::register::sstatus::clear_sum() };
+
+    crate::pr_info!("[SYSCALL] mount: mounting at '{}'", target_str);
+
+    // 3. 检查挂载点是否存在
+    if vfs_lookup(&target_str).is_err() {
+        crate::pr_warn!("[SYSCALL] mount: target '{}' does not exist", target_str);
+        return FsError::NotFound.to_errno();
+    }
+
+    // 4. 获取块设备（简化：使用第一个）
+    let block_device = match get_first_block_device() {
+        Ok(dev) => dev,
+        Err(e) => {
+            crate::pr_err!("[SYSCALL] mount: no block device available");
+            return e as isize;
+        }
+    };
+
+    // 5. 创建 Ext4 文件系统
+    let block_size = EXT4_BLOCK_SIZE;
+    let total_blocks = crate::config::FS_IMAGE_SIZE / block_size;
+
+    let ext4_fs = match Ext4FileSystem::open(block_device.clone(), block_size, total_blocks, 0) {
+        Ok(fs) => fs,
+        Err(e) => {
+            crate::pr_err!("[SYSCALL] mount: failed to open ext4: {:?}", e);
+            return e.to_errno();
+        }
+    };
+
+    // 6. 挂载文件系统（使用空标志，因为我们忽略所有 flags）
+    match MOUNT_TABLE.mount(
+        ext4_fs,
+        &target_str,
+        VfsMountFlags::empty(),
+        Some(String::from("virtio-blk0")),
+    ) {
+        Ok(()) => {
+            crate::pr_info!("[SYSCALL] mount: successfully mounted at '{}'", target_str);
+            0
+        }
+        Err(e) => {
+            crate::pr_err!("[SYSCALL] mount: failed: {:?}", e);
+            e.to_errno()
+        }
+    }
+}
+
+/// umount2 - 卸载文件系统
+///
+/// # 系统调用号
+/// 39 (SYS_UMOUNT2)
+///
+/// # 简化实现说明
+/// - 忽略 flags 参数（但保留以保持 ABI 兼容）
+/// - 不检查文件是否被占用
+/// - 直接调用 MOUNT_TABLE.umount()
+pub fn umount2(target: *const c_char, _flags: i32) -> isize {
+    use crate::vfs::MOUNT_TABLE;
+
+    // 1. 启用用户空间内存访问
+    unsafe { riscv::register::sstatus::set_sum() };
+
+    // 2. 解析目标路径
+    let target_str = match get_path_safe(target) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { riscv::register::sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+
+    unsafe { riscv::register::sstatus::clear_sum() };
+
+    crate::pr_info!("[SYSCALL] umount2: unmounting '{}'", target_str);
+
+    // 3. 卸载文件系统
+    // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
+    match MOUNT_TABLE.umount(&target_str) {
+        Ok(()) => {
+            crate::pr_info!(
+                "[SYSCALL] umount2: successfully unmounted '{}'",
+                target_str
+            );
+            0
+        }
+        Err(e) => {
+            crate::pr_err!("[SYSCALL] umount2: failed: {:?}", e);
+            e.to_errno()
+        }
+    }
+}
