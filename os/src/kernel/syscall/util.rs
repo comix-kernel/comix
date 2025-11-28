@@ -272,3 +272,23 @@ fn get_dmesg_restrict() -> u32 {
     // 参考路径: /proc/sys/kernel/dmesg_restrict
     0
 }
+
+/// 获取第一个可用的块设备驱动
+///
+/// 简化版实现：直接返回第一个块设备
+///
+/// # 返回值
+/// * `Ok(Arc<dyn BlockDriver>)` - 成功获取块设备
+/// * `Err(errno)` - 没有可用的块设备
+pub fn get_first_block_device() -> Result<Arc<dyn crate::device::block::BlockDriver>, i32> {
+    use crate::device::BLK_DRIVERS;
+    use crate::uapi::errno::ENODEV;
+
+    let drivers = BLK_DRIVERS.read();
+
+    if drivers.is_empty() {
+        return Err(-ENODEV);
+    }
+
+    Ok(drivers[0].clone())
+}

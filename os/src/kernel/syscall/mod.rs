@@ -115,6 +115,8 @@ impl_syscall!(sys_chdir, chdir, (*const c_char));
 impl_syscall!(sys_getcwd, getcwd, (*mut u8, usize));
 impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
 impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
+impl_syscall!(sys_umount2, umount2, (*const c_char, i32));
+impl_syscall!(sys_mount, mount, (*const c_char, *const c_char, *const c_char, u64, *const c_void));
 impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
