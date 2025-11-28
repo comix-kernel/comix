@@ -1,10 +1,10 @@
 //! RISC-V Virt 平台相关
 
-use crate::device::{bus, device_tree, irq};
+use crate::device::{bus, device_tree, irq, serial};
 
 /// 初始化 Virt 平台相关设备
 pub fn init() {
-    // serial::uart16550::driver_init();
+    serial::uart16550::driver_init();
     bus::virtio_mmio::driver_init();
     irq::plic::driver_init();
     // rtc::rtc_goldfish::driver_init();

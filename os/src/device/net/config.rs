@@ -1,5 +1,4 @@
-use crate::device::net::interface::NETWORK_INTERFACE_MANAGER;
-use crate::println;
+use crate::{device::net::interface::NETWORK_INTERFACE_MANAGER, earlyprintln};
 use alloc::string::String;
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address};
 
@@ -86,7 +85,7 @@ impl NetworkConfigManager {
 
     /// 初始化默认网络接口配置
     pub fn init_default_interface() -> Result<(), NetworkConfigError> {
-        println!("Initializing default network configuration...");
+        earlyprintln!("Initializing default network configuration...");
 
         // 先获取接口的Arc，然后释放全局锁
         // 避免在持有NETWORK_INTERFACE_MANAGER锁时操作接口字段锁
@@ -96,21 +95,21 @@ impl NetworkConfigManager {
         }; // NETWORK_INTERFACE_MANAGER锁已释放
 
         if let Some(interface) = interface {
-            println!("Configuring interface: {}", interface.name());
+            earlyprintln!("Configuring interface: {}", interface.name());
 
             // 设置默认IP地址
             let ip_cidr = IpCidr::new(IpAddress::v4(192, 168, 1, 100), 24);
             interface.add_ip_address(ip_cidr);
-            println!("Set IP address: 192.168.1.100/24");
+            earlyprintln!("Set IP address: 192.168.1.100/24");
 
             // 设置默认网关
             let gateway = Ipv4Address::new(192, 168, 1, 1);
             interface.set_ipv4_gateway(Some(gateway));
-            println!("Set default gateway: 192.168.1.1");
+            earlyprintln!("Set default gateway: 192.168.1.1");
 
             Ok(())
         } else {
-            println!("No network interfaces found to configure");
+            earlyprintln!("No network interfaces found to configure");
             Err(NetworkConfigError::InterfaceNotFound)
         }
     }
@@ -133,7 +132,7 @@ impl NetworkConfigManager {
                 Ok(ipv4) => {
                     let ip_cidr = IpCidr::new(IpAddress::Ipv4(ipv4), prefix);
                     interface.add_ip_address(ip_cidr);
-                    println!("Set IP address for {}: {}/{}", interface_name, ip, prefix);
+                    earlyprintln!("Set IP address for {}: {}/{}", interface_name, ip, prefix);
                     Ok(())
                 }
                 Err(_) => Err(NetworkConfigError::InvalidAddress),
@@ -159,7 +158,7 @@ impl NetworkConfigManager {
             match gateway.parse::<Ipv4Address>() {
                 Ok(gateway_ipv4) => {
                     interface.set_ipv4_gateway(Some(gateway_ipv4));
-                    println!("Set default gateway for {}: {}", interface_name, gateway);
+                    earlyprintln!("Set default gateway for {}: {}", interface_name, gateway);
                     Ok(())
                 }
                 Err(_) => Err(NetworkConfigError::InvalidGateway),
@@ -244,7 +243,7 @@ impl NetworkConfigManager {
             // 设置网关
             interface.set_ipv4_gateway(Some(gateway_address));
 
-            println!(
+            earlyprintln!(
                 "Set interface config for {}: IP={}/{}, Gateway={}",
                 interface_name, ip, prefix_length, gateway
             );

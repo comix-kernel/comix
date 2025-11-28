@@ -6,26 +6,18 @@ use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
-    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
-    ipc::{SignalHandlerTable, SignalPending},
-    kernel::{
+    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap}, earlyprintln, ipc::{SignalHandlerTable, SignalPending}, kernel::{
         FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
         sleep_task_with_block, yield_task,
-    },
-    mm::{
+    }, mm::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
-    },
-    println,
-    sync::SpinLock,
-    test::run_early_tests,
-    uapi::{
+    }, println, sync::SpinLock, test::run_early_tests, uapi::{
         resource::{INIT_RLIMITS, RlimitStruct},
         signal::SignalFlags,
         uts_namespace::UtsNamespace,
-    },
-    vfs::{create_stdio_files, fd_table, get_root_dentry},
+    }, vfs::{create_stdio_files, fd_table, get_root_dentry}
 };
 
 /// 内核的第一个任务启动函数
@@ -176,14 +168,10 @@ pub fn main(hartid: usize) {
 
     run_early_tests();
 
-    // Initialize memory management (frame allocator + heap + kernel page table)
+    earlyprintln!("[Boot] Hello, world!");
+    earlyprintln!("[Boot] RISC-V Hart {} is up!", hartid);
+
     mm::init();
-
-    // Initialize Simple FS (暂时禁用)
-    // crate::fs::init_simple_fs().expect("Failed to initialize VFS");
-
-    println!("[Boot] Hello, world!");
-    println!("[Boot] RISC-V Hart {} is up!", hartid);
 
     #[cfg(test)]
     crate::test_main();
