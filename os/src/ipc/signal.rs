@@ -12,7 +12,10 @@
 use bitflags::bitflags;
 
 use crate::{
-    arch::{kernel::cpu, trap::{TrapFrame, sigreturn_trampoline_address}},
+    arch::{
+        kernel::cpu,
+        trap::{TrapFrame, sigreturn_trampoline_address},
+    },
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
         exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block, yield_task,
