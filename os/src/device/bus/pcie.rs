@@ -4,7 +4,7 @@ use crate::{
     config::{VirtDevice, mmio_of},
     device::device_tree::FDT,
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    println,
+    earlyprintln,
 };
 use core::ptr::{read_volatile, write_volatile};
 
@@ -257,7 +257,7 @@ impl PcieHost {
 
     /// 枚举 PCIe 设备并打印信息
     pub fn enumerate(&self) {
-        println!(
+        earlyprintln!(
             "[PCIe] ECAM @ {:#x} (size {:#x}), MMIO @ {:#x} (size {:#x})",
             self.ecam_paddr, self.ecam_size, self.mmio_base, self.mmio_size
         );
@@ -274,7 +274,7 @@ impl PcieHost {
                 let hdr = (unsafe { self.cfg_read32(bus, dev, 0, 0x0C) } >> 16) as u8; // header type
                 let multi_func = (hdr & 0x80) != 0;
 
-                println!(
+                earlyprintln!(
                     "[PCIe] bus {:02x} dev {:02x} fn 00: vendor={:04x} device={:04x} hdr={:02x}",
                     bus,
                     dev,
@@ -292,7 +292,7 @@ impl PcieHost {
                         }
                         let did = (unsafe { self.cfg_read32(bus, dev, func, 0x00) } >> 16) as u16;
                         let hdr = (unsafe { self.cfg_read32(bus, dev, func, 0x0C) } >> 16) as u8;
-                        println!(
+                        earlyprintln!(
                             "[PCIe] bus {:02x} dev {:02x} fn {:02x}: vendor={:04x} device={:04x} hdr={:02x}",
                             bus,
                             dev,
@@ -313,6 +313,6 @@ pub fn init_and_enumerate() {
     if let Some(host) = PcieHost::from_fdt().or_else(|| PcieHost::from_platform_defaults()) {
         host.enumerate();
     } else {
-        println!("[PCIe] no host found from platform defaults");
+        earlyprintln!("[PCIe] no host found from platform defaults");
     }
 }

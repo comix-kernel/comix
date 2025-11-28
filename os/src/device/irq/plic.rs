@@ -7,9 +7,9 @@ use crate::arch::constant::SUPERVISOR_EXTERNAL;
 use crate::device::device_tree::{DEVICE_TREE_INTC, DEVICE_TREE_REGISTRY};
 use crate::device::irq::IntcDriver;
 use crate::device::{DeviceType, Driver, IRQ_MANAGER};
+use crate::earlyprintln;
 use crate::kernel::current_memory_space;
 use crate::mm::address::{Paddr, UsizeConvert};
-use crate::pr_warn;
 use crate::{sync::SpinLock as Mutex, tool::read, tool::write};
 use alloc::format;
 use alloc::string::String;
@@ -80,7 +80,7 @@ pub fn init_dt(dt: &FdtNode) {
         let paddr = reg.starting_address as usize;
         let size = reg.size.unwrap_or(0);
         if size == 0 {
-            pr_warn!("PLIC device tree node {} has no size", dt.name);
+            earlyprintln!("[Device] PLIC device tree node {} has no size", dt.name);
             return;
         }
         let vaddr = current_memory_space()
@@ -111,7 +111,7 @@ pub fn init_dt(dt: &FdtNode) {
             .write()
             .insert(phandle.try_into().unwrap(), plic);
     } else {
-        pr_warn!("PLIC device tree node {} has no 'reg' property", dt.name);
+        earlyprintln!("[Device] PLIC device tree node {} has no 'reg' property", dt.name);
     }
 }
 
