@@ -5,7 +5,7 @@
 use super::Driver;
 
 pub mod keyboard;
-
+pub mod uart16550;
 pub mod virtio_console;
 
 /// 串行设备驱动程序特征

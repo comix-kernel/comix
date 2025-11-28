@@ -405,10 +405,7 @@ impl Task {
             Arc::new(SpinLock::new(UtsNamespace::default())),
             Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
             Arc::new(FDTable::new()),
-            Arc::new(SpinLock::new(FsStruct::new(
-                Some(get_root_dentry().unwrap()),
-                Some(get_root_dentry().unwrap()),
-            ))),
+            Arc::new(SpinLock::new(FsStruct::new(None, None))),
         )
     }
 }

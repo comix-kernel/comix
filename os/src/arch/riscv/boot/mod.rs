@@ -7,6 +7,7 @@ use riscv::register::sscratch;
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
+    earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
@@ -176,14 +177,10 @@ pub fn main(hartid: usize) {
 
     run_early_tests();
 
-    // Initialize memory management (frame allocator + heap + kernel page table)
+    earlyprintln!("[Boot] Hello, world!");
+    earlyprintln!("[Boot] RISC-V Hart {} is up!", hartid);
+
     mm::init();
-
-    // Initialize Simple FS (暂时禁用)
-    // crate::fs::init_simple_fs().expect("Failed to initialize VFS");
-
-    println!("[Boot] Hello, world!");
-    println!("[Boot] RISC-V Hart {} is up!", hartid);
 
     #[cfg(test)]
     crate::test_main();
