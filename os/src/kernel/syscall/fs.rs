@@ -1165,3 +1165,42 @@ pub fn renameat2(
 
     0
 }
+
+/// 同步所有文件系统
+/// 
+/// # 实现说明
+/// 由于 Comix 使用写直达架构,数据已在块设备中,
+/// 此调用只需刷新硬件写缓存。
+pub fn sync() -> isize {
+    use crate::kernel::syscall::util::flush_all_block_devices;
+
+    // sync 总是成功(即使 flush 失败也不返回错误)
+    let _ = flush_all_block_devices();
+    0
+}
+
+/// syncfs - 同步指定文件系统
+pub fn syncfs(fd: usize) -> isize {
+    use crate::kernel::syscall::util::flush_block_device_by_fd;
+
+    match flush_block_device_by_fd(fd) {
+        Ok(()) => 0,
+        Err(errno) => errno,
+    }
+}
+
+/// fsync - 同步文件数据和元数据
+///
+/// # 实现说明
+/// 在写直达架构下,等同于 syncfs
+pub fn fsync(fd: usize) -> isize {
+    syncfs(fd)
+}
+
+/// fdatasync - 同步文件数据(元数据可选)
+///
+/// # 实现说明
+/// 在写直达架构下,完全等同于 fsync
+pub fn fdatasync(fd: usize) -> isize {
+    fsync(fd)
+}
