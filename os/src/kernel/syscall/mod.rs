@@ -21,8 +21,9 @@ use crate::{
         fs::LinuxStatFs,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
-        time::timespec,
-        types::{SigSetT, StackT},
+        sysinfo::SysInfo,
+        time::{Itimerval, TimeSepc},
+        types::{SigSetT, SizeT, StackT},
         uts_namespace::UtsNamespace,
     },
     vfs::Stat,
@@ -91,7 +92,7 @@ impl_syscall!(sys_fdatasync, fdatasync, (usize));
 impl_syscall!(
     sys_utimensat,
     utimensat,
-    (i32, *const c_char, *const timespec, u32)
+    (i32, *const c_char, *const TimeSepc, u32)
 );
 
 // 进程与控制 (Process and Control)
@@ -99,9 +100,18 @@ impl_syscall!(sys_exit, exit, (c_int));
 impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 
 // 同步/休眠 (Synchronization/Sleeping)
-impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
+impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSepc, *mut TimeSepc));
+impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
+impl_syscall!(
+    sys_setitimmer,
+    setitimer,
+    (c_int, *const Itimerval, *mut Itimerval)
+);
 
-// 内核日志 (Kernel Logging)
+// POSIX 定时器 (POSIX Timers)
+impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSepc));
+impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSepc));
+impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSepc));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 
 // 信号 (Signals)
@@ -124,9 +134,9 @@ impl_syscall!(sys_rt_sigpending, rt_sigpending, (*mut SigSetT, c_uint));
 impl_syscall!(
     sys_rt_sigtimedwait,
     rt_sigtimedwait,
-    (*const SigSetT, *mut SigInfoT, *const timespec, c_uint)
+    (*const SigSetT, *mut SigInfoT, *const TimeSepc, c_uint)
 );
-impl_syscall!(sys_rt_sigreturn, rt_sigreturn, ());
+impl_syscall!(sys_rt_sigreturn, rt_sigreturn, noreturn, ());
 
 // 进程属性 (Process Attributes)
 impl_syscall!(sys_reboot, reboot, (c_int, c_int, c_int, *mut c_void));
@@ -150,6 +160,7 @@ impl_syscall!(sys_geteuid, geteuid, ());
 impl_syscall!(sys_getgid, getgid, ());
 impl_syscall!(sys_getegid, getegid, ());
 impl_syscall!(sys_gettid, gettid, ());
+impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
 
 // 网络 (Networking/Sockets)
 impl_syscall!(sys_socket, socket, (i32, i32, i32));
@@ -188,7 +199,7 @@ impl_syscall!(
     (*const u8, *const *const u8, *const *const u8)
 );
 
-// 网络 (续)
+// 网络/I/O (续)
 impl_syscall!(sys_accept4, accept4, (i32, *mut u8, *mut u32, i32));
 
 // 进程与控制 (续)
@@ -202,12 +213,15 @@ impl_syscall!(
 // 文件系统同步 (续)
 impl_syscall!(sys_syncfs, syncfs, (usize));
 
-// 文件重命名
+// 调度 (续)
 impl_syscall!(
     sys_renameat2,
     renameat2,
     (i32, *const c_char, i32, *const c_char, u32)
 );
+
+// 随机数与内存文件
+impl_syscall!(sys_getrandom, getrandom, (*mut c_void, SizeT, c_uint));
 
 // 获取网络接口地址列表 (非标准系统调用)
 impl_syscall!(sys_getifaddrs, getifaddrs, (*mut *mut u8));

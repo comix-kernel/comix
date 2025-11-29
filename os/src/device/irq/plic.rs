@@ -10,7 +10,7 @@ use crate::device::{DeviceType, Driver, IRQ_MANAGER};
 use crate::earlyprintln;
 use crate::kernel::current_memory_space;
 use crate::mm::address::{Paddr, UsizeConvert};
-use crate::{sync::SpinLock as Mutex, tool::read, tool::write};
+use crate::{sync::SpinLock as Mutex, util::read, util::write};
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;

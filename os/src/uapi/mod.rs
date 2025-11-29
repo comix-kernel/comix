@@ -12,6 +12,7 @@ pub mod reboot;
 pub mod resource;
 pub mod sched;
 pub mod signal;
+pub mod sysinfo;
 pub mod time;
 pub mod types;
 pub mod uts_namespace;
