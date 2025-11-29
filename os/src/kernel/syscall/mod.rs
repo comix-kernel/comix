@@ -20,8 +20,9 @@ use crate::{
         fs::LinuxStatFs,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
-        time::timespec,
-        types::{SigSetT, StackT},
+        sysinfo::SysInfo,
+        time::{Itimerval, TimeSepc},
+        types::{SigSetT, SizeT, StackT},
         uts_namespace::UtsNamespace,
     },
     vfs::Stat,
@@ -111,7 +112,7 @@ impl_syscall!(
 impl_syscall!(
     sys_utimensat,
     utimensat,
-    (i32, *const c_char, *const timespec, u32)
+    (i32, *const c_char, *const TimeSepc, u32)
 );
 impl_syscall!(
     sys_renameat2,
@@ -125,7 +126,7 @@ impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
 impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
-impl_syscall!(sys_nanosleep, nanosleep, (*const timespec, *mut timespec));
+impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSepc, *mut TimeSepc));
 impl_syscall!(sys_sync, sync, ());
 impl_syscall!(sys_syncfs, syncfs, (usize));
 impl_syscall!(sys_fsync, fsync, (usize));
@@ -144,13 +145,24 @@ impl_syscall!(
 impl_syscall!(
     sys_rt_sigtimedwait,
     rt_sigtimedwait,
-    (*const SigSetT, *mut SigInfoT, *const timespec, c_uint)
+    (*const SigSetT, *mut SigInfoT, *const TimeSepc, c_uint)
 );
 impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
-impl_syscall!(sys_rt_sigreturn, rt_sigreturn, ());
+impl_syscall!(sys_rt_sigreturn, rt_sigreturn, noreturn, ());
 impl_syscall!(sys_sigaltstack, signal_stack, (*const StackT, *mut StackT));
 impl_syscall!(sys_kill, kill, (c_int, c_int));
 impl_syscall!(sys_tkill, tkill, (c_int, c_int));
 impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
 impl_syscall!(sys_gettid, gettid, ());
+impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
+impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSepc));
+impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSepc));
+impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSepc));
+impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
+impl_syscall!(
+    sys_setitimmer,
+    setitimer,
+    (c_int, *const Itimerval, *mut Itimerval)
+);
+impl_syscall!(sys_getrandom, getrandom, (*mut c_void, SizeT, c_uint));

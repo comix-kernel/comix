@@ -50,10 +50,7 @@ pub fn exit_process(task: SharedTask, code: i32) {
 /// # 参数：
 /// * `task` - 目标进程对应的任务
 /// * `sig` - 要发送的信号编号
-pub fn send_signal_process(task: SharedTask, sig: usize) {
-    if !task.lock().is_process() {
-        panic!("send_signal_process called on a non-process task");
-    }
+pub fn send_signal_process(task: &SharedTask, sig: usize) {
     task.lock()
         .shared_pending
         .lock()

@@ -62,7 +62,7 @@ pub unsafe fn ptr_array_to_vec_strings(ptrs: *const *const u8) -> Result<Vec<Str
         if p.is_null() {
             break;
         }
-        match unsafe { crate::tool::copy_cstr_to_string(p) } {
+        match unsafe { crate::util::copy_cstr_to_string(p) } {
             Ok(s) => out.push(s),
             Err(_) => return Err(()),
         }

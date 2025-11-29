@@ -12,7 +12,7 @@
 
 use core::any::Any;
 
-use crate::uapi::time::timespec;
+use crate::uapi::time::TimeSepc;
 use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -103,9 +103,9 @@ pub struct InodeMetadata {
     pub uid: u32,              // 用户 ID
     pub gid: u32,              // 组 ID
     pub size: usize,           // 文件大小（字节）
-    pub atime: timespec,       // 访问时间
-    pub mtime: timespec,       // 修改时间
-    pub ctime: timespec,       // 状态改变时间
+    pub atime: TimeSepc,       // 访问时间
+    pub mtime: TimeSepc,       // 修改时间
+    pub ctime: TimeSepc,       // 状态改变时间
     pub nlinks: usize,         // 硬链接数
     pub blocks: usize,         // 占用的块数（512B 为单位）
 }
@@ -203,7 +203,7 @@ pub trait Inode: Send + Sync + Any {
     fn as_any(&self) -> &dyn Any;
 
     /// 设置文件时间戳
-    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, _atime: Option<TimeSepc>, _mtime: Option<TimeSepc>) -> Result<(), FsError> {
         // 默认实现：不支持
         Err(FsError::NotSupported)
     }
