@@ -20,6 +20,7 @@ use crate::{
         fs::LinuxStatFs,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
+        sysinfo::SysInfo,
         time::timespec,
         types::{SigSetT, StackT},
         uts_namespace::UtsNamespace,
@@ -154,3 +155,4 @@ impl_syscall!(sys_tkill, tkill, (c_int, c_int));
 impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
 impl_syscall!(sys_gettid, gettid, ());
+impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));

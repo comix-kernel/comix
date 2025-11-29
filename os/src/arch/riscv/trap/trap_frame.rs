@@ -211,7 +211,7 @@ impl TrapFrame {
                 self.x29_t4 as u64,
                 self.x30_t5 as u64,
                 self.x31_t6 as u64,
-        ],
+            ],
             fpregs: [0; 66],
         }
     }

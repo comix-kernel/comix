@@ -1,10 +1,16 @@
 //! 系统相关系统调用实现
 
-use core::ffi::{c_char, c_int, c_void};
+use core::{
+    ffi::{c_char, c_int, c_ulong, c_void},
+    sync::atomic::Ordering,
+};
 use riscv::register::sstatus;
 
 use crate::{
-    arch::lib::sbi::shutdown,
+    arch::{
+        lib::sbi::shutdown,
+        timer::{TICKS_PER_SEC, TIMER_TICKS},
+    },
     kernel::{
         current_task,
         syscall::util::{check_syslog_permission, validate_syslog_args},
@@ -25,6 +31,7 @@ use crate::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
         },
+        sysinfo::SysInfo,
         uts_namespace::{UTS_NAME_LEN, UtsNamespace},
     },
 };
@@ -61,13 +68,11 @@ pub fn reboot(magic: c_int, magic2: c_int, op: c_int, _arg: *mut c_void) -> c_in
     0
 }
 
-/// 获取主机名系统调用
+/// 获取系统信息系统调用
 /// # 参数
-/// - `buf`: 指向用户缓冲区的指针，用于存放主机名
-/// - `len`: 缓冲区长度
+/// - `buf`: 指向用户空间缓冲区的指针，用于存储系统信息
 /// # 返回值
 /// 成功返回 0，失败返回负错误码
-/// 注意: 没有GETHOSTNAME系统调用, 该功能实际属于SYS_UNAME或sysinfo
 pub fn uname(buf: *mut UtsNamespace) -> c_int {
     let uts = {
         let task = current_task();
@@ -105,6 +110,22 @@ pub fn set_hostname(name: *const c_char, len: usize) -> c_int {
     }
     0
     // TODO: EPERM 和 EFAULT
+}
+
+/// 获取系统信息系统调用
+/// # 参数
+/// * `info` - 指向用户空间 SysInfo 结构体的指针
+/// # 返回值
+/// * **成功**：返回 0，`info` 被填充系统信息
+/// * **失败**：返回负的 errno
+pub fn sysinfo(info: *mut SysInfo) -> c_int {
+    // TODO: 填充更多系统信息字段
+    let mut sys_info = SysInfo::new();
+    sys_info.uptime = (TIMER_TICKS.load(Ordering::SeqCst) / TICKS_PER_SEC) as c_ulong;
+    unsafe {
+        write_to_user(info, sys_info);
+    }
+    0
 }
 
 /// 读取和控制内核日志缓冲区
