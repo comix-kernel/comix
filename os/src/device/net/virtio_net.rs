@@ -4,9 +4,7 @@ use crate::{
     device::{
         Driver,
         net::{add_network_device, interface::NetworkInterface, net_device::VirtioNetDevice},
-    },
-    println,
-    sync::SpinLock,
+    }, earlyprintln, println, sync::SpinLock
 };
 use alloc::{format, sync::Arc};
 use lazy_static::lazy_static;
@@ -16,7 +14,7 @@ lazy_static! {
 }
 
 pub fn init(transport: MmioTransport<'static>) {
-    println!("[Device] Initializing network driver (virtio-net)");
+    earlyprintln!("[Device] Initializing network driver (virtio-net)");
 
     // // 获取设备ID
     // let device_id = {

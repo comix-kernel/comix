@@ -1,6 +1,6 @@
 //! RISC-V Virt 平台相关
 
-use crate::device::{bus, device_tree, irq, serial};
+use crate::device::{bus, console, device_tree, irq, serial};
 
 /// 初始化 Virt 平台相关设备
 pub fn init() {
@@ -9,6 +9,7 @@ pub fn init() {
     irq::plic::driver_init();
     // rtc::rtc_goldfish::driver_init();
     device_tree::init();
+    console::init();
 }
 
 pub const MEMORY_END: usize = 0x8800_0000;
