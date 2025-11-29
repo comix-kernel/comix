@@ -9,9 +9,15 @@ test_case!(test_tmpfs_complex_scenario, {
     let root = fs.root_inode();
 
     // 创建复杂的目录结构
-    let etc = root.mkdir("etc", FileMode::from_bits_truncate(0o755)).unwrap();
-    let home = root.mkdir("home", FileMode::from_bits_truncate(0o755)).unwrap();
-    let tmp = root.mkdir("tmp", FileMode::from_bits_truncate(0o755)).unwrap();
+    let etc = root
+        .mkdir("etc", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    let home = root
+        .mkdir("home", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    let tmp = root
+        .mkdir("tmp", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 在 /etc 中创建配置文件
     let passwd = etc
@@ -20,7 +26,9 @@ test_case!(test_tmpfs_complex_scenario, {
     passwd.write_at(0, b"root:x:0:0::/root:/bin/sh\n").unwrap();
 
     // 在 /home 中创建用户目录
-    let user = home.mkdir("user", FileMode::from_bits_truncate(0o755)).unwrap();
+    let user = home
+        .mkdir("user", FileMode::from_bits_truncate(0o755))
+        .unwrap();
     let bashrc = user
         .create(".bashrc", FileMode::from_bits_truncate(0o644))
         .unwrap();
@@ -112,7 +120,9 @@ test_case!(test_tmpfs_stats, {
     // 创建一些文件
     for i in 0..10 {
         let name = alloc::format!("file_{}.txt", i);
-        let file = root.create(&name, FileMode::from_bits_truncate(0o644)).unwrap();
+        let file = root
+            .create(&name, FileMode::from_bits_truncate(0o644))
+            .unwrap();
         file.write_at(0, &[0xAB; 8192]).unwrap(); // 2 pages per file
     }
 

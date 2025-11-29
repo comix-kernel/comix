@@ -179,17 +179,11 @@ test_case!(test_tmpfs_lookup_dot_dotdot, {
 
     // 测试根目录的 "."
     let dot = root.lookup(".").unwrap();
-    kassert!(
-        dot.metadata().unwrap().inode_no
-            == root.metadata().unwrap().inode_no
-    );
+    kassert!(dot.metadata().unwrap().inode_no == root.metadata().unwrap().inode_no);
 
     // 测试根目录的 ".." (应该指向自己)
     let dotdot = root.lookup("..").unwrap();
-    kassert!(
-        dotdot.metadata().unwrap().inode_no
-            == root.metadata().unwrap().inode_no
-    );
+    kassert!(dotdot.metadata().unwrap().inode_no == root.metadata().unwrap().inode_no);
 
     // 创建子目录
     let subdir = root
@@ -198,10 +192,7 @@ test_case!(test_tmpfs_lookup_dot_dotdot, {
 
     // 测试子目录的 ".."
     let parent = subdir.lookup("..").unwrap();
-    kassert!(
-        parent.metadata().unwrap().inode_no
-            == root.metadata().unwrap().inode_no
-    );
+    kassert!(parent.metadata().unwrap().inode_no == root.metadata().unwrap().inode_no);
 });
 
 test_case!(test_tmpfs_already_exists, {

@@ -255,4 +255,3 @@ test_case!(test_check_mount_point_function, {
     MOUNT_TABLE.umount("/mountpoint").ok();
     MOUNT_TABLE.umount("/").ok();
 });
-

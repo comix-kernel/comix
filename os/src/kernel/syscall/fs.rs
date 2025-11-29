@@ -1186,7 +1186,7 @@ pub fn mount(
     use crate::config::EXT4_BLOCK_SIZE;
     use crate::fs::ext4::Ext4FileSystem;
     use crate::kernel::syscall::util::get_first_block_device;
-    use crate::vfs::{MountFlags as VfsMountFlags, MOUNT_TABLE};
+    use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
 
     // 1. 启用用户空间内存访问
@@ -1282,10 +1282,7 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
     // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
     match MOUNT_TABLE.umount(&target_str) {
         Ok(()) => {
-            crate::pr_info!(
-                "[SYSCALL] umount2: successfully unmounted '{}'",
-                target_str
-            );
+            crate::pr_info!("[SYSCALL] umount2: successfully unmounted '{}'", target_str);
             0
         }
         Err(e) => {
