@@ -14,7 +14,9 @@ use riscv::register::{sepc, sscratch, sstatus, stval};
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::{TIMER_TICKS, clock_freq, get_time};
 use crate::arch::trap::restore;
-use crate::kernel::{SCHEDULER, TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
+use crate::kernel::{
+    SCHEDULER, TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block,
+};
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，

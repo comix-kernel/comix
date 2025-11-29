@@ -1,7 +1,8 @@
 //! 系统相关系统调用实现
 
 use core::{
-    ffi::{c_char, c_int, c_long, c_ulong, c_void}, sync::atomic::Ordering
+    ffi::{c_char, c_int, c_long, c_ulong, c_void},
+    sync::atomic::Ordering,
 };
 use riscv::register::sstatus;
 
@@ -12,23 +13,33 @@ use crate::{
     },
     kernel::{
         current_task,
-        syscall::util::{check_syslog_permission, validate_syslog_args}, time::update_realtime,
+        syscall::util::{check_syslog_permission, validate_syslog_args},
+        time::update_realtime,
     },
     log::{
         DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, read_log,
         set_console_level,
     },
     pr_alert,
-    tool::{
+    uapi::{
+        errno::{EINVAL, ENOSYS},
+        log::SyslogAction,
+        reboot::{
+            REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
+            REBOOT_MAGIC2C,
+        },
+        sysinfo::SysInfo,
+        time::clock_id::{
+            CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME,
+            CLOCK_REALTIME_COARSE, MAX_CLOCKS,
+        },
+        uts_namespace::{UTS_NAME_LEN, UtsNamespace},
+    },
+    util::{
         cstr_copy,
         user_buffer::{UserBuffer, write_to_user},
     },
-    uapi::{
-        errno::{EINVAL, ENOSYS}, log::SyslogAction, reboot::{
-            REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
-            REBOOT_MAGIC2C,
-        }, sysinfo::SysInfo, time::clock_id::{CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, MAX_CLOCKS}, uts_namespace::{UTS_NAME_LEN, UtsNamespace}
-    }, vfs::TimeSepc,
+    vfs::TimeSepc,
 };
 
 /// 重启系统调用
@@ -132,12 +143,8 @@ pub fn sysinfo(info: *mut SysInfo) -> c_int {
 /// * **失败**：返回负的 errno
 pub fn clock_gettime(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
     let ts = match clk_id {
-        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
-            TimeSepc::now()
-        }
-        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => {
-            TimeSepc::monotonic_now()
-        }
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSepc::now(),
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSepc::monotonic_now(),
         id if id < MAX_CLOCKS as c_int && id >= 0 => {
             return -ENOSYS;
         }
@@ -171,12 +178,8 @@ pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
             // 单调时钟不可设置
             -EINVAL
         }
-        id if id < MAX_CLOCKS as c_int && id >= 0 => {
-            -ENOSYS
-        }
-        _ => {
-            -EINVAL
-        }
+        id if id < MAX_CLOCKS as c_int && id >= 0 => -ENOSYS,
+        _ => -EINVAL,
     }
 }
 
@@ -189,18 +192,14 @@ pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
 /// * **失败**：返回负的 errno
 pub fn clock_getres(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
     let res = match clk_id {
-        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
-            TimeSepc {
-                tv_sec: 0,
-                tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
-            }
-        }
-        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => {
-            TimeSepc {
-                tv_sec: 0,
-                tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
-            }
-        }
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSepc {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+        },
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSepc {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+        },
         id if id < MAX_CLOCKS as c_int && id >= 0 => {
             return -ENOSYS;
         }

@@ -1,7 +1,15 @@
 use alloc::{string::String, sync::Arc};
 use fdt::node::FdtNode;
 
-use crate::{device::{DRIVERS, DeviceType, Driver, RTC_DRIVERS, device_tree::DEVICE_TREE_REGISTRY, rtc::RtcDriver}, earlyprintln, kernel::current_memory_space, mm::address::{Paddr, UsizeConvert}, tool::read};
+use crate::{
+    device::{
+        DRIVERS, DeviceType, Driver, RTC_DRIVERS, device_tree::DEVICE_TREE_REGISTRY, rtc::RtcDriver,
+    },
+    earlyprintln,
+    kernel::current_memory_space,
+    mm::address::{Paddr, UsizeConvert},
+    util::read,
+};
 
 const TIMER_TIME_LOW: usize = 0x00;
 const TIMER_TIME_HIGH: usize = 0x04;
@@ -53,7 +61,9 @@ fn init_dt(dt: &FdtNode) {
         .map_mmio(Paddr::from_usize(paddr), size)
         .ok()
         .expect("Failed to map MMIO region for goldfish-rtc");
-    let rtc = Arc::new(RtcGoldfish { base: vaddr.as_usize() });
+    let rtc = Arc::new(RtcGoldfish {
+        base: vaddr.as_usize(),
+    });
     DRIVERS.write().push(rtc.clone());
     RTC_DRIVERS.write().push(rtc);
     earlyprintln!("[Device] RTC Goldfish initialized");

@@ -7,7 +7,7 @@ use alloc::{
 
 use crate::{
     sync::Mutex,
-    tool::{ring_buffer::RingBuffer, user_buffer::UserBuffer},
+    util::{ring_buffer::RingBuffer, user_buffer::UserBuffer},
 };
 
 /// 创建一个管道，返回读端和写端

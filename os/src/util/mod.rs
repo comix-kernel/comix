@@ -3,7 +3,8 @@
 pub mod address;
 pub mod ring_buffer;
 pub mod stdio;
-mod str;
 pub mod user_buffer;
+
+mod str;
 
 pub use str::*;

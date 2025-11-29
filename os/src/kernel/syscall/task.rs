@@ -15,17 +15,36 @@ use crate::{
     },
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule, sleep_task_with_block, syscall::util::{get_args_safe, get_path_safe}, time::REALTIME, yield_task
+        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
+        TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
+        sleep_task_with_block,
+        syscall::util::{get_args_safe, get_path_safe},
+        time::REALTIME,
+        yield_task,
     },
     mm::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
     sync::SpinLock,
-    tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
-        errno::{EINTR, EINVAL, ENOSYS, ESRCH}, resource::{RLIM_NLIMITS, Rlimit, Rusage}, sched::CloneFlags, signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM}, time::{Itimerval, TimeSepc, clock_flags::TIMER_ABSTIME, clock_id::{CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME, CLOCK_TAI}, itimer_id::{ITIMER_PROF, ITIMER_REAL, ITIMER_VIRTUAL}}, types::StackT, wait::{WaitFlags, WaitStatus}
+        errno::{EINTR, EINVAL, ENOSYS, ESRCH},
+        resource::{RLIM_NLIMITS, Rlimit, Rusage},
+        sched::CloneFlags,
+        signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
+        time::{
+            Itimerval, TimeSepc,
+            clock_flags::TIMER_ABSTIME,
+            clock_id::{
+                CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
+                CLOCK_TAI,
+            },
+            itimer_id::{ITIMER_PROF, ITIMER_REAL, ITIMER_VIRTUAL},
+        },
+        types::StackT,
+        wait::{WaitFlags, WaitStatus},
     },
+    util::user_buffer::{read_from_user, write_to_user},
 };
 
 /// 线程退出系统调用
@@ -587,10 +606,7 @@ pub fn clock_nanosleep(
 /// - `curr_value`: 指向 Itimerval 结构体的指针, 用于存储当前定时器值
 /// # 返回值
 /// - 成功返回 0, 失败返回负错误码
-pub fn getitimer(
-    which: c_int,
-    curr_value: *mut Itimerval,
-) -> c_int {
+pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
     match which {
         ITIMER_REAL | ITIMER_VIRTUAL | ITIMER_PROF => {}
         _ => return -EINVAL,
@@ -604,11 +620,7 @@ pub fn getitimer(
     let mut val = Itimerval::zero();
     if let Some(timer) = TIMER.lock().find_entry(&current_task(), sig) {
         let now = get_time();
-        let remaining = if *timer.0 > now {
-            *timer.0 - now
-        } else {
-            0
-        };
+        let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
         let it_value = TimeSepc::from_freq(remaining, clock_freq()).to_timeval();
         let it_interval = timer.1.it_interval.to_timeval();
         val = Itimerval {
@@ -629,11 +641,7 @@ pub fn getitimer(
 /// - `old_value`: 指向 Itimerval 结构体的指针, 用于存储旧的定时器值, 可为 NULL
 /// # 返回值
 /// - 成功返回 0, 失败返回负错误码
-pub fn setitimer(
-    which: c_int,
-    new_value: *const Itimerval,
-    old_value: *mut Itimerval,
-) -> c_int {
+pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itimerval) -> c_int {
     match which {
         ITIMER_REAL | ITIMER_VIRTUAL | ITIMER_PROF => {}
         _ => return -EINVAL,
@@ -661,11 +669,7 @@ pub fn setitimer(
         let mut val = Itimerval::zero();
         if let Some(timer) = binding.find_entry(&current_task(), sig) {
             let now = get_time();
-            let remaining = if *timer.0 > now {
-                *timer.0 - now
-            } else {
-                0
-            };
+            let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
             let it_value = TimeSepc::from_freq(remaining, clock_freq()).to_timeval();
             let it_interval = timer.1.it_interval.to_timeval();
             val = Itimerval {

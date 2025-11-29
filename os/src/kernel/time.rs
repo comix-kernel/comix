@@ -24,7 +24,10 @@ pub fn init() {
     // 这里减去 mtime 是为简化后续的时间计算
     let time = TimeSepc::new(sec as i64, 0) - mtime;
     *realtime = time;
-    pr_info!("REALTIME clock initialized to {:?} seconds since epoch.", time);
+    pr_info!(
+        "REALTIME clock initialized to {:?} seconds since epoch.",
+        time
+    );
 }
 
 pub fn update_realtime(time: &TimeSepc) {

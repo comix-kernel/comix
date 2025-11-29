@@ -15,7 +15,6 @@ use crate::{
         sleep_task_with_graud_and_block, yield_task,
     },
     sync::SpinLock,
-    tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
@@ -26,6 +25,7 @@ use crate::{
         time::TimeSepc,
         types::{SigSetT, StackT},
     },
+    util::user_buffer::{read_from_user, write_to_user},
 };
 
 /// 修改当前任务的信号屏蔽字

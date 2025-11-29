@@ -69,7 +69,11 @@ pub struct TimerEntry {
 impl TimerEntry {
     /// 创建一个新的定时器条目
     pub fn new(sig: usize, task: SharedTask, it_interval: TimeSepc) -> Self {
-        Self { sig, task, it_interval }
+        Self {
+            sig,
+            task,
+            it_interval,
+        }
     }
 }
 
