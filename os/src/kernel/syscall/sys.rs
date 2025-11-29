@@ -12,7 +12,7 @@ use crate::{
     },
     kernel::{
         current_task,
-        syscall::util::{check_syslog_permission, validate_syslog_args},
+        syscall::util::{check_syslog_permission, validate_syslog_args}, time::update_realtime,
     },
     log::{
         DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, read_log,
@@ -151,6 +151,33 @@ pub fn clock_gettime(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
     }
 
     0
+}
+
+/// 设置指定时钟的时间系统调用
+/// # 参数
+/// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
+/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，包含要设置的时间
+/// # 返回值
+/// * **成功**：返回 0，时钟时间被更新
+/// * **失败**：返回负的 errno
+pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
+    match clk_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
+            let ts: TimeSepc = unsafe { core::ptr::read(tp) };
+            update_realtime(&ts);
+            0
+        }
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => {
+            // 单调时钟不可设置
+            -EINVAL
+        }
+        id if id < MAX_CLOCKS as c_int && id >= 0 => {
+            -ENOSYS
+        }
+        _ => {
+            -EINVAL
+        }
+    }
 }
 
 /// 读取和控制内核日志缓冲区
