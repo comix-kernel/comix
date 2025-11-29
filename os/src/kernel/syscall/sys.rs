@@ -1,32 +1,47 @@
 //! 系统相关系统调用实现
 
-use core::ffi::{c_char, c_int, c_void};
+use core::{
+    ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
+    sync::atomic::Ordering,
+};
 use riscv::register::sstatus;
 
 use crate::{
-    arch::lib::sbi::shutdown,
+    arch::{
+        lib::sbi::shutdown,
+        timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
+    },
     kernel::{
         current_task,
         syscall::util::{check_syslog_permission, validate_syslog_args},
+        time::update_realtime,
     },
     log::{
         DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, read_log,
         set_console_level,
     },
     pr_alert,
-    tool::{
-        cstr_copy,
-        user_buffer::{UserBuffer, write_to_user},
-    },
+    security::{BiogasPoll, EntropyPool},
     uapi::{
-        errno::EINVAL,
+        errno::{EINVAL, ENOSYS},
         log::SyslogAction,
         reboot::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
         },
+        sysinfo::SysInfo,
+        time::clock_id::{
+            CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME,
+            CLOCK_REALTIME_COARSE, MAX_CLOCKS,
+        },
+        types::SizeT,
         uts_namespace::{UTS_NAME_LEN, UtsNamespace},
     },
+    util::{
+        cstr_copy,
+        user_buffer::{UserBuffer, write_to_user},
+    },
+    vfs::TimeSepc,
 };
 
 /// 重启系统调用
@@ -61,13 +76,11 @@ pub fn reboot(magic: c_int, magic2: c_int, op: c_int, _arg: *mut c_void) -> c_in
     0
 }
 
-/// 获取主机名系统调用
+/// 获取系统信息系统调用
 /// # 参数
-/// - `buf`: 指向用户缓冲区的指针，用于存放主机名
-/// - `len`: 缓冲区长度
+/// - `buf`: 指向用户空间缓冲区的指针，用于存储系统信息
 /// # 返回值
 /// 成功返回 0，失败返回负错误码
-/// 注意: 没有GETHOSTNAME系统调用, 该功能实际属于SYS_UNAME或sysinfo
 pub fn uname(buf: *mut UtsNamespace) -> c_int {
     let uts = {
         let task = current_task();
@@ -105,6 +118,103 @@ pub fn set_hostname(name: *const c_char, len: usize) -> c_int {
     }
     0
     // TODO: EPERM 和 EFAULT
+}
+
+/// 获取系统信息系统调用
+/// # 参数
+/// * `info` - 指向用户空间 SysInfo 结构体的指针
+/// # 返回值
+/// * **成功**：返回 0，`info` 被填充系统信息
+/// * **失败**：返回负的 errno
+pub fn sysinfo(info: *mut SysInfo) -> c_int {
+    // TODO: 填充更多系统信息字段
+    let mut sys_info = SysInfo::new();
+    sys_info.uptime = (TIMER_TICKS.load(Ordering::SeqCst) / TICKS_PER_SEC) as c_ulong;
+    unsafe {
+        write_to_user(info, sys_info);
+    }
+    0
+}
+
+/// 获取指定时钟的时间系统调用
+/// # 参数
+/// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
+/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，用于存储时间
+/// # 返回值
+/// * **成功**：返回 0，`tp` 被填充当前时间
+/// * **失败**：返回负的 errno
+pub fn clock_gettime(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
+    let ts = match clk_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSepc::now(),
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSepc::monotonic_now(),
+        id if id < MAX_CLOCKS as c_int && id >= 0 => {
+            return -ENOSYS;
+        }
+        _ => {
+            return -EINVAL;
+        }
+    };
+
+    unsafe {
+        write_to_user(tp, ts);
+    }
+
+    0
+}
+
+/// 设置指定时钟的时间系统调用
+/// # 参数
+/// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
+/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，包含要设置的时间
+/// # 返回值
+/// * **成功**：返回 0，时钟时间被更新
+/// * **失败**：返回负的 errno
+pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
+    match clk_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
+            let ts: TimeSepc = unsafe { core::ptr::read(tp) };
+            update_realtime(&ts);
+            0
+        }
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => {
+            // 单调时钟不可设置
+            -EINVAL
+        }
+        id if id < MAX_CLOCKS as c_int && id >= 0 => -ENOSYS,
+        _ => -EINVAL,
+    }
+}
+
+/// 获取指定时钟的分辨率系统调用
+/// # 参数
+/// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
+/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，用于存储分辨率
+/// # 返回值
+/// * **成功**：返回 0，`tp` 被填充时钟分辨率
+/// * **失败**：返回负的 errno
+pub fn clock_getres(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
+    let res = match clk_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSepc {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+        },
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSepc {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+        },
+        id if id < MAX_CLOCKS as c_int && id >= 0 => {
+            return -ENOSYS;
+        }
+        _ => {
+            return -EINVAL;
+        }
+    };
+
+    unsafe {
+        write_to_user(tp, res);
+    }
+
+    0
 }
 
 /// 读取和控制内核日志缓冲区
@@ -374,4 +484,28 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
         // 空操作（这些操作在 Linux 中也是 NOP）
         SyslogAction::Close | SyslogAction::Open => 0,
     }
+}
+
+/// 获取随机字节系统调用
+/// # 参数
+/// * `buf`: 指向用户空间缓冲区的指针，用于存储随机字节
+/// * `len`: 最大需要填充的字节数
+/// * `_flags`: 标志位（当前未使用）
+/// # 返回值
+/// * **成功**：返回填充的字节数
+/// * **失败**：返回负的 errno
+pub fn getrandom(buf: *mut c_void, len: SizeT, _flags: c_uint) -> c_int {
+    let mut pool = BiogasPoll::new();
+    for i in 0..len {
+        let byte = match pool.try_fill(core::slice::from_mut(unsafe {
+            &mut *(buf as *mut u8).add(i as usize)
+        })) {
+            Ok(_) => unsafe { *(buf as *mut u8).add(i as usize) },
+            Err(_) => return -EINVAL,
+        };
+        unsafe {
+            *(buf as *mut u8).add(i as usize) = byte;
+        }
+    }
+    len as c_int
 }

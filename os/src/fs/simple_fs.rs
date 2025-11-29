@@ -2,7 +2,7 @@
 
 use crate::sync::SpinLock;
 use crate::vfs::*;
-use crate::{device::BlockDevice, uapi::time::timespec};
+use crate::{device::BlockDevice, uapi::time::TimeSepc};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -295,9 +295,9 @@ impl Inode for SimpleFsInode {
             uid: 0,
             gid: 0,
             size: data.len(),
-            atime: timespec::now(),
-            mtime: timespec::now(),
-            ctime: timespec::now(),
+            atime: TimeSepc::now(),
+            mtime: TimeSepc::now(),
+            ctime: TimeSepc::now(),
             nlinks: 1,
             blocks: (data.len() + 511) / 512,
         })

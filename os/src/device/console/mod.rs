@@ -29,6 +29,6 @@ pub trait Console: Send + Sync {
 
 /// 初始化控制台设备
 pub fn init() {
-    // uart_console::init();
+    MAIN_CONSOLE.write().replace(CONSOLES.read()[0].clone());
     // frame_console::init();
 }

@@ -6,8 +6,8 @@ use uart_16550::MmioSerialPort;
 
 use crate::{
     device::{
-        DRIVERS, DeviceType, Driver, SERIAL_DRIVERS, device_tree::DEVICE_TREE_REGISTRY,
-        serial::SerialDriver,
+        DRIVERS, DeviceType, Driver, SERIAL_DRIVERS, console::uart_console,
+        device_tree::DEVICE_TREE_REGISTRY, serial::SerialDriver,
     },
     earlyprintln,
     kernel::current_memory_space,
@@ -79,7 +79,8 @@ pub fn init(node: &FdtNode) {
         serial_port: SpinLock::new(serial_port),
     });
     DRIVERS.write().push(driver.clone());
-    SERIAL_DRIVERS.write().push(driver);
+    SERIAL_DRIVERS.write().push(driver.clone());
+    uart_console::init(driver);
     earlyprintln!("[Device] Serial driver (uart16550) is initialized");
 }
 
