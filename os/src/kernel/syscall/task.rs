@@ -30,7 +30,7 @@ use crate::{
         errno::{EINTR, EINVAL, ENOSYS, ESRCH},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
-        time::timespec,
+        time::TimeSepc,
         types::StackT,
         wait::{WaitFlags, WaitStatus},
     },
@@ -488,11 +488,11 @@ pub fn prlimit(
 
 /// 高精度睡眠（纳秒级别）
 /// # 参数
-/// - `duration`: 指向 timespec 结构体的指针, 包含睡眠的时间
-/// - `rem`: 指向 timespec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// - `duration`: 指向 TimeSepc 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 TimeSepc 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
 /// # 返回值
 /// - 成功返回 0, 失败返回负错误码
-pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
+pub fn nanosleep(duration: *const TimeSepc, rem: *mut TimeSepc) -> c_int {
     let req = unsafe { read_from_user(duration) };
     if req.tv_sec == 0 && req.tv_nsec == 0 {
         return 0;
@@ -519,7 +519,7 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
         } else {
             0
         };
-        let rem_ts = timespec::from_freq(remaining_ticks, clock_freq());
+        let rem_ts = TimeSepc::from_freq(remaining_ticks, clock_freq());
         unsafe {
             write_to_user(rem, rem_ts);
         }

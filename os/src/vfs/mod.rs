@@ -54,7 +54,7 @@ pub use path::{normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_fr
 // Re-export UAPI types used by VFS
 pub use crate::uapi::fcntl::{FdFlags, OpenFlags, SeekWhence};
 pub use crate::uapi::fs::{LinuxDirent64, Stat};
-pub use crate::uapi::time::timespec;
+pub use crate::uapi::time::TimeSepc;
 
 use alloc::{vec, vec::Vec};
 
