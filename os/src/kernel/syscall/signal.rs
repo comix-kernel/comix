@@ -20,7 +20,7 @@ use crate::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
             MContextT, MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE,
-            SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
+            SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags, UContextT,
         },
         time::timespec,
         types::{SigSetT, StackT},
@@ -229,9 +229,9 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
 pub fn rt_sigreturn() -> ! {
     let tfp = current_task().lock().trap_frame_ptr.load(Ordering::SeqCst);
     let tf = unsafe { &mut *tfp };
-    let mcontext_addr = tf.x2_sp;
-    let mcontext: MContextT = unsafe { read_from_user(mcontext_addr as *const MContextT) };
-    tf.restore_from_mcontext(&mcontext);
+    let ucontext_addr = tf.x2_sp;
+    let ucontext: UContextT = unsafe { read_from_user(ucontext_addr as *const UContextT) };
+    tf.restore_from_mcontext(&ucontext.uc_mcontext);
     unsafe { restore(tf) }
     unreachable!("rt_sigreturn should not return");
 }
