@@ -156,3 +156,4 @@ impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
 impl_syscall!(sys_gettid, gettid, ());
 impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
+impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut timespec));

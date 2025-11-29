@@ -55,10 +55,18 @@ impl timespec {
         }
     }
 
-    /// 获取当前时间的 timespec。
+    /// 获取当前墙上时钟时间的 timespec。
     /// # 返回值:
     /// - 当前时间的 timespec 结构体
     pub fn now() -> Self {
+        let time = get_time();
+        Self::from_freq(time, clock_freq())
+    }
+
+    /// 获取当前单调时钟时间的 timespec。
+    /// # 返回值:
+    /// - 当前单调时间的 timespec 结构体
+    pub fn monotonic_now() -> Self {
         let time = get_time();
         Self::from_freq(time, clock_freq())
     }

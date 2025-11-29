@@ -10,9 +10,7 @@ use crate::{
     earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
-        sleep_task_with_block, yield_task,
+        FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, current_memory_space, current_task, kernel_execve, kthread_spawn, kworker, sleep_task_with_block, time, yield_task
     },
     mm::{
         self,
@@ -188,6 +186,7 @@ pub fn main(hartid: usize) {
     // 初始化工作
     trap::init_boot_trap();
     platform::init();
+    time::init();
     timer::init();
     unsafe { intr::enable_interrupts() };
 
