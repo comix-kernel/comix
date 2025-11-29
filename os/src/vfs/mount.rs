@@ -204,6 +204,22 @@ impl MountTable {
             })
             .collect()
     }
+
+    pub fn list_all(&self) -> BTreeMap<String, Arc<MountPoint>> {
+        let mounts = self.mounts.lock();
+        mounts.iter() // 获取引用，不消耗原 Map
+        .filter_map(|(key, stack)| {
+            // 1. stack.last(): 获取栈顶元素的引用（如果不为空）
+            // 2. map(...): 如果栈顶存在，执行闭包
+            stack.last().map(|mount_point| {
+                (
+                    key.clone(),          // 必须克隆 String，因为新 Map 需要拥有 Key 的所有权
+                    mount_point.clone()   // 克隆 Arc，这非常廉价（只增加引用计数），不涉及深拷贝
+                )
+            })
+        })
+        .collect()
+    }
 }
 
 // 全局挂载表

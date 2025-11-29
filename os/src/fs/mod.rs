@@ -180,5 +180,32 @@ pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::v
     Ok(())
 }
 
+/// 初始化并挂载 procfs 到 /proc
+pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
+    use crate::fs::proc::ProcFS;
+    use crate::vfs::MountFlags;
+    use alloc::string::ToString;
+
+    println!("[ProcFS] Initializing procfs");
+
+    // 创建 procfs
+    let procfs = ProcFS::new();
+
+    // 初始化文件系统树
+    procfs.init_tree()?;
+
+    // 挂载到 /proc
+    MOUNT_TABLE.mount(
+        procfs,
+        "/proc",
+        MountFlags::empty(),
+        Some(String::from("proc")),
+    )?;
+
+    println!("[ProcFS] Procfs mounted at /proc");
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

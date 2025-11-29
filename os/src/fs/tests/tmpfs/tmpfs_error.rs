@@ -92,7 +92,9 @@ test_case!(test_tmpfs_write_to_directory, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir = root.mkdir("dir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("dir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 尝试向目录写入应该失败
     let result = dir.write_at(0, b"data");
@@ -103,7 +105,9 @@ test_case!(test_tmpfs_read_from_directory, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir = root.mkdir("dir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("dir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 尝试从目录读取应该失败
     let mut buf = [0u8; 10];
@@ -115,7 +119,9 @@ test_case!(test_tmpfs_truncate_directory, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir = root.mkdir("dir", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("dir", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 尝试截断目录应该失败
     let result = dir.truncate(0);

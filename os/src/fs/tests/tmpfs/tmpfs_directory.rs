@@ -10,9 +10,15 @@ test_case!(test_tmpfs_nested_directories, {
     let root = fs.root_inode();
 
     // 创建嵌套目录
-    let dir1 = root.mkdir("dir1", FileMode::from_bits_truncate(0o755)).unwrap();
-    let dir2 = dir1.mkdir("dir2", FileMode::from_bits_truncate(0o755)).unwrap();
-    let dir3 = dir2.mkdir("dir3", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir1 = root
+        .mkdir("dir1", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    let dir2 = dir1
+        .mkdir("dir2", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    let dir3 = dir2
+        .mkdir("dir3", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 在最深层目录创建文件
     let file = dir3
@@ -35,7 +41,9 @@ test_case!(test_tmpfs_readdir_nested, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir = root.mkdir("parent", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("parent", FileMode::from_bits_truncate(0o755))
+        .unwrap();
     dir.create("file1.txt", FileMode::from_bits_truncate(0o644))
         .unwrap();
     dir.mkdir("subdir", FileMode::from_bits_truncate(0o755))
@@ -56,7 +64,9 @@ test_case!(test_tmpfs_empty_directory, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir = root.mkdir("empty", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("empty", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 空目录应该只有 . 和 ..
     let entries = dir.readdir().unwrap();
@@ -71,7 +81,9 @@ test_case!(test_tmpfs_directory_not_empty, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir = root.mkdir("nonempty", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir = root
+        .mkdir("nonempty", FileMode::from_bits_truncate(0o755))
+        .unwrap();
     dir.create("file.txt", FileMode::from_bits_truncate(0o644))
         .unwrap();
 
@@ -85,22 +97,20 @@ test_case!(test_tmpfs_parent_link, {
     let fs = create_test_tmpfs();
     let root = fs.root_inode();
 
-    let dir1 = root.mkdir("dir1", FileMode::from_bits_truncate(0o755)).unwrap();
-    let dir2 = dir1.mkdir("dir2", FileMode::from_bits_truncate(0o755)).unwrap();
+    let dir1 = root
+        .mkdir("dir1", FileMode::from_bits_truncate(0o755))
+        .unwrap();
+    let dir2 = dir1
+        .mkdir("dir2", FileMode::from_bits_truncate(0o755))
+        .unwrap();
 
     // 通过 .. 返回父目录
     let parent = dir2.lookup("..").unwrap();
-    kassert!(
-        parent.metadata().unwrap().inode_no
-            == dir1.metadata().unwrap().inode_no
-    );
+    kassert!(parent.metadata().unwrap().inode_no == dir1.metadata().unwrap().inode_no);
 
     // 再往上一层
     let grandparent = parent.lookup("..").unwrap();
-    kassert!(
-        grandparent.metadata().unwrap().inode_no
-            == root.metadata().unwrap().inode_no
-    );
+    kassert!(grandparent.metadata().unwrap().inode_no == root.metadata().unwrap().inode_no);
 });
 
 test_case!(test_tmpfs_many_entries, {
