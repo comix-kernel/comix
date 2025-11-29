@@ -1,14 +1,14 @@
 //! 系统相关系统调用实现
 
 use core::{
-    ffi::{c_char, c_int, c_ulong, c_void}, sync::atomic::Ordering
+    ffi::{c_char, c_int, c_long, c_ulong, c_void}, sync::atomic::Ordering
 };
 use riscv::register::sstatus;
 
 use crate::{
     arch::{
         lib::sbi::shutdown,
-        timer::{TICKS_PER_SEC, TIMER_TICKS},
+        timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
     },
     kernel::{
         current_task,
@@ -178,6 +178,42 @@ pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
             -EINVAL
         }
     }
+}
+
+/// 获取指定时钟的分辨率系统调用
+/// # 参数
+/// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
+/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，用于存储分辨率
+/// # 返回值
+/// * **成功**：返回 0，`tp` 被填充时钟分辨率
+/// * **失败**：返回负的 errno
+pub fn clock_getres(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
+    let res = match clk_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
+            TimeSepc {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+            }
+        }
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => {
+            TimeSepc {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+            }
+        }
+        id if id < MAX_CLOCKS as c_int && id >= 0 => {
+            return -ENOSYS;
+        }
+        _ => {
+            return -EINVAL;
+        }
+    };
+
+    unsafe {
+        write_to_user(tp, res);
+    }
+
+    0
 }
 
 /// 读取和控制内核日志缓冲区

@@ -15,10 +15,7 @@ use crate::{
     },
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskState,
-        TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block,
-        syscall::util::{get_args_safe, get_path_safe},
-        yield_task,
+        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskState, TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block, syscall::util::{get_args_safe, get_path_safe}, time::REALTIME, yield_task
     },
     mm::{
         frame_allocator::{alloc_contig_frames, alloc_frame},
@@ -30,7 +27,7 @@ use crate::{
         errno::{EINTR, EINVAL, ENOSYS, ESRCH},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
-        time::TimeSepc,
+        time::{TimeSepc, clock_flags::TIMER_ABSTIME, clock_id::{CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME, CLOCK_TAI}},
         types::StackT,
         wait::{WaitFlags, WaitStatus},
     },
@@ -531,4 +528,60 @@ pub fn nanosleep(duration: *const TimeSepc, rem: *mut TimeSepc) -> c_int {
 
 pub fn gettid() -> c_int {
     current_task().lock().tid as c_int
+}
+
+/// 基于时钟的高精度睡眠
+/// # 参数
+/// - `clk_id`: 时钟 ID
+/// - `flags`: 睡眠选项标志
+/// - `req`: 指向 TimeSepc 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 TimeSepc 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn clock_nanosleep(
+    clk_id: c_int,
+    flags: c_int,
+    req: *const TimeSepc,
+    rem: *mut TimeSepc,
+) -> c_int {
+    let time_req = unsafe { read_from_user(req) };
+    let is_abstime = (flags & TIMER_ABSTIME) != 0;
+    let sleep_ticks = time_req.into_freq(clock_freq());
+    let trigger = if is_abstime {
+        sleep_ticks
+    } else {
+        let now = match clk_id {
+            CLOCK_REALTIME => REALTIME.read().into_freq(clock_freq()),
+            CLOCK_MONOTONIC => get_time(),
+            CLOCK_TAI | CLOCK_BOOTTIME | CLOCK_PROCESS_CPUTIME_ID => return -ENOSYS,
+            _ => return -EINVAL,
+        };
+        now.saturating_add(sleep_ticks)
+    };
+
+    let mut result = 0;
+    let task = current_task();
+
+    let mut timer_q = TIMER_QUEUE.lock();
+    timer_q.push(trigger, task.clone());
+    sleep_task_with_block(task, true);
+    drop(timer_q);
+    yield_task();
+
+    if !rem.is_null() {
+        let dur = trigger.saturating_sub(get_time());
+        let remaining_ticks = if dur > 0 {
+            // XXX: 提前唤醒是否一定是因为信号？
+            result = -EINTR;
+            dur
+        } else {
+            0
+        };
+        let rem_ts = TimeSepc::from_freq(remaining_ticks, clock_freq());
+        unsafe {
+            write_to_user(rem, rem_ts);
+        }
+    }
+
+    result
 }
