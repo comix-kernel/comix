@@ -21,8 +21,8 @@ use crate::{
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
-        time::TimeSepc,
-        types::{SigSetT, StackT},
+        time::{Itimerval, TimeSepc},
+        types::{SigSetT, SizeT, StackT},
         uts_namespace::UtsNamespace,
     },
     vfs::Stat,
@@ -159,3 +159,10 @@ impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
 impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSepc));
 impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSepc));
 impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSepc));
+impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
+impl_syscall!(
+    sys_setitimmer,
+    setitimer,
+    (c_int, *const Itimerval, *mut Itimerval)
+);
+impl_syscall!(sys_getrandom, getrandom, (*mut c_void, SizeT, c_uint));

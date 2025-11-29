@@ -19,6 +19,7 @@ mod fs;
 mod ipc;
 mod kernel;
 mod mm;
+mod security;
 mod sync;
 mod test;
 mod uapi;

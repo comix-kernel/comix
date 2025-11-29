@@ -1,7 +1,7 @@
 //! 系统相关系统调用实现
 
 use core::{
-    ffi::{c_char, c_int, c_long, c_ulong, c_void},
+    ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     sync::atomic::Ordering,
 };
 use riscv::register::sstatus;
@@ -21,6 +21,7 @@ use crate::{
         set_console_level,
     },
     pr_alert,
+    security::{BiogasPoll, EntropyPool},
     uapi::{
         errno::{EINVAL, ENOSYS},
         log::SyslogAction,
@@ -33,6 +34,7 @@ use crate::{
             CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME,
             CLOCK_REALTIME_COARSE, MAX_CLOCKS,
         },
+        types::SizeT,
         uts_namespace::{UTS_NAME_LEN, UtsNamespace},
     },
     util::{
@@ -482,4 +484,28 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
         // 空操作（这些操作在 Linux 中也是 NOP）
         SyslogAction::Close | SyslogAction::Open => 0,
     }
+}
+
+/// 获取随机字节系统调用
+/// # 参数
+/// * `buf`: 指向用户空间缓冲区的指针，用于存储随机字节
+/// * `len`: 最大需要填充的字节数
+/// * `_flags`: 标志位（当前未使用）
+/// # 返回值
+/// * **成功**：返回填充的字节数
+/// * **失败**：返回负的 errno
+pub fn getrandom(buf: *mut c_void, len: SizeT, _flags: c_uint) -> c_int {
+    let mut pool = BiogasPoll::new();
+    for i in 0..len {
+        let byte = match pool.try_fill(core::slice::from_mut(unsafe {
+            &mut *(buf as *mut u8).add(i as usize)
+        })) {
+            Ok(_) => unsafe { *(buf as *mut u8).add(i as usize) },
+            Err(_) => return -EINVAL,
+        };
+        unsafe {
+            *(buf as *mut u8).add(i as usize) = byte;
+        }
+    }
+    len as c_int
 }
