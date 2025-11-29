@@ -8,7 +8,9 @@ use riscv::register::sstatus;
 use crate::{
     kernel::{
         current_cpu, current_task,
-        syscall::util::{create_file_at, get_path_safe, resolve_at_path},
+        syscall::util::{
+            create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags,
+        },
     },
     uapi::{
         errno::{EACCES, EINVAL, ENOENT},
@@ -1203,4 +1205,128 @@ pub fn fsync(fd: usize) -> isize {
 /// 在写直达架构下,完全等同于 fsync
 pub fn fdatasync(fd: usize) -> isize {
     fsync(fd)
+}
+
+/// fchownat - 修改文件所有者和组
+///
+/// # 参数
+/// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
+/// * `pathname` - 文件路径
+/// * `owner` - 新的用户 ID（u32::MAX 表示不改变）
+/// * `group` - 新的组 ID（u32::MAX 表示不改变）
+/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW、AT_EMPTY_PATH 等）
+///
+/// # 返回值
+/// * 0 - 成功
+/// * -errno - 失败
+///
+/// # 在单 root 用户系统中的行为
+/// 所有调用都会成功并更新 inode 的 uid/gid 字段，不进行权限检查
+pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, flags: u32) -> isize {
+    use crate::uapi::fs::AtFlags;
+
+    // 1. 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 2. 解析标志位
+    let at_flags = AtFlags::from_bits_truncate(flags);
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let empty_path = at_flags.contains(AtFlags::EMPTY_PATH);
+
+    // 3. 处理 AT_EMPTY_PATH 情况
+    if empty_path && path_str.is_empty() {
+        // pathname 为空，操作 dirfd 本身
+        if dirfd == AT_FDCWD {
+            // 不能对当前目录使用 AT_EMPTY_PATH
+            return -(EINVAL as isize);
+        }
+
+        let task = current_task();
+        let file = match task.lock().fd_table.get(dirfd as usize) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
+
+        let dentry = match file.dentry() {
+            Ok(d) => d,
+            Err(e) => return e.to_errno(),
+        };
+
+        return match dentry.inode.chown(owner, group) {
+            Ok(()) => 0,
+            Err(e) => e.to_errno(),
+        };
+    }
+
+    // 4. 解析路径，获取 dentry（使用辅助函数）
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 5. 调用 inode 的 chown 方法
+    match dentry.inode.chown(owner, group) {
+        Ok(()) => 0,
+        Err(e) => e.to_errno(),
+    }
+}
+
+/// fchmodat - 修改文件权限模式
+///
+/// # 参数
+/// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
+/// * `pathname` - 文件路径
+/// * `mode` - 新的权限模式（12 位权限位）
+/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW 等）
+///
+/// # 返回值
+/// * 0 - 成功
+/// * -errno - 失败
+///
+/// # 在单 root 用户系统中的行为
+/// 所有调用都会成功并更新 inode 的 mode 字段，不进行权限检查
+pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> isize {
+    use crate::uapi::fs::AtFlags;
+
+    // 1. 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 2. 解析标志位
+    let at_flags = AtFlags::from_bits_truncate(flags);
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+
+    // 3. 验证 mode 参数（只保留权限位，去除文件类型位）
+    let mode = mode & 0o7777; // 保留 12 位权限位（包括 setuid/setgid/sticky）
+    let file_mode = match FileMode::from_bits(mode) {
+        Some(m) => m,
+        None => return -(EINVAL as isize),
+    };
+
+    // 4. 解析路径，获取 dentry（使用辅助函数）
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 5. 调用 inode 的 chmod 方法
+    match dentry.inode.chmod(file_mode) {
+        Ok(()) => 0,
+        Err(e) => e.to_errno(),
+    }
 }

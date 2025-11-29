@@ -36,3 +36,9 @@ single_use_lifetimes = "warn"
 todo = "warn"
 needless_borrow = "deny"
 redundant_clone = "deny"
+
+[profile.dev]
+opt-level = 1  # 启用基本优化以减小代码体积
+
+[profile.test]
+opt-level = 1  # 测试模式也启用基本优化

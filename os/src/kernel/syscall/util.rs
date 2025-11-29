@@ -334,3 +334,69 @@ pub fn flush_block_device_by_fd(fd: usize) -> Result<(), isize> {
 
     Ok(())
 }
+
+/// 根据 dirfd 和路径解析 dentry，支持符号链接控制
+///
+/// 这是对 `resolve_at_path` 的扩展，支持控制是否跟随最后一个符号链接。
+///
+/// # 参数
+/// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
+/// * `path` - 文件路径
+/// * `follow_symlink` - 是否跟随最后一个符号链接
+///
+/// # 返回值
+/// * `Ok(Arc<Dentry>)` - 成功找到文件
+/// * `Err(FsError)` - 查找失败
+///
+/// # 示例
+/// ```rust
+/// // 跟随符号链接（默认行为）
+/// let dentry = resolve_at_path_with_flags(AT_FDCWD, "/path/to/file", true)?;
+///
+/// // 不跟随符号链接（用于 lstat, lchown 等）
+/// let dentry = resolve_at_path_with_flags(AT_FDCWD, "/path/to/symlink", false)?;
+/// ```
+pub fn resolve_at_path_with_flags(
+    dirfd: i32,
+    path: &str,
+    follow_symlink: bool,
+) -> Result<Arc<Dentry>, FsError> {
+    use crate::vfs::vfs_lookup_no_follow;
+
+    if follow_symlink {
+        // 跟随符号链接，使用标准的 resolve_at_path
+        resolve_at_path(dirfd, path)?.ok_or(FsError::NotFound)
+    } else {
+        // 不跟随符号链接
+        if path.starts_with('/') {
+            // 绝对路径
+            vfs_lookup_no_follow(path)
+        } else {
+            // 相对路径，需要从 dirfd 开始
+            let base_dentry = if dirfd == super::fs::AT_FDCWD {
+                // 使用当前工作目录
+                current_task()
+                    .lock()
+                    .fs
+                    .lock()
+                    .cwd
+                    .clone()
+                    .ok_or(FsError::NotFound)?
+            } else {
+                // 使用 dirfd 指向的目录
+                let task = current_task();
+                let file = task.lock().fd_table.get(dirfd as usize)?;
+                file.dentry()?
+            };
+
+            // 构建完整路径
+            let full_path = if base_dentry.full_path() == "/" {
+                format!("/{}", path)
+            } else {
+                format!("{}/{}", base_dentry.full_path(), path)
+            };
+
+            vfs_lookup_no_follow(&full_path)
+        }
+    }
+}
