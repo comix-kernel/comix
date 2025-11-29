@@ -59,6 +59,7 @@ pub fn stdin() -> Stdin {
 /// print!("Hello, world!");
 /// print!("The answer is {}", 42);
 /// ```
+#[cfg(not(test))]
 #[macro_export]
 macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
@@ -77,9 +78,28 @@ macro_rules! print {
 /// println!("Hello, world!");
 /// println!("The answer is {}", 42);
 /// ```
+#[cfg(not(test))]
 #[macro_export]
 macro_rules! println {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         $crate::tool::stdio::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+    }
+}
+
+#[cfg(test)]
+#[macro_export]
+/// 测试环境下的打印宏
+macro_rules! println {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::arch::lib::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+    }
+}
+
+#[cfg(test)]
+#[macro_export]
+/// 测试环境下的打印宏
+macro_rules! print {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::arch::lib::console::print(format_args!($fmt $(, $($arg)+)?))
     }
 }
