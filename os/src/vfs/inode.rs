@@ -207,6 +207,41 @@ pub trait Inode: Send + Sync + Any {
         // 默认实现：不支持
         Err(FsError::NotSupported)
     }
+
+    /// 修改文件所有者和组
+    ///
+    /// # 参数
+    /// * `uid` - 新的用户 ID（`u32::MAX` 表示不改变）
+    /// * `gid` - 新的组 ID（`u32::MAX` 表示不改变）
+    ///
+    /// # 返回值
+    /// * `Ok(())` - 成功
+    /// * `Err(FsError)` - 失败
+    ///
+    /// # 在单 root 用户系统中的行为
+    /// 此方法会更新 inode 的 uid/gid 字段，但不进行权限检查。
+    /// 所有调用都会成功（除非文件系统错误）。
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
+        // 默认实现：不支持
+        Err(FsError::NotSupported)
+    }
+
+    /// 修改文件权限模式
+    ///
+    /// # 参数
+    /// * `mode` - 新的权限模式（只修改权限位，不修改文件类型位）
+    ///
+    /// # 返回值
+    /// * `Ok(())` - 成功
+    /// * `Err(FsError)` - 失败
+    ///
+    /// # 在单 root 用户系统中的行为
+    /// 此方法会更新 inode 的 mode 字段，但不进行权限检查。
+    /// 所有调用都会成功（除非文件系统错误）。
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
+        // 默认实现：不支持
+        Err(FsError::NotSupported)
+    }
 }
 
 /// 为 Arc<dyn Inode> 提供向下转型辅助方法
