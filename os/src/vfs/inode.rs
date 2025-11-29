@@ -143,44 +143,24 @@ pub trait Inode: Send + Sync + Any {
     fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 创建符号链接
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 创建硬链接
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError>;
 
     /// 删除普通文件/链接
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn unlink(&self, name: &str) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn unlink(&self, name: &str) -> Result<(), FsError>;
 
     /// 删除目录
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn rmdir(&self, name: &str) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn rmdir(&self, name: &str) -> Result<(), FsError>;
 
     /// 重命名/移动 (原子操作)
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
     fn rename(
         &self,
         old_name: &str,
         new_parent: Arc<dyn Inode>,
         new_name: &str,
-    ) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    ) -> Result<(), FsError>;
 
     /// 列出目录内容
     fn readdir(&self) -> Result<Vec<DirEntry>, FsError>;
@@ -203,10 +183,10 @@ pub trait Inode: Send + Sync + Any {
     fn as_any(&self) -> &dyn Any;
 
     /// 设置文件时间戳
-    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
-        // 默认实现：不支持
-        Err(FsError::NotSupported)
-    }
+    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError>;
+
+    /// 读取符号链接的目标路径
+    fn readlink(&self) -> Result<String, FsError>;
 }
 
 /// 为 Arc<dyn Inode> 提供向下转型辅助方法

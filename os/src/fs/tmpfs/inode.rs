@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
-use crate::mm::frame_allocator::{alloc_frame, FrameTracker};
+use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::sync::{Mutex, SpinLock};
 use crate::uapi::time::timespec;
 use crate::vfs::{DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
@@ -347,7 +347,13 @@ impl Inode for TmpfsInode {
         // 获取自身的弱引用作为父节点
         let parent_weak = self.self_ref.lock().clone();
 
-        let new_inode = TmpfsInode::new(inode_no, InodeType::File, mode, parent_weak, self.stats.clone());
+        let new_inode = TmpfsInode::new(
+            inode_no,
+            InodeType::File,
+            mode,
+            parent_weak,
+            self.stats.clone(),
+        );
 
         // 设置新文件的自引用
         *new_inode.self_ref.lock() = Arc::downgrade(&new_inode);
@@ -563,5 +569,41 @@ impl Inode for TmpfsInode {
 
     fn as_any(&self) -> &dyn core::any::Any {
         self
+    }
+
+    fn symlink(&self, _name: &str, _target: &str) -> Result<Arc<dyn Inode>, FsError> {
+        // TODO: 实现符号链接支持
+        Err(FsError::NotSupported)
+    }
+
+    fn link(&self, _name: &str, _target: &Arc<dyn Inode>) -> Result<(), FsError> {
+        // TODO: 实现硬链接支持
+        Err(FsError::NotSupported)
+    }
+
+    fn rename(
+        &self,
+        _old_name: &str,
+        _new_parent: Arc<dyn Inode>,
+        _new_name: &str,
+    ) -> Result<(), FsError> {
+        // TODO: 实现重命名支持
+        Err(FsError::NotSupported)
+    }
+
+    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError> {
+        let mut metadata = self.metadata.lock();
+        if let Some(atime) = atime {
+            metadata.atime = atime;
+        }
+        if let Some(mtime) = mtime {
+            metadata.mtime = mtime;
+        }
+        Ok(())
+    }
+
+    fn readlink(&self) -> Result<String, FsError> {
+        // TODO: 实现符号链接读取
+        Err(FsError::NotSupported)
     }
 }
