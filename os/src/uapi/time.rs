@@ -7,10 +7,10 @@
 
 use core::{
     ffi::{c_int, c_long},
-    ops::Sub,
+    ops::{Add, Sub},
 };
 
-use crate::arch::timer::{clock_freq, get_time};
+use crate::{arch::timer::{clock_freq, get_time}, kernel::time::REALTIME};
 
 /// 用于指定秒和纳秒精度的时间
 #[repr(C)]
@@ -28,6 +28,19 @@ impl TimeSepc {
 
     /// 特殊值：不改变此时间（UTIME_OMIT，用于 utimensat）
     pub const UTIME_OMIT: c_long = (1i64 << 30) - 2; // 1073741822
+
+    /// 创建一个新的 TimeSepc 结构体
+    /// # 参数:
+    /// - `sec`: 秒数
+    /// - `nsec`: 纳秒数
+    /// # 返回值:
+    /// - 对应的 TimeSepc 结构体
+    pub fn new(sec: c_long, nsec: c_long) -> Self {
+        Self {
+            tv_sec: sec,
+            tv_nsec: nsec,
+        }
+    }
 
     /// 将 TimeSepc 转换为指定频率的刻度数。
     /// # 参数:
@@ -59,8 +72,9 @@ impl TimeSepc {
     /// # 返回值:
     /// - 当前时间的 TimeSepc 结构体
     pub fn now() -> Self {
-        let time = get_time();
-        Self::from_freq(time, clock_freq())
+        let time = REALTIME.read();
+        let mtime = Self::monotonic_now();
+        mtime + *time
     }
 
     /// 获取当前单调时钟时间的 TimeSepc。
@@ -125,6 +139,26 @@ impl Sub for TimeSepc {
             TimeSepc {
                 tv_sec: sec - 1,
                 tv_nsec: nsec + 1_000_000_000,
+            }
+        } else {
+            TimeSepc {
+                tv_sec: sec,
+                tv_nsec: nsec,
+            }
+        }
+    }
+}
+
+impl Add for TimeSepc {
+    type Output = TimeSepc;
+
+    fn add(self, other: TimeSepc) -> TimeSepc {
+        let sec = self.tv_sec + other.tv_sec;
+        let nsec = self.tv_nsec + other.tv_nsec;
+        if nsec >= 1_000_000_000 {
+            TimeSepc {
+                tv_sec: sec + 1,
+                tv_nsec: nsec - 1_000_000_000,
             }
         } else {
             TimeSepc {
