@@ -417,4 +417,33 @@ impl Inode for SimpleFsInode {
     fn as_any(&self) -> &dyn core::any::Any {
         self as &dyn core::any::Any
     }
+
+    fn symlink(&self, _name: &str, _target: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn link(&self, _name: &str, _target: &Arc<dyn Inode>) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn rmdir(&self, _name: &str) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn rename(
+        &self,
+        _old_name: &str,
+        _new_parent: Arc<dyn Inode>,
+        _new_name: &str,
+    ) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn readlink(&self) -> Result<String, FsError> {
+        Err(FsError::NotSupported)
+    }
 }

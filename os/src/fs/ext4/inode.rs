@@ -681,4 +681,9 @@ impl Inode for Ext4Inode {
         // inode_ref 在 drop 时会自动写回磁盘
         Ok(())
     }
+
+    fn readlink(&self) -> Result<String, FsError> {
+        // TODO: 实现 ext4 符号链接读取
+        Err(FsError::NotSupported)
+    }
 }
