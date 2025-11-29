@@ -3,9 +3,9 @@
 //! 在单 root 用户系统中，这些系统调用存储值但不实际限制权限
 
 use crate::kernel::task::current_task;
-use crate::tool::user_buffer::{validate_user_ptr_mut, write_to_user};
 use crate::uapi::cred::{GID_UNCHANGED, ROOT_GID, ROOT_UID, UID_UNCHANGED};
 use crate::uapi::errno::{EFAULT, EPERM};
+use crate::util::user_buffer::{validate_user_ptr_mut, write_to_user};
 
 /// 获取真实用户 ID
 ///

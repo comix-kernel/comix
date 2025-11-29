@@ -8,7 +8,9 @@ use riscv::register::sstatus;
 use crate::{
     kernel::{
         current_cpu, current_task,
-        syscall::util::{create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags},
+        syscall::util::{
+            create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags,
+        },
     },
     uapi::{
         errno::{EACCES, EINVAL, ENOENT},
@@ -1220,13 +1222,7 @@ pub fn fdatasync(fd: usize) -> isize {
 ///
 /// # 在单 root 用户系统中的行为
 /// 所有调用都会成功并更新 inode 的 uid/gid 字段，不进行权限检查
-pub fn fchownat(
-    dirfd: i32,
-    pathname: *const c_char,
-    owner: u32,
-    group: u32,
-    flags: u32,
-) -> isize {
+pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, flags: u32) -> isize {
     use crate::uapi::fs::AtFlags;
 
     // 1. 解析路径字符串
@@ -1334,4 +1330,3 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
         Err(e) => e.to_errno(),
     }
 }
-

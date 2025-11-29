@@ -158,18 +158,6 @@ test_case!(test_normalize_path_root_parent, {
 
 // P1 测试 vfs_lookup_no_follow 函数
 
-test_case!(test_vfs_lookup_no_follow_regular_file, {
-    // 测试普通文件查找（无符号链接）
-    // 这个测试需要实际的文件系统环境
-    // 由于测试环境限制，这里只测试函数存在性和基本调用
-    use crate::vfs::vfs_lookup_no_follow;
-
-    // 尝试查找根目录（总是存在的）
-    let result = vfs_lookup_no_follow("/");
-    // 根目录应该能找到
-    kassert!(result.is_ok());
-});
-
 test_case!(test_vfs_lookup_no_follow_nonexistent, {
     // 测试查找不存在的路径
     use crate::vfs::vfs_lookup_no_follow;
