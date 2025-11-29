@@ -4,7 +4,9 @@ use crate::{
     device::{
         Driver,
         net::{add_network_device, interface::NetworkInterface, net_device::VirtioNetDevice},
-    }, earlyprintln, println, sync::SpinLock
+    },
+    earlyprintln, println,
+    sync::SpinLock,
 };
 use alloc::{format, sync::Arc};
 use lazy_static::lazy_static;

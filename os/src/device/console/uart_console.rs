@@ -2,7 +2,10 @@
 
 use alloc::{string::String, sync::Arc};
 
-use crate::device::{console::{CONSOLES, Console}, serial::SerialDriver};
+use crate::device::{
+    console::{CONSOLES, Console},
+    serial::SerialDriver,
+};
 
 struct UARTConsole {
     uart: Arc<dyn SerialDriver>,

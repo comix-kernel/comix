@@ -8,9 +8,9 @@ use riscv::register::time;
 
 /// 每秒的时钟中断次数
 /// 决定内核每秒想要多少次时钟中断
-const TICKS_PER_SEC: usize = 100;
+pub const TICKS_PER_SEC: usize = 100;
 /// 每秒的毫秒数
-const MSEC_PER_SEC: usize = 1000;
+pub const MSEC_PER_SEC: usize = 1000;
 
 /// 记录时钟中断次数
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);

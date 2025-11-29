@@ -6,7 +6,8 @@ use uart_16550::MmioSerialPort;
 
 use crate::{
     device::{
-        DRIVERS, DeviceType, Driver, SERIAL_DRIVERS, console::uart_console, device_tree::DEVICE_TREE_REGISTRY, serial::SerialDriver
+        DRIVERS, DeviceType, Driver, SERIAL_DRIVERS, console::uart_console,
+        device_tree::DEVICE_TREE_REGISTRY, serial::SerialDriver,
     },
     earlyprintln,
     kernel::current_memory_space,
