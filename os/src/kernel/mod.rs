@@ -9,6 +9,7 @@ mod scheduler;
 mod task;
 mod timer_queue;
 
+pub mod time;
 pub mod syscall;
 
 pub use cpu::*;

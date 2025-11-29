@@ -1,8 +1,7 @@
 //! 系统相关系统调用实现
 
 use core::{
-    ffi::{c_char, c_int, c_ulong, c_void},
-    sync::atomic::Ordering,
+    ffi::{c_char, c_int, c_ulong, c_void}, sync::atomic::Ordering
 };
 use riscv::register::sstatus;
 
@@ -25,15 +24,11 @@ use crate::{
         user_buffer::{UserBuffer, write_to_user},
     },
     uapi::{
-        errno::EINVAL,
-        log::SyslogAction,
-        reboot::{
+        errno::{EINVAL, ENOSYS}, log::SyslogAction, reboot::{
             REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
-        },
-        sysinfo::SysInfo,
-        uts_namespace::{UTS_NAME_LEN, UtsNamespace},
-    },
+        }, sysinfo::SysInfo, time::clock_id::{CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, MAX_CLOCKS}, uts_namespace::{UTS_NAME_LEN, UtsNamespace}
+    }, vfs::timespec,
 };
 
 /// 重启系统调用
@@ -125,6 +120,36 @@ pub fn sysinfo(info: *mut SysInfo) -> c_int {
     unsafe {
         write_to_user(info, sys_info);
     }
+    0
+}
+
+/// 获取指定时钟的时间系统调用
+/// # 参数
+/// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
+/// * `tp` - 指向用户空间 timespec 结构体的指针，用于存储时间
+/// # 返回值
+/// * **成功**：返回 0，`tp` 被填充当前时间
+/// * **失败**：返回负的 errno
+pub fn clock_gettime(clk_id: c_int, tp: *mut timespec) -> c_int {
+    let ts = match clk_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
+            timespec::now()
+        }
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => {
+            timespec::monotonic_now()
+        }
+        id if id < MAX_CLOCKS as c_int && id >= 0 => {
+            return -ENOSYS;
+        }
+        _ => {
+            return -EINVAL;
+        }
+    };
+
+    unsafe {
+        write_to_user(tp, ts);
+    }
+
     0
 }
 
