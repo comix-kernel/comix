@@ -7,7 +7,7 @@
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
 use crate::sync::{Mutex, SpinLock};
-use crate::uapi::time::timespec;
+use crate::uapi::time::TimeSepc;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -112,15 +112,15 @@ impl Inode for Ext4Inode {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
-            atime: timespec {
+            atime: TimeSepc {
                 tv_sec: inode.atime as i64,
                 tv_nsec: atime_nsec,
             },
-            mtime: timespec {
+            mtime: TimeSepc {
                 tv_sec: inode.mtime as i64,
                 tv_nsec: mtime_nsec,
             },
-            ctime: timespec {
+            ctime: TimeSepc {
                 tv_sec: inode.ctime as i64,
                 tv_nsec: ctime_nsec,
             },
@@ -652,7 +652,7 @@ impl Inode for Ext4Inode {
         self
     }
 
-    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, atime: Option<TimeSepc>, mtime: Option<TimeSepc>) -> Result<(), FsError> {
         let mut fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
@@ -673,7 +673,7 @@ impl Inode for Ext4Inode {
             inode.i_mtime_extra = ((mt.tv_nsec as u32) << 2) & 0xFFFFFFFC;
 
             // 修改时间改变时，也更新 ctime
-            let now = timespec::now();
+            let now = TimeSepc::now();
             inode.ctime = now.tv_sec as u32;
             inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
         }
