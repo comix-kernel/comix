@@ -116,6 +116,22 @@ impl TimeSepc {
         Ok(())
     }
 
+    /// 将 TimeSepc 转换为 timeval 结构体。
+    /// # 返回值:
+    /// - 对应的 timeval 结构体
+    pub fn to_timeval(&self) -> timeval {
+        timeval {
+            tv_sec: self.tv_sec,
+            tv_usec: self.tv_nsec / 1000,
+        }
+    }
+
+    /// 检查是否为零时间
+    #[inline]
+    pub fn is_zero(&self) -> bool {
+        self.tv_sec == 0 && self.tv_nsec == 0
+    }
+
     /// 检查是否为 UTIME_NOW（用于 utimensat）
     #[inline]
     pub fn is_now(&self) -> bool {
@@ -179,10 +195,62 @@ pub struct timeval {
     pub tv_usec: c_long,
 }
 
+impl timeval {
+    /// 将 timeval 转换为 TimeSepc 结构体。
+    /// # 返回值:
+    /// - 对应的 TimeSepc 结构体
+    pub fn to_timespec(&self) -> TimeSepc {
+        TimeSepc {
+            tv_sec: self.tv_sec,
+            tv_nsec: self.tv_usec * 1000,
+        }
+    }
+
+    /// 将 timeval 转换为指定频率的刻度数。
+    /// # 参数:
+    /// - `freq`: 频率（每秒刻度数）
+    /// # 返回值:
+    /// - 刻度数
+    pub fn into_freq(&self, freq: usize) -> usize {
+        let sec_ticks = (self.tv_sec as u128) * (freq as u128);
+        let usec_ticks = (self.tv_usec as u128) * (freq as u128) / 1_000_000;
+        (sec_ticks + usec_ticks) as usize
+    }
+
+    /// 创建一个新的 timeval 结构体
+    /// # 参数:
+    /// - `sec`: 秒数
+    /// - `usec`: 微秒数
+    /// # 返回值:
+    /// - 对应的 timeval 结构体
+    pub fn new(sec: c_long, usec: c_long) -> Self {
+        Self {
+            tv_sec: sec,
+            tv_usec: usec,
+        }
+    }
+
+    /// 创建零时间的 timeval 结构体
+    /// # 返回值:
+    /// - 零时间的 timeval 结构体
+    pub fn zero() -> Self {
+        Self {
+            tv_sec: 0,
+            tv_usec: 0,
+        }
+    }
+
+    /// 检查是否为零时间
+    #[inline]
+    pub fn is_zero(&self) -> bool {
+        self.tv_sec == 0 && self.tv_usec == 0
+    }
+}
+
 /// 用于设置 POSIX 间隔定时器 (timer_create) 的结构。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct itimerspec {
+pub struct Itimerspec {
     /// 定时器周期 (timer period)
     pub it_interval: TimeSepc,
     /// 定时器初始值/到期时间 (timer expiration)
@@ -192,11 +260,23 @@ pub struct itimerspec {
 /// 用于设置传统 BSD 间隔定时器 (setitimer) 的结构。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct itimerval {
+pub struct Itimerval {
     /// 定时器周期 (timer interval)
     pub it_interval: timeval,
     /// 定时器当前值 (current value)
     pub it_value: timeval,
+}
+
+impl Itimerval {
+    /// 将 Itimerval 转换为 Itimerspec。
+    /// # 返回值:
+    /// - 对应的 Itimerspec 结构体
+    pub fn zero() -> Self {
+        Self {
+            it_interval: timeval { tv_sec: 0, tv_usec: 0 },
+            it_value: timeval { tv_sec: 0, tv_usec: 0 },
+        }
+    }
 }
 
 /// 时区结构体，用于 gettimeofday/settimeofday（现在已不推荐使用）。

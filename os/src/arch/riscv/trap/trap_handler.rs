@@ -6,14 +6,15 @@ use core::sync::atomic::Ordering;
 
 use crate::ipc::check_signal;
 use crate::println;
+use alloc::task;
 use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
 
 use crate::arch::syscall::dispatch_syscall;
-use crate::arch::timer::{TIMER_TICKS, get_time};
+use crate::arch::timer::{TIMER_TICKS, clock_freq, get_time};
 use crate::arch::trap::restore;
-use crate::kernel::{SCHEDULER, TIMER_QUEUE, schedule, wake_up_with_block};
+use crate::kernel::{SCHEDULER, TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，
@@ -125,6 +126,13 @@ pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_with_block(task);
+    }
+    while let Some(entry) = TIMER.lock().pop_due_entry(get_time()) {
+        send_signal_process(&entry.task, entry.sig);
+        if !entry.it_interval.is_zero() {
+            let next_trigger = get_time() + entry.it_interval.into_freq(clock_freq());
+            TIMER.lock().push(next_trigger, entry);
+        }
     }
     if SCHEDULER.lock().update_time_slice() {
         schedule();
