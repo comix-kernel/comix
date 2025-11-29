@@ -15,16 +15,17 @@ use crate::{
         sleep_task_with_graud_and_block, yield_task,
     },
     sync::SpinLock,
-    tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
             MContextT, MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE,
             SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
+            UContextT,
         },
-        time::timespec,
+        time::TimeSepc,
         types::{SigSetT, StackT},
     },
+    util::user_buffer::{read_from_user, write_to_user},
 };
 
 /// 修改当前任务的信号屏蔽字
@@ -151,7 +152,7 @@ pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut Signal
 pub fn rt_sigtimedwait(
     set: *const SigSetT,
     info: *mut SigInfoT,
-    timeout: *const timespec,
+    timeout: *const TimeSepc,
     sigsetsize: c_uint,
 ) -> c_int {
     if sigsetsize as usize != SIGSET_SIZE {
@@ -229,9 +230,9 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
 pub fn rt_sigreturn() -> ! {
     let tfp = current_task().lock().trap_frame_ptr.load(Ordering::SeqCst);
     let tf = unsafe { &mut *tfp };
-    let mcontext_addr = tf.x2_sp;
-    let mcontext: MContextT = unsafe { read_from_user(mcontext_addr as *const MContextT) };
-    tf.restore_from_mcontext(&mcontext);
+    let ucontext_addr = tf.x2_sp;
+    let ucontext: UContextT = unsafe { read_from_user(ucontext_addr as *const UContextT) };
+    tf.restore_from_mcontext(&ucontext.uc_mcontext);
     unsafe { restore(tf) }
     unreachable!("rt_sigreturn should not return");
 }
@@ -383,7 +384,7 @@ pub fn tgkill(tgid: c_int, tid: c_int, sig: c_int) -> c_int {
 fn wait_for_signal(
     task: SharedTask,
     signal: SignalFlags,
-    timeout: Option<timespec>,
+    timeout: Option<TimeSepc>,
 ) -> Result<(u8, SigInfoT), i32> {
     let mut t = task.lock();
     if let Some(timeout) = timeout {
@@ -408,11 +409,11 @@ fn wait_for_signal(
             }
         } else {
             // 带超时的阻塞等待
-            let start = timespec::now();
+            let start = TimeSepc::now();
             while !t.pending.has_deliverable_signal(signal)
                 && !t.shared_pending.lock().has_deliverable_signal(signal)
             {
-                let now = timespec::now();
+                let now = TimeSepc::now();
                 if now - start > timeout {
                     return Err(-EAGAIN); // 超时返回
                 }

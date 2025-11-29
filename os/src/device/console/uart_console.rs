@@ -2,7 +2,10 @@
 
 use alloc::{string::String, sync::Arc};
 
-use crate::device::{console::Console, serial::SerialDriver};
+use crate::device::{
+    console::{CONSOLES, Console},
+    serial::SerialDriver,
+};
 
 struct UARTConsole {
     uart: Arc<dyn SerialDriver>,
@@ -32,4 +35,9 @@ impl Console for UARTConsole {
     fn flush(&self) {
         // UART 通常不需要显式刷新
     }
+}
+
+pub fn init(uart: Arc<dyn SerialDriver>) {
+    let console = Arc::new(UARTConsole { uart });
+    CONSOLES.write().push(console);
 }

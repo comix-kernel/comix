@@ -123,11 +123,27 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // 文件系统同步 (续)
         syscall_number::SYS_SYNCFS => sys_syncfs(frame),
 
-        // 文件重命名
+        // 调度 (续)
         syscall_number::SYS_RENAMEAT2 => sys_renameat2(frame),
+
+        // 随机数与内存文件
+        syscall_number::SYS_GETRANDOM => sys_getrandom(frame),
 
         // 获取网络接口地址列表 (非标准系统调用)
         syscall_number::SYS_GETIFADDRS => sys_getifaddrs(frame),
+
+        // 扩展系统调用 (Extended/Legacy)
+        // (send/recv 等已经通过更通用的接口实现，不需要单独分发)
+
+        // 系统信息 (补充)
+        syscall_number::SYS_SYSINFO => sys_sysinfo(frame),
+
+        // POSIX 定时器 (补充)
+        syscall_number::SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
+        syscall_number::SYS_CLOCK_SETTIME => sys_clock_settime(frame),
+        syscall_number::SYS_CLOCK_GETRES => sys_clock_getres(frame),
+        syscall_number::SYS_GETITIMER => sys_getitimmer(frame),
+        syscall_number::SYS_SETITIMER => sys_setitimmer(frame),
 
         _ => {
             // 未知的系统调用

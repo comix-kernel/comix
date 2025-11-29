@@ -19,10 +19,11 @@ mod fs;
 mod ipc;
 mod kernel;
 mod mm;
+mod security;
 mod sync;
 mod test;
-mod tool;
 mod uapi;
+mod util;
 mod vfs;
 #[macro_use]
 mod log;
