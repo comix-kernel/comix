@@ -2,135 +2,56 @@
 //!
 //! 提供软件中断机制，用于发送异步通知给进程
 //! 处理信号的捕获、屏蔽和默认行为.
+//! # 信号投递流程
+//! - **检查：** 内核在返回用户态前，检查私有 `pending` 和共享 `pending`，找到**最高优先级且未被阻塞**的信号 S。
+//! - **投递：** 内核将 S 从 `pending` 队列中移除，构建 S 的上下文，并修改 PC/SP 指向信号处理函数。
+//! - **返回：** 内核退出，任务在用户态执行信号处理函数。
+//! - **循环：** 当信号处理函数执行完毕，通过 `rt_sigreturn` 返回内核后，内核会**再次**进入检查流程。
+//!             此时，它可能会发现队列中还有第二个未决信号，然后开始第二次单次投递。
 
 use bitflags::bitflags;
 
 use crate::{
-    arch::{kernel::cpu, trap::TrapFrame},
+    arch::{
+        kernel::cpu,
+        trap::{TrapFrame, sigreturn_trampoline_address},
+    },
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
         exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block, yield_task,
     },
     pr_err,
+    tool::{address::align_down, user_buffer::write_to_user},
+    uapi::signal::*,
 };
 
-/* 信号定义 */
-pub const _NSIG: usize = 31;
-
-pub const _SIGHUP: usize = 1;
-pub const _SIGINT: usize = 2;
-pub const _SIGQUIT: usize = 3;
-pub const _SIGILL: usize = 4;
-pub const _SIGTRAP: usize = 5;
-pub const _SIGABRT: usize = 6;
-pub const _SIGBUS: usize = 7;
-pub const _SIGFPE: usize = 8;
-pub const _SIGKILL: usize = 9;
-pub const _SIGUSR1: usize = 10;
-pub const _SIGSEGV: usize = 11;
-pub const _SIGUSR2: usize = 12;
-pub const _SIGPIPE: usize = 13;
-pub const _SIGALRM: usize = 14;
-pub const _SIGTERM: usize = 15;
-pub const _SIGSTKFLT: usize = 16;
-pub const _SIGCHLD: usize = 17;
-pub const _SIGCONT: usize = 18;
-pub const _SIGSTOP: usize = 19;
-pub const _SIGTSTP: usize = 20;
-pub const _SIGTTIN: usize = 21;
-pub const _SIGTTOU: usize = 22;
-pub const _SIGURG: usize = 23;
-pub const _SIGXCPU: usize = 24;
-pub const _SIGXFSZ: usize = 25;
-pub const _SIGVTALRM: usize = 26;
-pub const _SIGPROF: usize = 27;
-pub const _SIGWINCH: usize = 28;
-pub const _SIGIO: usize = 29;
-pub const _SIGPWR: usize = 30;
-pub const _SIGSYS: usize = 31;
-
-bitflags! {
-    #[derive(Clone, Debug, Copy)]
-    pub struct SignalFlags: usize {
-        const SIGHUP = 1 << (_SIGHUP - 1);
-        const SIGINT = 1 << (_SIGINT - 1);
-        const SIGQUIT = 1 << (_SIGQUIT - 1);
-        const SIGILL = 1 << (_SIGILL - 1);
-        const SIGTRAP = 1 << (_SIGTRAP - 1);
-        const SIGABRT = 1 << (_SIGABRT - 1);
-        const SIGBUS = 1 << (_SIGBUS - 1);
-        const SIGFPE = 1 << (_SIGFPE - 1);
-        const SIGKILL = 1 << (_SIGKILL - 1);
-        const SIGUSR1 = 1 << (_SIGUSR1 - 1);
-        const SIGSEGV = 1 << (_SIGSEGV - 1);
-        const SIGUSR2 = 1 << (_SIGUSR2 - 1);
-        const SIGPIPE = 1 << (_SIGPIPE - 1);
-        const SIGALRM = 1 << (_SIGALRM - 1);
-        const SIGTERM = 1 << (_SIGTERM - 1);
-        const SIGSTKFLT = 1 << (_SIGSTKFLT - 1);
-        const SIGCHLD = 1 << (_SIGCHLD - 1);
-        const SIGCONT = 1 << (_SIGCONT - 1);
-        const SIGSTOP = 1 << (_SIGSTOP - 1);
-        const SIGTSTP = 1 << (_SIGTSTP - 1);
-        const SIGTTIN = 1 << (_SIGTTIN - 1);
-        const SIGTTOU = 1 << (_SIGTTOU - 1);
-        const SIGURG = 1 << (_SIGURG - 1);
-        const SIGXCPU = 1 << (_SIGXCPU - 1);
-        const SIGXFSZ = 1 << (_SIGXFSZ - 1);
-        const SIGVTALRM = 1 << (_SIGVTALRM - 1);
-        const SIGPROF = 1 << (_SIGPROF - 1);
-        const SIGWINCH = 1 << (_SIGWINCH - 1);
-        const SIGIO = 1 << (_SIGIO - 1);
-        const SIGPWR = 1 << (_SIGPWR - 1);
-        const SIGSYS = 1 << (_SIGSYS - 1);
-    }
-}
-
-impl SignalFlags {
-    pub fn from_signal_num(sig_num: usize) -> Option<Self> {
-        if sig_num == 0 || sig_num > _NSIG {
-            return None;
-        }
-        Some(SignalFlags::from_bits(1 << (sig_num - 1)).unwrap())
-    }
-}
-
-/// 默认信号处理动作
-pub const SIG_DEF: usize = 0;
-/// 忽略信号
-pub const SIG_IGN: usize = 1;
-
-/// 信号处理动作
-#[repr(C, align(16))]
-#[derive(Debug, Clone, Copy)]
-pub struct SignalAction {
-    /// 信号处理函数指针
-    pub handler: usize,
-    /// 信号屏蔽字
-    pub mask: SignalFlags,
-}
-
 /// 信号的动作表
+/// 每个进程拥有一个独立的信号处理动作表，
+/// 用于存储每个信号的处理函数、屏蔽字和标志。
+/// 索引 0 未用，信号编号从 1..=_NSIG
+/// # SAFE:
+/// 该结构体包含裸指针，但其使用受限于内核对任务的锁保护，
+/// 因此可以安全地实现 Send 和 Sync。
 #[derive(Debug, Clone)]
 pub struct SignalHandlerTable {
     /// 动作数组，索引 0 未用，信号编号从 1..=_NSIG
-    pub actions: [SignalAction; _NSIG + 1],
+    pub actions: [SignalAction; NSIG + 1],
 }
+
+unsafe impl Send for SignalHandlerTable {}
+unsafe impl Sync for SignalHandlerTable {}
 
 impl SignalHandlerTable {
     /// 创建一个新的进程信号状态，所有信号动作和屏蔽字为空，待处理信号为空
     pub fn new() -> Self {
         Self {
-            actions: core::array::from_fn(|_| SignalAction {
-                handler: SIG_DEF,
-                mask: SignalFlags::empty(),
-            }),
+            actions: core::array::from_fn(|_| SignalAction::default()),
         }
     }
 
     /// 设置某个信号的动作
     pub fn set_action(&mut self, sig: usize, action: SignalAction) {
-        if sig == 0 || sig > _NSIG {
+        if sig == 0 || sig > NSIG {
             return;
         }
         self.actions[sig] = action;
@@ -149,7 +70,7 @@ pub fn first_deliverable_signal(
     }
 
     let signal_bit_index = deliverable_signals.bits().trailing_zeros();
-    if signal_bit_index < _NSIG as u32 {
+    if signal_bit_index < NSIG as u32 {
         let first_sig = SignalFlags::from_bits(1 << signal_bit_index).unwrap();
         return Some(first_sig);
     }
@@ -161,100 +82,164 @@ pub fn first_deliverable_signal(
 fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedTask) {
     let sig_num = signal_from_flag(sig_flag).unwrap();
 
-    match action.handler {
-        SIG_DEF => match sig_num {
-            _SIGQUIT | _SIGILL | _SIGABRT | _SIGBUS | _SIGFPE | _SIGSEGV | _SIGSYS | _SIGXCPU
-            | _SIGXFSZ => sig_dump(sig_num), // 致命错误，调用退出系统调用或内核退出函数
+    match unsafe { action.sa_handler() } as isize {
+        SIG_DFL => match sig_num {
+            NUM_SIGQUIT | NUM_SIGILL | NUM_SIGABRT | NUM_SIGBUS | NUM_SIGFPE | NUM_SIGSEGV
+            | NUM_SIGSYS | NUM_SIGXCPU | NUM_SIGXFSZ => sig_dump(sig_num), // 致命错误，调用退出系统调用或内核退出函数
 
-            _SIGHUP | _SIGINT | _SIGPIPE | _SIGALRM | _SIGTERM | _SIGUSR1 | _SIGUSR2
-            | _SIGSTKFLT | _SIGPROF | _SIGPWR => sig_terminate(sig_num), // 默认终止
-            _SIGKILL => sig_terminate(sig_num), // SIGKILL 总是终止
-            _SIGSTOP | _SIGTSTP | _SIGTTIN | _SIGTTOU => sig_stop(sig_num),
-            _SIGCONT => sig_continue(sig_num),
-            _SIGCHLD | _SIGURG | _SIGWINCH | _SIGIO => sig_ignore(sig_num),
+            NUM_SIGHUP | NUM_SIGINT | NUM_SIGPIPE | NUM_SIGALRM | NUM_SIGTERM | NUM_SIGUSR1
+            | NUM_SIGUSR2 | NUM_SIGSTKFLT | NUM_SIGPROF | NUM_SIGPWR => sig_terminate(sig_num), // 默认终止
+            NUM_SIGKILL => sig_terminate(sig_num), // SIGKILL 总是终止
+            NUM_SIGSTOP | NUM_SIGTSTP | NUM_SIGTTIN | NUM_SIGTTOU => sig_stop(sig_num),
+            NUM_SIGCONT => sig_continue(sig_num),
+            NUM_SIGCHLD | NUM_SIGURG | NUM_SIGWINCH | NUM_SIGIO => sig_ignore(sig_num),
             _ => panic!("Unhandled signal"),
         },
         SIG_IGN => sig_ignore(sig_num),
         handler_addr => {
             // 自定义处理器：构造用户栈上下文并跳转
             // **将 action.mask 传递给安装跳板函数**
-            install_user_signal_trampoline(task, sig_num, handler_addr, action.mask);
+            install_user_signal_trap_frame(
+                task,
+                sig_num,
+                handler_addr,
+                SignalFlags::from_sigset_t(action.sa_mask),
+            );
         }
     }
 }
 
 /// 在返回用户态前检查信号并处理
+/// # 说明:
+/// 该函数会检查当前任务的私有和共享待处理信号集合，
+/// 找出第一个可投递的信号并进行处理。
+/// 如果没有可投递的信号，则直接返回。
 pub fn check_signal() {
     let task = current_task();
-    loop {
-        let (sig_flag, action) = {
-            let mut t = task.lock();
-            let pending_copy = t.pending.clone();
-            let blocked_copy = t.blocked.clone();
-            let Some(flag) = first_deliverable_signal(pending_copy, blocked_copy) else {
-                break;
-            };
+    let (sig_flag, action) = {
+        let mut t = task.lock();
+        let pending_copy = t.pending.clone();
+        let shared_pending_copy = t.shared_pending.lock().clone();
+        let blocked_copy = t.blocked.clone();
+        if let Some(flag) = first_deliverable_signal(pending_copy.signals, blocked_copy) {
             let num = signal_from_flag(flag).unwrap();
             let action = {
                 let handlers = t.signal_handlers.lock();
                 handlers.actions[num]
             };
-            t.pending.remove(flag);
+            t.pending.signals.remove(flag);
             (flag, action)
-        };
-
-        handle_one_signal(sig_flag, action, &task);
-
-        // 若任务已退出或停止且为终止类信号，停止继续处理
+        } else if let Some(flag) =
+            first_deliverable_signal(shared_pending_copy.signals, blocked_copy)
         {
-            let t = task.lock();
-            if t.state == TaskState::Zombie {
-                break;
-            }
+            let num = signal_from_flag(flag).unwrap();
+            let action = {
+                let handlers = t.signal_handlers.lock();
+                handlers.actions[num]
+            };
+            t.shared_pending.lock().signals.remove(flag);
+            (flag, action)
+        } else {
+            return;
         }
-    }
+    };
+
+    handle_one_signal(sig_flag, action, &task);
 }
 
-/// 设置信号用户态处理跳板
-fn install_user_signal_trampoline(
+/// 为信号创建 siginfo_t 结构体
+/// # 参数:
+/// * `flag`: 信号标志
+/// TODO: 填充更多字段
+pub fn create_siginfo_for_signal(flag: SignalFlags) -> SigInfoT {
+    let sig_num = flag.to_signal_number();
+    let mut sig_info = SigInfoT::new();
+    sig_info.si_signo = sig_num as i32;
+    sig_info.si_code = 0;
+    sig_info.si_errno = 0;
+    sig_info
+}
+
+/// 设置信号用户态处理栈帧
+/// # 说明:
+/// 当信号投递时，内核在信号栈上从高地址到低地址通常依次构建以下结构：
+///     1. siginfo_t 结构体。 该结构体包含有关信号的信息（如信号编号、发送者等）。
+///     2. ucontext_t 结构体。 该结构体保存了被信号中断时的处理器状态（寄存器等）。
+///     3. 返回地址： 指向 C 库中的一个特殊函数（称为 sigreturn 或信号 trampoline），而不是直接返回原程序。
+/// 当信号处理函数返回时，它实际上会跳转到栈上的 sigreturn 函数，该函数会调用 rt_sigreturn 系统调用。
+/// 内核接收到这个调用后，会从栈上加载 ucontext_t 结构体，恢复所有保存的寄存器状态，从而使程序恢复到被中断时的执行点。
+/// # 参数:
+/// * `task`: 目标任务
+/// * `sig_num`: 信号编号
+/// * `entry`: 用户信号处理函数入口地址
+/// * `action_mask`: 信号处理函数的屏蔽字
+fn install_user_signal_trap_frame(
     task: &SharedTask,
     sig_num: usize,
-    entry: usize,
+    entry: isize,
     action_mask: SignalFlags,
 ) {
-    use core::mem::size_of;
     let mut t = task.lock();
     let tp = t.trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
         let tf = &mut *tp;
-        let user_sp = tf.x2_sp;
-        let frame_size = size_of::<TrapFrame>();
-        let mask_size = size_of::<SignalFlags>();
-        // 16 字节对齐
-        let total = (frame_size + mask_size + 15) & !15;
-        let frame_addr = user_sp.checked_sub(total).expect("signal frame overflow");
-        let frame_ptr = frame_addr as *mut TrapFrame;
-        frame_ptr.write(*tf); // 保存旧上下文
-        let mask_ptr = (frame_addr + frame_size) as *mut SignalFlags;
-        mask_ptr.write(t.blocked.clone());
+        let siginfo = create_siginfo_for_signal(SignalFlags::from_signal_num(sig_num).unwrap());
+        let uc = UContextT::new(
+            0,           // TODO: flags未实现
+            0 as *mut _, // TODO: link未实现
+            t.signal_stack.lock().clone(),
+            t.blocked.to_sigset_t(),
+            MContextT::from_trap_frame(tf),
+        );
+        // 构建用户栈帧
+        // TODO: 处理备用信号栈
+        // 内核决定是否使用备用信号栈取决于:
+        // 1. 备用栈已分配和启用
+        // 2. 信号处理动作明确要求使用备用栈
+        // 3. 当前线程不在备用栈上 (防止递归溢出)
+        let mut current_sp = tf.x2_sp;
+
+        current_sp = align_down(current_sp, align_of::<SigInfoT>());
+        let sig_info_addr = current_sp - size_of::<SigInfoT>();
+        current_sp = sig_info_addr;
+
+        current_sp = align_down(current_sp, align_of::<UContextT>());
+        let ucontext_addr = current_sp - size_of::<UContextT>();
+        current_sp = ucontext_addr;
+
+        current_sp = align_down(current_sp, align_of::<usize>()) - size_of::<usize>();
+        let return_addr_slot = current_sp;
+
+        // HACK: 保证返回地址和 ucontext_t 结构体地址之间没有间隙
+        //       以便于在 rt_sigreturn 直接读取 ucontext_t
+        let ucontext_addr = current_sp + size_of::<usize>();
+
+        let final_sp = current_sp;
+
+        write_to_user(sig_info_addr as *mut SigInfoT, siginfo);
+        write_to_user(ucontext_addr as *mut UContextT, uc);
+        write_to_user(
+            return_addr_slot as *mut usize,
+            sigreturn_trampoline_address(),
+        );
 
         // 更新 blocked（跳过不可屏蔽信号）
-        if sig_num != _SIGKILL && sig_num != _SIGSTOP {
+        if sig_num != NUM_SIGKILL && sig_num != NUM_SIGSTOP {
             let self_flag = SignalFlags::from_bits(1 << (sig_num - 1)).unwrap();
             t.blocked |= action_mask | self_flag;
         }
 
         // 设置用户处理器入口
-        tf.sepc = entry;
+        tf.sepc = entry as usize;
         tf.x10_a0 = sig_num;
-        tf.x2_sp = frame_addr;
+        tf.x2_sp = final_sp;
     }
 }
 
 fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
     let bit_index = flag.bits().trailing_zeros() as usize;
 
-    if bit_index >= _NSIG {
+    if bit_index >= NSIG {
         return None;
     }
 
@@ -329,3 +314,61 @@ fn sig_continue(sig_num: usize) {
 
 /// 默认行为：忽略信号
 fn sig_ignore(sig_num: usize) {}
+
+/// 待处理信号结构体
+#[derive(Debug, Clone)]
+pub struct SignalPending {
+    /// 待处理非实时信号集合
+    pub signals: SignalFlags,
+    // /// 待处理实时信号队列
+    // pub rt_signals: RtSignalQueue,
+}
+
+impl SignalPending {
+    /// 创建一个空的待处理信号集合
+    pub fn empty() -> Self {
+        Self {
+            signals: SignalFlags::empty(),
+            // rt_signals: RtSignalQueue::new(),
+        }
+    }
+
+    /// 检查是否有可投递的信号
+    /// # 参数:
+    /// * `blocked`: 当前阻塞的信号集合
+    pub fn has_deliverable_signal(&self, blocked: SignalFlags) -> bool {
+        !first_deliverable_signal(self.signals, blocked).is_none()
+    }
+
+    /// 获取第一个可投递的信号
+    /// # 参数:
+    /// * `blocked`: 当前阻塞的信号集合
+    pub fn first_deliverable_signal(&self, blocked: SignalFlags) -> Option<SignalFlags> {
+        first_deliverable_signal(self.signals, blocked)
+    }
+
+    /// 获取第一个在目标信号集合中的信号
+    /// # 参数:
+    /// * `target`: 目标信号集合
+    pub fn first_target_signal(&self, target: SignalFlags) -> Option<SignalFlags> {
+        let intersect = self.signals & target;
+        if intersect.is_empty() {
+            return None;
+        }
+
+        let signal_bit_index = intersect.bits().trailing_zeros();
+        if signal_bit_index < NSIG as u32 {
+            let first_sig = SignalFlags::from_bits(1 << signal_bit_index).unwrap();
+            return Some(first_sig);
+        }
+
+        None
+    }
+}
+
+/// 获取当前任务的待处理信号集合（私有 + 共享）
+pub fn do_sigpending() -> SignalFlags {
+    let task = current_task();
+    let t = task.lock();
+    t.pending.signals | t.shared_pending.lock().signals
+}

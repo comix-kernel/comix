@@ -1,7 +1,7 @@
-use virtio_drivers::transport::{self, mmio::MmioTransport};
+use virtio_drivers::transport::mmio::MmioTransport;
 
-use crate::println;
+use crate::earlyprintln;
 
 pub fn init(transport: MmioTransport<'static>) {
-    println!("[Device] Input driver (virtio-input) is initialized");
+    earlyprintln!("[Device] Input driver (virtio-input) is initialized");
 }

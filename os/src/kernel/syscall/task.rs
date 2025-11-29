@@ -1,7 +1,7 @@
 //! 任务相关的系统调用实现
 
 use core::{
-    ffi::{c_char, c_int},
+    ffi::{c_char, c_int, c_ulong},
     sync::atomic::Ordering,
 };
 
@@ -13,6 +13,7 @@ use crate::{
         timer::{clock_freq, get_time},
         trap::restore,
     },
+    ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskState,
         TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block,
@@ -26,9 +27,11 @@ use crate::{
     sync::SpinLock,
     tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
-        errno::{EINTR, EINVAL, ESRCH},
+        errno::{EINTR, EINVAL, ENOSYS, ESRCH},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
+        sched::CloneFlags,
         time::timespec,
+        types::StackT,
         wait::{WaitFlags, WaitStatus},
     },
 };
@@ -69,63 +72,149 @@ pub fn exit_group(code: c_int) -> ! {
     unreachable!("exit: exit_task should not return.");
 }
 
-/// 创建当前任务的子任务（fork）
-pub fn fork() -> usize {
+/// 克隆当前任务（线程或进程）
+/// # 参数
+/// - `fn_ptr`: 指向新任务执行函数的指针
+/// - `stack`: 指向新任务栈顶的指针
+/// - `flags`: 克隆选项标志
+/// - `arg`: 传递给新任务执行函数的参数指针
+/// # 返回值
+/// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
+pub fn clone(
+    clone_flags: c_ulong,
+    newsp: c_ulong,
+    parent_tidptr: *mut c_int,
+    child_tidptr: *mut c_int,
+    tls: c_ulong,
+) -> c_int {
+    let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(clone_flags as usize)
+    {
+        requested_flags
+    } else {
+        return -EINVAL;
+    };
+    if !requested_flags.is_known() {
+        return -EINVAL;
+    }
+    if !requested_flags.is_supported() {
+        return -ENOSYS;
+    }
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (ppid, pgid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts, rlimit) = {
+    let (
+        c_pid,
+        c_ppid,
+        c_pgid,
+        space,
+        signal_handlers,
+        blocked,
+        signal,
+        signal_stack,
+        ptf,
+        fd_table,
+        fs,
+        uts,
+        rlimit,
+    ) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
             task.pid,
+            task.ppid,
             task.pgid,
             task.memory_space
-                .as_ref()
-                .unwrap()
+                .clone()
+                .expect("fork: can only call fork on a user task."),
+            task.signal_handlers.clone(),
+            task.blocked,
+            task.shared_pending.clone(),
+            task.signal_stack.clone(),
+            task.trap_frame_ptr.load(Ordering::SeqCst),
+            task.fd_table.clone(),
+            task.fs.clone(),
+            task.uts_namespace.clone(),
+            task.rlimit.clone(),
+        )
+    };
+    let exit_signal = requested_flags.get_exit_signal();
+    let space = if requested_flags.contains(CloneFlags::VM) {
+        space
+    } else {
+        Arc::new(SpinLock::new(
+            space
                 .lock()
                 .clone_for_fork()
                 .expect("fork: clone memory space failed."),
-            task.signal_handlers.clone(),
-            task.blocked,
-            task.trap_frame_ptr.load(Ordering::SeqCst),
-            task.fd_table.clone(),
-            task.cwd.clone(),
-            task.root.clone(),
-            task.uts_namespace.clone(),
-            task.rlimit.clone(),
+        ))
+    };
+    let fd_table = if requested_flags.contains(CloneFlags::FILES) {
+        fd_table
+    } else {
+        Arc::new(fd_table.clone_table())
+    };
+    let fs = if requested_flags.contains(CloneFlags::FS) {
+        fs
+    } else {
+        Arc::new(SpinLock::new(fs.lock().clone()))
+    };
+    let ppid = if requested_flags.contains(CloneFlags::PARENT) {
+        c_ppid
+    } else {
+        c_pid
+    };
+    let pid = if requested_flags.contains(CloneFlags::THREAD) {
+        c_pid
+    } else {
+        tid
+    };
+    let (signal, signal_handler, signal_stack) = if requested_flags.contains(CloneFlags::SIGHAND) {
+        (signal, signal_handlers, signal_stack)
+    } else {
+        (
+            Arc::new(SpinLock::new(SignalPending::empty())),
+            Arc::new(SpinLock::new(SignalHandlerTable::new())),
+            Arc::new(SpinLock::new(StackT::default())),
         )
     };
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let mut child_task = TaskStruct::utask_create(
+    let child_task = TaskStruct::utask_create(
         tid,
-        tid,
+        pid,
         ppid,
-        pgid,
+        c_pgid,
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        Arc::new(SpinLock::new(space)),
-        signal_handlers,
+        space,
+        signal_handler,
         blocked,
+        signal,
+        signal_stack,
+        exit_signal,
         uts,
         rlimit,
+        fd_table,
+        fs,
     );
 
-    child_task.fd_table = Arc::new(fd_table.clone_table());
-    child_task.cwd = cwd;
-    child_task.root = root;
+    if requested_flags.contains(CloneFlags::CHILD_SETTID) {
+        unsafe {
+            write_to_user(child_tidptr, tid as c_int);
+        }
+    }
+    if requested_flags.contains(CloneFlags::PARENT_SETTID) {
+        unsafe {
+            write_to_user(parent_tidptr, tid as c_int);
+        }
+    }
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        (*tf).set_fork_trap_frame(&*ptf);
+        (*tf).set_fork_trap_frame(&*ptf, newsp as usize);
     }
     let child_task = child_task.into_shared();
-    current_cpu()
-        .lock()
-        .current_task
-        .as_ref()
-        .unwrap()
+    current_task()
         .lock()
         .children
         .lock()
@@ -133,7 +222,7 @@ pub fn fork() -> usize {
 
     TASK_MANAGER.lock().add_task(child_task.clone());
     SCHEDULER.lock().add_task(child_task);
-    tid as usize
+    tid as c_int
 }
 
 /// 执行一个新程序（execve）
@@ -141,6 +230,7 @@ pub fn fork() -> usize {
 /// - `path`: 可执行文件路径
 /// - `argv`: 命令行参数
 /// - `envp`: 环境变量
+/// TODO: 目前该函数可用但亟待完善
 pub fn execve(
     path: *const c_char,
     argv: *const *const c_char,
@@ -437,4 +527,8 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
 
     result
     // TODO: EFAULT
+}
+
+pub fn gettid() -> c_int {
+    current_task().lock().tid as c_int
 }

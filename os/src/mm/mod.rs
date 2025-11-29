@@ -59,18 +59,20 @@ pub fn init() {
     {
         use alloc::sync::Arc;
 
-        use crate::{kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock};
+        use crate::{
+            earlyprintln, kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock,
+        };
 
         // 记录切换前的 satp 值
         let old_satp: usize;
         unsafe {
             core::arch::asm!("csrr {0}, satp", out(reg) old_satp);
         }
-        println!("[MM] Before space switch - satp: 0x{:x}", old_satp);
+        earlyprintln!("[MM] Before space switch - satp: 0x{:x}", old_satp);
 
         let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
         let root_ppn = space.lock().root_ppn();
-        println!(
+        earlyprintln!(
             "[MM] New kernel space root PPN: 0x{:x}",
             root_ppn.as_usize()
         );
@@ -82,8 +84,8 @@ pub fn init() {
         unsafe {
             core::arch::asm!("csrr {0}, satp", out(reg) new_satp);
         }
-        println!("[MM] After space switch - satp: 0x{:x}", new_satp);
-        println!(
+        earlyprintln!("[MM] After space switch - satp: 0x{:x}", new_satp);
+        earlyprintln!(
             "[MM] Expected satp: 0x{:x}",
             (root_ppn.as_usize() | (8 << 60))
         );
