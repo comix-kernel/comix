@@ -3,15 +3,15 @@ pub mod macros;
 pub mod net_test;
 use crate::{
     arch::intr::{are_interrupts_enabled, disable_interrupts, enable_interrupts},
-    println,
+    earlyprintln,
 };
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Fn()]) {
-    use crate::{arch::lib::sbi::shutdown, test::macros::TEST_FAILED};
+    use crate::{arch::lib::sbi::shutdown, earlyprintln, test::macros::TEST_FAILED};
     use core::sync::atomic::Ordering;
-    println!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());
+    earlyprintln!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());
 
     // 重置失败计数器
     TEST_FAILED.store(0, Ordering::SeqCst);
@@ -22,8 +22,8 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
     }
 
     let failed = TEST_FAILED.load(Ordering::SeqCst);
-    println!("\x1b[33m\n--- Test Summary ---\x1b[0m");
-    println!(
+    earlyprintln!("\x1b[33m\n--- Test Summary ---\x1b[0m");
+    earlyprintln!(
         "\x1b[33mTotal: {}\x1b[0m, \x1b[32mPassed: {}\x1b[0m, \x1b[91mFailed: {}\x1b[0m, \x1b[33mTests Finished\x1b[0m",
         tests.len(),
         tests.len() - failed,
@@ -48,11 +48,11 @@ pub fn run_early_tests() {
     // 计算测试数量
     let count = unsafe { end.offset_from(start) } as usize;
     if count == 0 {
-        println!("\x1b[36m[early_test] No early tests to run.\x1b[0m");
+        earlyprintln!("\x1b[36m[early_test] No early tests to run.\x1b[0m");
         return;
     }
 
-    println!(
+    earlyprintln!(
         "\n\x1b[36m--- Running {} early tests (pre-mm) ---\x1b[0m",
         count
     );
@@ -63,7 +63,7 @@ pub fn run_early_tests() {
         test_fn();
     }
 
-    println!("\x1b[36m--- Early tests finished ---\x1b[0m\n");
+    earlyprintln!("\x1b[36m--- Early tests finished ---\x1b[0m\n");
 }
 
 /// 一个 RAII 守卫，用于在作用域内启用中断，并在离开作用域时恢复之前的状态。

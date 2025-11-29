@@ -2,9 +2,9 @@
 
 use crate::{
     device::{CMDLINE, irq::IntcDriver},
+    earlyprintln,
     kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    pr_info, println,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 use fdt::{Fdt, node::FdtNode};
@@ -39,7 +39,7 @@ lazy_static::lazy_static! {
 
 /// 初始化设备树
 pub fn init() {
-    println!(
+    earlyprintln!(
         "[Device] devicetree of {} is initialized",
         FDT.root().model()
     );
@@ -47,7 +47,7 @@ pub fn init() {
     let cpus = FDT.cpus().count();
     // SAFETY: 这里是在单核初始化阶段设置 CPU 数量
     unsafe { NUM_CPU = cpus };
-    println!("[Device] now has {} CPU(s)", cpus);
+    earlyprintln!("[Device] now has {} CPU(s)", cpus);
 
     unsafe {
         CLOCK_FREQ = FDT
@@ -56,10 +56,10 @@ pub fn init() {
             .expect("No CPU found in device tree")
             .timebase_frequency()
     };
-    println!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
+    earlyprintln!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
 
     FDT.memory().regions().for_each(|region| {
-        println!(
+        earlyprintln!(
             "[Device] Memory Region: Start = {:#X}, Size = {:#X}",
             region.starting_address as usize,
             region.size.unwrap() as usize
@@ -68,7 +68,7 @@ pub fn init() {
 
     if let Some(bootargs) = FDT.chosen().bootargs() {
         if !bootargs.is_empty() {
-            pr_info!("Kernel cmdline: {}", bootargs);
+            earlyprintln!("Kernel cmdline: {}", bootargs);
             *CMDLINE.write() = String::from(bootargs);
         }
     }
@@ -85,7 +85,7 @@ fn walk_dt(fdt: &Fdt, intc_only: bool) {
     for node in fdt.all_nodes() {
         if let Some(compatible) = node.compatible() {
             if node.property("interrupt-controller").is_some() == intc_only {
-                pr_info!("[Device] Found device: {}", node.name);
+                earlyprintln!("[Device] Found device: {}", node.name);
                 let registry = DEVICE_TREE_REGISTRY.read();
                 for c in compatible.all() {
                     if let Some(f) = registry.get(c) {

@@ -20,15 +20,16 @@ pub use ktask::*;
 pub use process::*;
 pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
 pub use task_state::TaskState;
+pub use task_struct::FsStruct;
 pub use task_struct::SharedTask;
 pub use task_struct::Task as TaskStruct;
 pub use work_queue::*;
 
 use alloc::sync::Arc;
 
-use crate::ipc::_SIGCHLD;
 use crate::mm::memory_space::MemorySpace;
 use crate::sync::SpinLock;
+use crate::uapi::signal::NUM_SIGCHLD;
 use crate::{
     arch::trap::{TrapFrame, restore},
     kernel::{cpu::current_cpu, schedule},
@@ -103,7 +104,7 @@ pub fn notify_parent(task: SharedTask) {
 
     let t = TASK_MANAGER.lock();
     let p = t.get_task(ppid).unwrap();
-    t.send_signal(p, _SIGCHLD);
+    t.send_signal(p, NUM_SIGCHLD);
 }
 
 /// 获取当前任务的文件描述符表

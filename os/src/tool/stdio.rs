@@ -1,45 +1,42 @@
+//! 标准输入输出工具模块
+
 use core::fmt::{self, Write};
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
-use crate::arch::lib::sbi::console_putchar;
+use crate::device::console::MAIN_CONSOLE;
 
 pub struct Stdout;
 pub struct Stdin;
 
+pub fn console_putchar(c: usize) {
+    MAIN_CONSOLE
+        .read()
+        .as_ref()
+        .unwrap()
+        .write_str(&(c as u8 as char).to_string());
+}
+
+/// 使用 sbi 调用从控制台获取字符(qemu uart handler)
+/// 返回值：字符的 ASCII 码
+pub fn console_getchar() -> usize {
+    MAIN_CONSOLE.read().as_ref().unwrap().read_char() as usize
+}
+
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            console_putchar(c as usize);
-        }
+        MAIN_CONSOLE.read().as_ref().unwrap().write_str(s);
         Ok(())
     }
 }
 
 impl Stdin {
-    // pub fn read_char(&mut self) -> char {
-    //     let c = crate::arch::lib::sbi::console_getchar();
-    //     c as u8 as char
-    // }
     pub fn read_char(&mut self) -> char {
-        let c = crate::arch::lib::sbi::console_getchar();
-        // 立即回显字符（如果是可打印字符）
-        if (c as u8) >= 0x20 && (c as u8) <= 0x7E {
-            crate::arch::lib::sbi::console_putchar(c);
-        } else if (c as u8) == b'\n' || (c as u8) == b'\r' {
-            crate::arch::lib::sbi::console_putchar(b'\n' as usize);
-        }
-        c as u8 as char
+        MAIN_CONSOLE.read().as_ref().unwrap().read_char()
     }
 
     pub fn read_line(&mut self, buf: &mut String) {
-        loop {
-            let c = self.read_char();
-            if c == '\n' || c == '\r' {
-                break;
-            }
-            buf.push(c);
-        }
+        MAIN_CONSOLE.read().as_ref().unwrap().read_line(buf);
     }
 }
 
@@ -63,7 +60,7 @@ pub fn stdin() -> Stdin {
 /// print!("The answer is {}", 42);
 /// ```
 #[macro_export]
-macro_rules! earlyprint {
+macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         $crate::arch::lib::console::print(format_args!($fmt $(, $($arg)+)?))
     }
@@ -81,7 +78,7 @@ macro_rules! earlyprint {
 /// println!("The answer is {}", 42);
 /// ```
 #[macro_export]
-macro_rules! earlyprintln {
+macro_rules! println {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         $crate::arch::lib::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }
