@@ -10,7 +10,10 @@ use core::{
     ops::{Add, Sub},
 };
 
-use crate::{arch::timer::{clock_freq, get_time}, kernel::time::REALTIME};
+use crate::{
+    arch::timer::{clock_freq, get_time},
+    kernel::time::REALTIME,
+};
 
 /// 用于指定秒和纳秒精度的时间
 #[repr(C)]
@@ -273,8 +276,14 @@ impl Itimerval {
     /// - 对应的 Itimerspec 结构体
     pub fn zero() -> Self {
         Self {
-            it_interval: timeval { tv_sec: 0, tv_usec: 0 },
-            it_value: timeval { tv_sec: 0, tv_usec: 0 },
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
         }
     }
 }

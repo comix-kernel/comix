@@ -21,8 +21,8 @@ mod kernel;
 mod mm;
 mod sync;
 mod test;
-mod tool;
 mod uapi;
+mod util;
 mod vfs;
 #[macro_use]
 mod log;

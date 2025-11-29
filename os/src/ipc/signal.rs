@@ -21,8 +21,8 @@ use crate::{
         exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block, yield_task,
     },
     pr_err,
-    tool::{address::align_down, user_buffer::write_to_user},
     uapi::signal::*,
+    util::{address::align_down, user_buffer::write_to_user},
 };
 
 /// 信号的动作表

@@ -82,7 +82,7 @@ macro_rules! print {
 #[macro_export]
 macro_rules! println {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::tool::stdio::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+        $crate::util::stdio::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }
 }
 
