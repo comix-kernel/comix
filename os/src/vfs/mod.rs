@@ -49,7 +49,7 @@ pub use file_system::{FileSystem, StatFs};
 pub use impls::{DiskFile, PipeFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
 pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType};
 pub use mount::{MOUNT_TABLE, MountFlags, MountPoint, MountTable, get_root_dentry};
-pub use path::{normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_from};
+pub use path::{normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_from, vfs_lookup_no_follow};
 
 // Re-export UAPI types used by VFS
 pub use crate::uapi::fcntl::{FdFlags, OpenFlags, SeekWhence};

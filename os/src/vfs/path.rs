@@ -234,3 +234,84 @@ fn get_cur_dir() -> Result<Arc<Dentry>, FsError> {
         .clone()
         .ok_or(FsError::NotSupported)
 }
+
+/// 查找路径但不跟随最后一个符号链接
+///
+/// # 参数
+/// * `path` - 要查找的路径
+///
+/// # 返回值
+/// * `Ok(dentry)` - 找到的 dentry（如果最后一个组件是符号链接，返回链接本身）
+/// * `Err(FsError)` - 查找失败
+///
+/// # 行为
+/// 与 `vfs_lookup` 类似，但最后一个路径组件如果是符号链接，
+/// 不会跟随它，而是直接返回链接文件的 dentry。
+/// 路径中间的符号链接仍然会被跟随。
+pub fn vfs_lookup_no_follow(path: &str) -> Result<Arc<Dentry>, FsError> {
+    let components = parse_path(path);
+
+    if components.is_empty() {
+        return Err(FsError::InvalidArgument);
+    }
+
+    // 确定起始 dentry
+    let mut current_dentry = if components.first() == Some(&PathComponent::Root) {
+        // 绝对路径：从根目录开始
+        get_root_dentry()?
+    } else {
+        // 相对路径：从当前工作目录开始
+        get_cur_dir()?
+    };
+
+    // 如果只有一个 Root 组件，直接返回根目录
+    if components.len() == 1 && components[0] == PathComponent::Root {
+        return Ok(current_dentry);
+    }
+
+    // 解析除最后一个组件外的所有组件（这些符号链接需要跟随）
+    let len = components.len();
+    for i in 0..len - 1 {
+        current_dentry = resolve_component(current_dentry, components[i].clone())?;
+    }
+
+    // 解析最后一个组件，但不跟随符号链接
+    let last_component = &components[len - 1];
+    match last_component {
+        PathComponent::Root => {
+            // 最后一个是根，不应该发生，但处理一下
+            get_root_dentry()
+        }
+        PathComponent::Current => {
+            // "." 表示当前目录
+            Ok(current_dentry)
+        }
+        PathComponent::Parent => {
+            // ".." 表示父目录
+            match current_dentry.parent() {
+                Some(parent) => Ok(parent),
+                None => Ok(current_dentry), // 根目录的父目录是自己
+            }
+        }
+        PathComponent::Normal(name) => {
+            // 正常文件名：查找但不跟随符号链接
+
+            // 1. 先检查 dentry 缓存
+            if let Some(child) = current_dentry.lookup_child(name) {
+                return Ok(child);
+            }
+
+            // 2. 缓存未命中，通过 inode 查找
+            let child_inode = current_dentry.inode.lookup(name)?;
+
+            // 3. 创建新的 dentry 并加入缓存（不跟随符号链接）
+            let child_dentry = Dentry::new(name.clone(), child_inode);
+            current_dentry.add_child(child_dentry.clone());
+
+            // 4. 加入全局缓存
+            crate::vfs::DENTRY_CACHE.insert(&child_dentry);
+
+            Ok(child_dentry)
+        }
+    }
+}

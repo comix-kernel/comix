@@ -57,6 +57,8 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 // 文件大小/权限/所有权 (File Size/Permissions/Ownership)
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_chdir, chdir, (*const c_char));
+impl_syscall!(sys_fchmodat, fchmodat, (i32, *const c_char, u32, u32));
+impl_syscall!(sys_fchownat, fchownat, (i32, *const c_char, u32, u32, u32));
 
 // 文件描述符操作 (File Descriptor Operations)
 impl_syscall!(sys_openat, openat, (i32, *const c_char, u32, u32));
@@ -70,15 +72,27 @@ impl_syscall!(sys_read, read, (usize, *mut u8, usize));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
 
 // 文件元数据与同步 (File Metadata and Synchronization)
-impl_syscall!(sys_readlinkat, readlinkat, (i32, *const c_char, *mut u8, usize));
-impl_syscall!(sys_newfstatat, newfstatat, (i32, *const c_char, *mut Stat, u32));
+impl_syscall!(
+    sys_readlinkat,
+    readlinkat,
+    (i32, *const c_char, *mut u8, usize)
+);
+impl_syscall!(
+    sys_newfstatat,
+    newfstatat,
+    (i32, *const c_char, *mut Stat, u32)
+);
 impl_syscall!(sys_fstat, fstat, (usize, *mut Stat));
 impl_syscall!(sys_sync, sync, ());
 impl_syscall!(sys_fsync, fsync, (usize));
 impl_syscall!(sys_fdatasync, fdatasync, (usize));
 
 // 定时器 (Timers)
-impl_syscall!(sys_utimensat, utimensat, (i32, *const c_char, *const timespec, u32));
+impl_syscall!(
+    sys_utimensat,
+    utimensat,
+    (i32, *const c_char, *const timespec, u32)
+);
 
 // 进程与控制 (Process and Control)
 impl_syscall!(sys_exit, exit, (c_int));
@@ -96,10 +110,22 @@ impl_syscall!(sys_tkill, tkill, (c_int, c_int));
 impl_syscall!(sys_tgkill, tgkill, (c_int, c_int, c_int));
 impl_syscall!(sys_sigaltstack, signal_stack, (*const StackT, *mut StackT));
 impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
-impl_syscall!(sys_rt_sigaction, rt_sigaction, (c_int, *const SignalAction, *mut SignalAction));
-impl_syscall!(sys_rt_sigprocmask, rt_sigprocmask, (c_int, *const SigSetT, *mut SigSetT, c_uint));
+impl_syscall!(
+    sys_rt_sigaction,
+    rt_sigaction,
+    (c_int, *const SignalAction, *mut SignalAction)
+);
+impl_syscall!(
+    sys_rt_sigprocmask,
+    rt_sigprocmask,
+    (c_int, *const SigSetT, *mut SigSetT, c_uint)
+);
 impl_syscall!(sys_rt_sigpending, rt_sigpending, (*mut SigSetT, c_uint));
-impl_syscall!(sys_rt_sigtimedwait, rt_sigtimedwait, (*const SigSetT, *mut SigInfoT, *const timespec, c_uint));
+impl_syscall!(
+    sys_rt_sigtimedwait,
+    rt_sigtimedwait,
+    (*const SigSetT, *mut SigInfoT, *const timespec, c_uint)
+);
 impl_syscall!(sys_rt_sigreturn, rt_sigreturn, ());
 
 // 进程属性 (Process Attributes)
@@ -133,27 +159,55 @@ impl_syscall!(sys_accept, accept, (i32, *mut u8, *mut u32));
 impl_syscall!(sys_connect, connect, (i32, *const u8, u32));
 impl_syscall!(sys_getsockname, getsockname, (i32, *mut u8, *mut u32));
 impl_syscall!(sys_getpeername, getpeername, (i32, *mut u8, *mut u32));
-impl_syscall!(sys_sendto, sendto, (i32, *const u8, usize, i32, *const u8, u32));
-impl_syscall!(sys_recvfrom, recvfrom, (i32, *mut u8, usize, i32, *mut u8, *mut u32));
+impl_syscall!(
+    sys_sendto,
+    sendto,
+    (i32, *const u8, usize, i32, *const u8, u32)
+);
+impl_syscall!(
+    sys_recvfrom,
+    recvfrom,
+    (i32, *mut u8, usize, i32, *mut u8, *mut u32)
+);
 impl_syscall!(sys_setsockopt, setsockopt, (i32, i32, i32, *const u8, u32));
-impl_syscall!(sys_getsockopt, getsockopt, (i32, i32, i32, *mut u8, *mut u32));
+impl_syscall!(
+    sys_getsockopt,
+    getsockopt,
+    (i32, i32, i32, *mut u8, *mut u32)
+);
 
 // 进程创建/执行 (Process Creation/Execution)
-impl_syscall!(sys_clone, clone, (c_ulong, c_ulong, *mut c_int, *mut c_int, c_ulong));
-impl_syscall!(sys_execve, execve, (*const u8, *const *const u8, *const *const u8));
+impl_syscall!(
+    sys_clone,
+    clone,
+    (c_ulong, c_ulong, *mut c_int, *mut c_int, c_ulong)
+);
+impl_syscall!(
+    sys_execve,
+    execve,
+    (*const u8, *const *const u8, *const *const u8)
+);
 
 // 网络 (续)
 impl_syscall!(sys_accept4, accept4, (i32, *mut u8, *mut u32, i32));
 
 // 进程与控制 (续)
 impl_syscall!(sys_wait4, wait4, (c_int, *mut c_int, c_int, *mut Rusage));
-impl_syscall!(sys_prlimit, prlimit, (c_int, c_int, *const Rlimit, *mut Rlimit));
+impl_syscall!(
+    sys_prlimit,
+    prlimit,
+    (c_int, c_int, *const Rlimit, *mut Rlimit)
+);
 
 // 文件系统同步 (续)
 impl_syscall!(sys_syncfs, syncfs, (usize));
 
 // 文件重命名
-impl_syscall!(sys_renameat2, renameat2, (i32, *const c_char, i32, *const c_char, u32));
+impl_syscall!(
+    sys_renameat2,
+    renameat2,
+    (i32, *const c_char, i32, *const c_char, u32)
+);
 
 // 获取网络接口地址列表 (非标准系统调用)
 impl_syscall!(sys_getifaddrs, getifaddrs, (*mut *mut u8));
