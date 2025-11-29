@@ -59,6 +59,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_SYSINFO => sys_sysinfo(frame),
         syscall_number::SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
         syscall_number::SYS_CLOCK_SETTIME => sys_clock_settime(frame),
+        syscall_number::SYS_CLOCK_GETRES => sys_clock_getres(frame),
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS

@@ -148,7 +148,7 @@ impl_syscall!(
     (*const SigSetT, *mut SigInfoT, *const TimeSepc, c_uint)
 );
 impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
-impl_syscall!(sys_rt_sigreturn, rt_sigreturn, ());
+impl_syscall!(sys_rt_sigreturn, rt_sigreturn, noreturn, ());
 impl_syscall!(sys_sigaltstack, signal_stack, (*const StackT, *mut StackT));
 impl_syscall!(sys_kill, kill, (c_int, c_int));
 impl_syscall!(sys_tkill, tkill, (c_int, c_int));
@@ -158,3 +158,4 @@ impl_syscall!(sys_gettid, gettid, ());
 impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
 impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSepc));
 impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSepc));
+impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSepc));
