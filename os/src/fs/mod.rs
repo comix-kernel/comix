@@ -4,8 +4,10 @@
 //! 包括文件系统接口、文件操作等
 //! 目前只实现了一个简单的内存文件系统
 pub mod ext4;
+pub mod proc;
 pub mod simple_fs;
 pub mod smfs;
+pub mod sysfs;
 pub mod tmpfs;
 
 use alloc::string::String;
