@@ -32,6 +32,7 @@
 pub mod adapter;
 pub mod dentry;
 pub mod dev;
+pub mod devno;
 pub mod error;
 pub mod fd_table;
 pub mod file;
@@ -44,6 +45,7 @@ pub mod path;
 pub use adapter::inode_type_to_d_type;
 pub use dentry::{DENTRY_CACHE, Dentry, DentryCache};
 pub use dev::{major, makedev, minor};
+pub use devno::{get_chrdev_driver, get_blkdev_index};
 pub use error::FsError;
 pub use fd_table::FDTable;
 pub use file::File;
