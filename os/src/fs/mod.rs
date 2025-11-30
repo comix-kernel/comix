@@ -207,5 +207,32 @@ pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
     Ok(())
 }
 
+/// 初始化并挂载 sysfs 到 /sys
+pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
+    use crate::fs::sysfs::SysFS;
+    use crate::vfs::MountFlags;
+    use alloc::string::ToString;
+
+    println!("[SysFS] Initializing sysfs");
+
+    // 创建 sysfs
+    let sysfs = SysFS::new();
+
+    // 初始化文件系统树 (从设备注册表构建设备树)
+    sysfs.init_tree()?;
+
+    // 挂载到 /sys
+    MOUNT_TABLE.mount(
+        sysfs,
+        "/sys",
+        MountFlags::empty(),
+        Some(String::from("sysfs")),
+    )?;
+
+    println!("[SysFS] Sysfs mounted at /sys");
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
