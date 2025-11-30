@@ -5,7 +5,7 @@ use core::ffi::{CStr, c_char};
 use riscv::register::sstatus;
 
 use crate::{
-    device::net::{config::NetworkConfigManager, interface::NETWORK_INTERFACE_MANAGER},
+    net::{config::NetworkConfigManager, interface::NETWORK_INTERFACE_MANAGER},
     println,
 };
 
