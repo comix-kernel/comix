@@ -1,7 +1,7 @@
 use virtio_drivers::transport::mmio::MmioTransport;
 
-use crate::println;
+use crate::earlyprintln;
 
 pub fn init(transport: MmioTransport<'static>) {
-    println!("[Device] GPU driver (virtio-gpu) is initialized");
+    earlyprintln!("[Device] GPU driver (virtio-gpu) is initialized");
 }

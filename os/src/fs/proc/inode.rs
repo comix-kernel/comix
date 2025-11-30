@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     sync::{Mutex, SpinLock},
-    uapi::time::timespec,
+    uapi::time::TimeSpec,
     vfs::{DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType},
 };
 use alloc::{
@@ -50,7 +50,7 @@ impl ProcInode {
     /// 创建静态文件 inode
     pub fn new_static_file(_name: &str, content: Vec<u8>, mode: FileMode) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
 
         Arc::new(Self {
             metadata: SpinLock::new(InodeMetadata {
@@ -78,7 +78,7 @@ impl ProcInode {
         mode: FileMode,
     ) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
 
         Arc::new(Self {
             metadata: SpinLock::new(InodeMetadata {
@@ -102,7 +102,7 @@ impl ProcInode {
     /// 创建目录 inode
     pub fn new_directory(mode: FileMode) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
 
         Arc::new(Self {
             metadata: SpinLock::new(InodeMetadata {
@@ -126,7 +126,7 @@ impl ProcInode {
     /// 创建符号链接 inode
     pub fn new_symlink(_name: &str, target: String) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
 
         Arc::new(Self {
             metadata: SpinLock::new(InodeMetadata {
@@ -153,7 +153,7 @@ impl ProcInode {
         F: Fn() -> String + Send + Sync + 'static,
     {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
 
         Arc::new(Self {
             metadata: SpinLock::new(InodeMetadata {
@@ -359,7 +359,7 @@ impl Inode for ProcInode {
         self
     }
 
-    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, _atime: Option<TimeSpec>, _mtime: Option<TimeSpec>) -> Result<(), FsError> {
         Err(FsError::PermissionDenied)
     }
 
@@ -372,6 +372,14 @@ impl Inode for ProcInode {
     }
 
     fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+    
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 }

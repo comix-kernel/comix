@@ -22,7 +22,6 @@ use crate::device::rtc::RtcDriver;
 
 use crate::device::serial::SerialDriver;
 use crate::device::{block::BlockDriver, net::net_device::NetDevice};
-use crate::sync::SpinLock;
 
 use alloc::{string::String, vec::Vec};
 use lazy_static::lazy_static;
@@ -90,10 +89,6 @@ pub trait Driver: Send + Sync {
     fn as_rtc_arc(self: Arc<Self>) -> Option<Arc<dyn RtcDriver>> {
         None
     }
-}
-
-pub fn init() {
-    device_tree::init();
 }
 
 lazy_static! {

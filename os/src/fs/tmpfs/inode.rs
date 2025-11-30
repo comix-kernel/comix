@@ -11,7 +11,7 @@ use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
 use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::sync::{Mutex, SpinLock};
-use crate::uapi::time::timespec;
+use crate::uapi::time::TimeSpec;
 use crate::vfs::{DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
 
 /// Tmpfs Inode 实现
@@ -61,7 +61,7 @@ impl TmpfsInode {
         parent: Weak<TmpfsInode>,
         stats: Arc<Mutex<TmpfsStats>>,
     ) -> Arc<Self> {
-        let now = timespec::now();
+        let now = TimeSpec::now();
 
         // 清除文件类型位，只保留权限位和特殊位
         let mode = mode & !FileMode::S_IFMT;
@@ -168,13 +168,13 @@ impl TmpfsInode {
     /// 更新访问时间
     fn update_atime(&self) {
         let mut meta = self.metadata.lock();
-        meta.atime = timespec::now();
+        meta.atime = TimeSpec::now();
     }
 
     /// 更新修改时间
     fn update_mtime(&self) {
         let mut meta = self.metadata.lock();
-        let now = timespec::now();
+        let now = TimeSpec::now();
         meta.mtime = now;
         meta.ctime = now;
     }
@@ -592,7 +592,7 @@ impl Inode for TmpfsInode {
         Err(FsError::NotSupported)
     }
 
-    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
         let mut metadata = self.metadata.lock();
         if let Some(atime) = atime {
             metadata.atime = atime;
@@ -660,5 +660,13 @@ impl Inode for TmpfsInode {
         self.update_mtime();
 
         Ok(new_inode as Arc<dyn Inode>)
+    }
+
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
     }
 }

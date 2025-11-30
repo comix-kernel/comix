@@ -12,7 +12,7 @@
 
 use core::any::Any;
 
-use crate::uapi::time::timespec;
+use crate::uapi::time::TimeSpec;
 use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -103,9 +103,9 @@ pub struct InodeMetadata {
     pub uid: u32,              // 用户 ID
     pub gid: u32,              // 组 ID
     pub size: usize,           // 文件大小（字节）
-    pub atime: timespec,       // 访问时间
-    pub mtime: timespec,       // 修改时间
-    pub ctime: timespec,       // 状态改变时间
+    pub atime: TimeSpec,       // 访问时间
+    pub mtime: TimeSpec,       // 修改时间
+    pub ctime: TimeSpec,       // 状态改变时间
     pub nlinks: usize,         // 硬链接数
     pub blocks: usize,         // 占用的块数（512B 为单位）
     pub rdev: u64,             // 设备号（仅对 CharDevice 和 BlockDevice 有效）
@@ -184,13 +184,42 @@ pub trait Inode: Send + Sync + Any {
     fn as_any(&self) -> &dyn Any;
 
     /// 设置文件时间戳
-    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError>;
+    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError>;
 
     /// 读取符号链接的目标路径
     fn readlink(&self) -> Result<String, FsError>;
 
     /// 创建设备文件节点
     fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError>;
+
+    /// 修改文件所有者和组
+    ///
+    /// # 参数
+    /// * `uid` - 新的用户 ID（`u32::MAX` 表示不改变）
+    /// * `gid` - 新的组 ID（`u32::MAX` 表示不改变）
+    ///
+    /// # 返回值
+    /// * `Ok(())` - 成功
+    /// * `Err(FsError)` - 失败
+    ///
+    /// # 在单 root 用户系统中的行为
+    /// 此方法会更新 inode 的 uid/gid 字段，但不进行权限检查。
+    /// 所有调用都会成功（除非文件系统错误）。
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError>;
+
+    /// 修改文件权限模式
+    ///
+    /// # 参数
+    /// * `mode` - 新的权限模式（只修改权限位，不修改文件类型位）
+    ///
+    /// # 返回值
+    /// * `Ok(())` - 成功
+    /// * `Err(FsError)` - 失败
+    ///
+    /// # 在单 root 用户系统中的行为
+    /// 此方法会更新 inode 的 mode 字段，但不进行权限检查。
+    /// 所有调用都会成功（除非文件系统错误）。
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError>;
 }
 
 /// 为 Arc<dyn Inode> 提供向下转型辅助方法

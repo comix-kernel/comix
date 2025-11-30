@@ -22,6 +22,7 @@ spin = "0.10.0"
 fdt = "0.1.5"
 smoltcp = { version = "0.12.0", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "proto-ipv6", "socket-raw"] }
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+uart_16550 = "0.4.0"
 
 [lints.rustdoc]
 broken_intra_doc_links = "deny"
@@ -36,3 +37,9 @@ single_use_lifetimes = "warn"
 todo = "warn"
 needless_borrow = "deny"
 redundant_clone = "deny"
+
+[profile.dev]
+opt-level = 1  # 启用基本优化以减小代码体积
+
+[profile.test]
+opt-level = 1  # 测试模式也启用基本优化

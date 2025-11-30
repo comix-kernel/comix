@@ -63,7 +63,7 @@ pub fn stdin() -> Stdin {
 /// print!("The answer is {}", 42);
 /// ```
 #[macro_export]
-macro_rules! print {
+macro_rules! earlyprint {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         $crate::arch::lib::console::print(format_args!($fmt $(, $($arg)+)?))
     }
@@ -81,7 +81,7 @@ macro_rules! print {
 /// println!("The answer is {}", 42);
 /// ```
 #[macro_export]
-macro_rules! println {
+macro_rules! earlyprintln {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         $crate::arch::lib::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }

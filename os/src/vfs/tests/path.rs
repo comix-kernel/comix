@@ -255,3 +255,14 @@ test_case!(test_check_mount_point_function, {
     MOUNT_TABLE.umount("/mountpoint").ok();
     MOUNT_TABLE.umount("/").ok();
 });
+
+// P1 测试 vfs_lookup_no_follow 函数
+test_case!(test_vfs_lookup_no_follow_nonexistent, {
+    // 测试查找不存在的路径
+    use crate::vfs::vfs_lookup_no_follow;
+
+    // 查找一个不太可能存在的路径
+    let result = vfs_lookup_no_follow("/nonexistent_test_file_12345");
+    // 应该返回错误
+    kassert!(result.is_err());
+});

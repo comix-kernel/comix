@@ -2,7 +2,7 @@
 
 use crate::sync::SpinLock;
 use crate::vfs::*;
-use crate::{device::block::BlockDriver, uapi::time::timespec};
+use crate::{device::block::BlockDriver, uapi::time::TimeSpec};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -295,9 +295,9 @@ impl Inode for SimpleFsInode {
             uid: 0,
             gid: 0,
             size: data.len(),
-            atime: timespec::now(),
-            mtime: timespec::now(),
-            ctime: timespec::now(),
+            atime: TimeSpec::now(),
+            mtime: TimeSpec::now(),
+            ctime: TimeSpec::now(),
             nlinks: 1,
             blocks: (data.len() + 511) / 512,
             rdev: 0,
@@ -440,7 +440,7 @@ impl Inode for SimpleFsInode {
         Err(FsError::NotSupported)
     }
 
-    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, _atime: Option<TimeSpec>, _mtime: Option<TimeSpec>) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 
@@ -449,6 +449,14 @@ impl Inode for SimpleFsInode {
     }
 
     fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 }

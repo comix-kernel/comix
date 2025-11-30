@@ -5,28 +5,47 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use core::ffi::{c_int, c_long};
+use core::{
+    ffi::{c_int, c_long},
+    ops::{Add, Sub},
+};
 
-use crate::arch::timer::{clock_freq, get_time};
+use crate::{
+    arch::timer::{clock_freq, get_time},
+    kernel::time::REALTIME,
+};
 
 /// 用于指定秒和纳秒精度的时间
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct timespec {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TimeSpec {
     /// 秒 (seconds)
     pub tv_sec: c_long,
     /// 纳秒 (nanoseconds)
     pub tv_nsec: c_long,
 }
 
-impl timespec {
+impl TimeSpec {
     /// 特殊值：设置为当前时间（UTIME_NOW，用于 utimensat）
     pub const UTIME_NOW: c_long = (1i64 << 30) - 1; // 1073741823
 
     /// 特殊值：不改变此时间（UTIME_OMIT，用于 utimensat）
     pub const UTIME_OMIT: c_long = (1i64 << 30) - 2; // 1073741822
 
-    /// 将 timespec 转换为指定频率的刻度数。
+    /// 创建一个新的 TimeSpec 结构体
+    /// # 参数:
+    /// - `sec`: 秒数
+    /// - `nsec`: 纳秒数
+    /// # 返回值:
+    /// - 对应的 TimeSpec 结构体
+    pub fn new(sec: c_long, nsec: c_long) -> Self {
+        Self {
+            tv_sec: sec,
+            tv_nsec: nsec,
+        }
+    }
+
+    /// 将 TimeSpec 转换为指定频率的刻度数。
     /// # 参数:
     /// - `freq`: 频率（每秒刻度数）
     /// # 返回值:
@@ -37,12 +56,12 @@ impl timespec {
         (sec_ticks + nsec_ticks) as usize
     }
 
-    /// 通过指定频率的刻度数创建 timespec。
+    /// 通过指定频率的刻度数创建 TimeSepc。
     /// # 参数:
     /// - `ticks`: 刻度数
     /// - `freq`: 频率（每秒刻度数）
     /// # 返回值:
-    /// - 对应的 timespec 结构体
+    /// - 对应的 TimeSpec 结构体
     pub fn from_freq(ticks: usize, freq: usize) -> Self {
         let sec = ticks / freq;
         let nsec = (ticks % freq) * 1_000_000_000 / freq;
@@ -52,17 +71,26 @@ impl timespec {
         }
     }
 
-    /// 获取当前时间的 timespec。
+    /// 获取当前墙上时钟时间的 TimeSepc。
     /// # 返回值:
-    /// - 当前时间的 timespec 结构体
+    /// - 当前时间的 TimeSpec 结构体
     pub fn now() -> Self {
+        let time = REALTIME.read();
+        let mtime = Self::monotonic_now();
+        mtime + *time
+    }
+
+    /// 获取当前单调时钟时间的 TimeSepc。
+    /// # 返回值:
+    /// - 当前单调时间的 TimeSpec 结构体
+    pub fn monotonic_now() -> Self {
         let time = get_time();
         Self::from_freq(time, clock_freq())
     }
 
-    /// 创建零时间的 timespec。
+    /// 创建零时间的 TimeSepc。
     /// # 返回值:
-    /// - 零时间的 timespec 结构体
+    /// - 零时间的 TimeSpec 结构体
     pub fn zero() -> Self {
         Self {
             tv_sec: 0,
@@ -70,7 +98,7 @@ impl timespec {
         }
     }
 
-    /// 验证 timespec 的有效性（用于 utimensat）
+    /// 验证 TimeSpec 的有效性（用于 utimensat）
     ///
     /// # 返回值
     /// - `Ok(())`: 有效
@@ -91,6 +119,22 @@ impl timespec {
         Ok(())
     }
 
+    /// 将 TimeSpec 转换为 timeval 结构体。
+    /// # 返回值:
+    /// - 对应的 timeval 结构体
+    pub fn to_timeval(&self) -> timeval {
+        timeval {
+            tv_sec: self.tv_sec,
+            tv_usec: self.tv_nsec / 1000,
+        }
+    }
+
+    /// 检查是否为零时间
+    #[inline]
+    pub fn is_zero(&self) -> bool {
+        self.tv_sec == 0 && self.tv_nsec == 0
+    }
+
     /// 检查是否为 UTIME_NOW（用于 utimensat）
     #[inline]
     pub fn is_now(&self) -> bool {
@@ -104,6 +148,46 @@ impl timespec {
     }
 }
 
+impl Sub for TimeSpec {
+    type Output = TimeSpec;
+
+    fn sub(self, other: TimeSpec) -> TimeSpec {
+        let sec = self.tv_sec - other.tv_sec;
+        let nsec = self.tv_nsec - other.tv_nsec;
+        if nsec < 0 {
+            TimeSpec {
+                tv_sec: sec - 1,
+                tv_nsec: nsec + 1_000_000_000,
+            }
+        } else {
+            TimeSpec {
+                tv_sec: sec,
+                tv_nsec: nsec,
+            }
+        }
+    }
+}
+
+impl Add for TimeSpec {
+    type Output = TimeSpec;
+
+    fn add(self, other: TimeSpec) -> TimeSpec {
+        let sec = self.tv_sec + other.tv_sec;
+        let nsec = self.tv_nsec + other.tv_nsec;
+        if nsec >= 1_000_000_000 {
+            TimeSpec {
+                tv_sec: sec + 1,
+                tv_nsec: nsec - 1_000_000_000,
+            }
+        } else {
+            TimeSpec {
+                tv_sec: sec,
+                tv_nsec: nsec,
+            }
+        }
+    }
+}
+
 /// 用于指定秒和微秒精度的时间。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,24 +198,94 @@ pub struct timeval {
     pub tv_usec: c_long,
 }
 
+impl timeval {
+    /// 将 timeval 转换为 TimeSpec 结构体。
+    /// # 返回值:
+    /// - 对应的 TimeSpec 结构体
+    pub fn to_timespec(&self) -> TimeSpec {
+        TimeSpec {
+            tv_sec: self.tv_sec,
+            tv_nsec: self.tv_usec * 1000,
+        }
+    }
+
+    /// 将 timeval 转换为指定频率的刻度数。
+    /// # 参数:
+    /// - `freq`: 频率（每秒刻度数）
+    /// # 返回值:
+    /// - 刻度数
+    pub fn into_freq(&self, freq: usize) -> usize {
+        let sec_ticks = (self.tv_sec as u128) * (freq as u128);
+        let usec_ticks = (self.tv_usec as u128) * (freq as u128) / 1_000_000;
+        (sec_ticks + usec_ticks) as usize
+    }
+
+    /// 创建一个新的 timeval 结构体
+    /// # 参数:
+    /// - `sec`: 秒数
+    /// - `usec`: 微秒数
+    /// # 返回值:
+    /// - 对应的 timeval 结构体
+    pub fn new(sec: c_long, usec: c_long) -> Self {
+        Self {
+            tv_sec: sec,
+            tv_usec: usec,
+        }
+    }
+
+    /// 创建零时间的 timeval 结构体
+    /// # 返回值:
+    /// - 零时间的 timeval 结构体
+    pub fn zero() -> Self {
+        Self {
+            tv_sec: 0,
+            tv_usec: 0,
+        }
+    }
+
+    /// 检查是否为零时间
+    #[inline]
+    pub fn is_zero(&self) -> bool {
+        self.tv_sec == 0 && self.tv_usec == 0
+    }
+}
+
 /// 用于设置 POSIX 间隔定时器 (timer_create) 的结构。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct itimerspec {
+pub struct Itimerspec {
     /// 定时器周期 (timer period)
-    pub it_interval: timespec,
+    pub it_interval: TimeSpec,
     /// 定时器初始值/到期时间 (timer expiration)
-    pub it_value: timespec,
+    pub it_value: TimeSpec,
 }
 
 /// 用于设置传统 BSD 间隔定时器 (setitimer) 的结构。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct itimerval {
+pub struct Itimerval {
     /// 定时器周期 (timer interval)
     pub it_interval: timeval,
     /// 定时器当前值 (current value)
     pub it_value: timeval,
+}
+
+impl Itimerval {
+    /// 将 Itimerval 转换为 Itimerspec。
+    /// # 返回值:
+    /// - 对应的 Itimerspec 结构体
+    pub fn zero() -> Self {
+        Self {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        }
+    }
 }
 
 /// 时区结构体，用于 gettimeofday/settimeofday（现在已不推荐使用）。
