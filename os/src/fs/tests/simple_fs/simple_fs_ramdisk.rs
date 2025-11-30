@@ -1,5 +1,5 @@
 use super::*;
-use crate::device::block::block_device::BlockDevice;
+use crate::device::block::BlockDriver;
 use crate::fs::simple_fs::SimpleFs;
 use crate::{kassert, test_case};
 use alloc::vec;
@@ -62,5 +62,5 @@ test_case!(test_simplefs_ramdisk_too_small, {
     // 尝试读取第一个块应该失败
     let mut buf = vec![0u8; 512];
     let result = ramdisk.read_block(0, &mut buf);
-    kassert!(result.is_err());
+    kassert!(!result);
 });
