@@ -129,6 +129,7 @@ impl Inode for Ext4Inode {
             nlinks: inode.links_count as usize,
             uid: inode.uid as u32,
             gid: inode.gid as u32,
+            rdev: 0,
         })
     }
 
@@ -684,6 +685,11 @@ impl Inode for Ext4Inode {
 
     fn readlink(&self) -> Result<String, FsError> {
         // TODO: 实现 ext4 符号链接读取
+        Err(FsError::NotSupported)
+    }
+
+    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        // TODO: 实现 ext4 创建文件节点
         Err(FsError::NotSupported)
     }
 }

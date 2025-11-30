@@ -73,6 +73,7 @@ impl SysfsInode {
                 mtime: now,
                 ctime: now,
                 blocks: 0,
+                rdev: 0,
             }),
             content: SysfsInodeContent::Directory(Mutex::new(BTreeMap::new())),
         })
@@ -98,6 +99,7 @@ impl SysfsInode {
                 mtime: now,
                 ctime: now,
                 blocks: 0,
+                rdev: 0,
             }),
             content: SysfsInodeContent::Attribute(attr),
         })
@@ -122,6 +124,7 @@ impl SysfsInode {
                 mtime: now,
                 ctime: now,
                 blocks: 0,
+                rdev: 0,
             }),
             content: SysfsInodeContent::Symlink(target),
         })
@@ -295,5 +298,9 @@ impl Inode for SysfsInode {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
     }
 }

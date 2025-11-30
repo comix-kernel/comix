@@ -65,6 +65,7 @@ impl ProcInode {
                 ctime: now,
                 nlinks: 1,
                 blocks: 0,
+                rdev: 0,
             }),
             content: ProcInodeContent::Static(content),
         })
@@ -92,6 +93,7 @@ impl ProcInode {
                 ctime: now,
                 nlinks: 1,
                 blocks: 0,
+                rdev: 0,
             }),
             content: ProcInodeContent::Dynamic(generator),
         })
@@ -115,6 +117,7 @@ impl ProcInode {
                 ctime: now,
                 nlinks: 2, // . 和 ..
                 blocks: 0,
+                rdev: 0,
             }),
             content: ProcInodeContent::Directory(Mutex::new(BTreeMap::new())),
         })
@@ -138,6 +141,7 @@ impl ProcInode {
                 ctime: now,
                 nlinks: 1,
                 blocks: 0,
+                rdev: 0,
             }),
             content: ProcInodeContent::Symlink(target),
         })
@@ -164,6 +168,7 @@ impl ProcInode {
                 ctime: now,
                 nlinks: 1,
                 blocks: 0,
+                rdev: 0,
             }),
             content: ProcInodeContent::DynamicSymlink(Arc::new(generator)),
         })
@@ -364,5 +369,9 @@ impl Inode for ProcInode {
             ProcInodeContent::DynamicSymlink(generator) => Ok(generator()),
             _ => Err(FsError::InvalidArgument),
         }
+    }
+
+    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
     }
 }

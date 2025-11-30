@@ -13,7 +13,7 @@
 //!
 //! # 文件类型
 //!
-//! - [`DiskFile`]: 基于 Inode 的磁盘文件（支持 lseek）
+//! - [`RegFile`]: 普通文件（Regular File）- 基于 Inode 的磁盘文件（支持 lseek）
 //! - [`PipeFile`]: 管道文件（流式设备，不支持 lseek）
 //! - [`StdinFile`]/[`StdoutFile`]/[`StderrFile`]: 标准 I/O 文件（字符设备）
 //!
@@ -22,7 +22,7 @@
 //! ```rust
 //! // 打开文件
 //! let dentry = vfs_lookup("/etc/passwd")?;
-//! let file = DiskFile::new(dentry, OpenFlags::O_RDONLY);
+//! let file = RegFile::new(dentry, OpenFlags::O_RDONLY);
 //! let file: Arc<dyn File> = Arc::new(file);
 //!
 //! // 安装到文件描述符表
@@ -31,6 +31,7 @@
 
 pub mod adapter;
 pub mod dentry;
+pub mod dev;
 pub mod error;
 pub mod fd_table;
 pub mod file;
@@ -42,11 +43,12 @@ pub mod path;
 
 pub use adapter::inode_type_to_d_type;
 pub use dentry::{DENTRY_CACHE, Dentry, DentryCache};
+pub use dev::{major, makedev, minor};
 pub use error::FsError;
 pub use fd_table::FDTable;
 pub use file::File;
 pub use file_system::{FileSystem, StatFs};
-pub use impls::{DiskFile, PipeFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
+pub use impls::{RegFile, PipeFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
 pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType};
 pub use mount::{MOUNT_TABLE, MountFlags, MountPoint, MountTable, get_root_dentry};
 pub use path::{normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_from};

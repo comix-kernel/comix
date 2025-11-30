@@ -108,6 +108,7 @@ pub struct InodeMetadata {
     pub ctime: timespec,       // 状态改变时间
     pub nlinks: usize,         // 硬链接数
     pub blocks: usize,         // 占用的块数（512B 为单位）
+    pub rdev: u64,             // 设备号（仅对 CharDevice 和 BlockDevice 有效）
 }
 
 /// 文件系统底层存储接口
@@ -187,6 +188,9 @@ pub trait Inode: Send + Sync + Any {
 
     /// 读取符号链接的目标路径
     fn readlink(&self) -> Result<String, FsError>;
+
+    /// 创建设备文件节点
+    fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError>;
 }
 
 /// 为 Arc<dyn Inode> 提供向下转型辅助方法

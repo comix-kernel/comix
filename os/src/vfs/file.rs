@@ -10,7 +10,7 @@
 //!
 //! # 实现类型
 //!
-//! - [`DiskFile`](crate::vfs::DiskFile) - 基于 Inode 的磁盘文件，支持 seek
+//! - [`RegFile`](crate::vfs::RegFile) - 普通文件（Regular File），基于 Inode，支持 seek
 //! - [`PipeFile`](crate::vfs::PipeFile) - 管道，流式设备，不支持 seek
 //! - [`StdinFile`](crate::vfs::StdinFile) / [`StdoutFile`](crate::vfs::StdoutFile) - 标准 I/O
 
@@ -25,7 +25,7 @@ use alloc::sync::Arc;
 /// # 设计要点
 ///
 /// - 方法不携带 offset 参数，由实现者内部维护
-/// - 支持可 seek 文件（DiskFile）和流式设备（PipeFile）
+/// - 支持可 seek 文件（RegFile）和流式设备（PipeFile）
 /// - 可选方法提供默认实现（如 `lseek` 默认返回 `NotSupported`）
 pub trait File: Send + Sync {
     /// 检查文件是否可读
@@ -36,13 +36,13 @@ pub trait File: Send + Sync {
 
     /// 从文件读取数据
     ///
-    /// DiskFile 从当前 offset 读取并更新 offset；
+    /// RegFile 从当前 offset 读取并更新 offset；
     /// PipeFile 从管道缓冲区读取，无 offset 概念。
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError>;
 
     /// 向文件写入数据
     ///
-    /// DiskFile 在 `O_APPEND` 模式下总是写到文件末尾。
+    /// RegFile 在 `O_APPEND` 模式下总是写到文件末尾。
     fn write(&self, buf: &[u8]) -> Result<usize, FsError>;
 
     /// 获取文件元数据
@@ -71,14 +71,14 @@ pub trait File: Send + Sync {
 
     /// 获取目录项（可选方法）
     ///
-    /// 默认返回`FsError::NotSupported`,适用于DiskFile
+    /// 默认返回`FsError::NotSupported`,适用于RegFile
     fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
         Err(FsError::NotSupported)
     }
 
     /// 获取Inode（可选方法）
     ///
-    /// 默认返回`FsError::NotSupported`,适用于DiskFile
+    /// 默认返回`FsError::NotSupported`,适用于RegFile
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
     }

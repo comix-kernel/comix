@@ -168,6 +168,7 @@ impl File for PipeFile {
             ctime: timespec::zero(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 
