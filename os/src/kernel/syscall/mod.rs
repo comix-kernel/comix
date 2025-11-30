@@ -49,6 +49,7 @@ impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
 impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
 
 // 文件/目录创建与链接 (File/Directory Creation and Linking)
+impl_syscall!(sys_mknodat, mknodat, (i32, *const c_char, u32, u64));
 impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
 impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
 

@@ -16,7 +16,7 @@ impl Stat {
             st_nlink: meta.nlinks as u32,
             st_uid: meta.uid,
             st_gid: meta.gid,
-            st_rdev: 0,
+            st_rdev: meta.rdev,
             __pad1: 0,
             st_size: meta.size as i64,
             st_blksize: 512,

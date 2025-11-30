@@ -13,8 +13,9 @@ use crate::{
     kernel::current_task,
     uapi::{errno::EINVAL, log::SyslogAction},
     vfs::{
-        DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, get_root_dentry, split_path,
-        vfs_lookup_from,
+        DENTRY_CACHE, Dentry, File, FileMode, FsError, InodeType, OpenFlags, get_root_dentry,
+        impls::{BlockDeviceFile, CharDeviceFile, RegFile},
+        split_path, vfs_lookup_from,
     },
 };
 
@@ -285,7 +286,7 @@ fn get_dmesg_restrict() -> u32 {
 pub fn get_first_block_device() -> Result<Arc<dyn crate::device::block::BlockDriver>, i32> {
     use crate::device::BLK_DRIVERS;
     use crate::uapi::errno::ENODEV;
-    
+
     let drivers = BLK_DRIVERS.read();
 
     if drivers.is_empty() {
@@ -419,4 +420,33 @@ pub fn resolve_at_path_with_flags(
             vfs_lookup_no_follow(&full_path)
         }
     }
+}
+
+/// 根据 inode 类型创建对应的 File 实例
+pub fn create_file_from_dentry(
+    dentry: Arc<Dentry>,
+    flags: OpenFlags,
+) -> Result<Arc<dyn File>, FsError> {
+    let inode_type = dentry.inode.metadata()?.inode_type;
+
+    let file: Arc<dyn File> = match inode_type {
+        InodeType::File | InodeType::Directory | InodeType::Symlink => {
+            // 普通文件、目录、符号链接
+            Arc::new(RegFile::new(dentry, flags))
+        }
+        InodeType::CharDevice => {
+            // 字符设备
+            Arc::new(CharDeviceFile::new(dentry, flags)?)
+        }
+        InodeType::BlockDevice => {
+            // 块设备
+            Arc::new(BlockDeviceFile::new(dentry, flags)?)
+        }
+        InodeType::Socket | InodeType::Fifo => {
+            // FIFO（命名管道） 和 Unix 域套接字 暂不支持
+            return Err(FsError::NotSupported);
+        }
+    };
+
+    Ok(file)
 }
