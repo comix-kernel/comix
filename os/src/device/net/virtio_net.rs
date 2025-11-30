@@ -24,10 +24,10 @@ pub fn init(transport: MmioTransport<'static>) {
     let device_id = {
         let mut count = NET_DEVICE_COUNT.lock();
         let id = *count;
-        println!("[Device] Find VirtioNetDevice with ID: {}", id);
         *count += 1;
         id
     };
+    println!("[Device] Find VirtioNetDevice with ID: {}", device_id);
 
     // 创建VirtioNetDevice
     match VirtioNetDevice::new(transport, device_id) {
