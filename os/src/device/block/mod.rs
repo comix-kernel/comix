@@ -4,7 +4,6 @@
 
 use super::Driver;
 
-pub mod block_device;
 pub mod ram_disk;
 pub mod virtio_blk;
 
@@ -34,6 +33,20 @@ pub trait BlockDriver: Driver {
     /// # 返回值：
     /// 如果刷新成功则返回 true，否则返回 false
     fn flush(&self) -> bool {
+        unimplemented!("not a block driver")
+    }
+
+    /// 获取块大小（字节）
+    /// # 返回值：
+    /// 块大小
+    fn block_size(&self) -> usize {
+        unimplemented!("not a block driver")
+    }
+
+    /// 获取总块数
+    /// # 返回值：
+    /// 总块数
+    fn total_blocks(&self) -> usize {
         unimplemented!("not a block driver")
     }
 }

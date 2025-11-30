@@ -57,6 +57,14 @@ impl BlockDriver for VirtIOBlkDriver {
     fn flush(&self) -> bool {
         self.0.lock().flush().is_ok()
     }
+
+    fn block_size(&self) -> usize {
+        512 // VirtIO 块设备标准块大小
+    }
+
+    fn total_blocks(&self) -> usize {
+        self.0.lock().capacity() as usize
+    }
 }
 
 /// 初始化 VirtIO 块设备驱动

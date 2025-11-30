@@ -15,7 +15,6 @@ pub mod virtio_hal;
 pub mod device_tree;
 
 use alloc::sync::Arc;
-pub use block::block_device::BlockDevice;
 pub use block::ram_disk::RamDisk;
 use spin::RwLock;
 
