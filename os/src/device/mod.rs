@@ -66,13 +66,28 @@ pub trait Driver: Send + Sync {
         None
     }
 
+    /// 将驱动程序转换为网络驱动程序 Arc（如果适用）
+    fn as_net_arc(self: Arc<Self>) -> Option<Arc<dyn NetDevice>> {
+        None
+    }
+
     /// 将驱动程序转换为块设备驱动程序（如果适用）
     fn as_block(&self) -> Option<&dyn BlockDriver> {
         None
     }
 
+    /// 将驱动程序转换为块设备驱动程序 Arc（如果适用）
+    fn as_block_arc(self: Arc<Self>) -> Option<Arc<dyn BlockDriver>> {
+        None
+    }
+
     /// 将驱动程序转换为实时时钟驱动程序（如果适用）
     fn as_rtc(&self) -> Option<&dyn RtcDriver> {
+        None
+    }
+
+    /// 将驱动程序转换为实时时钟驱动程序 Arc（如果适用）
+    fn as_rtc_arc(self: Arc<Self>) -> Option<Arc<dyn RtcDriver>> {
         None
     }
 }

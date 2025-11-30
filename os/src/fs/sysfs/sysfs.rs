@@ -2,6 +2,7 @@
 //!
 //! 提供与 Linux 兼容的 sysfs 虚拟文件系统,暴露设备和内核信息。
 
+use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use crate::vfs::{FileMode, FileSystem, FsError, Inode, StatFs};
@@ -49,6 +50,18 @@ impl SysFS {
         let net_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
         class_dir.add_child("net", net_dir)?;
 
+        // /sys/class/tty/
+        let tty_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
+        class_dir.add_child("tty", tty_dir)?;
+
+        // /sys/class/input/
+        let input_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
+        class_dir.add_child("input", input_dir)?;
+
+        // /sys/class/rtc/
+        let rtc_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
+        class_dir.add_child("rtc", rtc_dir)?;
+
         // /sys/kernel/
         let kernel_dir =
             SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
@@ -59,19 +72,27 @@ impl SysFS {
             SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
         root.add_child("devices", devices_dir)?;
 
+        // /sys/block/ -> class/block/ (向后兼容符号链接)
+        let block_symlink = SysfsInode::new_symlink("class/block".to_string());
+        root.add_child("block", block_symlink)?;
+
         Ok(())
     }
 
     fn build_device_trees(&self) -> Result<(), FsError> {
         use super::builders;
 
-        // 构建块设备树
+        // 1. 先在 /sys/devices/ 创建真实设备树
+        builders::devices::build_platform_devices(&self.root_inode)?;
+
+        // 2. 再在 /sys/class/ 创建符号链接
         builders::block::build_block_devices(&self.root_inode)?;
-
-        // 构建网络设备树
         builders::net::build_net_devices(&self.root_inode)?;
+        builders::tty::build_tty_devices(&self.root_inode)?;
+        builders::input::build_input_devices(&self.root_inode)?;
+        builders::rtc::build_rtc_devices(&self.root_inode)?;
 
-        // 构建内核信息树
+        // 3. 构建内核信息树
         builders::kernel::build_kernel_info(&self.root_inode)?;
 
         Ok(())
