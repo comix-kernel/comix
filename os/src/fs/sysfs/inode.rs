@@ -14,7 +14,7 @@ use core::any::Any;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
-use crate::uapi::time::timespec;
+use crate::uapi::time::TimeSpec;
 use crate::vfs::{DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
 
 /// Sysfs 属性生成器
@@ -57,7 +57,7 @@ impl SysfsInode {
     /// 创建目录 inode
     pub fn new_directory(mode: FileMode) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
         Arc::new(Self {
             inode_no,
             inode_type: InodeType::Directory,
@@ -83,7 +83,7 @@ impl SysfsInode {
     pub fn new_attribute(attr: SysfsAttr) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
         let mode = attr.mode.clone();
-        let now = timespec::now();
+        let now = TimeSpec::now();
         Arc::new(Self {
             inode_no,
             inode_type: InodeType::File,
@@ -108,7 +108,7 @@ impl SysfsInode {
     /// 创建符号链接 inode
     pub fn new_symlink(target: String) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let now = timespec::now();
+        let now = TimeSpec::now();
         Arc::new(Self {
             inode_no,
             inode_type: InodeType::Symlink,
@@ -285,7 +285,7 @@ impl Inode for SysfsInode {
         Err(FsError::PermissionDenied)
     }
 
-    fn set_times(&self, _atime: Option<timespec>, _mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, _atime: Option<TimeSpec>, _mtime: Option<TimeSpec>) -> Result<(), FsError> {
         Err(FsError::PermissionDenied)
     }
 
@@ -301,6 +301,14 @@ impl Inode for SysfsInode {
     }
 
     fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+    
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
 }

@@ -96,6 +96,8 @@ pub fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, Fs
     } else if dirfd == super::fs::AT_FDCWD {
         current_task()
             .lock()
+            .fs
+            .lock()
             .cwd
             .clone()
             .ok_or(FsError::NotSupported)?
@@ -283,7 +285,7 @@ fn get_dmesg_restrict() -> u32 {
 pub fn get_first_block_device() -> Result<Arc<dyn crate::device::block::BlockDriver>, i32> {
     use crate::device::BLK_DRIVERS;
     use crate::uapi::errno::ENODEV;
-
+    
     let drivers = BLK_DRIVERS.read();
 
     if drivers.is_empty() {
@@ -291,4 +293,130 @@ pub fn get_first_block_device() -> Result<Arc<dyn crate::device::block::BlockDri
     }
 
     Ok(drivers[0].clone())
+}
+
+/// 刷新所有块设备
+///
+/// # 返回值
+/// 如果所有设备成功刷新返回 Ok(()),否则返回第一个错误
+pub fn flush_all_block_devices() -> Result<(), isize> {
+    use crate::{device::BLK_DRIVERS, uapi::errno::EIO};
+
+    let drivers = BLK_DRIVERS.read();
+
+    if drivers.is_empty() {
+        // 没有块设备也算成功(无事可做)
+        return Ok(());
+    }
+
+    for driver in drivers.iter() {
+        if !driver.flush() {
+            // VirtIO flush 失败
+            return Err(-EIO as isize);
+        }
+    }
+
+    Ok(())
+}
+
+/// 从文件描述符获取对应的块设备并刷新
+///
+/// 通过 fd -> dentry -> 路径 -> 挂载点 -> 文件系统 -> 同步
+///
+/// # 参数
+/// - `fd`: 文件描述符
+///
+/// # 返回值
+/// - Ok(()): 刷新成功
+/// - Err(-EBADF): 无效的文件描述符
+/// - Err(-EINVAL): fd 不支持同步(如 pipe、socket)
+/// - Err(-EIO): 块设备刷新失败
+pub fn flush_block_device_by_fd(fd: usize) -> Result<(), isize> {
+    use crate::{uapi::errno::EIO, vfs::MOUNT_TABLE};
+
+    // 1. 获取文件对象
+    let task = current_task();
+    let file = task.lock().fd_table.get(fd).map_err(|e| e.to_errno())?;
+
+    // 2. 获取 dentry (如果不支持则说明是管道等特殊文件)
+    let dentry = file.dentry().map_err(|e| e.to_errno())?;
+
+    // 3. 获取文件的完整路径
+    let path = dentry.full_path();
+
+    // 4. 通过路径查找对应的挂载点
+    let mount_point = MOUNT_TABLE
+        .find_mount(&path)
+        .ok_or_else(|| FsError::NotSupported.to_errno())?;
+
+    // 5. 调用文件系统的 sync 方法
+    mount_point.fs.sync().map_err(|_| -EIO as isize)?;
+
+    Ok(())
+}
+
+/// 根据 dirfd 和路径解析 dentry，支持符号链接控制
+///
+/// 这是对 `resolve_at_path` 的扩展，支持控制是否跟随最后一个符号链接。
+///
+/// # 参数
+/// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
+/// * `path` - 文件路径
+/// * `follow_symlink` - 是否跟随最后一个符号链接
+///
+/// # 返回值
+/// * `Ok(Arc<Dentry>)` - 成功找到文件
+/// * `Err(FsError)` - 查找失败
+///
+/// # 示例
+/// ```rust
+/// // 跟随符号链接（默认行为）
+/// let dentry = resolve_at_path_with_flags(AT_FDCWD, "/path/to/file", true)?;
+///
+/// // 不跟随符号链接（用于 lstat, lchown 等）
+/// let dentry = resolve_at_path_with_flags(AT_FDCWD, "/path/to/symlink", false)?;
+/// ```
+pub fn resolve_at_path_with_flags(
+    dirfd: i32,
+    path: &str,
+    follow_symlink: bool,
+) -> Result<Arc<Dentry>, FsError> {
+    use crate::vfs::vfs_lookup_no_follow;
+
+    if follow_symlink {
+        // 跟随符号链接，使用标准的 resolve_at_path
+        resolve_at_path(dirfd, path)?.ok_or(FsError::NotFound)
+    } else {
+        // 不跟随符号链接
+        if path.starts_with('/') {
+            // 绝对路径
+            vfs_lookup_no_follow(path)
+        } else {
+            // 相对路径，需要从 dirfd 开始
+            let base_dentry = if dirfd == super::fs::AT_FDCWD {
+                // 使用当前工作目录
+                current_task()
+                    .lock()
+                    .fs
+                    .lock()
+                    .cwd
+                    .clone()
+                    .ok_or(FsError::NotFound)?
+            } else {
+                // 使用 dirfd 指向的目录
+                let task = current_task();
+                let file = task.lock().fd_table.get(dirfd as usize)?;
+                file.dentry()?
+            };
+
+            // 构建完整路径
+            let full_path = if base_dentry.full_path() == "/" {
+                format!("/{}", path)
+            } else {
+                format!("{}/{}", base_dentry.full_path(), path)
+            };
+
+            vfs_lookup_no_follow(&full_path)
+        }
+    }
 }

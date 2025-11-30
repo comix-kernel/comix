@@ -11,6 +11,8 @@ use alloc::vec::Vec;
 use core::ptr;
 use riscv::register::sstatus;
 
+use crate::arch::constant::{USER_BASE, USER_TOP};
+
 /// 向用户空间写入数据
 /// # 参数
 /// - `user_ptr`: 指向用户空间的指针
@@ -113,4 +115,63 @@ impl UserBuffer {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+}
+
+/// 验证用户空间指针是否有效
+///
+/// 检查指针是否：
+/// 1. 非空
+/// 2. 指向用户空间地址范围 [USER_BASE, USER_TOP]
+/// 3. 指针指向的内存区域不溢出用户空间
+///
+/// # 参数
+/// * `ptr` - 要验证的用户空间指针
+///
+/// # 返回值
+/// * `true` - 指针有效
+/// * `false` - 指针无效
+///
+/// # 注意
+/// 此函数仅进行地址范围检查，不验证内存是否已映射或可访问。
+/// 实际访问内存前，仍需处理可能的页错误。
+pub fn validate_user_ptr<T>(ptr: *const T) -> bool {
+    if ptr.is_null() {
+        return false;
+    }
+
+    let addr = ptr as usize;
+    let size = core::mem::size_of::<T>();
+
+    // 检查起始地址是否在用户空间范围内
+    // USER_BASE 为 0，所以只需检查上界
+    if addr > USER_TOP {
+        return false;
+    }
+
+    // 检查是否会溢出用户空间
+    if let Some(end_addr) = addr.checked_add(size) {
+        if end_addr > USER_TOP + 1 {
+            return false;
+        }
+    } else {
+        // 地址加法溢出
+        return false;
+    }
+
+    true
+}
+
+/// 验证可写的用户空间指针是否有效
+///
+/// 与 `validate_user_ptr` 功能相同，但用于可变指针。
+///
+/// # 参数
+/// * `ptr` - 要验证的可写用户空间指针
+///
+/// # 返回值
+/// * `true` - 指针有效
+/// * `false` - 指针无效
+#[inline]
+pub fn validate_user_ptr_mut<T>(ptr: *mut T) -> bool {
+    validate_user_ptr(ptr as *const T)
 }

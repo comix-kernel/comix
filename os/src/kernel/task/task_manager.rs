@@ -9,11 +9,11 @@
 use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::ipc::SignalFlags;
-use crate::kernel::exit_task_with_block;
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
+use crate::kernel::{TaskState, exit_task_with_block, wake_up_with_block};
 use crate::sync::SpinLock;
+use crate::uapi::signal::SignalFlags;
 
 use lazy_static::lazy_static;
 
@@ -51,7 +51,7 @@ pub trait TaskManagerTrait {
 
     /// 释放一个已退出的任务
     /// 参数:
-    /// * `tid`: 需要释放的任务 ID
+    /// * `task`: 需要释放的任务，类型为 SharedTask
     fn release_task(&mut self, task: SharedTask);
 
     /// 根据任务 ID 获取对应的任务
@@ -59,6 +59,12 @@ pub trait TaskManagerTrait {
     /// * `tid`: 需要获取的任务 ID
     ///   返回值: 如果找到对应任务则返回 Some(SharedTask)，否则返回 None
     fn get_task(&self, tid: u32) -> Option<SharedTask>;
+
+    /// 根据条件获取符合条件的任务列表
+    /// 参数:
+    /// * `cond`: 用于筛选任务的条件函数，接受一个 SharedTask 参数并返回 bool
+    /// 返回值: 符合条件的任务列表
+    fn get_task_cond(&self, cond: impl Fn(&SharedTask) -> bool) -> Vec<SharedTask>;
 
     /// 获取进程（线程组）内所有线程
     /// 参数：
@@ -73,8 +79,8 @@ pub trait TaskManagerTrait {
     fn get_process_children(&self, process: SharedTask) -> Vec<SharedTask>;
 
     /// 发送信号给指定任务
-    /// 参数:
-    /// * `tid`: 目标任务 ID
+    /// 参数：
+    /// * `task`: 目标任务对应的 SharedTask
     /// * `signal`: 需要发送的信号编号
     /// 返回值: 如果任务存在且信号发送成功则返回 true，否则返回 false
     fn send_signal(&self, task: SharedTask, signal: usize) -> bool;
@@ -132,6 +138,16 @@ impl TaskManagerTrait for TaskManager {
         self.tasks.get(&tid).cloned()
     }
 
+    fn get_task_cond(&self, cond: impl Fn(&SharedTask) -> bool) -> Vec<SharedTask> {
+        let mut v = Vec::new();
+        for task in self.tasks.values() {
+            if cond(task) {
+                v.push(task.clone());
+            }
+        }
+        v
+    }
+
     fn get_process_threads(&self, process: SharedTask) -> Vec<SharedTask> {
         let mut v = Vec::new();
         let pid = process.lock().pid;
@@ -148,10 +164,13 @@ impl TaskManagerTrait for TaskManager {
     }
 
     fn send_signal(&self, task: SharedTask, signal: usize) -> bool {
-        // FIXME: 如果主线程已退出, 这里无法处理
         if let Some(signal_flag) = SignalFlags::from_signal_num(signal) {
             let mut t = task.lock();
-            t.pending.insert(signal_flag);
+            t.pending.signals.insert(signal_flag);
+            if t.state == TaskState::Interruptible {
+                drop(t);
+                wake_up_with_block(task.clone());
+            }
             true
         } else {
             false

@@ -1,7 +1,7 @@
 //! 任务相关的系统调用实现
 
 use core::{
-    ffi::{c_char, c_int},
+    ffi::{c_char, c_int, c_ulong},
     sync::atomic::Ordering,
 };
 
@@ -13,10 +13,13 @@ use crate::{
         timer::{clock_freq, get_time},
         trap::restore,
     },
+    ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, TaskState,
-        TaskStruct, current_cpu, current_task, exit_process, schedule, sleep_task_with_block,
+        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
+        TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
+        sleep_task_with_block,
         syscall::util::{get_args_safe, get_path_safe},
+        time::REALTIME,
         yield_task,
     },
     mm::{
@@ -24,13 +27,24 @@ use crate::{
         memory_space::MemorySpace,
     },
     sync::SpinLock,
-    tool::user_buffer::{read_from_user, write_to_user},
     uapi::{
-        errno::{EINTR, EINVAL, ESRCH},
+        errno::{EINTR, EINVAL, ENOSYS, ESRCH},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
-        time::timespec,
+        sched::CloneFlags,
+        signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
+        time::{
+            Itimerval, TimeSpec,
+            clock_flags::TIMER_ABSTIME,
+            clock_id::{
+                CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
+                CLOCK_TAI,
+            },
+            itimer_id::{ITIMER_PROF, ITIMER_REAL, ITIMER_VIRTUAL},
+        },
+        types::StackT,
         wait::{WaitFlags, WaitStatus},
     },
+    util::user_buffer::{read_from_user, write_to_user},
 };
 
 /// 线程退出系统调用
@@ -69,63 +83,149 @@ pub fn exit_group(code: c_int) -> ! {
     unreachable!("exit: exit_task should not return.");
 }
 
-/// 创建当前任务的子任务（fork）
-pub fn fork() -> usize {
+/// 克隆当前任务（线程或进程）
+/// # 参数
+/// - `fn_ptr`: 指向新任务执行函数的指针
+/// - `stack`: 指向新任务栈顶的指针
+/// - `flags`: 克隆选项标志
+/// - `arg`: 传递给新任务执行函数的参数指针
+/// # 返回值
+/// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
+pub fn clone(
+    clone_flags: c_ulong,
+    newsp: c_ulong,
+    parent_tidptr: *mut c_int,
+    child_tidptr: *mut c_int,
+    tls: c_ulong,
+) -> c_int {
+    let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(clone_flags as usize)
+    {
+        requested_flags
+    } else {
+        return -EINVAL;
+    };
+    if !requested_flags.is_known() {
+        return -EINVAL;
+    }
+    if !requested_flags.is_supported() {
+        return -ENOSYS;
+    }
     let tid = { TASK_MANAGER.lock().allocate_tid() };
-    let (ppid, pgid, space, signal_handlers, blocked, ptf, fd_table, cwd, root, uts, rlimit) = {
+    let (
+        c_pid,
+        c_ppid,
+        c_pgid,
+        space,
+        signal_handlers,
+        blocked,
+        signal,
+        signal_stack,
+        ptf,
+        fd_table,
+        fs,
+        uts,
+        rlimit,
+    ) = {
         let cpu = current_cpu().lock();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
             task.pid,
+            task.ppid,
             task.pgid,
             task.memory_space
-                .as_ref()
-                .unwrap()
+                .clone()
+                .expect("fork: can only call fork on a user task."),
+            task.signal_handlers.clone(),
+            task.blocked,
+            task.shared_pending.clone(),
+            task.signal_stack.clone(),
+            task.trap_frame_ptr.load(Ordering::SeqCst),
+            task.fd_table.clone(),
+            task.fs.clone(),
+            task.uts_namespace.clone(),
+            task.rlimit.clone(),
+        )
+    };
+    let exit_signal = requested_flags.get_exit_signal();
+    let space = if requested_flags.contains(CloneFlags::VM) {
+        space
+    } else {
+        Arc::new(SpinLock::new(
+            space
                 .lock()
                 .clone_for_fork()
                 .expect("fork: clone memory space failed."),
-            task.signal_handlers.clone(),
-            task.blocked,
-            task.trap_frame_ptr.load(Ordering::SeqCst),
-            task.fd_table.clone(),
-            task.cwd.clone(),
-            task.root.clone(),
-            task.uts_namespace.clone(),
-            task.rlimit.clone(),
+        ))
+    };
+    let fd_table = if requested_flags.contains(CloneFlags::FILES) {
+        fd_table
+    } else {
+        Arc::new(fd_table.clone_table())
+    };
+    let fs = if requested_flags.contains(CloneFlags::FS) {
+        fs
+    } else {
+        Arc::new(SpinLock::new(fs.lock().clone()))
+    };
+    let ppid = if requested_flags.contains(CloneFlags::PARENT) {
+        c_ppid
+    } else {
+        c_pid
+    };
+    let pid = if requested_flags.contains(CloneFlags::THREAD) {
+        c_pid
+    } else {
+        tid
+    };
+    let (signal, signal_handler, signal_stack) = if requested_flags.contains(CloneFlags::SIGHAND) {
+        (signal, signal_handlers, signal_stack)
+    } else {
+        (
+            Arc::new(SpinLock::new(SignalPending::empty())),
+            Arc::new(SpinLock::new(SignalHandlerTable::new())),
+            Arc::new(SpinLock::new(StackT::default())),
         )
     };
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let mut child_task = TaskStruct::utask_create(
+    let child_task = TaskStruct::utask_create(
         tid,
-        tid,
+        pid,
         ppid,
-        pgid,
+        c_pgid,
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
-        Arc::new(SpinLock::new(space)),
-        signal_handlers,
+        space,
+        signal_handler,
         blocked,
+        signal,
+        signal_stack,
+        exit_signal,
         uts,
         rlimit,
+        fd_table,
+        fs,
     );
 
-    child_task.fd_table = Arc::new(fd_table.clone_table());
-    child_task.cwd = cwd;
-    child_task.root = root;
+    if requested_flags.contains(CloneFlags::CHILD_SETTID) {
+        unsafe {
+            write_to_user(child_tidptr, tid as c_int);
+        }
+    }
+    if requested_flags.contains(CloneFlags::PARENT_SETTID) {
+        unsafe {
+            write_to_user(parent_tidptr, tid as c_int);
+        }
+    }
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        (*tf).set_fork_trap_frame(&*ptf);
+        (*tf).set_fork_trap_frame(&*ptf, newsp as usize);
     }
     let child_task = child_task.into_shared();
-    current_cpu()
-        .lock()
-        .current_task
-        .as_ref()
-        .unwrap()
+    current_task()
         .lock()
         .children
         .lock()
@@ -133,7 +233,7 @@ pub fn fork() -> usize {
 
     TASK_MANAGER.lock().add_task(child_task.clone());
     SCHEDULER.lock().add_task(child_task);
-    tid as usize
+    tid as c_int
 }
 
 /// 执行一个新程序（execve）
@@ -141,6 +241,7 @@ pub fn fork() -> usize {
 /// - `path`: 可执行文件路径
 /// - `argv`: 命令行参数
 /// - `envp`: 环境变量
+/// TODO: 目前该函数可用但亟待完善
 pub fn execve(
     path: *const c_char,
     argv: *const *const c_char,
@@ -398,11 +499,11 @@ pub fn prlimit(
 
 /// 高精度睡眠（纳秒级别）
 /// # 参数
-/// - `duration`: 指向 timespec 结构体的指针, 包含睡眠的时间
-/// - `rem`: 指向 timespec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// - `duration`: 指向 TimeSpec 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 TimeSpec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
 /// # 返回值
 /// - 成功返回 0, 失败返回负错误码
-pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
+pub fn nanosleep(duration: *const TimeSpec, rem: *mut TimeSpec) -> c_int {
     let req = unsafe { read_from_user(duration) };
     if req.tv_sec == 0 && req.tv_nsec == 0 {
         return 0;
@@ -429,7 +530,7 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
         } else {
             0
         };
-        let rem_ts = timespec::from_freq(remaining_ticks, clock_freq());
+        let rem_ts = TimeSpec::from_freq(remaining_ticks, clock_freq());
         unsafe {
             write_to_user(rem, rem_ts);
         }
@@ -437,4 +538,149 @@ pub fn nanosleep(duration: *const timespec, rem: *mut timespec) -> c_int {
 
     result
     // TODO: EFAULT
+}
+
+pub fn gettid() -> c_int {
+    current_task().lock().tid as c_int
+}
+
+/// 基于时钟的高精度睡眠
+/// # 参数
+/// - `clk_id`: 时钟 ID
+/// - `flags`: 睡眠选项标志
+/// - `req`: 指向 TimeSpec 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 TimeSpec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn clock_nanosleep(
+    clk_id: c_int,
+    flags: c_int,
+    req: *const TimeSpec,
+    rem: *mut TimeSpec,
+) -> c_int {
+    let time_req = unsafe { read_from_user(req) };
+    let is_abstime = (flags & TIMER_ABSTIME) != 0;
+    let sleep_ticks = time_req.into_freq(clock_freq());
+    let trigger = if is_abstime {
+        sleep_ticks
+    } else {
+        let now = match clk_id {
+            CLOCK_REALTIME => REALTIME.read().into_freq(clock_freq()),
+            CLOCK_MONOTONIC => get_time(),
+            CLOCK_TAI | CLOCK_BOOTTIME | CLOCK_PROCESS_CPUTIME_ID => return -ENOSYS,
+            _ => return -EINVAL,
+        };
+        now.saturating_add(sleep_ticks)
+    };
+
+    let mut result = 0;
+    let task = current_task();
+
+    let mut timer_q = TIMER_QUEUE.lock();
+    timer_q.push(trigger, task.clone());
+    sleep_task_with_block(task, true);
+    drop(timer_q);
+    yield_task();
+
+    if !rem.is_null() {
+        let dur = trigger.saturating_sub(get_time());
+        let remaining_ticks = if dur > 0 {
+            // XXX: 提前唤醒是否一定是因为信号？
+            result = -EINTR;
+            dur
+        } else {
+            0
+        };
+        let rem_ts = TimeSpec::from_freq(remaining_ticks, clock_freq());
+        unsafe {
+            write_to_user(rem, rem_ts);
+        }
+    }
+
+    result
+}
+
+/// 获取间隔定时器的当前值
+/// # 参数
+/// - `which`: 定时器 ID
+/// - `curr_value`: 指向 Itimerval 结构体的指针, 用于存储当前定时器值
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
+    match which {
+        ITIMER_REAL | ITIMER_VIRTUAL | ITIMER_PROF => {}
+        _ => return -EINVAL,
+    }
+    let sig = match which {
+        ITIMER_REAL => NUM_SIGALRM,
+        ITIMER_VIRTUAL => NUM_SIGVTALRM,
+        ITIMER_PROF => NUM_SIGPROF,
+        _ => unreachable!("getitimer: unreachable which case."),
+    };
+    let mut val = Itimerval::zero();
+    if let Some(timer) = TIMER.lock().find_entry(&current_task(), sig) {
+        let now = get_time();
+        let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
+        let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
+        let it_interval = timer.1.it_interval.to_timeval();
+        val = Itimerval {
+            it_value,
+            it_interval,
+        };
+    }
+    unsafe {
+        write_to_user(curr_value, val);
+    }
+    0
+}
+
+/// 设置间隔定时器的值
+/// # 参数
+/// - `which`: 定时器 ID
+/// - `new_value`: 指向 Itimerval 结构体的指针, 包含要设置的定时器值
+/// - `old_value`: 指向 Itimerval 结构体的指针, 用于存储旧的定时器值, 可为 NULL
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itimerval) -> c_int {
+    match which {
+        ITIMER_REAL | ITIMER_VIRTUAL | ITIMER_PROF => {}
+        _ => return -EINVAL,
+    }
+    let sig = match which {
+        ITIMER_REAL => NUM_SIGALRM,
+        ITIMER_VIRTUAL => NUM_SIGVTALRM,
+        ITIMER_PROF => NUM_SIGPROF,
+        _ => unreachable!("setitimer: unreachable which case."),
+    };
+
+    let mut binding = TIMER.lock();
+    let new_itimer = unsafe { read_from_user(new_value) };
+    if !new_itimer.it_value.is_zero() {
+        let trigger = get_time() + new_itimer.it_value.into_freq(clock_freq());
+        let interval = new_itimer.it_interval.to_timespec();
+        let entry = TimerEntry {
+            task: current_task(),
+            sig,
+            it_interval: interval,
+        };
+        binding.push(trigger, entry);
+    }
+    if !old_value.is_null() {
+        let mut val = Itimerval::zero();
+        if let Some(timer) = binding.find_entry(&current_task(), sig) {
+            let now = get_time();
+            let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
+            let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
+            let it_interval = timer.1.it_interval.to_timeval();
+            val = Itimerval {
+                it_value,
+                it_interval,
+            };
+        }
+        unsafe {
+            write_to_user(old_value, val);
+        }
+    }
+
+    0
 }

@@ -48,6 +48,8 @@ impl DateTime {
     }
 }
 
+pub mod rtc_goldfish;
+
 /// RTC 设备驱动接口
 pub trait RtcDriver: Driver {
     /// 读取自纪元以来的秒数

@@ -8,12 +8,14 @@ use riscv::register::sstatus;
 use crate::{
     kernel::{
         current_cpu, current_task,
-        syscall::util::{create_file_at, get_path_safe, resolve_at_path},
+        syscall::util::{
+            create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags,
+        },
     },
     uapi::{
         errno::{EACCES, EINVAL, ENOENT},
         fs::{AtFlags, F_OK, FileSystemType, LinuxStatFs, R_OK, W_OK, X_OK},
-        time::timespec,
+        time::TimeSpec,
     },
     vfs::{
         Dentry, RegFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
@@ -256,13 +258,13 @@ pub fn chdir(path: *const c_char) -> isize {
     }
 
     // 更新当前工作目录
-    current_task().lock().cwd = Some(dentry);
+    current_task().lock().fs.lock().cwd = Some(dentry);
     0
 }
 
 pub fn getcwd(buf: *mut u8, size: usize) -> isize {
     // 获取当前工作目录dentry
-    let cwd_dentry = match current_task().lock().cwd.clone() {
+    let cwd_dentry = match current_task().lock().fs.lock().cwd.clone() {
         Some(d) => d,
         None => return FsError::NotSupported.to_errno(),
     };
@@ -731,7 +733,7 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     0
 }
 
-pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const timespec, flags: u32) -> isize {
+pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, flags: u32) -> isize {
     // 解析路径
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(pathname) {
@@ -786,7 +788,7 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const timespec, fl
     // 解析时间参数
     let (atime_opt, mtime_opt) = if times.is_null() {
         // NULL 表示将两个时间都设置为当前时间
-        let now = timespec::now();
+        let now = TimeSpec::now();
         (Some(now), Some(now))
     } else {
         unsafe {
@@ -807,7 +809,7 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const timespec, fl
             let atime_opt = if user_times[0].is_omit() {
                 None // 不修改
             } else if user_times[0].is_now() {
-                Some(timespec::now())
+                Some(TimeSpec::now())
             } else {
                 Some(user_times[0])
             };
@@ -816,7 +818,7 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const timespec, fl
             let mtime_opt = if user_times[1].is_omit() {
                 None
             } else if user_times[1].is_now() {
-                Some(timespec::now())
+                Some(TimeSpec::now())
             } else {
                 Some(user_times[1])
             };
@@ -1189,10 +1191,10 @@ pub fn mount(
     use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
 
-    // 1. 启用用户空间内存访问
+    // 启用用户空间内存访问
     unsafe { riscv::register::sstatus::set_sum() };
 
-    // 2. 解析目标路径
+    // 解析目标路径
     let target_str = match get_path_safe(target) {
         Ok(s) => s.to_string(),
         Err(_) => {
@@ -1205,13 +1207,13 @@ pub fn mount(
 
     crate::pr_info!("[SYSCALL] mount: mounting at '{}'", target_str);
 
-    // 3. 检查挂载点是否存在
+    // 检查挂载点是否存在
     if vfs_lookup(&target_str).is_err() {
         crate::pr_warn!("[SYSCALL] mount: target '{}' does not exist", target_str);
         return FsError::NotFound.to_errno();
     }
 
-    // 4. 获取块设备（简化：使用第一个）
+    // 获取块设备（简化：使用第一个）
     let block_device = match get_first_block_device() {
         Ok(dev) => dev,
         Err(e) => {
@@ -1220,7 +1222,7 @@ pub fn mount(
         }
     };
 
-    // 5. 创建 Ext4 文件系统
+    // 创建 Ext4 文件系统
     let block_size = EXT4_BLOCK_SIZE;
     let total_blocks = crate::config::FS_IMAGE_SIZE / block_size;
 
@@ -1232,7 +1234,7 @@ pub fn mount(
         }
     };
 
-    // 6. 挂载文件系统（使用空标志，因为我们忽略所有 flags）
+    // 挂载文件系统（使用空标志，因为我们忽略所有 flags）
     match MOUNT_TABLE.mount(
         ext4_fs,
         &target_str,
@@ -1262,10 +1264,10 @@ pub fn mount(
 pub fn umount2(target: *const c_char, _flags: i32) -> isize {
     use crate::vfs::MOUNT_TABLE;
 
-    // 1. 启用用户空间内存访问
+    // 启用用户空间内存访问
     unsafe { riscv::register::sstatus::set_sum() };
 
-    // 2. 解析目标路径
+    // 解析目标路径
     let target_str = match get_path_safe(target) {
         Ok(s) => s.to_string(),
         Err(_) => {
@@ -1278,7 +1280,8 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
 
     crate::pr_info!("[SYSCALL] umount2: unmounting '{}'", target_str);
 
-    // 3. 卸载文件系统
+    // 卸载文件系统
+
     // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
     match MOUNT_TABLE.umount(&target_str) {
         Ok(()) => {
@@ -1289,5 +1292,168 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
             crate::pr_err!("[SYSCALL] umount2: failed: {:?}", e);
             e.to_errno()
         }
+    }
+}
+
+/// 同步所有文件系统
+///
+/// # 实现说明
+/// 由于 Comix 使用写直达架构,数据已在块设备中,
+/// 此调用只需刷新硬件写缓存。
+pub fn sync() -> isize {
+    use crate::kernel::syscall::util::flush_all_block_devices;
+
+    // sync 总是成功(即使 flush 失败也不返回错误)
+    let _ = flush_all_block_devices();
+    0
+}
+
+/// syncfs - 同步指定文件系统
+pub fn syncfs(fd: usize) -> isize {
+    use crate::kernel::syscall::util::flush_block_device_by_fd;
+
+    match flush_block_device_by_fd(fd) {
+        Ok(()) => 0,
+        Err(errno) => errno,
+    }
+}
+
+/// fsync - 同步文件数据和元数据
+///
+/// # 实现说明
+/// 在写直达架构下,等同于 syncfs
+pub fn fsync(fd: usize) -> isize {
+    syncfs(fd)
+}
+
+/// fdatasync - 同步文件数据(元数据可选)
+///
+/// # 实现说明
+/// 在写直达架构下,完全等同于 fsync
+pub fn fdatasync(fd: usize) -> isize {
+    fsync(fd)
+}
+
+/// fchownat - 修改文件所有者和组
+///
+/// # 参数
+/// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
+/// * `pathname` - 文件路径
+/// * `owner` - 新的用户 ID（u32::MAX 表示不改变）
+/// * `group` - 新的组 ID（u32::MAX 表示不改变）
+/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW、AT_EMPTY_PATH 等）
+///
+/// # 返回值
+/// * 0 - 成功
+/// * -errno - 失败
+///
+/// # 在单 root 用户系统中的行为
+/// 所有调用都会成功并更新 inode 的 uid/gid 字段，不进行权限检查
+pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, flags: u32) -> isize {
+    use crate::uapi::fs::AtFlags;
+
+    // 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 解析标志位
+    let at_flags = AtFlags::from_bits_truncate(flags);
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let empty_path = at_flags.contains(AtFlags::EMPTY_PATH);
+
+    // 处理 AT_EMPTY_PATH 情况
+    if empty_path && path_str.is_empty() {
+        // pathname 为空，操作 dirfd 本身
+        if dirfd == AT_FDCWD {
+            // 不能对当前目录使用 AT_EMPTY_PATH
+            return -(EINVAL as isize);
+        }
+
+        let task = current_task();
+        let file = match task.lock().fd_table.get(dirfd as usize) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
+
+        let dentry = match file.dentry() {
+            Ok(d) => d,
+            Err(e) => return e.to_errno(),
+        };
+
+        return match dentry.inode.chown(owner, group) {
+            Ok(()) => 0,
+            Err(e) => e.to_errno(),
+        };
+    }
+
+    // 解析路径，获取 dentry（使用辅助函数）
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 调用 inode 的 chown 方法
+    match dentry.inode.chown(owner, group) {
+        Ok(()) => 0,
+        Err(e) => e.to_errno(),
+    }
+}
+
+/// fchmodat - 修改文件权限模式
+///
+/// # 参数
+/// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
+/// * `pathname` - 文件路径
+/// * `mode` - 新的权限模式（12 位权限位）
+/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW 等）
+///
+/// # 返回值
+/// * 0 - 成功
+/// * -errno - 失败
+///
+/// # 在单 root 用户系统中的行为
+/// 所有调用都会成功并更新 inode 的 mode 字段，不进行权限检查
+pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> isize {
+    use crate::uapi::fs::AtFlags;
+
+    // 解析路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return -(EINVAL as isize);
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 解析标志位
+    let at_flags = AtFlags::from_bits_truncate(flags);
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+
+    // 验证 mode 参数（只保留权限位，去除文件类型位）
+    let mode = mode & 0o7777; // 保留 12 位权限位（包括 setuid/setgid/sticky）
+    let file_mode = match FileMode::from_bits(mode) {
+        Some(m) => m,
+        None => return -(EINVAL as isize),
+    };
+
+    // 解析路径，获取 dentry（使用辅助函数）
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 调用 inode 的 chmod 方法
+    match dentry.inode.chmod(file_mode) {
+        Ok(()) => 0,
+        Err(e) => e.to_errno(),
     }
 }

@@ -156,6 +156,19 @@ pub fn create_test_dir(fs: &Arc<Ext4FileSystem>, name: &str) -> Result<Arc<dyn I
     root.mkdir(name, FileMode::from_bits_truncate(0o755))
 }
 
+/// Create a test file in Ext4 filesystem
+///
+/// # Arguments
+/// - `fs`: Ext4 filesystem instance
+/// - `name`: File name
+///
+/// # Returns
+/// Created file Inode
+pub fn create_test_file(fs: &Arc<Ext4FileSystem>, name: &str) -> Result<Arc<dyn Inode>, FsError> {
+    let root = fs.root_inode();
+    root.create(name, FileMode::from_bits_truncate(0o644))
+}
+
 // Export test modules
 pub mod ext4_basic;
 pub mod ext4_directory;
@@ -163,4 +176,5 @@ pub mod ext4_error;
 pub mod ext4_integration;
 pub mod ext4_io;
 pub mod ext4_metadata;
+pub mod ext4_permissions;
 pub mod ext4_rename;

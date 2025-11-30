@@ -7,7 +7,7 @@
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
 use crate::sync::{Mutex, SpinLock};
-use crate::uapi::time::timespec;
+use crate::uapi::time::TimeSpec;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -112,15 +112,15 @@ impl Inode for Ext4Inode {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
-            atime: timespec {
+            atime: TimeSpec {
                 tv_sec: inode.atime as i64,
                 tv_nsec: atime_nsec,
             },
-            mtime: timespec {
+            mtime: TimeSpec {
                 tv_sec: inode.mtime as i64,
                 tv_nsec: mtime_nsec,
             },
-            ctime: timespec {
+            ctime: TimeSpec {
                 tv_sec: inode.ctime as i64,
                 tv_nsec: ctime_nsec,
             },
@@ -653,7 +653,7 @@ impl Inode for Ext4Inode {
         self
     }
 
-    fn set_times(&self, atime: Option<timespec>, mtime: Option<timespec>) -> Result<(), FsError> {
+    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
         let mut fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
@@ -674,12 +674,65 @@ impl Inode for Ext4Inode {
             inode.i_mtime_extra = ((mt.tv_nsec as u32) << 2) & 0xFFFFFFFC;
 
             // 修改时间改变时，也更新 ctime
-            let now = timespec::now();
+            let now = TimeSpec::now();
             inode.ctime = now.tv_sec as u32;
             inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
         }
 
-        // inode_ref 在 drop 时会自动写回磁盘
+        // 写回 inode 到磁盘
+        fs.write_back_inode(&mut inode_ref);
+
+        Ok(())
+    }
+
+    fn chown(&self, uid: u32, gid: u32) -> Result<(), FsError> {
+        let mut fs = self.fs.lock();
+
+        // 获取 inode 引用（可变）
+        let mut inode_ref = fs.get_inode_ref(self.ino);
+        let inode = &mut inode_ref.inode;
+
+        // 更新 uid/gid（u32::MAX 表示不改变）
+        if uid != u32::MAX {
+            inode.uid = uid as u16;
+            // 如果将来需要支持 32 位 UID，需要更新 i_uid_high
+        }
+        if gid != u32::MAX {
+            inode.gid = gid as u16;
+            // 如果将来需要支持 32 位 GID，需要更新 i_gid_high
+        }
+
+        // 更新 ctime（状态改变时间）
+        let now = TimeSpec::now();
+        inode.ctime = now.tv_sec as u32;
+        inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
+
+        // 写回 inode 到磁盘
+        fs.write_back_inode(&mut inode_ref);
+
+        Ok(())
+    }
+
+    fn chmod(&self, mode: FileMode) -> Result<(), FsError> {
+        let mut fs = self.fs.lock();
+
+        // 获取 inode 引用（可变）
+        let mut inode_ref = fs.get_inode_ref(self.ino);
+        let inode = &mut inode_ref.inode;
+
+        // 保留文件类型位（高 4 位），只修改权限位（低 12 位）
+        let file_type = inode.mode & 0xF000;
+        let permission_bits = (mode.bits() & 0x0FFF) as u16;
+        inode.mode = file_type | permission_bits;
+
+        // 更新 ctime（状态改变时间）
+        let now = TimeSpec::now();
+        inode.ctime = now.tv_sec as u32;
+        inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
+
+        // 写回 inode 到磁盘
+        fs.write_back_inode(&mut inode_ref);
+
         Ok(())
     }
 

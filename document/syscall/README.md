@@ -2,7 +2,7 @@
 
 本文档收录了两百个左右Linux x86_64 的主干 syscall 接口，用于在实现系统调用时速查。
 
-说明：作用按领域分组；参数一般遵循 (int fd, const char *buf, size_t len)、(const struct timespec *req, struct timespec *rem)、(int pid, int sig)、(void *addr, size_t len, int prot, int flags, int fd, off_t off) 等常见模式。下面按类别简述关键功能与典型参数。未逐条展开，保持速览。
+说明：作用按领域分组；参数一般遵循 (int fd, const char *buf, size_t len)、(const struct TimeSpec *req, struct TimeSpec *rem)、(int pid, int sig)、(void *addr, size_t len, int prot, int flags, int fd, off_t off) 等常见模式。下面按类别简述关键功能与典型参数。未逐条展开，保持速览。
 
 1. 基础文件与 IO
 - read/write/pread/pwrite/readv/writev: (fd, buf/vec, count, offset)
@@ -56,7 +56,7 @@
 - gettimeofday/clock_gettime/clock_settime/clock_getres/adjtimex: 时间与校时
 - times: (tmsbuf)
 - getrusage: (who, rusage)
-- sched_rr_get_interval: (pid, timespec)
+- sched_rr_get_interval: (pid, TimeSpec)
 
 5. IPC
 - pipe/pipe2: (fds[2])
@@ -123,7 +123,7 @@
 参数模式速记
 - 路径相关：dirfd + path + flags + mode
 - IO 向量：iovec 数组 + count（readv/writev/preadv/pwritev）
-- 时间：timespec/timeval + 可选剩余/精度结构
+- 时间：TimeSpec/timeval + 可选剩余/精度结构
 - 结构读写：用户指针传入，内核填充（stat, rusage, utsname）
 - 标志位：按 OR 组合（O_*、MAP_*、EPOLL*、SOCK_*）
 

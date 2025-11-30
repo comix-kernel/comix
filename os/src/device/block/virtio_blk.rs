@@ -7,7 +7,7 @@ use virtio_drivers::transport::mmio::MmioTransport;
 use crate::device::virtio_hal::VirtIOHal;
 
 use crate::device::{BLK_DRIVERS, DRIVERS, IRQ_MANAGER, NetDevice};
-use crate::println;
+use crate::earlyprintln;
 use crate::sync::Mutex;
 
 use super::{
@@ -78,7 +78,7 @@ pub fn init(transport: MmioTransport<'static>) {
     DRIVERS.write().push(driver.clone());
     IRQ_MANAGER.write().register_all(driver.clone());
     BLK_DRIVERS.write().push(driver);
-    println!("[Device] Block driver (virtio-blk) is initialized");
+    earlyprintln!("[Device] Block driver (virtio-blk) is initialized");
 }
 
 #[cfg(test)]
