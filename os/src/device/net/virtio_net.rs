@@ -5,8 +5,9 @@ use crate::{
         Driver,
         net::{add_network_device, net_device::VirtioNetDevice},
     },
+    earlyprintln,
     net::interface::NetworkInterface,
-    earlyprintln, println,
+    println,
     sync::SpinLock,
 };
 use alloc::{format, sync::Arc};
