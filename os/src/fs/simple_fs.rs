@@ -300,6 +300,7 @@ impl Inode for SimpleFsInode {
             ctime: timespec::now(),
             nlinks: 1,
             blocks: (data.len() + 511) / 512,
+            rdev: 0,
         })
     }
 
@@ -444,6 +445,10 @@ impl Inode for SimpleFsInode {
     }
 
     fn readlink(&self) -> Result<String, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
     }
 }

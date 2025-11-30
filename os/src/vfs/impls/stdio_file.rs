@@ -60,6 +60,7 @@ impl File for StdinFile {
             ctime: timespec::now(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 
@@ -105,6 +106,7 @@ impl File for StdoutFile {
             ctime: timespec::now(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 }
@@ -148,6 +150,7 @@ impl File for StderrFile {
             ctime: timespec::now(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 }

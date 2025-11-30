@@ -1,7 +1,7 @@
 //! 文件描述符表
 //!
 //! 每个进程维护一个 [`FDTable`]，管理打开的文件。文件以 `Arc<dyn File>` 形式存储，
-//! 支持异构文件类型（DiskFile、PipeFile、StdioFile等）。
+//! 支持异构文件类型（RegFile、PipeFile、StdioFile等）。
 
 use crate::config::DEFAULT_MAX_FDS;
 use crate::sync::SpinLock;

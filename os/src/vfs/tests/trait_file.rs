@@ -1,5 +1,5 @@
 use super::*;
-use crate::vfs::{DiskFile, PipeFile};
+use crate::vfs::{RegFile, PipeFile};
 use crate::{kassert, test_case};
 
 /// 测试 File trait 的多态行为
@@ -12,8 +12,8 @@ test_case!(test_trait_polymorphism, {
     let inode = create_test_file_with_content(&fs, "test.txt", b"disk file").unwrap();
     let dentry = create_test_dentry("test.txt", inode);
 
-    // DiskFile
-    let disk_file: Arc<dyn File> = Arc::new(DiskFile::new(dentry, OpenFlags::O_RDWR));
+    // RegFile
+    let disk_file: Arc<dyn File> = Arc::new(RegFile::new(dentry, OpenFlags::O_RDWR));
 
     // PipeFile
     let (pipe_read, pipe_write) = PipeFile::create_pair();
@@ -27,7 +27,7 @@ test_case!(test_trait_polymorphism, {
 });
 
 test_case!(test_disk_file_vs_pipe_file_lseek, {
-    // DiskFile 支持 lseek
+    // RegFile 支持 lseek
     let fs = create_test_simplefs();
     let inode = create_test_file_with_content(&fs, "test.txt", b"0123456789").unwrap();
     let disk_file = create_test_file("test.txt", inode, OpenFlags::O_RDONLY);
@@ -46,7 +46,7 @@ test_case!(test_disk_file_vs_pipe_file_lseek, {
 });
 
 test_case!(test_disk_file_vs_pipe_file_offset, {
-    // DiskFile 有 offset
+    // RegFile 有 offset
     let fs = create_test_simplefs();
     let inode = create_test_file_with_content(&fs, "test.txt", b"test").unwrap();
     let disk_file = create_test_file("test.txt", inode, OpenFlags::O_RDONLY);
@@ -64,7 +64,7 @@ test_case!(test_disk_file_vs_pipe_file_offset, {
 });
 
 test_case!(test_disk_file_vs_pipe_file_flags, {
-    // DiskFile 有真实的 flags
+    // RegFile 有真实的 flags
     let fs = create_test_simplefs();
     let inode = create_test_file_with_content(&fs, "test.txt", b"test").unwrap();
     let disk_file = create_test_file("test.txt", inode, OpenFlags::O_RDWR);
@@ -86,7 +86,7 @@ test_case!(test_fdtable_with_mixed_files, {
     // 在 FDTable 中混合存储不同类型的文件
     let fd_table = FDTable::new();
 
-    // 添加 DiskFile
+    // 添加 RegFile
     let fs = create_test_simplefs();
     let inode = create_test_file_with_content(&fs, "test.txt", b"disk").unwrap();
     let disk_file = create_test_file("test.txt", inode, OpenFlags::O_RDONLY);

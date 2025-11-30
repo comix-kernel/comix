@@ -16,7 +16,7 @@ use crate::{
         time::timespec,
     },
     vfs::{
-        Dentry, DiskFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
+        Dentry, RegFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
         vfs_lookup,
     },
 };
@@ -122,7 +122,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     }
 
     // 创建 File 对象
-    let file = Arc::new(DiskFile::new(dentry, open_flags));
+    let file = Arc::new(RegFile::new(dentry, open_flags));
 
     // 分配文件描述符
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
