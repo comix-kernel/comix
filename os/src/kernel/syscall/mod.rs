@@ -219,10 +219,8 @@ impl_syscall!(
     renameat2,
     (i32, *const c_char, i32, *const c_char, u32)
 );
-impl_syscall!(sys_chdir, chdir, (*const c_char));
-impl_syscall!(sys_getcwd, getcwd, (*mut u8, usize));
-impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
-impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
+
+// 挂载/文件系统操作 (Mount/Filesystem Operations)
 impl_syscall!(sys_umount2, umount2, (*const c_char, i32));
 impl_syscall!(
     sys_mount,
@@ -235,9 +233,6 @@ impl_syscall!(
         *const c_void
     )
 );
-impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
-impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
-impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 
 // 随机数与内存文件
 impl_syscall!(sys_getrandom, getrandom, (*mut c_void, SizeT, c_uint));
