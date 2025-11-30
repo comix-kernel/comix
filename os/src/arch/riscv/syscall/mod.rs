@@ -17,6 +17,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_IOCTL => sys_ioctl(frame),
 
         // 文件/目录创建与链接 (File/Directory Creation and Linking)
+        syscall_number::SYS_MKNODAT => sys_mknodat(frame),
         syscall_number::SYS_MKDIRAT => sys_mkdirat(frame),
         syscall_number::SYS_UNLINKAT => sys_unlinkat(frame),
 

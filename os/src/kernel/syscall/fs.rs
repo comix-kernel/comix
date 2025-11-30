@@ -9,7 +9,7 @@ use crate::{
     kernel::{
         current_cpu, current_task,
         syscall::util::{
-            create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags,
+            create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags, create_file_from_dentry
         },
     },
     uapi::{
@@ -19,7 +19,7 @@ use crate::{
     },
     vfs::{
         Dentry, RegFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
-        vfs_lookup,
+        vfs_lookup, DENTRY_CACHE
     },
 };
 
@@ -124,7 +124,10 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     }
 
     // 创建 File 对象
-    let file = Arc::new(RegFile::new(dentry, open_flags));
+    let file = match create_file_from_dentry(dentry, open_flags) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
 
     // 分配文件描述符
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
@@ -1454,6 +1457,58 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     // 调用 inode 的 chmod 方法
     match dentry.inode.chmod(file_mode) {
         Ok(()) => 0,
+        Err(e) => e.to_errno(),
+    }
+}
+
+/// mknodat 系统调用
+///
+/// # 参数
+/// - `dirfd`: 目录文件描述符（-100 表示当前工作目录）
+/// - `pathname`: 路径名
+/// - `mode`: 文件模式（包含类型和权限）
+/// - `dev`: 设备号
+///
+/// # 返回
+/// * 0: 成功
+/// * -errno - 失败
+pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isize {
+    // 安全地读取路径字符串
+    unsafe { sstatus::set_sum() };
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 分割路径为目录和文件名
+    let (dir_path, filename) = match split_path(&path_str) {
+        Ok(p) => p,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 解析父目录路径
+    let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
+        Ok(Some(d)) => d,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+
+    // 构造文件模式
+    let file_mode = FileMode::from_bits_truncate(mode);
+
+    // 调用 inode.mknod()
+    match parent_dentry.inode.mknod(&filename, file_mode, dev) {
+        Ok(child_inode) => {
+            // 创建 dentry 并加入缓存
+            let child_dentry = Dentry::new(filename.clone(), child_inode);
+            parent_dentry.add_child(child_dentry.clone());
+            DENTRY_CACHE.insert(&child_dentry);
+            0
+        }
         Err(e) => e.to_errno(),
     }
 }
