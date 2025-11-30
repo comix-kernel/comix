@@ -93,6 +93,7 @@ impl TmpfsInode {
                 1
             }, // 目录默认2（.和..）
             blocks: 0,
+            rdev: 0,  // 设备节点会在 mknod 时设置
         };
 
         Arc::new(Self {
@@ -605,5 +606,59 @@ impl Inode for TmpfsInode {
     fn readlink(&self) -> Result<String, FsError> {
         // TODO: 实现符号链接读取
         Err(FsError::NotSupported)
+    }
+
+    fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        // 检查当前节点是否为目录
+        let meta = self.metadata.lock();
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        drop(meta);
+
+        // 检查文件名是否已存在
+        let mut children = self.children.lock();
+        if children.contains_key(name) {
+            return Err(FsError::AlreadyExists);
+        }
+
+        // 从 mode 提取文件类型
+        let inode_type = if mode.contains(FileMode::S_IFCHR) {
+            InodeType::CharDevice
+        } else if mode.contains(FileMode::S_IFBLK) {
+            InodeType::BlockDevice
+        } else if mode.contains(FileMode::S_IFIFO) {
+            InodeType::Fifo
+        } else {
+            // mknod 只支持特殊文件
+            return Err(FsError::InvalidArgument);
+        };
+
+        // 分配新的 inode 号
+        let inode_no = self.alloc_inode_no();
+
+        // 获取父节点的弱引用
+        let parent_weak = self.self_ref.lock().clone();
+
+        // 创建新的 inode
+        let new_inode = TmpfsInode::new(
+            inode_no,
+            inode_type,
+            mode,
+            parent_weak,
+            self.stats.clone(),
+        );
+
+        // 设置设备号 与 自引用
+        new_inode.metadata.lock().rdev = dev;
+        *new_inode.self_ref.lock() = Arc::downgrade(&new_inode);
+
+        // 添加到父目录的子节点
+        children.insert(String::from(name), new_inode.clone());
+        drop(children);
+
+        self.update_mtime();
+
+        Ok(new_inode as Arc<dyn Inode>)
     }
 }
