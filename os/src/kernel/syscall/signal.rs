@@ -383,7 +383,7 @@ pub fn tgkill(tgid: c_int, tid: c_int, sig: c_int) -> c_int {
 fn wait_for_signal(
     task: SharedTask,
     signal: SignalFlags,
-    timeout: Option<TimeSepc>,
+    timeout: Option<TimeSpec>,
 ) -> Result<(usize, SigInfoT), i32> {
     let mut t = task.lock();
     if let Some(timeout) = timeout {
