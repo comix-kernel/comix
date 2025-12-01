@@ -663,8 +663,7 @@ impl Inode for TmpfsInode {
         let bytes_read = self.read_at(0, &mut buf)?;
 
         // 转换为字符串
-        String::from_utf8(buf[..bytes_read].to_vec())
-            .map_err(|_| FsError::InvalidArgument)
+        String::from_utf8(buf[..bytes_read].to_vec()).map_err(|_| FsError::InvalidArgument)
     }
 
     fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {
