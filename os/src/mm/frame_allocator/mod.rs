@@ -110,6 +110,21 @@ fn dealloc_contig_frames(frame_range: &FrameRangeTracker) {
     FRAME_ALLOCATOR.lock().dealloc_contig_frames(frame_range);
 }
 
+/// 获取总的物理帧数
+pub fn get_total_frames() -> usize {
+    FRAME_ALLOCATOR.lock().total_frames()
+}
+
+/// 获取已分配的帧数
+pub fn get_allocated_frames() -> usize {
+    FRAME_ALLOCATOR.lock().allocated_frames()
+}
+
+/// 获取空闲的帧数
+pub fn get_free_frames() -> usize {
+    FRAME_ALLOCATOR.lock().free_frames()
+}
+
 #[cfg(test)]
 mod frame_allocator_tests {
     use super::*;

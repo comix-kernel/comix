@@ -1,6 +1,6 @@
 use super::super::*;
-use crate::devices::block_device::{BlockDevice, BlockError};
-use crate::devices::ram_disk::RamDisk;
+use crate::device::block::BlockDriver;
+use crate::device::ram_disk::RamDisk;
 use crate::{kassert, test_case};
 
 // P0 核心功能测试
@@ -47,13 +47,13 @@ test_case!(test_ramdisk_read_block, {
     // 读取第一个块
     let mut buf = [0u8; 512];
     let result = ramdisk.read_block(0, &mut buf);
-    kassert!(result.is_ok());
+    kassert!(result);
     kassert!(buf[0] == 0xAA);
     kassert!(buf[511] == 0xAA);
 
     // 读取第二个块
     let result = ramdisk.read_block(1, &mut buf);
-    kassert!(result.is_ok());
+    kassert!(result);
     kassert!(buf[0] == 0xBB);
     kassert!(buf[511] == 0xBB);
 });
@@ -65,11 +65,11 @@ test_case!(test_ramdisk_write_block, {
     // 写入第一个块
     let write_buf = [0xCC; 512];
     let result = ramdisk.write_block(0, &write_buf);
-    kassert!(result.is_ok());
+    kassert!(result);
 
     // 读回验证
     let mut read_buf = [0u8; 512];
-    ramdisk.read_block(0, &mut read_buf).unwrap();
+    kassert!(ramdisk.read_block(0, &mut read_buf));
     kassert!(read_buf[0] == 0xCC);
     kassert!(read_buf[511] == 0xCC);
 });
@@ -79,7 +79,7 @@ test_case!(test_ramdisk_flush, {
 
     // flush 应该始终成功 (内存设备无需 flush)
     let result = ramdisk.flush();
-    kassert!(result.is_ok());
+    kassert!(result);
 });
 
 // P2 边界和错误处理测试
@@ -90,8 +90,7 @@ test_case!(test_ramdisk_read_invalid_block, {
     // 尝试读取超出范围的块
     let mut buf = [0u8; 512];
     let result = ramdisk.read_block(1, &mut buf);
-    kassert!(result.is_err());
-    kassert!(matches!(result, Err(BlockError::InvalidBlock)));
+    kassert!(!result);
 });
 
 test_case!(test_ramdisk_write_invalid_block, {
@@ -100,8 +99,7 @@ test_case!(test_ramdisk_write_invalid_block, {
     // 尝试写入超出范围的块
     let buf = [0u8; 512];
     let result = ramdisk.write_block(1, &buf);
-    kassert!(result.is_err());
-    kassert!(matches!(result, Err(BlockError::InvalidBlock)));
+    kassert!(!result);
 });
 
 test_case!(test_ramdisk_read_wrong_buffer_size, {
@@ -110,8 +108,7 @@ test_case!(test_ramdisk_read_wrong_buffer_size, {
     // 使用错误的缓冲区大小
     let mut buf = [0u8; 256];
     let result = ramdisk.read_block(0, &mut buf);
-    kassert!(result.is_err());
-    kassert!(matches!(result, Err(BlockError::InvalidBlock)));
+    kassert!(!result);
 });
 
 test_case!(test_ramdisk_write_wrong_buffer_size, {
@@ -120,8 +117,7 @@ test_case!(test_ramdisk_write_wrong_buffer_size, {
     // 使用错误的缓冲区大小
     let buf = [0u8; 256];
     let result = ramdisk.write_block(0, &buf);
-    kassert!(result.is_err());
-    kassert!(matches!(result, Err(BlockError::InvalidBlock)));
+    kassert!(!result);
 });
 
 // P1 重要功能测试
@@ -133,13 +129,13 @@ test_case!(test_ramdisk_multiple_read_write, {
     for block_id in 0..4 {
         let write_buf = [block_id as u8; 512];
         let result = ramdisk.write_block(block_id, &write_buf);
-        kassert!(result.is_ok());
+        kassert!(result);
     }
 
     // 读回验证
     for block_id in 0..4 {
         let mut read_buf = [0u8; 512];
-        ramdisk.read_block(block_id, &mut read_buf).unwrap();
+        kassert!(ramdisk.read_block(block_id, &mut read_buf));
         kassert!(read_buf[0] == block_id as u8);
         kassert!(read_buf[511] == block_id as u8);
     }
@@ -150,15 +146,15 @@ test_case!(test_ramdisk_overwrite_block, {
 
     // 第一次写入
     let write_buf1 = [0xAA; 512];
-    ramdisk.write_block(0, &write_buf1).unwrap();
+    kassert!(ramdisk.write_block(0, &write_buf1));
 
     // 覆盖写入
     let write_buf2 = [0xBB; 512];
-    ramdisk.write_block(0, &write_buf2).unwrap();
+    kassert!(ramdisk.write_block(0, &write_buf2));
 
     // 读回验证
     let mut read_buf = [0u8; 512];
-    ramdisk.read_block(0, &mut read_buf).unwrap();
+    kassert!(ramdisk.read_block(0, &mut read_buf));
     kassert!(read_buf[0] == 0xBB);
     kassert!(read_buf[511] == 0xBB);
 });

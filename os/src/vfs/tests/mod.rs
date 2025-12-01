@@ -45,10 +45,13 @@ pub fn create_test_dentry(name: &str, inode: Arc<dyn Inode>) -> Arc<Dentry> {
 /// 创建一个测试用的 File 对象
 pub fn create_test_file(name: &str, inode: Arc<dyn Inode>, flags: OpenFlags) -> Arc<dyn File> {
     let dentry = create_test_dentry(name, inode);
-    Arc::new(DiskFile::new(dentry, flags))
+    Arc::new(RegFile::new(dentry, flags))
 }
 
+pub mod blk_dev_file;
+pub mod char_dev_file;
 pub mod dentry;
+pub mod devno;
 pub mod fd_table;
 pub mod file;
 pub mod mount;

@@ -22,7 +22,7 @@ use crate::{
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
-        time::{Itimerval, TimeSepc},
+        time::{Itimerval, TimeSpec},
         types::{SigSetT, SizeT, StackT},
         uts_namespace::UtsNamespace,
     },
@@ -49,8 +49,14 @@ impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
 impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
 
 // 文件/目录创建与链接 (File/Directory Creation and Linking)
+impl_syscall!(sys_mknodat, mknodat, (i32, *const c_char, u32, u64));
 impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
 impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
+impl_syscall!(
+    sys_symlinkat,
+    symlinkat,
+    (*const c_char, i32, *const c_char)
+);
 
 // 挂载/文件系统信息 (Mount/Filesystem Info)
 impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
@@ -92,7 +98,7 @@ impl_syscall!(sys_fdatasync, fdatasync, (usize));
 impl_syscall!(
     sys_utimensat,
     utimensat,
-    (i32, *const c_char, *const TimeSepc, u32)
+    (i32, *const c_char, *const TimeSpec, u32)
 );
 
 // 进程与控制 (Process and Control)
@@ -100,7 +106,7 @@ impl_syscall!(sys_exit, exit, (c_int));
 impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 
 // 同步/休眠 (Synchronization/Sleeping)
-impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSepc, *mut TimeSepc));
+impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSpec, *mut TimeSpec));
 impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
 impl_syscall!(
     sys_setitimmer,
@@ -109,9 +115,9 @@ impl_syscall!(
 );
 
 // POSIX 定时器 (POSIX Timers)
-impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSepc));
-impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSepc));
-impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSepc));
+impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSpec));
+impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSpec));
+impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSpec));
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 
 // 信号 (Signals)
@@ -134,7 +140,7 @@ impl_syscall!(sys_rt_sigpending, rt_sigpending, (*mut SigSetT, c_uint));
 impl_syscall!(
     sys_rt_sigtimedwait,
     rt_sigtimedwait,
-    (*const SigSetT, *mut SigInfoT, *const TimeSepc, c_uint)
+    (*const SigSetT, *mut SigInfoT, *const TimeSpec, c_uint)
 );
 impl_syscall!(sys_rt_sigreturn, rt_sigreturn, noreturn, ());
 
@@ -218,6 +224,20 @@ impl_syscall!(
     sys_renameat2,
     renameat2,
     (i32, *const c_char, i32, *const c_char, u32)
+);
+
+// 挂载/文件系统操作 (Mount/Filesystem Operations)
+impl_syscall!(sys_umount2, umount2, (*const c_char, i32));
+impl_syscall!(
+    sys_mount,
+    mount,
+    (
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        u64,
+        *const c_void
+    )
 );
 
 // 随机数与内存文件

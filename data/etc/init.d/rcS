@@ -17,8 +17,10 @@ echo "--- Starting Minimal BusyBox System ---"
 # --- 2. 处理设备文件 ---
 # mdev 是 BusyBox 中用于创建设备文件 (/dev/null, /dev/console 等) 的工具
 # -s 选项扫描 /sys/class 和 /sys/block 并创建相应的设备文件
-echo "Populating /dev via mdev..."
-/sbin/mdev -s
+
+# 现在转为由mount中进行特判，自动创建设备文件
+# echo "Populating /dev via mdev..."
+# /sbin/mdev -s
 
 # --- 3. 系统配置 ---
 

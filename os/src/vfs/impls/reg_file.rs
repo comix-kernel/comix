@@ -1,10 +1,10 @@
-//! 基于 Inode 的磁盘文件实现
+//! 普通文件（Regular File）的 File trait 实现
 
 use crate::sync::SpinLock;
 use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
-/// 基于 Inode 的磁盘文件
+/// 普通文件的 File 实现
 ///
 /// 对底层 Inode 的会话包装，维护：
 /// - 当前文件偏移量（offset）
@@ -13,7 +13,7 @@ use alloc::sync::Arc;
 /// # 并发安全
 ///
 /// `offset` 使用 `SpinLock` 保护，因为多线程可能通过 `fork()` 共享同一个 fd。
-pub struct DiskFile {
+pub struct RegFile {
     /// 关联的 dentry (保留,用于某些操作如 fstat)
     pub dentry: Arc<Dentry>,
 
@@ -27,8 +27,8 @@ pub struct DiskFile {
     pub flags: OpenFlags,
 }
 
-impl DiskFile {
-    /// 创建新的 DiskFile 实例
+impl RegFile {
+    /// 创建新的 RegFile 实例
     pub fn new(dentry: Arc<Dentry>, flags: OpenFlags) -> Self {
         let inode = dentry.inode.clone();
         Self {
@@ -50,7 +50,7 @@ impl DiskFile {
     }
 }
 
-impl File for DiskFile {
+impl File for RegFile {
     fn readable(&self) -> bool {
         self.flags.readable()
     }

@@ -66,8 +66,8 @@ impl MountPoint {
 
 /// 全局挂载表
 pub struct MountTable {
-    /// 挂载路径 -> 挂载点
-    mounts: SpinLock<BTreeMap<String, Arc<MountPoint>>>,
+    /// 挂载路径 -> 挂载点栈（最后一个是当前可见的）
+    mounts: SpinLock<BTreeMap<String, Vec<Arc<MountPoint>>>>,
 }
 
 impl MountTable {
@@ -90,16 +90,20 @@ impl MountTable {
 
         let normalized_path = normalize_path(path);
 
-        // 检查是否已经挂载
-        if self.mounts.lock().contains_key(&normalized_path) {
-            return Err(FsError::AlreadyExists);
-        }
-
         // 创建挂载点
         let mount_point = MountPoint::new(fs, normalized_path.clone(), flags, device);
 
-        // 添加到挂载表
-        self.mounts.lock().insert(normalized_path, mount_point);
+        // 添加到挂载栈
+        let mut mounts = self.mounts.lock();
+        mounts
+            .entry(normalized_path.clone())
+            .or_insert_with(Vec::new)
+            .push(mount_point.clone());
+
+        // 如果挂载点的 dentry 已经存在于缓存中，更新其挂载信息
+        if let Some(dentry) = crate::vfs::DENTRY_CACHE.lookup(&normalized_path) {
+            dentry.set_mount(&mount_point.root);
+        }
 
         Ok(())
     }
@@ -110,11 +114,24 @@ impl MountTable {
 
         let normalized_path = normalize_path(path);
 
-        let mount_point = self
-            .mounts
-            .lock()
-            .remove(&normalized_path)
-            .ok_or(FsError::NotFound)?;
+        // 不允许卸载根文件系统
+        if normalized_path == "/" {
+            return Err(FsError::NotSupported);
+        }
+
+        let mut mounts = self.mounts.lock();
+        let stack = mounts.get_mut(&normalized_path).ok_or(FsError::NotFound)?;
+
+        // 弹出栈顶的挂载点
+        let mount_point = stack.pop().ok_or(FsError::NotFound)?;
+
+        // 如果栈为空，移除整个条目
+        if stack.is_empty() {
+            mounts.remove(&normalized_path);
+        }
+
+        // 释放锁，避免在同步/卸载时持有锁
+        drop(mounts);
 
         // 同步文件系统
         mount_point.fs.sync()?;
@@ -122,12 +139,27 @@ impl MountTable {
         // 执行卸载清理
         mount_point.fs.umount()?;
 
+        // 更新 dentry 缓存
+        if let Some(dentry) = crate::vfs::DENTRY_CACHE.lookup(&normalized_path) {
+            // 如果还有下层挂载，更新为下层挂载点
+            let mounts = self.mounts.lock();
+            if let Some(stack) = mounts.get(&normalized_path) {
+                if let Some(underlying_mount) = stack.last() {
+                    dentry.set_mount(&underlying_mount.root);
+                } else {
+                    dentry.clear_mount();
+                }
+            } else {
+                dentry.clear_mount();
+            }
+        }
+
         Ok(())
     }
 
     /// 查找给定路径的挂载点
     ///
-    /// 返回最长匹配的挂载点
+    /// 返回最长匹配的挂载点（栈顶）
     pub fn find_mount(&self, path: &str) -> Option<Arc<MountPoint>> {
         use crate::vfs::normalize_path;
 
@@ -138,10 +170,13 @@ impl MountTable {
         let mut best_match = None;
         let mut best_len = 0;
 
-        for (mount_path, mount_point) in mounts.iter() {
+        for (mount_path, stack) in mounts.iter() {
             if normalized_path.starts_with(mount_path) && mount_path.len() > best_len {
-                best_match = Some(mount_point.clone());
-                best_len = mount_path.len();
+                // 返回栈顶的挂载点（当前可见的）
+                if let Some(mp) = stack.last() {
+                    best_match = Some(mp.clone());
+                    best_len = mount_path.len();
+                }
             }
         }
 
@@ -150,7 +185,11 @@ impl MountTable {
 
     /// 获取根挂载点
     pub fn root_mount(&self) -> Option<Arc<MountPoint>> {
-        self.mounts.lock().get("/").cloned()
+        self.mounts
+            .lock()
+            .get("/")
+            .and_then(|stack| stack.last())
+            .cloned()
     }
 
     /// 列出所有挂载点（用于调试）
@@ -158,7 +197,28 @@ impl MountTable {
         let mounts = self.mounts.lock();
         mounts
             .iter()
-            .map(|(path, mp)| (path.clone(), String::from(mp.fs.fs_type())))
+            .flat_map(|(path, stack)| {
+                stack
+                    .iter()
+                    .map(|mp| (path.clone(), String::from(mp.fs.fs_type())))
+            })
+            .collect()
+    }
+
+    pub fn list_all(&self) -> BTreeMap<String, Arc<MountPoint>> {
+        let mounts = self.mounts.lock();
+        mounts
+            .iter() // 获取引用，不消耗原 Map
+            .filter_map(|(key, stack)| {
+                // 1. stack.last(): 获取栈顶元素的引用（如果不为空）
+                // 2. map(...): 如果栈顶存在，执行闭包
+                stack.last().map(|mount_point| {
+                    (
+                        key.clone(),         // 必须克隆 String，因为新 Map 需要拥有 Key 的所有权
+                        mount_point.clone(), // 克隆 Arc，这非常廉价（只增加引用计数），不涉及深拷贝
+                    )
+                })
+            })
             .collect()
     }
 }
