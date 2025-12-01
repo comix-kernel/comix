@@ -1182,15 +1182,16 @@ pub fn renameat2(
 /// - 忽略所有 mountflags（但保留以保持 ABI 兼容）
 /// - 忽略 data 参数
 pub fn mount(
-    _source: *const c_char,
+    source: *const c_char,
     target: *const c_char,
-    _filesystemtype: *const c_char,
+    filesystemtype: *const c_char,
     _mountflags: u64,
     _data: *const core::ffi::c_void,
 ) -> isize {
     use crate::config::EXT4_BLOCK_SIZE;
     use crate::fs::ext4::Ext4FileSystem;
-    use crate::kernel::syscall::util::get_first_block_device;
+    use crate::fs::sysfs::device_registry;
+    use crate::fs::{init_dev, init_procfs, init_sysfs, mount_tmpfs};
     use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
 
@@ -1206,53 +1207,131 @@ pub fn mount(
         }
     };
 
+    // 解析 source (可能为空)
+    let source_str = if !source.is_null() {
+        match get_path_safe(source) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                unsafe { riscv::register::sstatus::clear_sum() };
+                return FsError::InvalidArgument.to_errno();
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    // 解析 filesystemtype (可能为空)
+    let fstype_str = if !filesystemtype.is_null() {
+        match get_path_safe(filesystemtype) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                unsafe { riscv::register::sstatus::clear_sum() };
+                return FsError::InvalidArgument.to_errno();
+            }
+        }
+    } else {
+        String::new()
+    };
+
     unsafe { riscv::register::sstatus::clear_sum() };
 
-    crate::pr_info!("[SYSCALL] mount: mounting at '{}'", target_str);
+    crate::pr_info!(
+        "[SYSCALL] mount: source='{}', target='{}', type='{}'",
+        source_str,
+        target_str,
+        fstype_str
+    );
 
-    // 检查挂载点是否存在
-    if vfs_lookup(&target_str).is_err() {
-        crate::pr_warn!("[SYSCALL] mount: target '{}' does not exist", target_str);
-        return FsError::NotFound.to_errno();
+
+
+    // 特殊挂载点处理
+    match target_str.as_str() {
+        "/proc" => {
+            return match init_procfs() {
+                Ok(_) => 0,
+                Err(e) => e.to_errno(),
+            };
+        }
+        "/sys" => {
+            return match init_sysfs() {
+                Ok(_) => 0,
+                Err(e) => e.to_errno(),
+            };
+        }
+        "/tmp" => {
+            return match mount_tmpfs("/tmp", 0) {
+                Ok(_) => 0,
+                Err(e) => e.to_errno(),
+            };
+        }
+        "/dev" => {
+            // 先挂载 tmpfs 到 /dev
+            if let Err(e) = mount_tmpfs("/dev", 0) {
+                return e.to_errno();
+            }
+            // 然后初始化设备节点
+            return match init_dev() {
+                Ok(_) => 0,
+                Err(e) => e.to_errno(),
+            };
+        }
+        _ => {}
     }
 
-    // 获取块设备（简化：使用第一个）
-    let block_device = match get_first_block_device() {
-        Ok(dev) => dev,
-        Err(e) => {
-            crate::pr_err!("[SYSCALL] mount: no block device available");
-            return e as isize;
-        }
-    };
+    // 通用挂载逻辑 (目前只支持 ext4)
+    if fstype_str == "ext4" {
+        // 查找块设备
+        let dev_info = match device_registry::find_block_device(&source_str) {
+            Some(info) => info,
+            None => {
+                crate::pr_err!("[SYSCALL] mount: block device '{}' not found", source_str);
+                return -(ENOENT as isize);
+            }
+        };
 
-    // 创建 Ext4 文件系统
-    let block_size = EXT4_BLOCK_SIZE;
-    let total_blocks = crate::config::FS_IMAGE_SIZE / block_size;
+        let block_device = dev_info.device;
 
-    let ext4_fs = match Ext4FileSystem::open(block_device.clone(), block_size, total_blocks, 0) {
-        Ok(fs) => fs,
-        Err(e) => {
-            crate::pr_err!("[SYSCALL] mount: failed to open ext4: {:?}", e);
-            return e.to_errno();
-        }
-    };
+        // 创建 Ext4 文件系统
+        let block_size = EXT4_BLOCK_SIZE;
+        // 注意：这里我们无法直接知道设备的总块数，
+        // 但 Ext4FileSystem::open 通常会读取超级块来获取这些信息，
+        // 或者我们可以从 block_device 获取容量。
+        // 暂时使用 fs.img 的默认大小计算，或者让 Ext4FileSystem 自己处理。
+        // 为了兼容现有 API，我们尝试从设备获取大小。
+        let total_blocks = block_device.total_blocks();
 
-    // 挂载文件系统（使用空标志，因为我们忽略所有 flags）
-    match MOUNT_TABLE.mount(
-        ext4_fs,
-        &target_str,
-        VfsMountFlags::empty(),
-        Some(String::from("virtio-blk0")),
-    ) {
-        Ok(()) => {
-            crate::pr_info!("[SYSCALL] mount: successfully mounted at '{}'", target_str);
-            0
-        }
-        Err(e) => {
-            crate::pr_err!("[SYSCALL] mount: failed: {:?}", e);
-            e.to_errno()
+        let ext4_fs = match Ext4FileSystem::open(block_device.clone(), block_size, total_blocks, 0) {
+            Ok(fs) => fs,
+            Err(e) => {
+                crate::pr_err!("[SYSCALL] mount: failed to open ext4: {:?}", e);
+                return e.to_errno();
+            }
+        };
+
+        // 挂载文件系统
+        match MOUNT_TABLE.mount(
+            ext4_fs,
+            &target_str,
+            VfsMountFlags::empty(),
+            Some(source_str),
+        ) {
+            Ok(()) => {
+                crate::pr_info!("[SYSCALL] mount: successfully mounted ext4 at '{}'", target_str);
+                return 0;
+            }
+            Err(e) => {
+                crate::pr_err!("[SYSCALL] mount: failed: {:?}", e);
+                return e.to_errno();
+            }
         }
     }
+
+    crate::pr_err!(
+        "[SYSCALL] mount: unsupported filesystem type '{}' or target '{}'",
+        fstype_str,
+        target_str
+    );
+    -(EINVAL as isize)
 }
 
 /// umount2 - 卸载文件系统

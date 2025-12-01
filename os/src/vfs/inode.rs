@@ -32,7 +32,7 @@ pub enum InodeType {
 }
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     /// 文件权限和类型（与 POSIX 兼容）
     pub struct FileMode: u32 {
         // 文件类型掩码

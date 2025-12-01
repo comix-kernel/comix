@@ -20,7 +20,9 @@ use crate::fs::simple_fs::SimpleFs;
 use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
-use crate::vfs::{MOUNT_TABLE, MountFlags};
+use crate::vfs::{MOUNT_TABLE, MountFlags, FsError, vfs_lookup, FileMode};
+use crate::vfs::dev::makedev;
+use crate::vfs::devno::{blkdev_major, chrdev_major};
 
 /// 嵌入的 EXT4 镜像
 ///
@@ -180,6 +182,53 @@ pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::v
     Ok(())
 }
 
+pub fn init_dev() -> Result<(), FsError> {
+    if let Err(e) = vfs_lookup("/dev") {
+        return Err(e);
+    }
+
+    create_devices()?;
+
+    Ok(())
+}
+
+fn create_devices() -> Result<(), FsError> {
+    // 获取 /dev 目录的 dentry
+    let dev_dentry = vfs_lookup("/dev")?;
+
+    let dev_inode = &dev_dentry.inode;
+
+    // 字符设备：0666 权限
+    let char_mode = FileMode::S_IFCHR | FileMode::from_bits_truncate(0o666);
+
+    // /dev/null (1, 3)
+    dev_inode.mknod("null", char_mode, makedev(chrdev_major::MEM, 3))?;
+
+    // /dev/zero (1, 5)
+    dev_inode.mknod("zero", char_mode, makedev(chrdev_major::MEM, 5))?;
+
+    // /dev/random (1, 8)
+    dev_inode.mknod("random", char_mode, makedev(chrdev_major::MEM, 8))?;
+
+    // /dev/urandom (1, 9)
+    dev_inode.mknod("urandom", char_mode, makedev(chrdev_major::MEM, 9))?;
+
+    // /dev/console (5, 1) - 只读
+    let console_mode = FileMode::S_IFCHR | FileMode::from_bits_truncate(0o600);
+    dev_inode.mknod("console", console_mode, makedev(chrdev_major::CONSOLE, 1))?;
+
+    // /dev/ttyS0 (4, 64)
+    dev_inode.mknod("ttyS0", char_mode, makedev(chrdev_major::TTY, 64))?;
+
+    // 块设备：0660 权限
+    let block_mode = FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660);
+
+    // /dev/vda (254, 0)
+    dev_inode.mknod("vda", block_mode, makedev(blkdev_major::VIRTIO_BLK, 0))?;
+
+    Ok(())
+}
+
 /// 初始化并挂载 procfs 到 /proc
 pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
     use crate::fs::proc::ProcFS;
@@ -233,6 +282,8 @@ pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
 
     Ok(())
 }
+
+
 
 #[cfg(test)]
 mod tests;
