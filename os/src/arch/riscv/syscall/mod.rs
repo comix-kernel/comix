@@ -94,6 +94,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_GETRESUID => sys_getresuid(frame),
         syscall_number::SYS_SETRESGID => sys_setresgid(frame),
         syscall_number::SYS_GETRESGID => sys_getresgid(frame),
+        syscall_number::SYS_SETSID => sys_setsid(frame),
 
         // 系统信息 (System Information)
         syscall_number::SYS_UNAME => sys_uname(frame),

@@ -170,6 +170,7 @@ impl_syscall!(sys_setresuid, setresuid, (u32, u32, u32));
 impl_syscall!(sys_getresuid, getresuid, (*mut u32, *mut u32, *mut u32));
 impl_syscall!(sys_setresgid, setresgid, (u32, u32, u32));
 impl_syscall!(sys_getresgid, getresgid, (*mut u32, *mut u32, *mut u32));
+impl_syscall!(sys_setsid, setsid, ());
 
 // 系统信息 (System Information)
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
