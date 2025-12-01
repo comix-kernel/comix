@@ -14,7 +14,7 @@ use alloc::sync::Arc;
 /// # 并发安全
 ///
 /// `offset`、`flags` 和 `owner` 使用 `SpinLock` 保护，因为多线程可能通过 `fork()` 共享同一个 fd。
-pub struct DiskFile {
+pub struct RegFile {
     /// 关联的 dentry (保留,用于某些操作如 fstat)
     pub dentry: Arc<Dentry>,
 
