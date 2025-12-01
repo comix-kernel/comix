@@ -309,4 +309,23 @@ impl FrameAllocator {
             }
         }
     }
+
+    /// 获取总的物理帧数
+    pub fn total_frames(&self) -> usize {
+        self.end.as_usize() - self.start.as_usize()
+    }
+
+    /// 获取已分配的帧数
+    pub fn allocated_frames(&self) -> usize {
+        let allocated = self.cur.as_usize() - self.start.as_usize();
+        let recycled = self.recycled.len();
+        allocated - recycled
+    }
+
+    /// 获取空闲的帧数
+    pub fn free_frames(&self) -> usize {
+        let total = self.total_frames();
+        let allocated = self.allocated_frames();
+        total - allocated
+    }
 }

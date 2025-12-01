@@ -22,7 +22,7 @@ use crate::{
             SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
             UContextT,
         },
-        time::TimeSepc,
+        time::TimeSpec,
         types::{SigSetT, StackT},
     },
     util::user_buffer::{read_from_user, write_to_user},
@@ -152,7 +152,7 @@ pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut Signal
 pub fn rt_sigtimedwait(
     set: *const SigSetT,
     info: *mut SigInfoT,
-    timeout: *const TimeSepc,
+    timeout: *const TimeSpec,
     sigsetsize: c_uint,
 ) -> c_int {
     if sigsetsize as usize != SIGSET_SIZE {
@@ -384,7 +384,7 @@ pub fn tgkill(tgid: c_int, tid: c_int, sig: c_int) -> c_int {
 fn wait_for_signal(
     task: SharedTask,
     signal: SignalFlags,
-    timeout: Option<TimeSepc>,
+    timeout: Option<TimeSpec>,
 ) -> Result<(u8, SigInfoT), i32> {
     let mut t = task.lock();
     if let Some(timeout) = timeout {
@@ -409,11 +409,11 @@ fn wait_for_signal(
             }
         } else {
             // 带超时的阻塞等待
-            let start = TimeSepc::now();
+            let start = TimeSpec::now();
             while !t.pending.has_deliverable_signal(signal)
                 && !t.shared_pending.lock().has_deliverable_signal(signal)
             {
-                let now = TimeSepc::now();
+                let now = TimeSpec::now();
                 if now - start > timeout {
                     return Err(-EAGAIN); // 超时返回
                 }

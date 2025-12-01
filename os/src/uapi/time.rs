@@ -18,26 +18,26 @@ use crate::{
 /// 用于指定秒和纳秒精度的时间
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TimeSepc {
+pub struct TimeSpec {
     /// 秒 (seconds)
     pub tv_sec: c_long,
     /// 纳秒 (nanoseconds)
     pub tv_nsec: c_long,
 }
 
-impl TimeSepc {
+impl TimeSpec {
     /// 特殊值：设置为当前时间（UTIME_NOW，用于 utimensat）
     pub const UTIME_NOW: c_long = (1i64 << 30) - 1; // 1073741823
 
     /// 特殊值：不改变此时间（UTIME_OMIT，用于 utimensat）
     pub const UTIME_OMIT: c_long = (1i64 << 30) - 2; // 1073741822
 
-    /// 创建一个新的 TimeSepc 结构体
+    /// 创建一个新的 TimeSpec 结构体
     /// # 参数:
     /// - `sec`: 秒数
     /// - `nsec`: 纳秒数
     /// # 返回值:
-    /// - 对应的 TimeSepc 结构体
+    /// - 对应的 TimeSpec 结构体
     pub fn new(sec: c_long, nsec: c_long) -> Self {
         Self {
             tv_sec: sec,
@@ -45,7 +45,7 @@ impl TimeSepc {
         }
     }
 
-    /// 将 TimeSepc 转换为指定频率的刻度数。
+    /// 将 TimeSpec 转换为指定频率的刻度数。
     /// # 参数:
     /// - `freq`: 频率（每秒刻度数）
     /// # 返回值:
@@ -61,7 +61,7 @@ impl TimeSepc {
     /// - `ticks`: 刻度数
     /// - `freq`: 频率（每秒刻度数）
     /// # 返回值:
-    /// - 对应的 TimeSepc 结构体
+    /// - 对应的 TimeSpec 结构体
     pub fn from_freq(ticks: usize, freq: usize) -> Self {
         let sec = ticks / freq;
         let nsec = (ticks % freq) * 1_000_000_000 / freq;
@@ -73,7 +73,7 @@ impl TimeSepc {
 
     /// 获取当前墙上时钟时间的 TimeSepc。
     /// # 返回值:
-    /// - 当前时间的 TimeSepc 结构体
+    /// - 当前时间的 TimeSpec 结构体
     pub fn now() -> Self {
         let time = REALTIME.read();
         let mtime = Self::monotonic_now();
@@ -82,7 +82,7 @@ impl TimeSepc {
 
     /// 获取当前单调时钟时间的 TimeSepc。
     /// # 返回值:
-    /// - 当前单调时间的 TimeSepc 结构体
+    /// - 当前单调时间的 TimeSpec 结构体
     pub fn monotonic_now() -> Self {
         let time = get_time();
         Self::from_freq(time, clock_freq())
@@ -90,7 +90,7 @@ impl TimeSepc {
 
     /// 创建零时间的 TimeSepc。
     /// # 返回值:
-    /// - 零时间的 TimeSepc 结构体
+    /// - 零时间的 TimeSpec 结构体
     pub fn zero() -> Self {
         Self {
             tv_sec: 0,
@@ -98,7 +98,7 @@ impl TimeSepc {
         }
     }
 
-    /// 验证 TimeSepc 的有效性（用于 utimensat）
+    /// 验证 TimeSpec 的有效性（用于 utimensat）
     ///
     /// # 返回值
     /// - `Ok(())`: 有效
@@ -119,7 +119,7 @@ impl TimeSepc {
         Ok(())
     }
 
-    /// 将 TimeSepc 转换为 timeval 结构体。
+    /// 将 TimeSpec 转换为 timeval 结构体。
     /// # 返回值:
     /// - 对应的 timeval 结构体
     pub fn to_timeval(&self) -> timeval {
@@ -148,19 +148,19 @@ impl TimeSepc {
     }
 }
 
-impl Sub for TimeSepc {
-    type Output = TimeSepc;
+impl Sub for TimeSpec {
+    type Output = TimeSpec;
 
-    fn sub(self, other: TimeSepc) -> TimeSepc {
+    fn sub(self, other: TimeSpec) -> TimeSpec {
         let sec = self.tv_sec - other.tv_sec;
         let nsec = self.tv_nsec - other.tv_nsec;
         if nsec < 0 {
-            TimeSepc {
+            TimeSpec {
                 tv_sec: sec - 1,
                 tv_nsec: nsec + 1_000_000_000,
             }
         } else {
-            TimeSepc {
+            TimeSpec {
                 tv_sec: sec,
                 tv_nsec: nsec,
             }
@@ -168,19 +168,19 @@ impl Sub for TimeSepc {
     }
 }
 
-impl Add for TimeSepc {
-    type Output = TimeSepc;
+impl Add for TimeSpec {
+    type Output = TimeSpec;
 
-    fn add(self, other: TimeSepc) -> TimeSepc {
+    fn add(self, other: TimeSpec) -> TimeSpec {
         let sec = self.tv_sec + other.tv_sec;
         let nsec = self.tv_nsec + other.tv_nsec;
         if nsec >= 1_000_000_000 {
-            TimeSepc {
+            TimeSpec {
                 tv_sec: sec + 1,
                 tv_nsec: nsec - 1_000_000_000,
             }
         } else {
-            TimeSepc {
+            TimeSpec {
                 tv_sec: sec,
                 tv_nsec: nsec,
             }
@@ -199,11 +199,11 @@ pub struct timeval {
 }
 
 impl timeval {
-    /// 将 timeval 转换为 TimeSepc 结构体。
+    /// 将 timeval 转换为 TimeSpec 结构体。
     /// # 返回值:
-    /// - 对应的 TimeSepc 结构体
-    pub fn to_timespec(&self) -> TimeSepc {
-        TimeSepc {
+    /// - 对应的 TimeSpec 结构体
+    pub fn to_timespec(&self) -> TimeSpec {
+        TimeSpec {
             tv_sec: self.tv_sec,
             tv_nsec: self.tv_usec * 1000,
         }
@@ -255,9 +255,9 @@ impl timeval {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Itimerspec {
     /// 定时器周期 (timer period)
-    pub it_interval: TimeSepc,
+    pub it_interval: TimeSpec,
     /// 定时器初始值/到期时间 (timer expiration)
-    pub it_value: TimeSepc,
+    pub it_value: TimeSpec,
 }
 
 /// 用于设置传统 BSD 间隔定时器 (setitimer) 的结构。

@@ -20,6 +20,9 @@ pub struct Dentry {
 
     /// 子 dentry 映射（文件名 -> dentry）
     children: SpinLock<BTreeMap<String, Arc<Dentry>>>,
+
+    /// 如果此 dentry 是挂载点，指向挂载的根 dentry
+    mount_point: SpinLock<Option<Weak<Dentry>>>,
 }
 
 impl fmt::Debug for Dentry {
@@ -46,6 +49,7 @@ impl Dentry {
             inode,
             parent: SpinLock::new(Weak::new()),
             children: SpinLock::new(BTreeMap::new()),
+            mount_point: SpinLock::new(None),
         });
 
         dentry.inode.set_dentry(Arc::downgrade(&dentry));
@@ -110,6 +114,21 @@ impl Dentry {
         } else {
             String::from("/") + &components.join("/")
         }
+    }
+
+    /// 设置挂载点
+    pub fn set_mount(&self, mounted_root: &Arc<Dentry>) {
+        *self.mount_point.lock() = Some(Arc::downgrade(mounted_root));
+    }
+
+    /// 清除挂载点
+    pub fn clear_mount(&self) {
+        *self.mount_point.lock() = None;
+    }
+
+    /// 获取挂载的根 dentry（如果有）
+    pub fn get_mount(&self) -> Option<Arc<Dentry>> {
+        self.mount_point.lock().as_ref()?.upgrade()
     }
 }
 

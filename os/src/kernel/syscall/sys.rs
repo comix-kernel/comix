@@ -41,7 +41,7 @@ use crate::{
         cstr_copy,
         user_buffer::{UserBuffer, write_to_user},
     },
-    vfs::TimeSepc,
+    vfs::TimeSpec,
 };
 
 /// 重启系统调用
@@ -139,14 +139,14 @@ pub fn sysinfo(info: *mut SysInfo) -> c_int {
 /// 获取指定时钟的时间系统调用
 /// # 参数
 /// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
-/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，用于存储时间
+/// * `tp` - 指向用户空间 TimeSpec 结构体的指针，用于存储时间
 /// # 返回值
 /// * **成功**：返回 0，`tp` 被填充当前时间
 /// * **失败**：返回负的 errno
-pub fn clock_gettime(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
+pub fn clock_gettime(clk_id: c_int, tp: *mut TimeSpec) -> c_int {
     let ts = match clk_id {
-        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSepc::now(),
-        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSepc::monotonic_now(),
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSpec::now(),
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSpec::monotonic_now(),
         id if id < MAX_CLOCKS as c_int && id >= 0 => {
             return -ENOSYS;
         }
@@ -165,14 +165,14 @@ pub fn clock_gettime(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
 /// 设置指定时钟的时间系统调用
 /// # 参数
 /// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
-/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，包含要设置的时间
+/// * `tp` - 指向用户空间 TimeSpec 结构体的指针，包含要设置的时间
 /// # 返回值
 /// * **成功**：返回 0，时钟时间被更新
 /// * **失败**：返回负的 errno
-pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
+pub fn clock_settime(clk_id: c_int, tp: *const TimeSpec) -> c_int {
     match clk_id {
         CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
-            let ts: TimeSepc = unsafe { core::ptr::read(tp) };
+            let ts: TimeSpec = unsafe { core::ptr::read(tp) };
             update_realtime(&ts);
             0
         }
@@ -188,17 +188,17 @@ pub fn clock_settime(clk_id: c_int, tp: *const TimeSepc) -> c_int {
 /// 获取指定时钟的分辨率系统调用
 /// # 参数
 /// * `clk_id` - 时钟 ID（如 CLOCK_REALTIME）
-/// * `tp` - 指向用户空间 TimeSepc 结构体的指针，用于存储分辨率
+/// * `tp` - 指向用户空间 TimeSpec 结构体的指针，用于存储分辨率
 /// # 返回值
 /// * **成功**：返回 0，`tp` 被填充时钟分辨率
 /// * **失败**：返回负的 errno
-pub fn clock_getres(clk_id: c_int, tp: *mut TimeSepc) -> c_int {
+pub fn clock_getres(clk_id: c_int, tp: *mut TimeSpec) -> c_int {
     let res = match clk_id {
-        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSepc {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSpec {
             tv_sec: 0,
             tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
         },
-        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSepc {
+        CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSpec {
             tv_sec: 0,
             tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
         },

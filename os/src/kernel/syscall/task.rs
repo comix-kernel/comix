@@ -33,7 +33,7 @@ use crate::{
         sched::CloneFlags,
         signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
         time::{
-            Itimerval, TimeSepc,
+            Itimerval, TimeSpec,
             clock_flags::TIMER_ABSTIME,
             clock_id::{
                 CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
@@ -499,11 +499,11 @@ pub fn prlimit(
 
 /// 高精度睡眠（纳秒级别）
 /// # 参数
-/// - `duration`: 指向 TimeSepc 结构体的指针, 包含睡眠的时间
-/// - `rem`: 指向 TimeSepc 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// - `duration`: 指向 TimeSpec 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 TimeSpec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
 /// # 返回值
 /// - 成功返回 0, 失败返回负错误码
-pub fn nanosleep(duration: *const TimeSepc, rem: *mut TimeSepc) -> c_int {
+pub fn nanosleep(duration: *const TimeSpec, rem: *mut TimeSpec) -> c_int {
     let req = unsafe { read_from_user(duration) };
     if req.tv_sec == 0 && req.tv_nsec == 0 {
         return 0;
@@ -530,7 +530,7 @@ pub fn nanosleep(duration: *const TimeSepc, rem: *mut TimeSepc) -> c_int {
         } else {
             0
         };
-        let rem_ts = TimeSepc::from_freq(remaining_ticks, clock_freq());
+        let rem_ts = TimeSpec::from_freq(remaining_ticks, clock_freq());
         unsafe {
             write_to_user(rem, rem_ts);
         }
@@ -548,15 +548,15 @@ pub fn gettid() -> c_int {
 /// # 参数
 /// - `clk_id`: 时钟 ID
 /// - `flags`: 睡眠选项标志
-/// - `req`: 指向 TimeSepc 结构体的指针, 包含睡眠的时间
-/// - `rem`: 指向 TimeSepc 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
+/// - `req`: 指向 TimeSpec 结构体的指针, 包含睡眠的时间
+/// - `rem`: 指向 TimeSpec 结构体的指针, 用于存储剩余的睡眠时间, 可为 NULL
 /// # 返回值
 /// - 成功返回 0, 失败返回负错误码
 pub fn clock_nanosleep(
     clk_id: c_int,
     flags: c_int,
-    req: *const TimeSepc,
-    rem: *mut TimeSepc,
+    req: *const TimeSpec,
+    rem: *mut TimeSpec,
 ) -> c_int {
     let time_req = unsafe { read_from_user(req) };
     let is_abstime = (flags & TIMER_ABSTIME) != 0;
@@ -591,7 +591,7 @@ pub fn clock_nanosleep(
         } else {
             0
         };
-        let rem_ts = TimeSepc::from_freq(remaining_ticks, clock_freq());
+        let rem_ts = TimeSpec::from_freq(remaining_ticks, clock_freq());
         unsafe {
             write_to_user(rem, rem_ts);
         }
@@ -621,7 +621,7 @@ pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
     if let Some(timer) = TIMER.lock().find_entry(&current_task(), sig) {
         let now = get_time();
         let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
-        let it_value = TimeSepc::from_freq(remaining, clock_freq()).to_timeval();
+        let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
         let it_interval = timer.1.it_interval.to_timeval();
         val = Itimerval {
             it_value,
@@ -670,7 +670,7 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
         if let Some(timer) = binding.find_entry(&current_task(), sig) {
             let now = get_time();
             let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
-            let it_value = TimeSepc::from_freq(remaining, clock_freq()).to_timeval();
+            let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
             let it_interval = timer.1.it_interval.to_timeval();
             val = Itimerval {
                 it_value,

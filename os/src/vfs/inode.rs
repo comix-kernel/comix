@@ -12,7 +12,7 @@
 
 use core::any::Any;
 
-use crate::uapi::time::TimeSepc;
+use crate::uapi::time::TimeSpec;
 use crate::vfs::{Dentry, FsError};
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -32,7 +32,7 @@ pub enum InodeType {
 }
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     /// 文件权限和类型（与 POSIX 兼容）
     pub struct FileMode: u32 {
         // 文件类型掩码
@@ -103,11 +103,12 @@ pub struct InodeMetadata {
     pub uid: u32,              // 用户 ID
     pub gid: u32,              // 组 ID
     pub size: usize,           // 文件大小（字节）
-    pub atime: TimeSepc,       // 访问时间
-    pub mtime: TimeSepc,       // 修改时间
-    pub ctime: TimeSepc,       // 状态改变时间
+    pub atime: TimeSpec,       // 访问时间
+    pub mtime: TimeSpec,       // 修改时间
+    pub ctime: TimeSpec,       // 状态改变时间
     pub nlinks: usize,         // 硬链接数
     pub blocks: usize,         // 占用的块数（512B 为单位）
+    pub rdev: u64,             // 设备号（仅对 CharDevice 和 BlockDevice 有效）
 }
 
 /// 文件系统底层存储接口
@@ -143,44 +144,24 @@ pub trait Inode: Send + Sync + Any {
     fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 创建符号链接
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 创建硬链接
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError>;
 
     /// 删除普通文件/链接
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn unlink(&self, name: &str) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn unlink(&self, name: &str) -> Result<(), FsError>;
 
     /// 删除目录
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
-    fn rmdir(&self, name: &str) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    fn rmdir(&self, name: &str) -> Result<(), FsError>;
 
     /// 重命名/移动 (原子操作)
-    ///
-    /// 提供默认Err，以避免为SimpleFS实现新语义
     fn rename(
         &self,
         old_name: &str,
         new_parent: Arc<dyn Inode>,
         new_name: &str,
-    ) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
-    }
+    ) -> Result<(), FsError>;
 
     /// 列出目录内容
     fn readdir(&self) -> Result<Vec<DirEntry>, FsError>;
@@ -203,10 +184,13 @@ pub trait Inode: Send + Sync + Any {
     fn as_any(&self) -> &dyn Any;
 
     /// 设置文件时间戳
-    fn set_times(&self, _atime: Option<TimeSepc>, _mtime: Option<TimeSepc>) -> Result<(), FsError> {
-        // 默认实现：不支持
-        Err(FsError::NotSupported)
-    }
+    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError>;
+
+    /// 读取符号链接的目标路径
+    fn readlink(&self) -> Result<String, FsError>;
+
+    /// 创建设备文件节点
+    fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError>;
 
     /// 修改文件所有者和组
     ///
@@ -221,10 +205,7 @@ pub trait Inode: Send + Sync + Any {
     /// # 在单 root 用户系统中的行为
     /// 此方法会更新 inode 的 uid/gid 字段，但不进行权限检查。
     /// 所有调用都会成功（除非文件系统错误）。
-    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
-        // 默认实现：不支持
-        Err(FsError::NotSupported)
-    }
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError>;
 
     /// 修改文件权限模式
     ///
@@ -238,10 +219,7 @@ pub trait Inode: Send + Sync + Any {
     /// # 在单 root 用户系统中的行为
     /// 此方法会更新 inode 的 mode 字段，但不进行权限检查。
     /// 所有调用都会成功（除非文件系统错误）。
-    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
-        // 默认实现：不支持
-        Err(FsError::NotSupported)
-    }
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError>;
 }
 
 /// 为 Arc<dyn Inode> 提供向下转型辅助方法

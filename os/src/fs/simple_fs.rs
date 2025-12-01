@@ -2,7 +2,7 @@
 
 use crate::sync::SpinLock;
 use crate::vfs::*;
-use crate::{device::BlockDevice, uapi::time::TimeSepc};
+use crate::{device::block::BlockDriver, uapi::time::TimeSpec};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -12,7 +12,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 /// 简单的内存文件系统（用于测试）
 pub struct SimpleFs {
-    device: Option<Arc<dyn BlockDevice>>, // 可选的块设备
+    device: Option<Arc<dyn BlockDriver>>, // 可选的块设备
     root: Arc<SimpleFsInode>,
 }
 
@@ -62,12 +62,12 @@ impl FileSystem for SimpleFs {
 
 impl SimpleFs {
     /// 从块设备和镜像创建 SimpleFS
-    pub fn from_ramdisk(device: Arc<dyn BlockDevice>) -> Result<Self, FsError> {
+    pub fn from_ramdisk(device: Arc<dyn BlockDriver>) -> Result<Self, FsError> {
         // 1. 读取镜像头，验证魔数
         let block_size = device.block_size();
         let mut header_block = vec![0u8; block_size];
-        if let Err(block_error) = device.read_block(0, &mut header_block) {
-            return Err(block_error.to_fs_error());
+        if !device.read_block(0, &mut header_block) {
+            return Err(FsError::IoError);
         }
 
         if &header_block[0..8] != b"RAMDISK\0" {
@@ -102,7 +102,7 @@ impl SimpleFs {
 
     /// 解析镜像中的单个文件条目并添加到父目录
     fn parse_file_entry(
-        device: Arc<dyn BlockDevice>,
+        device: Arc<dyn BlockDriver>,
         offset: usize,
         parent: Arc<SimpleFsInode>,
     ) -> Result<usize, FsError> {
@@ -158,7 +158,7 @@ impl SimpleFs {
 
     /// 从设备的任意偏移位置读取数据（支持跨块读取）
     fn read_at_offset(
-        device: Arc<dyn BlockDevice>,
+        device: Arc<dyn BlockDriver>,
         offset: usize,
         buf: &mut [u8],
     ) -> Result<(), FsError> {
@@ -172,8 +172,8 @@ impl SimpleFs {
             let block_offset = current_offset % block_size;
 
             let mut block_buf = vec![0u8; block_size];
-            if let Err(block_error) = device.read_block(block_num, &mut block_buf) {
-                return Err(block_error.to_fs_error());
+            if !device.read_block(block_num, &mut block_buf) {
+                return Err(FsError::IoError);
             }
 
             // 计算本次要复制的字节数
@@ -295,11 +295,12 @@ impl Inode for SimpleFsInode {
             uid: 0,
             gid: 0,
             size: data.len(),
-            atime: TimeSepc::now(),
-            mtime: TimeSepc::now(),
-            ctime: TimeSepc::now(),
+            atime: TimeSpec::now(),
+            mtime: TimeSpec::now(),
+            ctime: TimeSpec::now(),
             nlinks: 1,
             blocks: (data.len() + 511) / 512,
+            rdev: 0,
         })
     }
 
@@ -416,5 +417,46 @@ impl Inode for SimpleFsInode {
 
     fn as_any(&self) -> &dyn core::any::Any {
         self as &dyn core::any::Any
+    }
+
+    fn symlink(&self, _name: &str, _target: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn link(&self, _name: &str, _target: &Arc<dyn Inode>) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn rmdir(&self, _name: &str) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn rename(
+        &self,
+        _old_name: &str,
+        _new_parent: Arc<dyn Inode>,
+        _new_name: &str,
+    ) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn set_times(&self, _atime: Option<TimeSpec>, _mtime: Option<TimeSpec>) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn readlink(&self) -> Result<String, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
     }
 }

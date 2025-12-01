@@ -36,6 +36,10 @@ impl Driver for VirtIOBlkDriver {
         Some(self)
     }
 
+    fn as_block_arc(self: Arc<Self>) -> Option<Arc<dyn BlockDriver>> {
+        Some(self)
+    }
+
     fn as_net(&self) -> Option<&dyn NetDevice> {
         None
     }
@@ -56,6 +60,14 @@ impl BlockDriver for VirtIOBlkDriver {
 
     fn flush(&self) -> bool {
         self.0.lock().flush().is_ok()
+    }
+
+    fn block_size(&self) -> usize {
+        512 // VirtIO 块设备标准块大小
+    }
+
+    fn total_blocks(&self) -> usize {
+        self.0.lock().capacity() as usize
     }
 }
 

@@ -1,6 +1,5 @@
 use super::super::{DeviceType, Driver};
 use super::BlockDriver;
-use super::block_device::{BlockDevice, BlockError};
 use crate::sync::SpinLock;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -44,55 +43,9 @@ impl RamDisk {
     pub fn raw_data(&self) -> Vec<u8> {
         self.data.lock().clone()
     }
-}
 
-impl BlockDevice for RamDisk {
-    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> Result<(), BlockError> {
-        if buf.len() != self.block_size {
-            return Err(BlockError::InvalidBlock);
-        }
-
-        let data = self.data.lock();
-        let offset = block_id * self.block_size;
-
-        if offset + self.block_size > data.len() {
-            return Err(BlockError::InvalidBlock);
-        }
-
-        buf.copy_from_slice(&data[offset..offset + self.block_size]);
-        Ok(())
-    }
-
-    fn write_block(&self, block_id: usize, buf: &[u8]) -> Result<(), BlockError> {
-        if buf.len() != self.block_size {
-            return Err(BlockError::InvalidBlock);
-        }
-
-        let mut data = self.data.lock();
-        let offset = block_id * self.block_size;
-
-        if offset + self.block_size > data.len() {
-            return Err(BlockError::InvalidBlock);
-        }
-
-        data[offset..offset + self.block_size].copy_from_slice(buf);
-        Ok(())
-    }
-
-    fn block_size(&self) -> usize {
-        self.block_size
-    }
-
-    fn total_blocks(&self) -> usize {
-        self.data.lock().len() / self.block_size
-    }
-
-    fn flush(&self) -> Result<(), BlockError> {
-        // 内存设备无需 flush
-        Ok(())
-    }
-
-    fn device_id(&self) -> usize {
+    /// 获取设备 ID
+    pub fn device_id(&self) -> usize {
         self.device_id
     }
 }
@@ -115,17 +68,49 @@ impl Driver for RamDisk {
     }
 }
 
-// 同时实现 BlockDriver 和 BlockDevice 保证兼容性
+// 实现 BlockDriver trait
 impl BlockDriver for RamDisk {
     fn read_block(&self, block_id: usize, buf: &mut [u8]) -> bool {
-        BlockDevice::read_block(self, block_id, buf).is_ok()
+        if buf.len() != self.block_size {
+            return false;
+        }
+
+        let data = self.data.lock();
+        let offset = block_id * self.block_size;
+
+        if offset + self.block_size > data.len() {
+            return false;
+        }
+
+        buf.copy_from_slice(&data[offset..offset + self.block_size]);
+        true
     }
 
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
-        BlockDevice::write_block(self, block_id, buf).is_ok()
+        if buf.len() != self.block_size {
+            return false;
+        }
+
+        let mut data = self.data.lock();
+        let offset = block_id * self.block_size;
+
+        if offset + self.block_size > data.len() {
+            return false;
+        }
+
+        data[offset..offset + self.block_size].copy_from_slice(buf);
+        true
     }
 
     fn flush(&self) -> bool {
-        true
+        true // 内存设备无需 flush
+    }
+
+    fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    fn total_blocks(&self) -> usize {
+        self.data.lock().len() / self.block_size
     }
 }

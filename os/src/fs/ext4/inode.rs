@@ -7,7 +7,7 @@
 //! - 需要路径时动态从 Dentry.full_path() 获取
 
 use crate::sync::{Mutex, SpinLock};
-use crate::uapi::time::TimeSepc;
+use crate::uapi::time::TimeSpec;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -112,15 +112,15 @@ impl Inode for Ext4Inode {
             inode_no: self.ino as usize,
             size: size as usize,
             blocks: inode.blocks as usize,
-            atime: TimeSepc {
+            atime: TimeSpec {
                 tv_sec: inode.atime as i64,
                 tv_nsec: atime_nsec,
             },
-            mtime: TimeSepc {
+            mtime: TimeSpec {
                 tv_sec: inode.mtime as i64,
                 tv_nsec: mtime_nsec,
             },
-            ctime: TimeSepc {
+            ctime: TimeSpec {
                 tv_sec: inode.ctime as i64,
                 tv_nsec: ctime_nsec,
             },
@@ -129,6 +129,7 @@ impl Inode for Ext4Inode {
             nlinks: inode.links_count as usize,
             uid: inode.uid as u32,
             gid: inode.gid as u32,
+            rdev: 0,
         })
     }
 
@@ -652,7 +653,7 @@ impl Inode for Ext4Inode {
         self
     }
 
-    fn set_times(&self, atime: Option<TimeSepc>, mtime: Option<TimeSepc>) -> Result<(), FsError> {
+    fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
         let mut fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
@@ -673,7 +674,7 @@ impl Inode for Ext4Inode {
             inode.i_mtime_extra = ((mt.tv_nsec as u32) << 2) & 0xFFFFFFFC;
 
             // 修改时间改变时，也更新 ctime
-            let now = TimeSepc::now();
+            let now = TimeSpec::now();
             inode.ctime = now.tv_sec as u32;
             inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
         }
@@ -702,7 +703,7 @@ impl Inode for Ext4Inode {
         }
 
         // 更新 ctime（状态改变时间）
-        let now = TimeSepc::now();
+        let now = TimeSpec::now();
         inode.ctime = now.tv_sec as u32;
         inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
 
@@ -725,7 +726,7 @@ impl Inode for Ext4Inode {
         inode.mode = file_type | permission_bits;
 
         // 更新 ctime（状态改变时间）
-        let now = TimeSepc::now();
+        let now = TimeSpec::now();
         inode.ctime = now.tv_sec as u32;
         inode.i_ctime_extra = ((now.tv_nsec as u32) << 2) & 0xFFFFFFFC;
 
@@ -733,5 +734,15 @@ impl Inode for Ext4Inode {
         fs.write_back_inode(&mut inode_ref);
 
         Ok(())
+    }
+
+    fn readlink(&self) -> Result<String, FsError> {
+        // TODO: 实现 ext4 符号链接读取
+        Err(FsError::NotSupported)
+    }
+
+    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        // TODO: 实现 ext4 创建文件节点
+        Err(FsError::NotSupported)
     }
 }

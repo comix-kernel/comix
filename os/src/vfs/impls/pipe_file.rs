@@ -3,7 +3,7 @@
 //! 管道是流式单向通信设备，读端和写端分别由两个 [`PipeFile`] 实例表示。
 
 use crate::sync::SpinLock;
-use crate::uapi::time::TimeSepc;
+use crate::uapi::time::TimeSpec;
 use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -163,11 +163,12 @@ impl File for PipeFile {
             mode: FileMode::S_IFIFO | FileMode::S_IRUSR | FileMode::S_IWUSR,
             uid: 0,
             gid: 0,
-            atime: TimeSepc::zero(),
-            mtime: TimeSepc::zero(),
-            ctime: TimeSepc::zero(),
+            atime: TimeSpec::zero(),
+            mtime: TimeSpec::zero(),
+            ctime: TimeSpec::zero(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 

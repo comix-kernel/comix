@@ -42,7 +42,7 @@ impl FileSystemType {
 }
 
 bitflags! {
-    /// 文件系统挂载标志
+    /// 文件系统挂载标志（用于 VFS 内部）
     ///
     /// 参考：include/uapi/linux/mount.h
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,8 +68,89 @@ bitflags! {
         /// 不更新目录访问时间
         const NODIRATIME = 2048;
 
+        /// 相对访问时间（修正值：与 Linux 内核一致）
+        const RELATIME = 2097152;
+    }
+}
+
+bitflags! {
+    /// mount 系统调用标志位（与 Linux ABI 完全一致）
+    ///
+    /// 参考：include/uapi/linux/mount.h
+    /// 这些标志在当前实现中会被忽略，但保留以保持 ABI 兼容性
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct SysMountFlags: u64 {
+        /// 只读挂载
+        const MS_RDONLY      = 1;
+
+        /// 禁止 SUID/SGID 位
+        const MS_NOSUID      = 2;
+
+        /// 禁止访问设备文件
+        const MS_NODEV       = 4;
+
+        /// 禁止执行程序
+        const MS_NOEXEC      = 8;
+
+        /// 同步所有写入
+        const MS_SYNCHRONOUS = 16;
+
+        /// 重新挂载（修改挂载选项）
+        const MS_REMOUNT     = 32;
+
+        /// 允许强制锁
+        const MS_MANDLOCK    = 64;
+
+        /// 目录同步
+        const MS_DIRSYNC     = 128;
+
+        /// 不跟随符号链接
+        const MS_NOSYMFOLLOW = 256;
+
+        /// 不更新访问时间
+        const MS_NOATIME     = 1024;
+
+        /// 不更新目录访问时间
+        const MS_NODIRATIME  = 2048;
+
+        /// 绑定挂载
+        const MS_BIND        = 4096;
+
+        /// 移动挂载
+        const MS_MOVE        = 8192;
+
+        /// 递归操作
+        const MS_REC         = 16384;
+
         /// 相对访问时间
-        const RELATIME = 4096;
+        const MS_RELATIME    = 2097152;
+
+        /// 严格的访问时间
+        const MS_STRICTATIME = 16777216;
+
+        /// 延迟更新时间
+        const MS_LAZYTIME    = 33554432;
+    }
+}
+
+bitflags! {
+    /// umount2 系统调用标志位（与 Linux ABI 完全一致）
+    ///
+    /// 参考：include/uapi/linux/mount.h
+    /// 这些标志在当前实现中会被忽略，但保留以保持 ABI 兼容性
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct UmountFlags: i32 {
+        /// 强制卸载（即使正在使用）
+        const MNT_FORCE  = 1;
+
+        /// 延迟卸载（不再使用时卸载）
+        const MNT_DETACH = 2;
+
+        /// 仅当挂载点过期时卸载
+        const MNT_EXPIRE = 4;
+
+        /// 不追踪符号链接
+        const UMOUNT_NOFOLLOW = 8;
     }
 }
 

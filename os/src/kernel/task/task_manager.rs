@@ -85,6 +85,10 @@ pub trait TaskManagerTrait {
     /// 返回值: 如果任务存在且信号发送成功则返回 true，否则返回 false
     fn send_signal(&self, task: SharedTask, signal: usize) -> bool;
 
+    /// 获取所有任务
+    /// 返回值: 所有任务的列表
+    fn get_all_tasks(&self) -> Vec<SharedTask>;
+
     #[cfg(test)]
     /// 获取当前任务数量（仅用于测试）
     /// 返回值: 当前任务数量
@@ -171,6 +175,10 @@ impl TaskManagerTrait for TaskManager {
         } else {
             false
         }
+    }
+
+    fn get_all_tasks(&self) -> Vec<SharedTask> {
+        self.tasks.values().cloned().collect()
     }
 
     #[cfg(test)]

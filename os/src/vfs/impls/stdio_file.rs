@@ -3,7 +3,7 @@
 //! 提供标准输入、输出、错误输出的文件接口，直接操作控制台，不依赖 Inode。
 
 use crate::{
-    uapi::time::TimeSepc,
+    uapi::time::TimeSpec,
     vfs::{File, FileMode, FsError, InodeMetadata, InodeType},
 };
 use alloc::sync::Arc;
@@ -55,11 +55,12 @@ impl File for StdinFile {
             uid: 0,
             gid: 0,
             size: 0,
-            atime: TimeSepc::now(),
-            mtime: TimeSepc::now(),
-            ctime: TimeSepc::now(),
+            atime: TimeSpec::now(),
+            mtime: TimeSpec::now(),
+            ctime: TimeSpec::now(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 
@@ -100,11 +101,12 @@ impl File for StdoutFile {
             uid: 0,
             gid: 0,
             size: 0,
-            atime: TimeSepc::now(),
-            mtime: TimeSepc::now(),
-            ctime: TimeSepc::now(),
+            atime: TimeSpec::now(),
+            mtime: TimeSpec::now(),
+            ctime: TimeSpec::now(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 }
@@ -143,11 +145,12 @@ impl File for StderrFile {
             uid: 0,
             gid: 0,
             size: 0,
-            atime: TimeSepc::now(),
-            mtime: TimeSepc::now(),
-            ctime: TimeSepc::now(),
+            atime: TimeSpec::now(),
+            mtime: TimeSpec::now(),
+            ctime: TimeSpec::now(),
             nlinks: 1,
             blocks: 0,
+            rdev: 0,
         })
     }
 }

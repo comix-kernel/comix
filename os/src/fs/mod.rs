@@ -4,8 +4,11 @@
 //! 包括文件系统接口、文件操作等
 //! 目前只实现了一个简单的内存文件系统
 pub mod ext4;
+pub mod proc;
 pub mod simple_fs;
 pub mod smfs;
+pub mod sysfs;
+pub mod tmpfs;
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -14,9 +17,12 @@ use crate::device::BLK_DRIVERS;
 use crate::device::RamDisk;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::simple_fs::SimpleFs;
+use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
-use crate::vfs::{MOUNT_TABLE, MountFlags};
+use crate::vfs::dev::makedev;
+use crate::vfs::devno::{blkdev_major, chrdev_major};
+use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
 /// 嵌入的 EXT4 镜像
 ///
@@ -137,6 +143,142 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
             println!("[Ext4] Failed to read root directory");
         }
     }
+
+    Ok(())
+}
+
+/// 挂载 tmpfs 到指定路径
+///
+/// # 参数
+///
+/// - `mount_point`: 挂载点路径（如 "/tmp"）
+/// - `max_size_mb`: 最大容量（MB），0 表示无限制
+pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::vfs::FsError> {
+    use crate::vfs::FsError;
+    use alloc::string::ToString;
+
+    println!(
+        "[Tmpfs] Creating tmpfs filesystem (max_size: {} MB)",
+        if max_size_mb == 0 {
+            "unlimited".to_string()
+        } else {
+            max_size_mb.to_string()
+        }
+    );
+
+    // 创建 tmpfs
+    let tmpfs = TmpFs::new(max_size_mb);
+
+    // 挂载到指定路径
+    MOUNT_TABLE.mount(
+        tmpfs,
+        mount_point,
+        MountFlags::empty(),
+        Some(String::from("tmpfs")),
+    )?;
+
+    println!("[Tmpfs] Tmpfs mounted at {}", mount_point);
+
+    Ok(())
+}
+
+pub fn init_dev() -> Result<(), FsError> {
+    if let Err(e) = vfs_lookup("/dev") {
+        return Err(e);
+    }
+
+    create_devices()?;
+
+    Ok(())
+}
+
+fn create_devices() -> Result<(), FsError> {
+    // 获取 /dev 目录的 dentry
+    let dev_dentry = vfs_lookup("/dev")?;
+
+    let dev_inode = &dev_dentry.inode;
+
+    // 字符设备：0666 权限
+    let char_mode = FileMode::S_IFCHR | FileMode::from_bits_truncate(0o666);
+
+    // /dev/null (1, 3)
+    dev_inode.mknod("null", char_mode, makedev(chrdev_major::MEM, 3))?;
+
+    // /dev/zero (1, 5)
+    dev_inode.mknod("zero", char_mode, makedev(chrdev_major::MEM, 5))?;
+
+    // /dev/random (1, 8)
+    dev_inode.mknod("random", char_mode, makedev(chrdev_major::MEM, 8))?;
+
+    // /dev/urandom (1, 9)
+    dev_inode.mknod("urandom", char_mode, makedev(chrdev_major::MEM, 9))?;
+
+    // /dev/console (5, 1) - 只读
+    let console_mode = FileMode::S_IFCHR | FileMode::from_bits_truncate(0o600);
+    dev_inode.mknod("console", console_mode, makedev(chrdev_major::CONSOLE, 1))?;
+
+    // /dev/ttyS0 (4, 64)
+    dev_inode.mknod("ttyS0", char_mode, makedev(chrdev_major::TTY, 64))?;
+
+    // 块设备：0660 权限
+    let block_mode = FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660);
+
+    // /dev/vda (254, 0)
+    dev_inode.mknod("vda", block_mode, makedev(blkdev_major::VIRTIO_BLK, 0))?;
+
+    Ok(())
+}
+
+/// 初始化并挂载 procfs 到 /proc
+pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
+    use crate::fs::proc::ProcFS;
+    use crate::vfs::MountFlags;
+    use alloc::string::ToString;
+
+    println!("[ProcFS] Initializing procfs");
+
+    // 创建 procfs
+    let procfs = ProcFS::new();
+
+    // 初始化文件系统树
+    procfs.init_tree()?;
+
+    // 挂载到 /proc
+    MOUNT_TABLE.mount(
+        procfs,
+        "/proc",
+        MountFlags::empty(),
+        Some(String::from("proc")),
+    )?;
+
+    println!("[ProcFS] Procfs mounted at /proc");
+
+    Ok(())
+}
+
+/// 初始化并挂载 sysfs 到 /sys
+pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
+    use crate::fs::sysfs::SysFS;
+    use crate::vfs::MountFlags;
+    use alloc::string::ToString;
+
+    println!("[SysFS] Initializing sysfs");
+
+    // 创建 sysfs
+    let sysfs = SysFS::new();
+
+    // 初始化文件系统树 (从设备注册表构建设备树)
+    sysfs.init_tree()?;
+
+    // 挂载到 /sys
+    MOUNT_TABLE.mount(
+        sysfs,
+        "/sys",
+        MountFlags::empty(),
+        Some(String::from("sysfs")),
+    )?;
+
+    println!("[SysFS] Sysfs mounted at /sys");
 
     Ok(())
 }
