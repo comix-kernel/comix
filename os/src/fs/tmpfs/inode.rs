@@ -3,7 +3,7 @@
 //! TmpfsInode 直接管理物理帧，无需经过 BlockDevice 层
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
@@ -572,9 +572,51 @@ impl Inode for TmpfsInode {
         self
     }
 
-    fn symlink(&self, _name: &str, _target: &str) -> Result<Arc<dyn Inode>, FsError> {
-        // TODO: 实现符号链接支持
-        Err(FsError::NotSupported)
+    fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
+        // 检查当前节点是否为目录
+        let meta = self.metadata.lock();
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        drop(meta);
+
+        // 检查文件名是否已存在
+        let children = self.children.lock();
+        if children.contains_key(name) {
+            return Err(FsError::AlreadyExists);
+        }
+        drop(children);
+
+        // 分配新的 inode 编号
+        let mut stats = self.stats.lock();
+        let inode_no = stats.next_inode_no;
+        stats.next_inode_no += 1;
+        drop(stats);
+
+        // 创建符号链接 inode (默认权限 0o777)
+        let symlink_inode = TmpfsInode::new(
+            inode_no,
+            InodeType::Symlink,
+            FileMode::from_bits_truncate(0o777),
+            Arc::downgrade(&self.self_ref.lock().upgrade().unwrap()),
+            self.stats.clone(),
+        );
+
+        // 将目标路径写入符号链接文件的数据中
+        let target_bytes = target.as_bytes();
+        if let Err(e) = symlink_inode.write_at(0, target_bytes) {
+            return Err(e);
+        }
+
+        // 添加到父目录
+        self.children
+            .lock()
+            .insert(name.to_string(), symlink_inode.clone());
+
+        // 更新父目录的修改时间
+        self.metadata.lock().mtime = TimeSpec::now();
+
+        Ok(symlink_inode as Arc<dyn Inode>)
     }
 
     fn link(&self, _name: &str, _target: &Arc<dyn Inode>) -> Result<(), FsError> {
@@ -604,8 +646,25 @@ impl Inode for TmpfsInode {
     }
 
     fn readlink(&self) -> Result<String, FsError> {
-        // TODO: 实现符号链接读取
-        Err(FsError::NotSupported)
+        // 检查是否为符号链接
+        let meta = self.metadata.lock();
+        if meta.inode_type != InodeType::Symlink {
+            return Err(FsError::InvalidArgument);
+        }
+        let size = meta.size;
+        drop(meta);
+
+        // 读取符号链接的目标路径
+        if size == 0 {
+            return Ok(String::new());
+        }
+
+        let mut buf = alloc::vec![0u8; size];
+        let bytes_read = self.read_at(0, &mut buf)?;
+
+        // 转换为字符串
+        String::from_utf8(buf[..bytes_read].to_vec())
+            .map_err(|_| FsError::InvalidArgument)
     }
 
     fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {

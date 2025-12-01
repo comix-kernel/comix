@@ -1483,3 +1483,63 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
         Err(e) => e.to_errno(),
     }
 }
+
+/// symlinkat - 创建符号链接
+///
+/// # 参数
+/// * `target` - 符号链接的目标路径(可以是相对或绝对路径)
+/// * `newdirfd` - 新符号链接所在目录的文件描述符
+/// * `linkpath` - 新符号链接的路径
+///
+/// # 返回值
+/// * 0 - 成功
+/// * -errno - 失败
+///
+/// # 注意
+/// target 参数不会被检查,即使目标不存在也能创建符号链接
+pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) -> isize {
+    // 解析 target 路径
+    unsafe { sstatus::set_sum() };
+    let target_str = match get_path_safe(target) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+
+    // 解析 linkpath 路径
+    let link_str = match get_path_safe(linkpath) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+    unsafe { sstatus::clear_sum() };
+
+    // 分割路径为目录和文件名
+    let (dir_path, link_name) = match split_path(&link_str) {
+        Ok(p) => p,
+        Err(e) => return e.to_errno(),
+    };
+
+    // 查找父目录
+    let parent_dentry = match resolve_at_path(newdirfd, &dir_path) {
+        Ok(Some(d)) => d,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+
+    // 创建符号链接
+    match parent_dentry.inode.symlink(&link_name, &target_str) {
+        Ok(symlink_inode) => {
+            // 创建 dentry 并加入缓存
+            let symlink_dentry = Dentry::new(link_name.clone(), symlink_inode);
+            parent_dentry.add_child(symlink_dentry.clone());
+            DENTRY_CACHE.insert(&symlink_dentry);
+            0
+        }
+        Err(e) => e.to_errno(),
+    }
+}
