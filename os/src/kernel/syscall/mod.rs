@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 mod cred;
+mod fcntl;
 mod fs;
 mod io;
 mod ipc;
@@ -29,6 +30,7 @@ use crate::{
     vfs::Stat,
 };
 use cred::*;
+use fcntl::*;
 use fs::*;
 use io::*;
 use ipc::*;
@@ -46,6 +48,7 @@ impl_syscall!(sys_getcwd, getcwd, (*mut u8, usize));
 // Epoll & Duplication
 impl_syscall!(sys_dup, dup, (usize));
 impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
+impl_syscall!(sys_fcntl, fcntl, (usize, i32, usize));
 impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
 
 // 文件/目录创建与链接 (File/Directory Creation and Linking)

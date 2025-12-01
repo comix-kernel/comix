@@ -14,6 +14,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // Epoll & Duplication
         syscall_number::SYS_DUP => sys_dup(frame),
         syscall_number::SYS_DUP3 => sys_dup3(frame),
+        syscall_number::SYS_FCNTL => sys_fcntl(frame),
         syscall_number::SYS_IOCTL => sys_ioctl(frame),
 
         // 文件/目录创建与链接 (File/Directory Creation and Linking)

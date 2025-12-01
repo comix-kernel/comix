@@ -82,4 +82,55 @@ pub trait File: Send + Sync {
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
     }
+
+    /// 设置文件状态标志（可选方法，用于 F_SETFL）
+    ///
+    /// 默认返回 `NotSupported`，适用于不支持动态修改标志的文件类型
+    fn set_status_flags(&self, _flags: OpenFlags) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 获取管道大小（可选方法，用于 F_GETPIPE_SZ）
+    ///
+    /// 默认返回 `NotSupported`，仅适用于 PipeFile
+    fn get_pipe_size(&self) -> Result<usize, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 设置管道大小（可选方法，用于 F_SETPIPE_SZ）
+    ///
+    /// 默认返回 `NotSupported`，仅适用于 PipeFile
+    fn set_pipe_size(&self, _size: usize) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 获取异步 I/O 所有者（可选方法，用于 F_GETOWN）
+    ///
+    /// 返回接收 SIGIO 信号的进程 PID
+    /// 默认返回 `NotSupported`
+    fn get_owner(&self) -> Result<i32, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 设置异步 I/O 所有者（可选方法，用于 F_SETOWN）
+    ///
+    /// 设置接收 SIGIO 信号的进程 PID
+    /// 默认返回 `NotSupported`
+    fn set_owner(&self, _pid: i32) -> Result<(), FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 从指定位置读取数据（可选方法，用于 pread64/preadv）
+    ///
+    /// 不改变文件偏移量，默认返回 `NotSupported`，适用于非 seekable 文件
+    fn read_at(&self, _offset: usize, _buf: &mut [u8]) -> Result<usize, FsError> {
+        Err(FsError::NotSupported)
+    }
+
+    /// 向指定位置写入数据（可选方法，用于 pwrite64/pwritev）
+    ///
+    /// 不改变文件偏移量，默认返回 `NotSupported`，适用于非 seekable 文件
+    fn write_at(&self, _offset: usize, _buf: &[u8]) -> Result<usize, FsError> {
+        Err(FsError::NotSupported)
+    }
 }
