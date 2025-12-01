@@ -54,6 +54,19 @@ impl TimerQueue {
         }
         None
     }
+
+    /// 移除指定任务
+    /// # 参数:
+    /// - `task`: 需要移除的任务
+    /// # 返回值:
+    /// - 被移除的任务（如果存在）
+    pub fn remove_task(&mut self, task: &SharedTask) -> Option<SharedTask> {
+        let key = self
+            .queue
+            .iter()
+            .find_map(|(time, t)| if ptr::eq(task, t) { Some(*time) } else { None })?;
+        self.queue.remove(&key)
+    }
 }
 
 /// 定时器条目

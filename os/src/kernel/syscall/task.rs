@@ -13,22 +13,24 @@ use crate::{
         timer::{clock_freq, get_time},
         trap::restore,
     },
-    ipc::{SignalHandlerTable, SignalPending},
+    ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{
-        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
-        TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
-        sleep_task_with_block,
+        FUTEX_MANAGER, SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE,
+        TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
+        exit_process, schedule, sleep_task_with_block,
         syscall::util::{get_args_safe, get_path_safe},
-        time::REALTIME,
+        time::{REALTIME, realtime_now},
         yield_task,
     },
     mm::{
+        address::{UsizeConvert, Vaddr},
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
     sync::SpinLock,
     uapi::{
-        errno::{EINTR, EINVAL, ENOSYS, ESRCH},
+        errno::{EAGAIN, EFAULT, EINTR, EINVAL, ENOSYS, ESRCH, ETIMEDOUT},
+        futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
         signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
@@ -683,4 +685,123 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
     }
 
     0
+}
+
+/// Futex 系统调用实现
+/// # 参数
+/// - `uaddr`: 指向用户空间中 futex 变量的指针
+/// - `op`: 操作码和标志
+/// - `val`: 操作相关的值
+/// - `_timeout`: 指向 TimeSepc 结构体的指针, 用于指定超时时间
+/// - `_uaddr2`: 指向用户空间中第二个 futex 变量的指针
+/// - `_val3`: 额外的操作相关值
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn futex(
+    uaddr: *mut u32,
+    op: c_int,
+    val: u32,
+    timeout: *const TimeSepc,
+    _uaddr2: *mut u32,
+    _val3: u32,
+) -> c_int {
+    let _private = (op & FUTEX_PRIVATE as c_int) != 0; // TODO: 目前不区分 PRIVATE 和 SHARED
+    let realtime = (op & FUTEX_CLOCK_REALTIME as c_int) != 0;
+    let op = op & !(FUTEX_PRIVATE as c_int) & !(FUTEX_CLOCK_REALTIME as c_int);
+    // HACK: 其实只需要锁定与 uaddr 对应的 Futex 等待队列
+    let mut fm = FUTEX_MANAGER.lock();
+    match op as u32 {
+        FUTEX_WAIT => {
+            // 必须保证获 取锁 → 读取用户数据 → 比较 → 释放锁 整个序列是原子的
+            let user_val = unsafe { read_from_user(uaddr) };
+            let memory_space = current_task()
+                .lock()
+                .memory_space
+                .as_ref()
+                .expect("futex: current task has no memory space.")
+                .clone();
+            let paddr = if let Some(paddr) = memory_space
+                .lock()
+                .translate(Vaddr::from_usize(uaddr as usize))
+            {
+                paddr.as_usize()
+            } else {
+                return -EFAULT;
+            };
+            if user_val != val as u32 {
+                return -EAGAIN;
+            }
+
+            let task = current_task();
+            let waitq = fm.get_wait_queue(paddr);
+            waitq.sleep(task.clone());
+            sleep_task_with_block(task.clone(), true);
+
+            if !timeout.is_null() {
+                let ts = unsafe { read_from_user(timeout) };
+                if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec > 999999999 {
+                    return -EINVAL;
+                }
+                let sleep_ticks = ts.into_freq(clock_freq());
+                let trigger = if realtime {
+                    let now = realtime_now().into_freq(clock_freq());
+                    now.saturating_add(sleep_ticks)
+                } else {
+                    let now = get_time();
+                    now.saturating_add(sleep_ticks)
+                };
+                TIMER_QUEUE.lock().push(trigger, task.clone());
+                drop(fm);
+                yield_task();
+                if TIMER_QUEUE.lock().remove_task(&task).is_none() {
+                    // 超时唤醒
+                    let mut fm = FUTEX_MANAGER.lock();
+                    let waitq = fm.get_wait_queue(paddr);
+                    // 虽然任务已经被唤醒, 但仍然需要从等待队列中移除
+                    waitq.remove_task(&task);
+                    return -ETIMEDOUT;
+                }
+            } else {
+                drop(fm);
+                yield_task();
+            }
+            if signal_pending(&task) {
+                // 信号唤醒
+                let mut fm = FUTEX_MANAGER.lock();
+                let waitq = fm.get_wait_queue(paddr);
+                waitq.remove_task(&task);
+                return -EINTR;
+            }
+            // 正常唤醒
+            // NOTE: 此时任务已经不在等待队列中
+            0
+        }
+        FUTEX_WAKE => {
+            let mut wake_count = 0;
+            let paddr = {
+                let memory_space = current_task()
+                    .lock()
+                    .memory_space
+                    .as_ref()
+                    .expect("futex: current task has no memory space.")
+                    .clone();
+                if let Some(paddr) = memory_space
+                    .lock()
+                    .translate(Vaddr::from_usize(uaddr as usize))
+                {
+                    paddr.as_usize()
+                } else {
+                    return -EFAULT;
+                }
+            };
+            let mut fm = FUTEX_MANAGER.lock();
+            let waitq = fm.get_wait_queue(paddr);
+            for _ in 0..val {
+                waitq.wake_up_one();
+                wake_count += 1;
+            }
+            wake_count
+        }
+        _ => -ENOSYS,
+    }
 }

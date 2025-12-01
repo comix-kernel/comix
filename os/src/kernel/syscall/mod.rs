@@ -107,6 +107,12 @@ impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
 
 // 同步/休眠 (Synchronization/Sleeping)
 impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSpec, *mut TimeSpec));
+impl_syscall!(
+    sys_futex,
+    futex,
+    (*mut u32, c_int, u32, *const TimeSepc, *mut u32, u32)
+);
+impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSepc, *mut TimeSepc));
 impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
 impl_syscall!(
     sys_setitimmer,

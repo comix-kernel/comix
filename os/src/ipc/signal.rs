@@ -372,3 +372,12 @@ pub fn do_sigpending() -> SignalFlags {
     let t = task.lock();
     t.pending.signals | t.shared_pending.lock().signals
 }
+
+/// 检查任务是否有可投递的信号
+/// # 参数:
+/// * `task`: 目标任务
+pub fn signal_pending(task: &SharedTask) -> bool {
+    let t = task.lock();
+    t.pending.has_deliverable_signal(t.blocked)
+        || t.shared_pending.lock().has_deliverable_signal(t.blocked)
+}
