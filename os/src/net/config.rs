@@ -1,4 +1,4 @@
-use crate::{device::net::interface::NETWORK_INTERFACE_MANAGER, earlyprintln};
+use crate::{earlyprintln, net::interface::NETWORK_INTERFACE_MANAGER};
 use alloc::string::String;
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address};
 
