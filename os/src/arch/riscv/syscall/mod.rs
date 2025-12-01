@@ -20,6 +20,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_MKNODAT => sys_mknodat(frame),
         syscall_number::SYS_MKDIRAT => sys_mkdirat(frame),
         syscall_number::SYS_UNLINKAT => sys_unlinkat(frame),
+        syscall_number::SYS_SYMLINKAT => sys_symlinkat(frame),
 
         // 挂载/文件系统信息 (Mount/Filesystem Info)
         syscall_number::SYS_MOUNT => sys_mount(frame),
