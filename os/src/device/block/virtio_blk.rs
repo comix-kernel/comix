@@ -37,7 +37,7 @@ impl Driver for VirtIOBlkDriver {
     }
 
     fn as_block_arc(self: Arc<Self>) -> Option<Arc<dyn BlockDriver>> {
-        Some(self.clone())
+        Some(self)
     }
 
     fn as_net(&self) -> Option<&dyn NetDevice> {

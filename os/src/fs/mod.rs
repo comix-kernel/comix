@@ -20,9 +20,9 @@ use crate::fs::simple_fs::SimpleFs;
 use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::println;
-use crate::vfs::{MOUNT_TABLE, MountFlags, FsError, vfs_lookup, FileMode};
 use crate::vfs::dev::makedev;
 use crate::vfs::devno::{blkdev_major, chrdev_major};
+use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
 /// 嵌入的 EXT4 镜像
 ///
@@ -171,7 +171,7 @@ pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::v
 
     // 挂载到指定路径
     MOUNT_TABLE.mount(
-        tmpfs.clone(),
+        tmpfs,
         mount_point,
         MountFlags::empty(),
         Some(String::from("tmpfs")),
@@ -282,8 +282,6 @@ pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
 
     Ok(())
 }
-
-
 
 #[cfg(test)]
 mod tests;

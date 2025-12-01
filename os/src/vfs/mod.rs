@@ -45,12 +45,12 @@ pub mod path;
 pub use adapter::inode_type_to_d_type;
 pub use dentry::{DENTRY_CACHE, Dentry, DentryCache};
 pub use dev::{major, makedev, minor};
-pub use devno::{get_chrdev_driver, get_blkdev_index};
+pub use devno::{get_blkdev_index, get_chrdev_driver};
 pub use error::FsError;
 pub use fd_table::FDTable;
 pub use file::File;
 pub use file_system::{FileSystem, StatFs};
-pub use impls::{RegFile, PipeFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
+pub use impls::{PipeFile, RegFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
 pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType};
 pub use mount::{MOUNT_TABLE, MountFlags, MountPoint, MountTable, get_root_dentry};
 pub use path::{

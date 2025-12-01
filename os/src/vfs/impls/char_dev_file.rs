@@ -1,8 +1,8 @@
 use crate::device::Driver;
 use crate::sync::SpinLock;
-use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use crate::vfs::dev::{major, minor};
 use crate::vfs::devno::{chrdev_major, get_chrdev_driver};
+use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
 /// 字符设备文件

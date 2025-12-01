@@ -19,8 +19,7 @@ pub fn build_platform_devices(root: &Arc<SysfsInode>) -> Result<(), FsError> {
         .ok_or(FsError::InvalidArgument)?;
 
     // 创建 /sys/devices/platform/
-    let platform_dir =
-        SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
+    let platform_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
     devices_dir.add_child("platform", platform_dir.clone())?;
 
     // 构建块设备
@@ -334,12 +333,7 @@ fn build_platform_tty_devices(platform_dir: &Arc<SysfsInode>) -> Result<(), FsEr
                 let maj = dev_info.major;
                 let min = dev_info.minor;
                 let name = dev_info.name.clone();
-                Arc::new(move || {
-                    Ok(format!(
-                        "MAJOR={}\nMINOR={}\nDEVNAME={}\n",
-                        maj, min, name
-                    ))
-                })
+                Arc::new(move || Ok(format!("MAJOR={}\nMINOR={}\nDEVNAME={}\n", maj, min, name)))
             },
             store: None,
         };
@@ -442,7 +436,10 @@ fn build_platform_rtc_devices(platform_dir: &Arc<SysfsInode>) -> Result<(), FsEr
                 let rtc = dev_info.device.clone();
                 Arc::new(move || {
                     let dt = rtc.read_datetime();
-                    Ok(format!("{:02}:{:02}:{:02}\n", dt.hour, dt.minute, dt.second))
+                    Ok(format!(
+                        "{:02}:{:02}:{:02}\n",
+                        dt.hour, dt.minute, dt.second
+                    ))
                 })
             },
             store: None,

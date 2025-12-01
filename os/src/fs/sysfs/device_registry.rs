@@ -7,10 +7,10 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::device::{BLK_DRIVERS, DRIVERS, DeviceType};
 use crate::device::block::BlockDriver;
 use crate::device::net::net_device::NetDevice;
 use crate::device::rtc::RtcDriver;
+use crate::device::{BLK_DRIVERS, DRIVERS, DeviceType};
 
 /// 块设备信息 (用于 sysfs)
 #[derive(Clone)]
@@ -97,7 +97,9 @@ pub fn list_net_devices() -> Vec<NetworkDeviceInfo> {
 
 /// 根据名称查找块设备
 pub fn find_block_device(name: &str) -> Option<BlockDeviceInfo> {
-    list_block_devices().into_iter().find(|dev| dev.name == name)
+    list_block_devices()
+        .into_iter()
+        .find(|dev| dev.name == name)
 }
 
 /// 根据名称查找网络设备
@@ -164,13 +166,13 @@ pub fn list_rtc_devices() -> Vec<RtcDeviceInfo> {
         .enumerate()
         .filter_map(|(idx, driver)| {
             // 使用 as_rtc_arc 方法安全地获取 Arc<dyn RtcDriver>
-            Arc::clone(driver).as_rtc_arc().map(|rtc_dev| {
-                RtcDeviceInfo {
+            Arc::clone(driver)
+                .as_rtc_arc()
+                .map(|rtc_dev| RtcDeviceInfo {
                     name: format!("rtc{}", idx),
                     id: idx as u32,
                     device: rtc_dev,
-                }
-            })
+                })
         })
         .collect()
 }

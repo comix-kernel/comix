@@ -1,5 +1,5 @@
 use super::*;
-use crate::vfs::{RegFile, PipeFile};
+use crate::vfs::{PipeFile, RegFile};
 use crate::{kassert, test_case};
 
 /// 测试 File trait 的多态行为

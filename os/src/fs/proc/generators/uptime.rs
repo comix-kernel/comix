@@ -19,8 +19,7 @@ impl ContentGenerator for UptimeGenerator {
 
         let content = format!(
             "{}.{:02} {}.{:02}\n",
-            uptime_sec, uptime_frac,
-            idle_sec, idle_frac
+            uptime_sec, uptime_frac, idle_sec, idle_frac
         );
 
         Ok(content.into_bytes())

@@ -78,4 +78,5 @@ mod device_registry;
 mod inode;
 mod sysfs;
 
+pub use device_registry::{find_block_device, find_net_device};
 pub use sysfs::SysFS;
