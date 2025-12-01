@@ -178,6 +178,19 @@ impl TmpfsInode {
         meta.mtime = now;
         meta.ctime = now;
     }
+
+    fn reserve_page(&self) -> Result<(), FsError> {
+        let mut stats = self.stats.lock();
+        if stats.max_pages != 0 && stats.allocated_pages >= stats.max_pages {
+            return Err(FsError::NoSpace);
+        }
+        stats.allocated_pages += 1;
+        Ok(())
+    }
+
+    fn cancel_page_reservation(&self) {
+        self.dec_allocated_pages(1);
+    }
 }
 
 impl Inode for TmpfsInode {
@@ -255,13 +268,20 @@ impl Inode for TmpfsInode {
 
             // 按需分配物理帧
             if data[page_index].is_none() {
-                if !self.can_alloc_pages(1) {
+                if self.reserve_page().is_err() {
                     return Err(FsError::NoSpace);
                 }
 
-                let frame = alloc_frame().ok_or(FsError::NoSpace)?;
-                data[page_index] = Some(Arc::new(frame));
-                self.inc_allocated_pages(1);
+                match alloc_frame() {
+                    Some(frame) => {
+                        data[page_index] = Some(Arc::new(frame));
+                    }
+                    None => {
+                        // 如果物理帧分配失败，回滚预留的页面计数
+                        self.cancel_page_reservation();
+                        return Err(FsError::NoSpace);
+                    }
+                }
             }
 
             // 通过内核直接映射写入
