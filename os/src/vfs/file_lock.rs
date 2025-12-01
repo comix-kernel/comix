@@ -82,6 +82,8 @@ impl FileLockManager {
         &self,
         dev: u64,
         ino: u64,
+        start: usize,
+        len: usize,
         flock: &mut Flock,
         pid: i32,
     ) -> Result<(), FsError> {
@@ -95,11 +97,11 @@ impl FileLockManager {
             _ => return Err(FsError::InvalidArgument),
         };
 
-        // 构造请求的锁
+        // 构造请求的锁（使用传入的范围参数）
         let requested_lock = FileLockEntry {
             lock_type,
-            start: 0, // 这里简化处理，实际应转换为绝对偏移
-            len: 0,
+            start,
+            len,
             pid,
         };
 
@@ -127,6 +129,35 @@ impl FileLockManager {
     ///
     /// # 参数
     /// - `blocking`: true 表示阻塞（F_SETLKW），false 表示非阻塞（F_SETLK）
+    ///
+    /// # TODO: 实现 F_SETLKW 阻塞等待
+    /// 当前实现在锁冲突时立即返回 WouldBlock，即使 blocking=true。
+    ///
+    /// 完整的 F_SETLKW 实现需要：
+    /// 1. 在 FileLockManager 中为每个文件维护一个 WaitQueue
+    /// 2. 锁冲突时，如果 blocking=true：
+    ///    - 将当前任务加入该文件的等待队列
+    ///    - 调用 yield_task() 让出 CPU
+    ///    - 被唤醒后重新检查并尝试获取锁（可能需要循环）
+    /// 3. 释放锁时（包括进程退出），唤醒等待队列中的所有任务
+    /// 4. 需要处理信号中断（返回 EINTR）
+    ///
+    /// 参考实现：
+    /// ```ignore
+    /// loop {
+    ///     if can_acquire_lock() {
+    ///         acquire_and_break();
+    ///     }
+    ///     if !blocking {
+    ///         return Err(WouldBlock);
+    ///     }
+    ///     // 检查信号
+    ///     if has_pending_signal() {
+    ///         return Err(Interrupted);
+    ///     }
+    ///     wait_queue.sleep(current_task());
+    /// }
+    /// ```
     pub fn set_lock(
         &self,
         dev: u64,
