@@ -2,6 +2,8 @@
 //!
 //! 这些常量对应于 Linux 内核的 futex(2) 系统调用操作码和控制标志。
 
+use core::ffi::{c_long, c_void};
+
 /// 类型定义：用于 Futex 系统调用操作码和标志。
 pub type FutexOp = u32;
 
@@ -50,3 +52,34 @@ pub const FUTEX_PRIVATE: FutexOp = 128; // 0x80
 /// 实时时钟标志：指定 FUTEX_WAIT 的超时时间应基于 CLOCK_REALTIME 计算。
 /// （默认为 CLOCK_MONOTONIC）。
 pub const FUTEX_CLOCK_REALTIME: FutexOp = 256; // 0x100
+
+/// 健壮列表头部结构体（struct robust_list_head）
+///
+/// 这个结构体是用户空间维护的，用于告诉内核当前线程持有健壮 futex 锁的列表信息。
+/// 示例用法（在需要时使用 volatile 访问）：
+/// ```rust
+/// fn access_robust_head(head: &mut RobustListHead) {
+///    unsafe {
+///        // 安全地读取 head 字段的 volatile 值
+///        let first_lock_ptr = head.head.read_volatile();
+///        // 安全地写入 head 字段的 volatile 值
+///        head.head.write_volatile(core::ptr::null_mut());
+///    }
+/// }
+/// ```
+#[repr(C)]
+pub struct RobustListHead {
+    /// head: volatile void *volatile head;
+    /// 指向当前线程拥有的第一个健壮 futex 锁。
+    /// 在 C 中是 volatile void *，在 Rust 中使用 *mut c_void 或 *mut u8。
+    /// 注意：volatile 访问必须通过 raw pointer 的 read/write_volatile 方法来实现，而不是在类型定义中。
+    pub head: *mut c_void,
+
+    /// off: long off;
+    /// 列表项（futex 锁）中 owner_tid 字段相对于列表头部的字节偏移量。
+    pub off: c_long,
+
+    /// pending: volatile void *volatile pending;
+    /// 指向一个正在等待被释放或修复的 futex 锁。
+    pub pending: *mut c_void,
+}
