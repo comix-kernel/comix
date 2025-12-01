@@ -30,7 +30,7 @@ use crate::{
     sync::SpinLock,
     uapi::{
         errno::{EAGAIN, EFAULT, EINTR, EINVAL, ENOSYS, ESRCH, ETIMEDOUT},
-        futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE},
+        futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
         signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
@@ -43,7 +43,7 @@ use crate::{
             },
             itimer_id::{ITIMER_PROF, ITIMER_REAL, ITIMER_VIRTUAL},
         },
-        types::StackT,
+        types::{SizeT, StackT},
         wait::{WaitFlags, WaitStatus},
     },
     util::user_buffer::{read_from_user, write_to_user},
@@ -59,6 +59,8 @@ use crate::{
 /// # 参数
 /// - `code`: 退出代码
 pub fn exit(code: c_int) -> c_int {
+    // TODO: 处理 tid_addr 和 robust_list
+    // TODO: clear_child_tid 的处理
     let task = current_task();
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
@@ -80,6 +82,7 @@ pub fn exit(code: c_int) -> c_int {
 /// # 参数
 /// - `code`: 退出代码
 pub fn exit_group(code: c_int) -> ! {
+    // TODO: 处理 tid_addr 和 robust_list
     exit_process(current_task(), code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
@@ -804,4 +807,68 @@ pub fn futex(
         }
         _ => -ENOSYS,
     }
+}
+
+//    long syscall(SYS_get_robust_list, int pid,
+//                 struct robust_list_head **head_ptr, size_t *sizep);
+//    long syscall(SYS_set_robust_list,
+//                 struct robust_list_head *head, size_t size);
+
+/// 设置线程 ID 地址
+/// # 参数
+/// - `tidptr`: 指向存储线程 ID 的用户空间地址
+/// # 返回值
+/// - 返回当前线程的线程 ID (TID)
+pub fn set_tid_address(tidptr: *mut c_int) -> c_int {
+    let task = current_task();
+    task.lock().clear_child_tid = tidptr as usize;
+    current_task().lock().tid as c_int
+}
+
+/// 获取线程的 robust futex 列表头指针和大小
+/// # 参数
+/// - `pid`: 目标进程 ID, 为 0 表示当前进程
+/// - `head_ptr`: 指向存储 robust futex 列表头指针的用户空间地址
+/// - `sizep`: 指向存储 robust futex 列表大小的用户空间地址
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn get_robust_list(pid: c_int, head_ptr: *mut *mut RobustListHead, sizep: *mut SizeT) -> c_int {
+    let task = if pid == 0 {
+        current_task()
+    } else {
+        let tm = TASK_MANAGER.lock();
+        match tm.get_task(pid as u32) {
+            Some(t) => t,
+            None => return -ESRCH,
+        }
+    };
+    let (head, size) = {
+        let t = task.lock();
+        let head = match t.robust_list {
+            Some(h) => h as *mut RobustListHead,
+            None => core::ptr::null_mut(),
+        };
+        let size = size_of::<RobustListHead>() as SizeT;
+        (head, size)
+    };
+    unsafe {
+        write_to_user(head_ptr, head);
+        write_to_user(sizep, size);
+    }
+    0
+}
+
+/// 设置线程的 robust futex 列表头指针
+/// # 参数
+/// - `head`: 指向 robust futex 列表头的指针
+/// - `size`: robust futex 列表的大小
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn set_robust_list(head: *const RobustListHead, size: SizeT) -> c_int {
+    if size != size_of::<RobustListHead>() as SizeT {
+        return -EINVAL;
+    }
+    let task = current_task();
+    task.lock().robust_list = Some(head as usize);
+    0
 }

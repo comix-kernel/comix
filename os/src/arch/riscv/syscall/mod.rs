@@ -58,9 +58,12 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // 进程与控制 (Process and Control)
         syscall_number::SYS_EXIT => sys_exit(frame),
         syscall_number::SYS_EXIT_GROUP => sys_exit_group(frame),
+        syscall_number::SYS_SET_TID_ADDRESS => sys_set_tid_address(frame),
 
         // 同步/休眠
         syscall_number::SYS_FUTEX => sys_futex(frame),
+        syscall_number::SYS_SET_ROBUST_LIST => sys_set_robust_list(frame),
+        syscall_number::SYS_GET_ROBUST_LIST => sys_get_robust_list(frame),
         syscall_number::SYS_NANOSLEEP => sys_nanosleep(frame),
         syscall_number::SYS_GETITIMER => sys_getitimmer(frame),
         syscall_number::SYS_SETITIMER => sys_setitimmer(frame),
