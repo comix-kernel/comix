@@ -20,6 +20,7 @@ use crate::{
     impl_syscall,
     uapi::{
         fs::LinuxStatFs,
+        iovec::IoVec,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
@@ -80,6 +81,13 @@ impl_syscall!(sys_lseek, lseek, (usize, isize, usize));
 // I/O 操作 (Input/Output Operations)
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
+impl_syscall!(sys_readv, readv, (usize, *const IoVec, usize));
+impl_syscall!(sys_writev, writev, (usize, *const IoVec, usize));
+impl_syscall!(sys_pread64, pread64, (usize, *mut u8, usize, i64));
+impl_syscall!(sys_pwrite64, pwrite64, (usize, *const u8, usize, i64));
+impl_syscall!(sys_preadv, preadv, (usize, *const IoVec, usize, i64));
+impl_syscall!(sys_pwritev, pwritev, (usize, *const IoVec, usize, i64));
+impl_syscall!(sys_sendfile, sendfile, (usize, usize, *mut i64, usize));
 
 // 文件元数据与同步 (File Metadata and Synchronization)
 impl_syscall!(
