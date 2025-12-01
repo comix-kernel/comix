@@ -600,6 +600,101 @@ impl MemorySpace {
         Ok(new_brk)
     }
 
+    /// 查找足够大的空闲地址区域
+    ///
+    /// # 参数
+    /// - `size`: 需要的大小（字节）
+    /// - `align`: 对齐要求（字节）
+    ///
+    /// # 返回值
+    /// - `Some(addr)`: 找到的空闲区域起始地址（已对齐）
+    /// - `None`: 没有足够大的空闲区域
+    fn find_free_region(&self, size: usize, align: usize) -> Option<usize> {
+        // 获取堆的起始和结束
+        let heap_start = self.heap_start?.start_addr().as_usize();
+
+        // 获取当前堆的实际结束地址（不包含 mmap 区域）
+        let heap_end = self.areas
+            .iter()
+            .filter(|a| a.area_type() == AreaType::UserHeap)
+            .map(|a| a.vpn_range().end().start_addr().as_usize())
+            .max()
+            .unwrap_or(heap_start);
+
+        // 栈的底部地址
+        let stack_bottom = USER_STACK_TOP - USER_STACK_SIZE;
+
+        // 预留栈增长空间（建议至少 1MB）
+        const STACK_GUARD_SIZE: usize = 1024 * 1024;
+        let search_limit = stack_bottom.saturating_sub(STACK_GUARD_SIZE);
+
+        // 收集所有用户区域（包括 heap 和 mmap），按起始地址排序
+        let mut user_areas: alloc::vec::Vec<(usize, usize)> = self.areas
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a.area_type(),
+                    AreaType::UserHeap
+                    | AreaType::UserMmap
+                    | AreaType::UserStack
+                    | AreaType::UserText
+                    | AreaType::UserRodata
+                    | AreaType::UserData
+                    | AreaType::UserBss
+                )
+            })
+            .map(|a| {
+                let start = a.vpn_range().start().start_addr().as_usize();
+                let end = a.vpn_range().end().start_addr().as_usize();
+                (start, end)
+            })
+            .collect();
+
+        user_areas.sort_by_key(|&(start, _)| start);
+
+        // 检查堆结束到第一个区域之间的空隙
+        let mut search_start = heap_end;
+
+        // 对齐到页边界（向上取整）
+        search_start = (search_start + crate::config::PAGE_SIZE - 1)
+            & !(crate::config::PAGE_SIZE - 1);
+
+        for &(area_start, area_end) in &user_areas {
+            // 跳过在 heap_end 之前的区域
+            if area_end <= heap_end {
+                continue;
+            }
+
+            // 检查 [search_start, area_start) 是否足够大
+            if area_start > search_start {
+                let gap_size = area_start - search_start;
+                if gap_size >= size && search_start < search_limit {
+                    // 应用对齐要求
+                    let aligned_start = (search_start + align - 1) & !(align - 1);
+                    if aligned_start + size <= area_start && aligned_start < search_limit {
+                        return Some(aligned_start);
+                    }
+                }
+            }
+
+            // 更新搜索起点到当前区域之后
+            search_start = area_end;
+        }
+
+        // 检查最后一个区域之后到栈之前的空间
+        if search_start < search_limit {
+            let remaining = search_limit - search_start;
+            if remaining >= size {
+                let aligned_start = (search_start + align - 1) & !(align - 1);
+                if aligned_start + size <= search_limit {
+                    return Some(aligned_start);
+                }
+            }
+        }
+
+        None
+    }
+
     /// 映射一个匿名区域（简化的 mmap）
     ///
     /// # 参数
@@ -611,63 +706,149 @@ impl MemorySpace {
             return Err(PagingError::InvalidAddress);
         }
 
-        // 确定起始地址
+        // 2. 确定起始地址
         let start = if hint == 0 {
-            // 内核选择地址：在堆末尾之后
-            let heap_bottom = self
-                .heap_start
-                .ok_or(PagingError::InvalidAddress)?
-                .start_addr()
-                .as_usize();
-
-            // 查找实际的堆末尾（当前 brk）
-            self.areas
-                .iter()
-                .filter(|a| a.area_type() == AreaType::UserHeap)
-                .map(|a| a.vpn_range().end().start_addr().as_usize())
-                .max()
-                .unwrap_or(heap_bottom)
+            // 内核选择地址：查找空闲区域
+            self.find_free_region(len, crate::config::PAGE_SIZE)
+                .ok_or(PagingError::OutOfMemory)?
         } else {
-            // 用户指定的地址，检查是否可用
+            // 用户指定地址
+
+            // 检查是否在有效范围内
             if hint >= USER_STACK_TOP - USER_STACK_SIZE {
                 return Err(PagingError::InvalidAddress);
             }
-            hint
+
+            // 将 hint 向下对齐到页边界（Linux 行为）
+            let aligned_hint = hint & !(crate::config::PAGE_SIZE - 1);
+
+            // 检查对齐后的区域是否可用
+            let vpn_range_check = VpnRange::new(
+                Vpn::from_addr_floor(Vaddr::from_usize(aligned_hint)),
+                Vpn::from_addr_ceil(Vaddr::from_usize(aligned_hint + len)),
+            );
+
+            // 检查是否与现有区域重叠
+            let has_overlap = self.areas.iter().any(|a| a.vpn_range().overlaps(&vpn_range_check));
+
+            if has_overlap {
+                // hint 不可用，尝试查找附近的空闲区域
+                // 注意：这里简化处理，直接查找任意空闲区域
+                // 更好的实现应该优先查找 hint 附近的区域
+                self.find_free_region(len, crate::config::PAGE_SIZE)
+                    .ok_or(PagingError::AlreadyMapped)?
+            } else {
+                aligned_hint
+            }
         };
 
+        // 3. 计算 VPN 范围（start 已经是页对齐的）
         let vpn_range = VpnRange::new(
             Vpn::from_addr_floor(Vaddr::from_usize(start)),
             Vpn::from_addr_ceil(Vaddr::from_usize(start + len)),
         );
 
-        // 检查重叠
+        // 4. 最终重叠检查（防御性编程）
         for area in &self.areas {
             if area.vpn_range().overlaps(&vpn_range) {
                 return Err(PagingError::AlreadyMapped);
             }
         }
 
-        // 转换权限
+        // 5. 转换权限标志
         let mut flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
-        if prot & 0x1 != 0 {
+        if prot & 0x1 != 0 {  // PROT_READ
             flags |= UniversalPTEFlag::READABLE;
         }
-        if prot & 0x2 != 0 {
+        if prot & 0x2 != 0 {  // PROT_WRITE
             flags |= UniversalPTEFlag::WRITEABLE;
         }
-        if prot & 0x4 != 0 {
+        if prot & 0x4 != 0 {  // PROT_EXEC
             flags |= UniversalPTEFlag::EXECUTABLE;
         }
 
-        self.insert_framed_area(vpn_range, AreaType::UserHeap, flags, None)?;
+        // 6. 创建映射区域
+        // ✅ 使用正确的 AreaType::UserMmap
+        self.insert_framed_area(vpn_range, AreaType::UserMmap, flags, None)?;
 
+        // 7. 返回对齐后的地址
         Ok(start)
     }
 
     /// 解除映射一个区域（munmap 系统调用）
-    pub fn munmap(&mut self, start: usize, _len: usize) -> Result<(), PagingError> {
-        let vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
-        self.remove_area(vpn)
+    ///
+    /// # 参数
+    /// - `start`: 起始地址（字节）
+    /// - `len`: 长度（字节）
+    ///
+    /// # 返回值
+    /// - `Ok(())`: 成功
+    /// - `Err(PagingError)`: 失败
+    ///
+    /// # 语义
+    /// - 解除映射 [start, start+len) 范围
+    /// - 如果范围跨越多个区域，会部分解除映射每个区域
+    /// - 如果只覆盖区域的一部分，会拆分区域
+    /// - 如果地址未映射，返回成功（幂等）
+    pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), PagingError> {
+        // 1. 参数验证
+        if len == 0 {
+            return Ok(());  // POSIX: len=0 是合法的，什么都不做
+        }
+
+        // 2. 计算需要解除映射的 VPN 范围
+        let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
+        let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start + len));
+        let unmap_range = VpnRange::new(start_vpn, end_vpn);
+
+        // 3. 收集需要处理的区域
+        // 注意：不能在迭代时修改 self.areas，所以先收集索引
+        let mut affected_indices = alloc::vec::Vec::new();
+        
+        for (idx, area) in self.areas.iter().enumerate() {
+            if area.vpn_range().overlaps(&unmap_range) {
+                affected_indices.push(idx);
+            }
+        }
+
+        // 4. 如果没有重叠的区域，直接返回成功（幂等）
+        if affected_indices.is_empty() {
+            return Ok(());
+        }
+
+        // 5. 处理每个受影响的区域
+        // 从后往前处理，避免索引失效
+        affected_indices.reverse();
+        
+        for idx in affected_indices {
+            // 移除原区域
+            let area = self.areas.remove(idx);
+            
+            // 只处理 Framed 映射，Direct 映射不应该被 munmap
+            if area.map_type() != MapType::Framed {
+                // 重新插入原区域
+                self.areas.insert(idx, area);
+                continue;
+            }
+
+            // 部分解除映射
+            match area.partial_unmap(&mut self.page_table, start_vpn, end_vpn)? {
+                None => {
+                    // 整个区域被解除映射，不需要重新插入
+                }
+                Some((left, None)) => {
+                    // 只剩一个区域
+                    self.areas.insert(idx, left);
+                }
+                Some((left, Some(right))) => {
+                    // 拆分为两个区域
+                    self.areas.insert(idx, left);
+                    self.areas.insert(idx + 1, right);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// 克隆内存空间（用于 fork 系统调用）

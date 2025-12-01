@@ -33,6 +33,7 @@ pub enum AreaType {
     UserBss,      // 用户 BSS 段
     UserStack,    // 用户栈
     UserHeap,     // 用户堆
+    UserMmap,     // 用户 mmap 匿名映射
 }
 
 /// 内存空间中的一个内存映射区域
@@ -331,6 +332,164 @@ impl MappingArea {
         }
 
         Ok(new_area)
+    }
+
+    /// 拆分区域为两部分：[start, split_vpn) 和 [split_vpn, end)
+    ///
+    /// # 参数
+    /// - `page_table`: 页表的可变引用
+    /// - `split_vpn`: 拆分点（必须在区域范围内，且不等于边界）
+    ///
+    /// # 返回值
+    /// - `Ok((left, right))`: 成功，返回拆分后的两个区域
+    /// - `Err(PagingError)`: 拆分失败
+    ///
+    /// # 注意
+    /// - 原区域会被消耗（moved）
+    /// - 调用者负责将拆分后的区域插入到 areas 列表中
+    /// - 只支持 Framed 映射类型
+    pub fn split_at(
+        mut self,
+        page_table: &mut ActivePageTableInner,
+        split_vpn: Vpn,
+    ) -> Result<(Self, Self), page_table::PagingError> {
+        // 1. 验证拆分点
+        if !self.vpn_range.contains(split_vpn) {
+            return Err(page_table::PagingError::InvalidAddress);
+        }
+
+        if split_vpn == self.vpn_range.start() || split_vpn == self.vpn_range.end() {
+            return Err(page_table::PagingError::InvalidAddress);
+        }
+
+        // 2. 只支持 Framed 映射
+        if self.map_type != MapType::Framed {
+            return Err(page_table::PagingError::UnsupportedMapType);
+        }
+
+        // 3. 创建左右两个区域的元数据
+        let left_range = VpnRange::new(self.vpn_range.start(), split_vpn);
+        let right_range = VpnRange::new(split_vpn, self.vpn_range.end());
+
+        let mut left_area = MappingArea::new(
+            left_range,
+            self.area_type,
+            self.map_type,
+            self.permission.clone(),
+        );
+
+        let mut right_area = MappingArea::new(
+            right_range,
+            self.area_type,
+            self.map_type,
+            self.permission.clone(),
+        );
+
+        // 4. 分配帧：遍历原区域的 frames，根据 VPN 分配到左右区域 - 手动迭代并清空
+        let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+        for vpn in vpns {
+            if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                if vpn < split_vpn {
+                    left_area.frames.insert(vpn, tracked_frames);
+                } else {
+                    right_area.frames.insert(vpn, tracked_frames);
+                }
+            }
+        }
+
+        // 5. 重新建立页表映射
+        // 注意：原区域的页表映射仍然存在，我们不需要重新映射
+        // 只需要确保 frames 的所有权转移正确
+
+        Ok((left_area, right_area))
+    }
+
+    /// 部分解除映射：解除 [start_vpn, end_vpn) 范围的映射
+    ///
+    /// # 参数
+    /// - `page_table`: 页表的可变引用
+    /// - `start_vpn`: 起始 VPN（包含）
+    /// - `end_vpn`: 结束 VPN（不包含）
+    ///
+    /// # 返回值
+    /// - `Ok(Option<(Self, Option<Self>)>)`: 成功
+    ///   - `None`: 整个区域被解除映射
+    ///   - `Some((left, None))`: 只剩左侧部分
+    ///   - `Some((left, Some(right)))`: 中间被解除映射，剩下左右两部分
+    ///
+    /// # 注意
+    /// - 原区域会被消耗（moved）
+    pub fn partial_unmap(
+        mut self,
+        page_table: &mut ActivePageTableInner,
+        start_vpn: Vpn,
+        end_vpn: Vpn,
+    ) -> Result<Option<(Self, Option<Self>)>, page_table::PagingError> {
+        let area_start = self.vpn_range.start();
+        let area_end = self.vpn_range.end();
+
+        // 1. 计算需要解除映射的实际范围
+        let unmap_start = core::cmp::max(start_vpn, area_start);
+        let unmap_end = core::cmp::min(end_vpn, area_end);
+
+        if unmap_start >= unmap_end {
+            // 没有重叠，返回原区域
+            return Ok(Some((self, None)));
+        }
+
+        // 2. 解除映射指定范围内的页
+        for vpn in VpnRange::new(unmap_start, unmap_end) {
+            self.unmap_one(page_table, vpn)?;
+        }
+
+        // 3. 根据解除映射的位置，决定返回什么
+        if unmap_start == area_start && unmap_end == area_end {
+            // 情况 1: 整个区域被解除映射
+            return Ok(None);
+        } else if unmap_start == area_start {
+            // 情况 2: 解除映射了前半部分，保留 [unmap_end, area_end)
+            self.vpn_range = VpnRange::new(unmap_end, area_end);
+            return Ok(Some((self, None)));
+        } else if unmap_end == area_end {
+            // 情况 3: 解除映射了后半部分，保留 [area_start, unmap_start)
+            self.vpn_range = VpnRange::new(area_start, unmap_start);
+            return Ok(Some((self, None)));
+        } else {
+            // 情况 4: 解除映射了中间部分，需要拆分为两个区域
+            // 保留 [area_start, unmap_start) 和 [unmap_end, area_end)
+
+            let left_range = VpnRange::new(area_start, unmap_start);
+            let right_range = VpnRange::new(unmap_end, area_end);
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(),
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(),
+            );
+
+            // 分配 frames - 手动迭代并清空
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < unmap_start {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else if vpn >= unmap_end {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                    // unmap_start <= vpn < unmap_end 的 frames 已经在 unmap_one 中释放
+                }
+            }
+
+            return Ok(Some((left_area, Some(right_area))));
+        }
     }
 }
 

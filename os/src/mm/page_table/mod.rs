@@ -49,6 +49,8 @@ pub enum PagingError {
     /// 巨页拆分功能尚未实现
     #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
     HugePageSplitNotImplemented,
+    /// 内存耗尽
+    OutOfMemory,
 }
 
 /// 分页操作的结果类型
