@@ -89,6 +89,11 @@ impl MemorySpace {
         self.page_table.root_ppn()
     }
 
+    /// 返回所有映射区域的引用
+    pub fn areas(&self) -> &Vec<MappingArea> {
+        &self.areas
+    }
+
     /// 获取当前的 brk 值（堆的当前结束地址）
     ///
     /// # 返回值
@@ -609,7 +614,7 @@ impl MemorySpace {
     /// # 返回值
     /// - `Some(addr)`: 找到的空闲区域起始地址（已对齐）
     /// - `None`: 没有足够大的空闲区域
-    fn find_free_region(&self, size: usize, align: usize) -> Option<usize> {
+    pub fn find_free_region(&self, size: usize, align: usize) -> Option<usize> {
         // 获取堆的起始和结束
         let heap_start = self.heap_start?.start_addr().as_usize();
 
