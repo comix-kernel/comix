@@ -130,6 +130,12 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_WAIT4 => sys_wait4(frame),
         syscall_number::SYS_PRLIMIT64 => sys_prlimit(frame),
 
+        // 内存管理 (Memory Management)
+        syscall_number::SYS_BRK => sys_brk(frame),
+        syscall_number::SYS_MUNMAP => sys_munmap(frame),
+        syscall_number::SYS_MMAP => sys_mmap(frame),
+        // syscall_number::SYS_MPROTECT => sys_mprotect(frame),
+
         // 文件系统同步 (续)
         syscall_number::SYS_SYNCFS => sys_syncfs(frame),
 
