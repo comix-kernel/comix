@@ -59,8 +59,9 @@ pub struct MemorySpace {
     /// 此内存空间中的映射区域列表
     areas: Vec<MappingArea>,
 
-    /// 堆顶部 (brk 系统调用使用，仅限用户空间)
-    heap_top: Option<Vpn>,
+    /// 堆的起始地址 (brk 系统调用使用，仅限用户空间)
+    /// 注意：这是堆的固定起始位置，真正的堆顶（current brk）存储在 UserHeap 区域的 vpn_range.end 中
+    heap_start: Option<Vpn>,
 }
 
 impl MemorySpace {
@@ -69,7 +70,7 @@ impl MemorySpace {
         MemorySpace {
             page_table: ActivePageTableInner::new(),
             areas: Vec::new(),
-            heap_top: None,
+            heap_start: None,
         }
     }
 
@@ -86,6 +87,20 @@ impl MemorySpace {
     /// 返回根页表的物理页号 (PPN)
     pub fn root_ppn(&self) -> Ppn {
         self.page_table.root_ppn()
+    }
+
+    /// 获取当前的 brk 值（堆的当前结束地址）
+    ///
+    /// # 返回值
+    /// - 如果堆区域存在，返回堆的结束地址（current brk）
+    /// - 如果堆区域不存在，返回堆的起始地址
+    /// - 如果堆未初始化，返回 None
+    pub fn current_brk(&self) -> Option<usize> {
+        self.areas
+            .iter()
+            .find(|a| a.area_type() == AreaType::UserHeap)
+            .map(|a| a.vpn_range().end().start_addr().as_usize())
+            .or_else(|| self.heap_start.map(|vpn| vpn.start_addr().as_usize()))
     }
 
     /// 映射内核空间（所有地址空间共享）
@@ -431,8 +446,8 @@ impl MemorySpace {
             }
         }
         space.areas = areas_to_keep;
-        // 重置堆顶
-        space.heap_top = None;
+        // 重置堆起始地址
+        space.heap_start = None;
 
         let mut max_end_vpn = Vpn::from_usize(0);
 
@@ -499,7 +514,7 @@ impl MemorySpace {
         }
 
         // 2. 初始化堆（从 ELF 结束地址开始，页对齐）
-        space.heap_top = Some(max_end_vpn);
+        space.heap_start = Some(max_end_vpn);
 
         // 3. 映射用户栈（带保护页）
         let user_stack_bottom =
@@ -525,7 +540,7 @@ impl MemorySpace {
     /// - 新的 brk 会超出 MAX_USER_HEAP_SIZE
     /// - 新的 brk 会与现有区域重叠
     pub fn brk(&mut self, new_brk: usize) -> Result<usize, PagingError> {
-        let heap_bottom = self.heap_top.ok_or(PagingError::InvalidAddress)?;
+        let heap_bottom = self.heap_start.ok_or(PagingError::InvalidAddress)?;
         let new_end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(new_brk));
 
         // 边界检查
@@ -598,20 +613,20 @@ impl MemorySpace {
 
         // 确定起始地址
         let start = if hint == 0 {
-            // 内核选择地址：在堆栈顶部之后
-            let heap_end = self
-                .heap_top
+            // 内核选择地址：在堆末尾之后
+            let heap_bottom = self
+                .heap_start
                 .ok_or(PagingError::InvalidAddress)?
                 .start_addr()
                 .as_usize();
 
-            // 查找实际的堆栈末尾
+            // 查找实际的堆末尾（当前 brk）
             self.areas
                 .iter()
                 .filter(|a| a.area_type() == AreaType::UserHeap)
                 .map(|a| a.vpn_range().end().start_addr().as_usize())
                 .max()
-                .unwrap_or(heap_end)
+                .unwrap_or(heap_bottom)
         } else {
             // 用户指定的地址，检查是否可用
             if hint >= USER_STACK_TOP - USER_STACK_SIZE {
@@ -662,7 +677,7 @@ impl MemorySpace {
     /// - 帧映射是深层复制的
     pub fn clone_for_fork(&self) -> Result<Self, PagingError> {
         let mut new_space = MemorySpace::new();
-        new_space.heap_top = self.heap_top;
+        new_space.heap_start = self.heap_start;
 
         for area in self.areas.iter() {
             match area.map_type() {

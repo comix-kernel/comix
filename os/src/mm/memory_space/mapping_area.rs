@@ -40,10 +40,11 @@ pub enum AreaType {
 pub struct MappingArea {
     /// 此映射区域的虚拟页号范围
     ///
-    /// 注意！
+    /// 现已移除大页映射，不用在意
+    /// ~~ 注意！~~ 
     ///
-    /// 创建后不要更改它，
-    /// 不要用它来映射或解除映射页
+    /// ~~ 创建后不要更改它，~~ 
+    /// ~~ 不要用它来映射或解除映射页~~ 
     vpn_range: VpnRange,
 
     /// 此映射区域的类型
@@ -633,8 +634,9 @@ impl MappingArea {
         let old_end = self.vpn_range.end();
         let new_end = Vpn::from_usize(old_end.as_usize() - count);
 
-        // 从末尾解除映射页（倒序）
-        for i in (0..count).rev() {
+        // 解除映射 [new_end, old_end) 范围内的页
+        // 对于 4K 页，解除映射顺序不影响正确性
+        for i in 0..count {
             let vpn = Vpn::from_usize(new_end.as_usize() + i);
             self.unmap_one(page_table, vpn)?;
         }
