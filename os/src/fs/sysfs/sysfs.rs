@@ -63,13 +63,11 @@ impl SysFS {
         class_dir.add_child("rtc", rtc_dir)?;
 
         // /sys/kernel/
-        let kernel_dir =
-            SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
+        let kernel_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
         root.add_child("kernel", kernel_dir)?;
 
         // /sys/devices/
-        let devices_dir =
-            SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
+        let devices_dir = SysfsInode::new_directory(FileMode::from_bits_truncate(0o040000 | 0o555));
         root.add_child("devices", devices_dir)?;
 
         // /sys/block/ -> class/block/ (向后兼容符号链接)

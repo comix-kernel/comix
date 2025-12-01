@@ -37,13 +37,13 @@ impl ContentGenerator for StatGenerator {
         // 格式参考: man 5 proc
         let content = format!(
             "{} ({}) {} {} {} {} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
-            task.tid,    // (1) pid
-            name,        // (2) comm (进程名)
-            state_char,  // (3) state
-            task.ppid,   // (4) ppid
-            task.pgid,   // (5) pgrp
-            0,           // (6) session
-            // 后续字段暂时用 0 填充
+            task.tid,   // (1) pid
+            name,       // (2) comm (进程名)
+            state_char, // (3) state
+            task.ppid,  // (4) ppid
+            task.pgid,  // (5) pgrp
+            0,          // (6) session
+                        // 后续字段暂时用 0 填充
         );
 
         Ok(content.into_bytes())

@@ -1,7 +1,7 @@
-pub mod status;
-pub mod stat;
 pub mod cmdline;
+pub mod stat;
+pub mod status;
 
-pub use status::StatusGenerator;
-pub use stat::StatGenerator;
 pub use cmdline::CmdlineGenerator;
+pub use stat::StatGenerator;
+pub use status::StatusGenerator;

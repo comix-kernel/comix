@@ -2,22 +2,22 @@
 //!
 //! 冷插拔系统的简化实现：所有设备号到驱动的映射都通过硬编码规则完成。
 
-use crate::device::{BLK_DRIVERS, SERIAL_DRIVERS, Driver};
+use crate::device::{BLK_DRIVERS, Driver, SERIAL_DRIVERS};
 use crate::vfs::dev::{major, minor};
 use alloc::sync::Arc;
 
 /// 标准字符设备 major 号
 pub mod chrdev_major {
-    pub const MEM: u32 = 1;      // /dev/null, /dev/zero 等
-    pub const TTY: u32 = 4;      // /dev/tty*, /dev/ttyS*
-    pub const CONSOLE: u32 = 5;  // /dev/console
-    pub const INPUT: u32 = 13;   // /dev/input/*
+    pub const MEM: u32 = 1; // /dev/null, /dev/zero 等
+    pub const TTY: u32 = 4; // /dev/tty*, /dev/ttyS*
+    pub const CONSOLE: u32 = 5; // /dev/console
+    pub const INPUT: u32 = 13; // /dev/input/*
 }
 
 /// 标准块设备 major 号
 pub mod blkdev_major {
-    pub const LOOP: u32 = 7;        // /dev/loop*
-    pub const SCSI_DISK: u32 = 8;   // /dev/sd*
+    pub const LOOP: u32 = 7; // /dev/loop*
+    pub const SCSI_DISK: u32 = 8; // /dev/sd*
     pub const VIRTIO_BLK: u32 = 254; // /dev/vd*
 }
 
@@ -44,7 +44,8 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
             if min >= 64 && min < 128 {
                 // 串口设备：ttyS0-ttyS63 (minor 64-127)
                 let idx = (min - 64) as usize;
-                SERIAL_DRIVERS.read()
+                SERIAL_DRIVERS
+                    .read()
                     .get(idx)
                     .map(|d| d.clone() as Arc<dyn Driver>)
             } else {
@@ -56,7 +57,8 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
         chrdev_major::CONSOLE => {
             // 控制台设备 (minor 1)
             // 使用第一个串口作为控制台
-            SERIAL_DRIVERS.read()
+            SERIAL_DRIVERS
+                .read()
                 .first()
                 .map(|d| d.clone() as Arc<dyn Driver>)
         }

@@ -9,7 +9,8 @@ use crate::vfs::{FileMode, FsError, Inode};
 /// 构建内核信息 sysfs 树
 pub fn build_kernel_info(root: &Arc<SysfsInode>) -> Result<(), FsError> {
     let kernel_inode = root.lookup("kernel")?;
-    let kernel_dir = kernel_inode.downcast_ref::<SysfsInode>()
+    let kernel_dir = kernel_inode
+        .downcast_ref::<SysfsInode>()
         .ok_or(FsError::InvalidArgument)?;
 
     // /sys/kernel/version

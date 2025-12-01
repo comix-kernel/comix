@@ -5,7 +5,6 @@
 //! - 属性文件 (Attribute) - 动态生成内容
 //! - 符号链接 (Symlink)
 
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -300,10 +299,10 @@ impl Inode for SysfsInode {
         self
     }
 
-    fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
     }
-    
+
     fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }

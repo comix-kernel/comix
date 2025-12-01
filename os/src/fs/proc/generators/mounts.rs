@@ -20,7 +20,10 @@ impl ContentGenerator for MountsGenerator {
 
             // 构建挂载选项
             let mut options = Vec::new();
-            if mount_point.flags.contains(crate::vfs::MountFlags::READ_ONLY) {
+            if mount_point
+                .flags
+                .contains(crate::vfs::MountFlags::READ_ONLY)
+            {
                 options.push("ro");
             } else {
                 options.push("rw");

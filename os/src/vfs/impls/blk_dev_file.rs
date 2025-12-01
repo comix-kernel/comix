@@ -2,8 +2,8 @@
 
 use crate::device::BLK_DRIVERS;
 use crate::sync::SpinLock;
-use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use crate::vfs::devno::get_blkdev_index;
+use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
 /// 块设备文件
@@ -137,7 +137,6 @@ impl File for BlockDeviceFile {
                 if !driver.read_block(sector_idx, &mut sector_buf) {
                     return Err(FsError::IoError);
                 }
-                    
             }
 
             // 修改数据

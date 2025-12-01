@@ -187,8 +187,8 @@ impl ProcInode {
 
     /// 为指定 PID 创建进程目录
     fn create_process_dir(&self, pid: u32) -> Option<Arc<ProcInode>> {
+        use crate::fs::proc::generators::{CmdlineGenerator, StatGenerator, StatusGenerator};
         use crate::kernel::{TASK_MANAGER, TaskManagerTrait};
-        use crate::fs::proc::generators::{StatusGenerator, StatGenerator, CmdlineGenerator};
 
         // 获取任务
         let task = TASK_MANAGER.lock().get_task(pid)?;
@@ -374,7 +374,7 @@ impl Inode for ProcInode {
     fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
     }
-    
+
     fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }

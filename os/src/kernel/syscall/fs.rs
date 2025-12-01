@@ -9,7 +9,8 @@ use crate::{
     kernel::{
         current_cpu, current_task,
         syscall::util::{
-            create_file_at, get_path_safe, resolve_at_path, resolve_at_path_with_flags, create_file_from_dentry
+            create_file_at, create_file_from_dentry, get_path_safe, resolve_at_path,
+            resolve_at_path_with_flags,
         },
     },
     uapi::{
@@ -18,8 +19,8 @@ use crate::{
         time::TimeSpec,
     },
     vfs::{
-        Dentry, RegFile, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, split_path,
-        vfs_lookup, DENTRY_CACHE
+        DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, RegFile, SeekWhence, Stat,
+        split_path, vfs_lookup,
     },
 };
 
@@ -482,39 +483,10 @@ pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> 
     };
 
     // 查找文件
-    let dentry = if at_flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        // 不跟随符号链接：需要特殊处理最后一级路径
-        let (dir_path, filename) = match split_path(&path_str) {
-            Ok(p) => p,
-            Err(e) => return e.to_errno(),
-        };
-
-        // 解析到父目录
-        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        };
-
-        // 在父目录中查找文件名（不跟随符号链接）
-        if let Some(child) = parent_dentry.lookup_child(&filename) {
-            child
-        } else {
-            let child_inode = match parent_dentry.inode.lookup(&filename) {
-                Ok(i) => i,
-                Err(e) => return e.to_errno(),
-            };
-            let child_dentry = Dentry::new(filename.clone(), child_inode);
-            parent_dentry.add_child(child_dentry.clone());
-            child_dentry
-        }
-    } else {
-        // 跟随符号链接（默认行为）
-        match resolve_at_path(dirfd, &path_str) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        }
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
     };
 
     // 获取文件元数据
@@ -589,31 +561,9 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     unsafe { sstatus::clear_sum() };
 
     // 查找符号链接（不跟随最后一级的符号链接）
-    let dentry = {
-        let (dir_path, filename) = match split_path(&path_str) {
-            Ok(p) => p,
-            Err(e) => return e.to_errno(),
-        };
-
-        // 解析到父目录（路径中间的符号链接会被跟随）
-        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        };
-
-        // 在父目录中查找文件名（不跟随符号链接）
-        if let Some(child) = parent_dentry.lookup_child(&filename) {
-            child
-        } else {
-            let child_inode = match parent_dentry.inode.lookup(&filename) {
-                Ok(i) => i,
-                Err(e) => return e.to_errno(),
-            };
-            let child_dentry = Dentry::new(filename.clone(), child_inode);
-            parent_dentry.add_child(child_dentry.clone());
-            child_dentry
-        }
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, false) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
     };
 
     // 验证是符号链接
@@ -678,43 +628,10 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     }
 
     // 查找文件
-    let dentry = if at_flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        // 不跟随符号链接：需要特殊处理最后一级路径
-        let (dir_path, filename) = match split_path(&path_str) {
-            Ok(p) => p,
-            Err(e) => return e.to_errno(),
-        };
-
-        // 解析到父目录
-        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        };
-
-        // 在父目录中查找文件名（不跟随符号链接）
-        // 先检查 dentry 缓存
-        if let Some(child) = parent_dentry.lookup_child(&filename) {
-            child
-        } else {
-            // 缓存未命中，通过 inode 查找
-            let child_inode = match parent_dentry.inode.lookup(&filename) {
-                Ok(i) => i,
-                Err(e) => return e.to_errno(),
-            };
-
-            // 创建新的 dentry
-            let child_dentry = Dentry::new(filename.clone(), child_inode);
-            parent_dentry.add_child(child_dentry.clone());
-            child_dentry
-        }
-    } else {
-        // 跟随符号链接（默认行为）
-        match resolve_at_path(dirfd, &path_str) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        }
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
     };
 
     // 获取文件元数据
@@ -755,37 +672,10 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
     };
 
     // 查找文件
-    let dentry = if at_flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        // 不跟随符号链接
-        let (dir_path, filename) = match split_path(&path_str) {
-            Ok(p) => p,
-            Err(e) => return e.to_errno(),
-        };
-
-        let parent_dentry = match resolve_at_path(dirfd, &dir_path) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        };
-
-        if let Some(child) = parent_dentry.lookup_child(&filename) {
-            child
-        } else {
-            let child_inode = match parent_dentry.inode.lookup(&filename) {
-                Ok(i) => i,
-                Err(e) => return e.to_errno(),
-            };
-            let child_dentry = Dentry::new(filename.clone(), child_inode);
-            parent_dentry.add_child(child_dentry.clone());
-            child_dentry
-        }
-    } else {
-        // 跟随符号链接
-        match resolve_at_path(dirfd, &path_str) {
-            Ok(Some(d)) => d,
-            Ok(None) => return -(ENOENT as isize),
-            Err(e) => return e.to_errno(),
-        }
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
     };
 
     // 解析时间参数
@@ -1190,7 +1080,7 @@ pub fn mount(
 ) -> isize {
     use crate::config::EXT4_BLOCK_SIZE;
     use crate::fs::ext4::Ext4FileSystem;
-    use crate::fs::sysfs::device_registry;
+    use crate::fs::sysfs::find_block_device;
     use crate::fs::{init_dev, init_procfs, init_sysfs, mount_tmpfs};
     use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
@@ -1242,8 +1132,6 @@ pub fn mount(
         fstype_str
     );
 
-
-
     // 特殊挂载点处理
     match target_str.as_str() {
         "/proc" => {
@@ -1281,7 +1169,7 @@ pub fn mount(
     // 通用挂载逻辑 (目前只支持 ext4)
     if fstype_str == "ext4" {
         // 查找块设备
-        let dev_info = match device_registry::find_block_device(&source_str) {
+        let dev_info = match find_block_device(&source_str) {
             Some(info) => info,
             None => {
                 crate::pr_err!("[SYSCALL] mount: block device '{}' not found", source_str);
@@ -1300,7 +1188,8 @@ pub fn mount(
         // 为了兼容现有 API，我们尝试从设备获取大小。
         let total_blocks = block_device.total_blocks();
 
-        let ext4_fs = match Ext4FileSystem::open(block_device.clone(), block_size, total_blocks, 0) {
+        let ext4_fs = match Ext4FileSystem::open(block_device.clone(), block_size, total_blocks, 0)
+        {
             Ok(fs) => fs,
             Err(e) => {
                 crate::pr_err!("[SYSCALL] mount: failed to open ext4: {:?}", e);
@@ -1316,7 +1205,10 @@ pub fn mount(
             Some(source_str),
         ) {
             Ok(()) => {
-                crate::pr_info!("[SYSCALL] mount: successfully mounted ext4 at '{}'", target_str);
+                crate::pr_info!(
+                    "[SYSCALL] mount: successfully mounted ext4 at '{}'",
+                    target_str
+                );
                 return 0;
             }
             Err(e) => {

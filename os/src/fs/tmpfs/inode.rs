@@ -93,7 +93,7 @@ impl TmpfsInode {
                 1
             }, // 目录默认2（.和..）
             blocks: 0,
-            rdev: 0,  // 设备节点会在 mknod 时设置
+            rdev: 0, // 设备节点会在 mknod 时设置
         };
 
         Arc::new(Self {
@@ -641,13 +641,8 @@ impl Inode for TmpfsInode {
         let parent_weak = self.self_ref.lock().clone();
 
         // 创建新的 inode
-        let new_inode = TmpfsInode::new(
-            inode_no,
-            inode_type,
-            mode,
-            parent_weak,
-            self.stats.clone(),
-        );
+        let new_inode =
+            TmpfsInode::new(inode_no, inode_type, mode, parent_weak, self.stats.clone());
 
         // 设置设备号 与 自引用
         new_inode.metadata.lock().rdev = dev;

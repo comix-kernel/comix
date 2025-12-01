@@ -3,7 +3,7 @@ use alloc::{format, vec::Vec};
 use crate::{
     config::PAGE_SIZE,
     fs::proc::ContentGenerator,
-    mm::frame_allocator::{get_total_frames, get_free_frames},
+    mm::frame_allocator::{get_free_frames, get_total_frames},
     vfs::FsError,
 };
 
@@ -22,7 +22,7 @@ impl ContentGenerator for MeminfoGenerator {
 
         // 注意：格式严格遵循 Linux ABI
         let content = format!(
-"MemTotal:       {:>8} kB
+            "MemTotal:       {:>8} kB
 MemFree:        {:>8} kB
 MemAvailable:   {:>8} kB
 Buffers:        {:>8} kB
@@ -44,8 +44,7 @@ AnonPages:      {:>8} kB
 Mapped:         {:>8} kB
 Shmem:          {:>8} kB
 ",
-            total_kb, free_kb, available_kb,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            total_kb, free_kb, available_kb, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
         );
 
         Ok(content.into_bytes())
