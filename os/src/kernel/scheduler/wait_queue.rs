@@ -80,6 +80,18 @@ impl WaitQueue {
             wake_up_with_block(t);
         }
     }
+
+    /// 从等待队列中移除指定任务（不唤醒）
+    pub fn remove_task(&mut self, task: &SharedTask) {
+        let _g = self.lock.lock();
+        self.tasks.remove_task(task);
+    }
+
+    /// 检查等待队列是否为空
+    pub fn is_empty(&self) -> bool {
+        let _g = self.lock.lock();
+        self.tasks.is_empty()
+    }
 }
 
 // SAFETY:

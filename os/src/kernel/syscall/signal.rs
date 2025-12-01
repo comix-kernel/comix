@@ -18,9 +18,8 @@ use crate::{
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
-            MContextT, MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE,
-            SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
-            UContextT,
+            MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE, SS_AUTODISARM,
+            SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags, UContextT,
         },
         time::TimeSpec,
         types::{SigSetT, StackT},
@@ -385,7 +384,7 @@ fn wait_for_signal(
     task: SharedTask,
     signal: SignalFlags,
     timeout: Option<TimeSpec>,
-) -> Result<(u8, SigInfoT), i32> {
+) -> Result<(usize, SigInfoT), i32> {
     let mut t = task.lock();
     if let Some(timeout) = timeout {
         if timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1_000_000_000 {
@@ -403,7 +402,7 @@ fn wait_for_signal(
                     .unwrap();
                 let sig_num = flag.to_signal_number();
                 t.pending.signals.remove(flag);
-                return Ok((sig_num as u8, create_siginfo_for_signal(flag)));
+                return Ok((sig_num, create_siginfo_for_signal(flag)));
             } else {
                 Err(-EAGAIN)
             }
@@ -432,7 +431,7 @@ fn wait_for_signal(
                 .unwrap();
             let sig_num = flag.to_signal_number();
             t.pending.signals.remove(flag);
-            return Ok((sig_num as u8, create_siginfo_for_signal(flag)));
+            return Ok((sig_num, create_siginfo_for_signal(flag)));
         }
     } else {
         // 阻塞等待
@@ -454,6 +453,6 @@ fn wait_for_signal(
             .unwrap();
         let sig_num = flag.to_signal_number();
         t.pending.signals.remove(flag);
-        return Ok((sig_num as u8, create_siginfo_for_signal(flag)));
+        return Ok((sig_num, create_siginfo_for_signal(flag)));
     }
 }

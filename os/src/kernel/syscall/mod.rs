@@ -19,6 +19,7 @@ use crate::{
     impl_syscall,
     uapi::{
         fs::LinuxStatFs,
+        futex::RobustListHead,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
@@ -104,9 +105,25 @@ impl_syscall!(
 // 进程与控制 (Process and Control)
 impl_syscall!(sys_exit, exit, (c_int));
 impl_syscall!(sys_exit_group, exit_group, noreturn, (c_int));
+impl_syscall!(sys_set_tid_address, set_tid_address, (*mut c_int));
 
 // 同步/休眠 (Synchronization/Sleeping)
 impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSpec, *mut TimeSpec));
+impl_syscall!(
+    sys_futex,
+    futex,
+    (*mut u32, c_int, u32, *const TimeSpec, *mut u32, u32)
+);
+impl_syscall!(
+    sys_set_robust_list,
+    set_robust_list,
+    (*const RobustListHead, SizeT)
+);
+impl_syscall!(
+    sys_get_robust_list,
+    get_robust_list,
+    (c_int, *mut *mut RobustListHead, *mut SizeT)
+);
 impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
 impl_syscall!(
     sys_setitimmer,
@@ -152,6 +169,7 @@ impl_syscall!(sys_setresuid, setresuid, (u32, u32, u32));
 impl_syscall!(sys_getresuid, getresuid, (*mut u32, *mut u32, *mut u32));
 impl_syscall!(sys_setresgid, setresgid, (u32, u32, u32));
 impl_syscall!(sys_getresgid, getresgid, (*mut u32, *mut u32, *mut u32));
+impl_syscall!(sys_setsid, setsid, ());
 
 // 系统信息 (System Information)
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
