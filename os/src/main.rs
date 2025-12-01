@@ -27,6 +27,8 @@ mod util;
 mod vfs;
 #[macro_use]
 mod log;
+mod net;
+
 use crate::arch::lib::sbi::shutdown;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
