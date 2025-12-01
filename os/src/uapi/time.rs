@@ -56,7 +56,7 @@ impl TimeSpec {
         (sec_ticks + nsec_ticks) as usize
     }
 
-    /// 通过指定频率的刻度数创建 TimeSepc。
+    /// 通过指定频率的刻度数创建 TimeSpec。
     /// # 参数:
     /// - `ticks`: 刻度数
     /// - `freq`: 频率（每秒刻度数）
@@ -71,7 +71,7 @@ impl TimeSpec {
         }
     }
 
-    /// 获取当前墙上时钟时间的 TimeSepc。
+    /// 获取当前墙上时钟时间的 TimeSpec。
     /// # 返回值:
     /// - 当前时间的 TimeSpec 结构体
     pub fn now() -> Self {
@@ -80,7 +80,7 @@ impl TimeSpec {
         mtime + *time
     }
 
-    /// 获取当前单调时钟时间的 TimeSepc。
+    /// 获取当前单调时钟时间的 TimeSpec。
     /// # 返回值:
     /// - 当前单调时间的 TimeSpec 结构体
     pub fn monotonic_now() -> Self {
@@ -88,7 +88,7 @@ impl TimeSpec {
         Self::from_freq(time, clock_freq())
     }
 
-    /// 创建零时间的 TimeSepc。
+    /// 创建零时间的 TimeSpec。
     /// # 返回值:
     /// - 零时间的 TimeSpec 结构体
     pub fn zero() -> Self {

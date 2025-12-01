@@ -30,7 +30,16 @@ pub fn init() {
     );
 }
 
+/// 更新墙上时钟时间
+/// # 参数:
+/// - `time`: 新的墙上时钟时间
 pub fn update_realtime(time: &TimeSpec) {
     let mut realtime = REALTIME.write();
-    *realtime = *time;
+    *realtime = *time - TimeSpec::monotonic_now();
+}
+
+/// 获取当前墙上时钟时间
+pub fn realtime_now() -> TimeSpec {
+    let realtime = REALTIME.read();
+    *realtime + TimeSpec::monotonic_now()
 }

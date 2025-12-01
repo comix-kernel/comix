@@ -110,6 +110,12 @@ pub struct Task {
     pub uts_namespace: Arc<SpinLock<UtsNamespace>>,
     /// 资源限制结构体
     pub rlimit: Arc<SpinLock<RlimitStruct>>,
+    /// 健壮列表头地址及其大小
+    pub robust_list: Option<usize>,
+    /// 线程ID地址
+    pub set_child_tid: usize,
+    /// 线程退出时清除的线程ID地址
+    pub clear_child_tid: usize,
 
     // === 权限和凭证 ===
     /// 任务凭证（用户、组、能力）
@@ -380,6 +386,9 @@ impl Task {
             blocked,
             pending: SignalPending::empty(),
             shared_pending,
+            robust_list: None,
+            set_child_tid: 0,
+            clear_child_tid: 0,
             credential: super::Credential::root(),
             umask: 0o022,
             fd_table,
@@ -392,7 +401,6 @@ impl Task {
         use crate::{
             mm::frame_allocator::{alloc_contig_frames, alloc_frame},
             uapi::resource::INIT_RLIMITS,
-            vfs::get_root_dentry,
         };
         let kstack_tracker =
             alloc_contig_frames(1).expect("new_dummy_task: failed to alloc kstack");

@@ -58,8 +58,12 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // 进程与控制 (Process and Control)
         syscall_number::SYS_EXIT => sys_exit(frame),
         syscall_number::SYS_EXIT_GROUP => sys_exit_group(frame),
+        syscall_number::SYS_SET_TID_ADDRESS => sys_set_tid_address(frame),
 
-        // 同步/休眠 (Synchronization/Sleeping)
+        // 同步/休眠
+        syscall_number::SYS_FUTEX => sys_futex(frame),
+        syscall_number::SYS_SET_ROBUST_LIST => sys_set_robust_list(frame),
+        syscall_number::SYS_GET_ROBUST_LIST => sys_get_robust_list(frame),
         syscall_number::SYS_NANOSLEEP => sys_nanosleep(frame),
         syscall_number::SYS_GETITIMER => sys_getitimmer(frame),
         syscall_number::SYS_SETITIMER => sys_setitimmer(frame),
@@ -90,6 +94,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_GETRESUID => sys_getresuid(frame),
         syscall_number::SYS_SETRESGID => sys_setresgid(frame),
         syscall_number::SYS_GETRESGID => sys_getresgid(frame),
+        syscall_number::SYS_SETSID => sys_setsid(frame),
 
         // 系统信息 (System Information)
         syscall_number::SYS_UNAME => sys_uname(frame),
@@ -141,6 +146,17 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
 
         // 获取网络接口地址列表 (非标准系统调用)
         syscall_number::SYS_GETIFADDRS => sys_getifaddrs(frame),
+
+        // 扩展系统调用 (Extended/Legacy)
+        // (send/recv 等已经通过更通用的接口实现，不需要单独分发)
+
+        // 系统信息 (补充)
+        syscall_number::SYS_SYSINFO => sys_sysinfo(frame),
+
+        // POSIX 定时器 (补充)
+        syscall_number::SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
+        syscall_number::SYS_CLOCK_SETTIME => sys_clock_settime(frame),
+        syscall_number::SYS_CLOCK_GETRES => sys_clock_getres(frame),
 
         _ => {
             // 未知的系统调用
