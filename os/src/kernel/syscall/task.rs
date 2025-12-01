@@ -695,7 +695,7 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
 /// - `uaddr`: 指向用户空间中 futex 变量的指针
 /// - `op`: 操作码和标志
 /// - `val`: 操作相关的值
-/// - `_timeout`: 指向 TimeSepc 结构体的指针, 用于指定超时时间
+/// - `_timeout`: 指向 TimeSpec 结构体的指针, 用于指定超时时间
 /// - `_uaddr2`: 指向用户空间中第二个 futex 变量的指针
 /// - `_val3`: 额外的操作相关值
 /// # 返回值
@@ -704,7 +704,7 @@ pub fn futex(
     uaddr: *mut u32,
     op: c_int,
     val: u32,
-    timeout: *const TimeSepc,
+    timeout: *const TimeSpec,
     _uaddr2: *mut u32,
     _val3: u32,
 ) -> c_int {

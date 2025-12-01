@@ -112,7 +112,7 @@ impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSpec, *mut TimeSpec));
 impl_syscall!(
     sys_futex,
     futex,
-    (*mut u32, c_int, u32, *const TimeSepc, *mut u32, u32)
+    (*mut u32, c_int, u32, *const TimeSpec, *mut u32, u32)
 );
 impl_syscall!(
     sys_set_robust_list,
@@ -124,7 +124,6 @@ impl_syscall!(
     get_robust_list,
     (c_int, *mut *mut RobustListHead, *mut SizeT)
 );
-impl_syscall!(sys_nanosleep, nanosleep, (*const TimeSepc, *mut TimeSepc));
 impl_syscall!(sys_getitimmer, getitimer, (c_int, *mut Itimerval));
 impl_syscall!(
     sys_setitimmer,
