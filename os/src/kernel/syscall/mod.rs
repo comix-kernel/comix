@@ -52,7 +52,11 @@ impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
 impl_syscall!(sys_mknodat, mknodat, (i32, *const c_char, u32, u64));
 impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
 impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
-impl_syscall!(sys_symlinkat, symlinkat, (*const c_char, i32, *const c_char));
+impl_syscall!(
+    sys_symlinkat,
+    symlinkat,
+    (*const c_char, i32, *const c_char)
+);
 
 // 挂载/文件系统信息 (Mount/Filesystem Info)
 impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));

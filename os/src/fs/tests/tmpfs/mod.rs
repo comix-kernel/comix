@@ -39,7 +39,10 @@ pub fn create_test_dir(fs: &Arc<TmpFs>, name: &str) -> Result<Arc<dyn Inode>, Fs
 
 // Export test modules
 pub mod tmpfs_basic;
+pub mod tmpfs_capacity;
 pub mod tmpfs_directory;
 pub mod tmpfs_error;
 pub mod tmpfs_integration;
 pub mod tmpfs_io;
+pub mod tmpfs_metadata;
+pub mod tmpfs_sparse;
