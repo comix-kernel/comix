@@ -154,10 +154,15 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             };
 
             // 测试锁
-            // 使用设备号 0 和 inode_no 作为文件标识
-            let dev = 0; // TODO: 获取真实设备号
+            // TODO: 获取真实设备号
+            // 当前使用设备号 0，在单一文件系统场景下 inode 号足够区分文件。
+            // 未来改进：
+            // 1. 在 FileSystem trait 中添加 dev_id() 方法返回设备号
+            // 2. 在挂载时为每个文件系统分配唯一的设备号
+            // 3. 通过 dentry -> mount_point -> fs 获取设备号
+            let dev = 0;
             let ino = metadata.inode_no as u64;
-            if let Err(e) = file_lock_manager().test_lock(dev, ino, &mut flock, pid) {
+            if let Err(e) = file_lock_manager().test_lock(dev, ino, start, len, &mut flock, pid) {
                 return e.to_errno();
             }
 
@@ -220,7 +225,8 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             let pid = task.lock().pid as i32;
 
             // 设置锁
-            let dev = 0; // TODO: 获取真实设备号
+            // TODO: 获取真实设备号（与上面 F_GETLK 的 TODO 相同）
+            let dev = 0;
             let ino = metadata.inode_no as u64;
             match file_lock_manager().set_lock(dev, ino, start, len, lock_type, pid, blocking) {
                 Ok(()) => 0,

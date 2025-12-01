@@ -3,8 +3,10 @@
 use riscv::register::sstatus;
 
 use crate::kernel::current_cpu;
+use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
+use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
 
 /// 向文件描述符写入数据
 /// # 参数
@@ -70,6 +72,11 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EINVAL as isize);
     }
 
+    // 验证 iovec 数组指针
+    if !validate_user_ptr(iov) {
+        return -(EFAULT as isize);
+    }
+
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
@@ -84,6 +91,17 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
+
+        // 验证每个 iovec 条目的缓冲区指针
+        if !validate_user_ptr_mut(vec.iov_base) {
+            unsafe { sstatus::clear_sum() };
+            return if total_read > 0 {
+                total_read as isize
+            } else {
+                -(EFAULT as isize)
+            };
+        }
+
         let buffer = unsafe { core::slice::from_raw_parts_mut(vec.iov_base, vec.iov_len) };
         match file.read(buffer) {
             Ok(n) => {
@@ -117,6 +135,11 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EINVAL as isize);
     }
 
+    // 验证 iovec 数组指针
+    if !validate_user_ptr(iov) {
+        return -(EFAULT as isize);
+    }
+
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
@@ -131,6 +154,17 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
+
+        // 验证每个 iovec 条目的缓冲区指针
+        if !validate_user_ptr(vec.iov_base) {
+            unsafe { sstatus::clear_sum() };
+            return if total_written > 0 {
+                total_written as isize
+            } else {
+                -(EFAULT as isize)
+            };
+        }
+
         let buffer = unsafe { core::slice::from_raw_parts(vec.iov_base, vec.iov_len) };
         match file.write(buffer) {
             Ok(n) => {
@@ -223,6 +257,11 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         return -(EINVAL as isize);
     }
 
+    // 验证 iovec 数组指针
+    if !validate_user_ptr(iov) {
+        return -(EFAULT as isize);
+    }
+
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
@@ -238,6 +277,17 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
+
+        // 验证每个 iovec 条目的缓冲区指针
+        if !validate_user_ptr_mut(vec.iov_base) {
+            unsafe { sstatus::clear_sum() };
+            return if total_read > 0 {
+                total_read as isize
+            } else {
+                -(EFAULT as isize)
+            };
+        }
+
         let buffer = unsafe { core::slice::from_raw_parts_mut(vec.iov_base, vec.iov_len) };
         match file.read_at(current_offset, buffer) {
             Ok(n) => {
@@ -273,6 +323,11 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         return -(EINVAL as isize);
     }
 
+    // 验证 iovec 数组指针
+    if !validate_user_ptr(iov) {
+        return -(EFAULT as isize);
+    }
+
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
@@ -288,6 +343,17 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
+
+        // 验证每个 iovec 条目的缓冲区指针
+        if !validate_user_ptr(vec.iov_base) {
+            unsafe { sstatus::clear_sum() };
+            return if total_written > 0 {
+                total_written as isize
+            } else {
+                -(EFAULT as isize)
+            };
+        }
+
         let buffer = unsafe { core::slice::from_raw_parts(vec.iov_base, vec.iov_len) };
         match file.write_at(current_offset, buffer) {
             Ok(n) => {
