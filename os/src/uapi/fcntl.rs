@@ -158,6 +158,79 @@ impl LockType {
     }
 }
 
+/// 文件锁结构（对应 POSIX struct flock）
+///
+/// 用于 F_GETLK / F_SETLK / F_SETLKW 系统调用
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Flock {
+    /// 锁类型：F_RDLCK, F_WRLCK, F_UNLCK
+    pub l_type: i16,
+
+    /// 起始偏移的参考位置：SEEK_SET, SEEK_CUR, SEEK_END
+    pub l_whence: i16,
+
+    /// 锁的起始偏移量
+    pub l_start: i64,
+
+    /// 锁的长度（0 表示到文件末尾）
+    pub l_len: i64,
+
+    /// 持有锁的进程 PID（仅用于 F_GETLK）
+    pub l_pid: i32,
+
+    /// 填充以保持 C 结构对齐
+    _pad: i32,
+}
+
+impl Flock {
+    /// 创建新的锁结构
+    pub fn new(lock_type: LockType, whence: i16, start: i64, len: i64) -> Self {
+        Self {
+            l_type: lock_type as i16,
+            l_whence: whence,
+            l_start: start,
+            l_len: len,
+            l_pid: 0,
+            _pad: 0,
+        }
+    }
+
+    /// 将相对偏移转换为绝对偏移
+    ///
+    /// # 参数
+    /// - `current_offset`: 当前文件偏移量（用于 SEEK_CUR）
+    /// - `file_size`: 文件大小（用于 SEEK_END）
+    pub fn to_absolute_range(
+        &self,
+        current_offset: usize,
+        file_size: usize,
+    ) -> Result<(usize, usize), ()> {
+        let start = match self.l_whence as i32 {
+            SEEK_SET => self.l_start,
+            SEEK_CUR => current_offset as i64 + self.l_start,
+            SEEK_END => file_size as i64 + self.l_start,
+            _ => return Err(()),
+        };
+
+        if start < 0 {
+            return Err(());
+        }
+
+        let start = start as usize;
+        let len = if self.l_len == 0 {
+            // 0 表示锁定到文件末尾
+            usize::MAX - start
+        } else if self.l_len > 0 {
+            self.l_len as usize
+        } else {
+            return Err(());
+        };
+
+        Ok((start, len))
+    }
+}
+
 bitflags! {
     /// 文件打开标志（与 POSIX 兼容）
     ///

@@ -9,11 +9,12 @@ use alloc::sync::Arc;
 /// 对底层 Inode 的会话包装，维护：
 /// - 当前文件偏移量（offset）
 /// - 打开标志位（O_RDONLY/O_WRONLY/O_APPEND 等）
+/// - 异步 I/O 所有者 PID
 ///
 /// # 并发安全
 ///
-/// `offset` 使用 `SpinLock` 保护，因为多线程可能通过 `fork()` 共享同一个 fd。
-pub struct RegFile {
+/// `offset`、`flags` 和 `owner` 使用 `SpinLock` 保护，因为多线程可能通过 `fork()` 共享同一个 fd。
+pub struct DiskFile {
     /// 关联的 dentry (保留,用于某些操作如 fstat)
     pub dentry: Arc<Dentry>,
 
@@ -23,8 +24,11 @@ pub struct RegFile {
     /// 当前文件偏移量 (需要锁保护,因为多线程可能共享 fd)
     offset: SpinLock<usize>,
 
-    /// 打开标志位
-    pub flags: OpenFlags,
+    /// 打开标志位 (需要锁保护以支持 F_SETFL)
+    flags: SpinLock<OpenFlags>,
+
+    /// 异步 I/O 所有者 PID (接收 SIGIO 信号的进程)
+    owner: SpinLock<Option<i32>>,
 }
 
 impl RegFile {
@@ -35,7 +39,8 @@ impl RegFile {
             dentry,
             inode,
             offset: SpinLock::new(0),
-            flags,
+            flags: SpinLock::new(flags),
+            owner: SpinLock::new(None),
         }
     }
 
@@ -48,15 +53,24 @@ impl RegFile {
     pub fn dentry(&self) -> Arc<Dentry> {
         self.dentry.clone()
     }
+
+    /// 设置文件状态标志 (F_SETFL)
+    ///
+    /// 只能修改部分标志，访问模式等不能被修改
+    pub fn set_flags(&self, new_flags: OpenFlags) -> Result<(), FsError> {
+        let mut flags = self.flags.lock();
+        *flags = new_flags;
+        Ok(())
+    }
 }
 
 impl File for RegFile {
     fn readable(&self) -> bool {
-        self.flags.readable()
+        self.flags.lock().readable()
     }
 
     fn writable(&self) -> bool {
-        self.flags.writable()
+        self.flags.lock().writable()
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
@@ -86,12 +100,14 @@ impl File for RegFile {
 
         // 获取写入偏移量
         let mut offset_guard = self.offset.lock();
-        let write_offset = if self.flags.contains(OpenFlags::O_APPEND) {
+        let flags = self.flags.lock();
+        let write_offset = if flags.contains(OpenFlags::O_APPEND) {
             // O_APPEND: 总是写到文件末尾
             self.inode.metadata()?.size
         } else {
             *offset_guard
         };
+        drop(flags); // 释放 flags 锁
 
         // 调用 inode 的 write_at
         let nwritten = self.inode.write_at(write_offset, buf)?;
@@ -131,7 +147,7 @@ impl File for RegFile {
     }
 
     fn flags(&self) -> OpenFlags {
-        self.flags.clone()
+        *self.flags.lock()
     }
 
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
@@ -140,5 +156,26 @@ impl File for RegFile {
 
     fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
         Ok(self.dentry())
+    }
+
+    fn set_status_flags(&self, new_flags: OpenFlags) -> Result<(), FsError> {
+        self.set_flags(new_flags)
+    }
+
+    fn get_owner(&self) -> Result<i32, FsError> {
+        Ok(self.owner.lock().unwrap_or(0))
+    }
+
+    fn set_owner(&self, pid: i32) -> Result<(), FsError> {
+        *self.owner.lock() = if pid == 0 { None } else { Some(pid) };
+        Ok(())
+    }
+
+    fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        self.inode.read_at(offset, buf)
+    }
+
+    fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        self.inode.write_at(offset, buf)
     }
 }
