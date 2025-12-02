@@ -3,6 +3,7 @@
 //! 包含陷阱处理程序的实现
 mod trap_frame;
 mod trap_handler;
+mod sum_guard;
 
 use core::arch::global_asm;
 use riscv::register::{
@@ -10,6 +11,7 @@ use riscv::register::{
     stvec::{self, Stvec},
 };
 
+pub use sum_guard::SumGuard;
 pub use trap_frame::TrapFrame;
 
 global_asm!(include_str!("trap_entry.S"));

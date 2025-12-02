@@ -1,7 +1,6 @@
 //! IO 相关的系统调用实现
 
-use riscv::register::sstatus;
-
+use crate::arch::trap::SumGuard;
 use crate::kernel::current_cpu;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
@@ -21,17 +20,16 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    // 2. 访问用户态缓冲区
-    unsafe { sstatus::set_sum() };
-    let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
-
-    // 3. 调用File::write（会自动处理O_APPEND和offset）
-    let result = match file.write(buffer) {
-        Ok(n) => n as isize,
-        Err(e) => e.to_errno(),
+    // 2. 访问用户态缓冲区并调用 File::write
+    let result = {
+        let _guard = SumGuard::new();
+        let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
+        match file.write(buffer) {
+            Ok(n) => n as isize,
+            Err(e) => e.to_errno(),
+        }
     };
 
-    unsafe { sstatus::clear_sum() };
     result
 }
 
@@ -48,17 +46,16 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    // 2. 访问用户态缓冲区
-    unsafe { sstatus::set_sum() };
-    let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-
-    // 3. 调用File::read（会自动更新offset）
-    let result = match file.read(buffer) {
-        Ok(n) => n as isize,
-        Err(e) => e.to_errno(),
+    // 2. 访问用户态缓冲区并调用 File::read
+    let result = {
+        let _guard = SumGuard::new();
+        let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
+        match file.read(buffer) {
+            Ok(n) => n as isize,
+            Err(e) => e.to_errno(),
+        }
     };
 
-    unsafe { sstatus::clear_sum() };
     result
 }
 
@@ -83,7 +80,8 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    unsafe { sstatus::set_sum() };
+    // 使用 SumGuard 保护整个用户空间访问区域
+    let _guard = SumGuard::new();
     let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
 
     let mut total_read = 0usize;
@@ -94,7 +92,6 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
 
         // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr_mut(vec.iov_base) {
-            unsafe { sstatus::clear_sum() };
             return if total_read > 0 {
                 total_read as isize
             } else {
@@ -111,7 +108,6 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
                 }
             }
             Err(e) => {
-                unsafe { sstatus::clear_sum() };
                 return if total_read > 0 {
                     total_read as isize
                 } else {
@@ -121,7 +117,6 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         }
     }
 
-    unsafe { sstatus::clear_sum() };
     total_read as isize
 }
 
@@ -146,7 +141,8 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    unsafe { sstatus::set_sum() };
+    // 使用 SumGuard 保护整个用户空间访问区域
+    let _guard = SumGuard::new();
     let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
 
     let mut total_written = 0usize;
@@ -157,7 +153,6 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
 
         // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr(vec.iov_base) {
-            unsafe { sstatus::clear_sum() };
             return if total_written > 0 {
                 total_written as isize
             } else {
@@ -174,7 +169,6 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
                 }
             }
             Err(e) => {
-                unsafe { sstatus::clear_sum() };
                 return if total_written > 0 {
                     total_written as isize
                 } else {
@@ -184,7 +178,6 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         }
     }
 
-    unsafe { sstatus::clear_sum() };
     total_written as isize
 }
 
@@ -205,15 +198,15 @@ pub fn pread64(fd: usize, buf: *mut u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    unsafe { sstatus::set_sum() };
-    let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-
-    let result = match file.read_at(offset as usize, buffer) {
-        Ok(n) => n as isize,
-        Err(e) => e.to_errno(),
+    let result = {
+        let _guard = SumGuard::new();
+        let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
+        match file.read_at(offset as usize, buffer) {
+            Ok(n) => n as isize,
+            Err(e) => e.to_errno(),
+        }
     };
 
-    unsafe { sstatus::clear_sum() };
     result
 }
 
@@ -234,15 +227,15 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    unsafe { sstatus::set_sum() };
-    let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
-
-    let result = match file.write_at(offset as usize, buffer) {
-        Ok(n) => n as isize,
-        Err(e) => e.to_errno(),
+    let result = {
+        let _guard = SumGuard::new();
+        let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
+        match file.write_at(offset as usize, buffer) {
+            Ok(n) => n as isize,
+            Err(e) => e.to_errno(),
+        }
     };
 
-    unsafe { sstatus::clear_sum() };
     result
 }
 
@@ -268,7 +261,8 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         Err(e) => return e.to_errno(),
     };
 
-    unsafe { sstatus::set_sum() };
+    // 使用 SumGuard 保护整个用户空间访问区域
+    let _guard = SumGuard::new();
     let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
 
     let mut total_read = 0usize;
@@ -280,7 +274,6 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
 
         // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr_mut(vec.iov_base) {
-            unsafe { sstatus::clear_sum() };
             return if total_read > 0 {
                 total_read as isize
             } else {
@@ -298,7 +291,6 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
                 }
             }
             Err(e) => {
-                unsafe { sstatus::clear_sum() };
                 return if total_read > 0 {
                     total_read as isize
                 } else {
@@ -308,7 +300,6 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         }
     }
 
-    unsafe { sstatus::clear_sum() };
     total_read as isize
 }
 
@@ -334,7 +325,8 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         Err(e) => return e.to_errno(),
     };
 
-    unsafe { sstatus::set_sum() };
+    // 使用 SumGuard 保护整个用户空间访问区域
+    let _guard = SumGuard::new();
     let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
 
     let mut total_written = 0usize;
@@ -346,7 +338,6 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
 
         // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr(vec.iov_base) {
-            unsafe { sstatus::clear_sum() };
             return if total_written > 0 {
                 total_written as isize
             } else {
@@ -364,7 +355,6 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
                 }
             }
             Err(e) => {
-                unsafe { sstatus::clear_sum() };
                 return if total_written > 0 {
                     total_written as isize
                 } else {
@@ -374,7 +364,6 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         }
     }
 
-    unsafe { sstatus::clear_sum() };
     total_written as isize
 }
 
@@ -400,9 +389,10 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
     // 如果 offset 非空，使用 pread；否则使用 read
     let use_offset = !offset.is_null();
     let mut current_offset = if use_offset {
-        unsafe { sstatus::set_sum() };
-        let off = unsafe { *offset };
-        unsafe { sstatus::clear_sum() };
+        let off = {
+            let _guard = SumGuard::new();
+            unsafe { *offset }
+        };
         if off < 0 {
             return -(EINVAL as isize);
         }
@@ -463,9 +453,8 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
 
     // 更新 offset 指针
     if use_offset {
-        unsafe { sstatus::set_sum() };
+        let _guard = SumGuard::new();
         unsafe { *offset = current_offset as i64 };
-        unsafe { sstatus::clear_sum() };
     }
 
     total_sent as isize

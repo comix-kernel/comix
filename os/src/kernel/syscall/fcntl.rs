@@ -1,11 +1,11 @@
 //! fcntl 系统调用实现
 
+use crate::arch::trap::SumGuard;
 use crate::kernel::current_cpu;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::fcntl::{FcntlCmd, FdFlags, FileStatusFlags, Flock, LockType};
 use crate::vfs::{FsError, OpenFlags, file_lock_manager};
 use alloc::sync::Arc;
-use riscv::register::sstatus;
 
 /// fcntl - 文件描述符操作
 ///
@@ -118,9 +118,10 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             }
 
             // 读取用户空间的 flock 结构
-            unsafe { sstatus::set_sum() };
-            let mut flock = unsafe { core::ptr::read(flock_ptr) };
-            unsafe { sstatus::clear_sum() };
+            let mut flock = {
+                let _guard = SumGuard::new();
+                unsafe { core::ptr::read(flock_ptr) }
+            };
 
             // 获取文件对象
             let file = match task.lock().fd_table.get(fd) {
@@ -167,9 +168,10 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             }
 
             // 将结果写回用户空间
-            unsafe { sstatus::set_sum() };
-            unsafe { core::ptr::write(flock_ptr, flock) };
-            unsafe { sstatus::clear_sum() };
+            {
+                let _guard = SumGuard::new();
+                unsafe { core::ptr::write(flock_ptr, flock) };
+            }
 
             0
         }
@@ -183,9 +185,10 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             }
 
             // 读取用户空间的 flock 结构
-            unsafe { sstatus::set_sum() };
-            let flock = unsafe { core::ptr::read(flock_ptr) };
-            unsafe { sstatus::clear_sum() };
+            let flock = {
+                let _guard = SumGuard::new();
+                unsafe { core::ptr::read(flock_ptr) }
+            };
 
             // 解析锁类型
             let lock_type = match LockType::from_raw(flock.l_type) {
@@ -322,35 +325,42 @@ fn fcntl_dupfd(
 }
 
 /// 从指定的最小 fd 开始分配文件描述符
+///
+/// 实现 F_DUPFD 和 F_DUPFD_CLOEXEC 语义：
+/// - 分配一个 >= min_fd 的最小未使用文件描述符
+/// - 不会覆盖已存在的文件描述符
+///
+/// # 参数
+/// - `fd_table`: 文件描述符表
+/// - `min_fd`: 最小文件描述符号
+/// - `file`: 要安装的文件对象
+/// - `cloexec`: 是否设置 CLOEXEC 标志
+///
+/// # 返回值
+/// 成功返回新分配的 fd，失败返回错误
 fn alloc_fd_from(
     fd_table: &crate::vfs::FDTable,
     min_fd: usize,
     file: Arc<dyn crate::vfs::File>,
     cloexec: bool,
 ) -> Result<usize, FsError> {
+    use crate::config::DEFAULT_MAX_FDS;
+
     let flags = if cloexec {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
     };
 
-    // 尝试从 min_fd 开始找到第一个可用的 fd
-    // 简单实现：先尝试分配，如果分配的 fd < min_fd，则继续安装到更高的位置
-    let fd = fd_table.alloc_with_flags(file.clone(), flags)?;
-    if fd >= min_fd {
-        return Ok(fd);
-    }
-
-    // 如果分配的 fd < min_fd，关闭它并在 min_fd 或更高位置重新安装
-    let _ = fd_table.close(fd);
-
-    // 从 min_fd 开始寻找第一个可用位置
-    for try_fd in min_fd..1024 {
-        // 尝试在这个位置安装
-        if fd_table
-            .install_at_with_flags(try_fd, file.clone(), flags)
-            .is_ok()
-        {
+    // 从 min_fd 开始线性扫描，查找第一个未使用的 fd
+    for try_fd in min_fd..DEFAULT_MAX_FDS {
+        // 尝试获取该 fd，如果返回 BadFileDescriptor 说明该 fd 未被使用
+        if fd_table.get(try_fd).is_err() {
+            // 找到一个未使用的 fd，安装文件
+            // 注意：install_at_with_flags 在这个位置安装文件
+            // 由于 fd_table 有内部锁保护，且我们在系统调用上下文中串行执行，
+            // 在 get() 和 install_at_with_flags() 之间不会有并发修改
+            fd_table.install_at_with_flags(try_fd, file, flags)?;
             return Ok(try_fd);
         }
     }
