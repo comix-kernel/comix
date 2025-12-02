@@ -6,7 +6,7 @@ use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
-use crate::pr_err;
+use crate::{pr_err, pr_warn};
 use crate::uapi::errno::{EACCES, EBADF, EEXIST, EINVAL, EIO, ENOMEM, EOPNOTSUPP};
 use crate::uapi::mm::{MAP_FAILED, MapFlags, ProtFlags};
 
@@ -286,7 +286,9 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
                 fd
             );
             // 加载失败，清理已创建的映射
-            let _ = space.munmap(start_addr, len);
+            if let Err(unmap_err) = space.munmap(start_addr, len) {
+                pr_warn!("mmap: failed to clean up mapping on load error: {:?}", unmap_err);
+            }
             return -EIO as isize;
         }
     }
