@@ -6,6 +6,7 @@ use core::sync::atomic::Ordering;
 
 mod cap;
 mod cred;
+mod futex;
 mod ktask;
 mod process;
 mod task_manager;
@@ -16,6 +17,7 @@ mod work_queue;
 
 pub use cap::*;
 pub use cred::*;
+pub use futex::*;
 pub use ktask::*;
 pub use process::*;
 pub use task_manager::{TASK_MANAGER, TaskManagerTrait};

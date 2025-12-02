@@ -768,6 +768,10 @@ impl MemorySpace {
 
         Ok(())
     }
+
+    pub fn translate(&self, vaddr: Vaddr) -> Option<Paddr> {
+        self.page_table.translate(vaddr)
+    }
 }
 
 #[cfg(test)]
