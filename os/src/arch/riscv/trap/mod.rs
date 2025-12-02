@@ -1,9 +1,9 @@
 //! RISC-V 架构的陷阱处理模块
 //!
 //! 包含陷阱处理程序的实现
+mod sum_guard;
 mod trap_frame;
 mod trap_handler;
-mod sum_guard;
 
 use core::arch::global_asm;
 use riscv::register::{

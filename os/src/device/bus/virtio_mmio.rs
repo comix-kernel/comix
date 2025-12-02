@@ -16,9 +16,9 @@ use crate::{
         block::virtio_blk, device_tree::DEVICE_TREE_REGISTRY, gpu::virtio_gpu, input::virtio_input,
         net::virtio_net,
     },
-    earlyprintln,
     kernel::current_memory_space,
     mm::address::{Paddr, UsizeConvert},
+    pr_info, pr_warn,
 };
 
 pub fn driver_init() {
@@ -37,7 +37,7 @@ fn virtio_probe(node: &FdtNode) {
         let paddr = reg.starting_address as usize;
         let size = reg.size.unwrap_or(0);
         if size == 0 {
-            earlyprintln!(
+            pr_warn!(
                 "[Device] Virtio MMIO device tree node {} has no size",
                 node.name
             );
@@ -51,7 +51,7 @@ fn virtio_probe(node: &FdtNode) {
             .expect("Failed to map MMIO region");
         let header = NonNull::new(vaddr.as_usize() as *mut VirtIOHeader).unwrap();
         match unsafe { MmioTransport::new(header, size) } {
-            Err(e) => earlyprintln!("Error creating VirtIO MMIO transport: {}", e),
+            Err(e) => pr_warn!("Error creating VirtIO MMIO transport: {}", e),
             Ok(transport) => {
                 virtio_device(transport);
             }
@@ -68,6 +68,6 @@ fn virtio_device(transport: MmioTransport<'static>) {
         DeviceType::GPU => virtio_gpu::init(transport),
         DeviceType::Input => virtio_input::init(transport),
         DeviceType::Network => virtio_net::init(transport),
-        t => earlyprintln!("Unrecognized virtio device: {:?}", t),
+        t => pr_warn!("Unrecognized virtio device: {:?}", t),
     }
 }

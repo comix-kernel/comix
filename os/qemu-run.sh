@@ -2,6 +2,13 @@
 ELF_FILE="$1"
 BIN_FILE="${ELF_FILE%.*}.bin"
 
+# 参数定义
+os_file="$BIN_FILE"
+mem="4G"
+smp="1"
+fs="fs.img"
+disk="disk.img"
+
 # 1. 转换为纯二进制
 rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
 
@@ -17,20 +24,25 @@ echo "Using existing fs.img (1GB Ext4 filesystem)"
 
 # 3. 运行 QEMU
 QEMU_ARGS="-machine virt \
+            -kernel $os_file \
             -display none \
-            -bios ../bootloader/rustsbi-qemu.bin \
-            -device loader,file=$BIN_FILE,addr=0x80200000"
+            -smp $smp \
+            -bios default \
+            -no-reboot"
 
-# 串口设备 (UART16550 @ 0x10000000)
+# 串口设备
 QEMU_ARGS="$QEMU_ARGS -serial stdio"
 
-# Virtio Block 设备 (@ 0x10001000)
-QEMU_ARGS="$QEMU_ARGS -drive file=fs.img,if=none,format=raw,id=x0"
-QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0"
+# RTC 设备 (基于 UTC 时间)
+QEMU_ARGS="$QEMU_ARGS -rtc base=utc"
 
-# Virtio Network 设备 (@ 0x10002000)
-QEMU_ARGS="$QEMU_ARGS -device virtio-net-device,netdev=net0"
-QEMU_ARGS="$QEMU_ARGS -netdev user,id=net0,hostfwd=tcp::8080-:80"
+# Virtio Block 设备
+QEMU_ARGS="$QEMU_ARGS -drive file=$fs,if=none,format=raw,id=x0"
+QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0"
+
+# Virtio Network 设备
+QEMU_ARGS="$QEMU_ARGS -device virtio-net-device,netdev=net"
+QEMU_ARGS="$QEMU_ARGS -netdev user,id=net,hostfwd=tcp::8080-:80"
 
 # GDB 调试模式
 if [ "$2" == "gdb" ]; then
@@ -39,12 +51,5 @@ if [ "$2" == "gdb" ]; then
 else
     echo "Starting QEMU in normal run mode."
 fi
-
-echo "MMIO devices enabled:"
-echo "  - UART16550      @ 0x10000000"
-echo "  - Virtio Block   @ 0x10001000 (fs.img - 1GB Ext4)"
-echo "  - Virtio Network @ 0x10002000"
-echo "  - PLIC           @ 0x0C000000 (virt machine built-in)"
-echo "  - TEST/RTC       @ 0x00100000 (virt machine built-in)"
 
 qemu-system-riscv64 $QEMU_ARGS
