@@ -447,6 +447,239 @@ impl MappingArea {
         Ok((left_area, right_area))
     }
 
+    /// 部分修改权限：修改 [start_vpn, end_vpn) 范围的权限
+    ///
+    /// # 参数
+    /// - `page_table`: 页表的可变引用
+    /// - `start_vpn`: 起始 VPN（包含）
+    /// - `end_vpn`: 结束 VPN（不包含）
+    /// - `new_perm`: 新的权限标志
+    ///
+    /// # 返回值
+    /// - `Ok(alloc::vec::Vec<Self>)`: 成功，返回修改后的区域列表
+    ///   - 如果整个区域都在范围内：返回包含1个区域的向量（权限已修改）
+    ///   - 如果部分在范围内：返回包含2-3个区域的向量（分割后的区域）
+    ///
+    /// # 注意
+    /// - 原区域会被消耗（moved）
+    /// - 调用者负责将返回的区域插入到 areas 列表中
+    /// - 只支持 Framed 映射类型
+    pub fn partial_change_permission(
+        mut self,
+        page_table: &mut ActivePageTableInner,
+        start_vpn: Vpn,
+        end_vpn: Vpn,
+        new_perm: UniversalPTEFlag,
+    ) -> Result<alloc::vec::Vec<Self>, page_table::PagingError> {
+        let area_start = self.vpn_range.start();
+        let area_end = self.vpn_range.end();
+
+        // 计算需要修改权限的实际范围
+        let change_start = core::cmp::max(start_vpn, area_start);
+        let change_end = core::cmp::min(end_vpn, area_end);
+
+        if change_start >= change_end {
+            // 没有重叠，返回原区域
+            return Ok(alloc::vec![self]);
+        }
+
+        // 只支持 Framed 映射
+        if self.map_type != MapType::Framed {
+            return Err(page_table::PagingError::UnsupportedMapType);
+        }
+
+        // 修改页表中的权限
+        for vpn in VpnRange::new(change_start, change_end) {
+            page_table.update_flags(vpn, new_perm)?;
+        }
+
+        // 根据修改范围决定如何分割区域
+        if change_start == area_start && change_end == area_end {
+            // 情况 1: 整个区域都需要修改权限
+            self.permission = new_perm;
+            return Ok(alloc::vec![self]);
+        } else if change_start == area_start {
+            // 情况 2: 修改了前半部分
+            // 分割为: [area_start, change_end) 新权限 + [change_end, area_end) 旧权限
+            let left_range = VpnRange::new(area_start, change_end);
+            let right_range = VpnRange::new(change_end, area_end);
+
+            let left_pages = change_end.as_usize() - area_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + left_pages * PAGE_SIZE,
+                len: f.len - left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                new_perm, // 新权限
+                left_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                right_file,
+            );
+
+            // 分配 frames
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < change_end {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                }
+            }
+
+            return Ok(alloc::vec![left_area, right_area]);
+        } else if change_end == area_end {
+            // 情况 3: 修改了后半部分
+            // 分割为: [area_start, change_start) 旧权限 + [change_start, area_end) 新权限
+            let left_range = VpnRange::new(area_start, change_start);
+            let right_range = VpnRange::new(change_start, area_end);
+
+            let left_pages = change_start.as_usize() - area_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + left_pages * PAGE_SIZE,
+                len: f.len - left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                left_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                new_perm, // 新权限
+                right_file,
+            );
+
+            // 分配 frames
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < change_start {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                }
+            }
+
+            return Ok(alloc::vec![left_area, right_area]);
+        } else {
+            // 情况 4: 修改了中间部分，需要分割为三个区域
+            // [area_start, change_start) 旧权限 + [change_start, change_end) 新权限 + [change_end, area_end) 旧权限
+            let left_range = VpnRange::new(area_start, change_start);
+            let middle_range = VpnRange::new(change_start, change_end);
+            let right_range = VpnRange::new(change_end, area_end);
+
+            let left_pages = change_start.as_usize() - area_start.as_usize();
+            let middle_pages = change_end.as_usize() - change_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let middle_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + left_pages * PAGE_SIZE,
+                len: middle_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + (left_pages + middle_pages) * PAGE_SIZE,
+                len: f.len - (left_pages + middle_pages) * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                left_file,
+            );
+
+            let mut middle_area = MappingArea::new(
+                middle_range,
+                self.area_type,
+                self.map_type,
+                new_perm, // 新权限
+                middle_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                right_file,
+            );
+
+            // 分配 frames
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < change_start {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else if vpn < change_end {
+                        middle_area.frames.insert(vpn, tracked_frames);
+                    } else {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                }
+            }
+
+            return Ok(alloc::vec![left_area, middle_area, right_area]);
+        }
+    }
+
     /// 部分解除映射：解除 [start_vpn, end_vpn) 范围的映射
     ///
     /// # 参数
