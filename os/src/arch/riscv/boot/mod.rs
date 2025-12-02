@@ -116,7 +116,7 @@ fn init() {
         println!("[Init] Continuing without filesystem...");
     }
 
-    kernel_execve("/home/user/bin/init", &["init"], &[]);
+    kernel_execve("/sbin/init", &["/sbin/init"], &[]);
 }
 
 /// 内核守护线程
