@@ -7,6 +7,7 @@ pub mod cred;
 pub mod errno;
 pub mod fcntl;
 pub mod fs;
+pub mod iovec;
 pub mod futex;
 pub mod log;
 pub mod reboot;

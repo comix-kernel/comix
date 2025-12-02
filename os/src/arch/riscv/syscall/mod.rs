@@ -14,6 +14,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // Epoll & Duplication
         syscall_number::SYS_DUP => sys_dup(frame),
         syscall_number::SYS_DUP3 => sys_dup3(frame),
+        syscall_number::SYS_FCNTL => sys_fcntl(frame),
         syscall_number::SYS_IOCTL => sys_ioctl(frame),
 
         // 文件/目录创建与链接 (File/Directory Creation and Linking)
@@ -43,6 +44,13 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // I/O 操作 (Input/Output Operations)
         syscall_number::SYS_READ => sys_read(frame),
         syscall_number::SYS_WRITE => sys_write(frame),
+        syscall_number::SYS_READV => sys_readv(frame),
+        syscall_number::SYS_WRITEV => sys_writev(frame),
+        syscall_number::SYS_PREAD64 => sys_pread64(frame),
+        syscall_number::SYS_PWRITE64 => sys_pwrite64(frame),
+        syscall_number::SYS_PREADV => sys_preadv(frame),
+        syscall_number::SYS_PWRITEV => sys_pwritev(frame),
+        syscall_number::SYS_SENDFILE => sys_sendfile(frame),
 
         // 文件元数据与同步 (File Metadata and Synchronization)
         syscall_number::SYS_READLINKAT => sys_readlinkat(frame),

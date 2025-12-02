@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 mod cred;
+mod fcntl;
 mod fs;
 mod io;
 mod ipc;
@@ -19,6 +20,7 @@ use crate::{
     impl_syscall,
     uapi::{
         fs::LinuxStatFs,
+        iovec::IoVec,
         futex::RobustListHead,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
@@ -30,6 +32,7 @@ use crate::{
     vfs::Stat,
 };
 use cred::*;
+use fcntl::*;
 use fs::*;
 use io::*;
 use ipc::*;
@@ -47,6 +50,7 @@ impl_syscall!(sys_getcwd, getcwd, (*mut u8, usize));
 // Epoll & Duplication
 impl_syscall!(sys_dup, dup, (usize));
 impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
+impl_syscall!(sys_fcntl, fcntl, (usize, i32, usize));
 impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
 
 // 文件/目录创建与链接 (File/Directory Creation and Linking)
@@ -78,6 +82,13 @@ impl_syscall!(sys_lseek, lseek, (usize, isize, usize));
 // I/O 操作 (Input/Output Operations)
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
 impl_syscall!(sys_write, write, (usize, *const u8, usize));
+impl_syscall!(sys_readv, readv, (usize, *const IoVec, usize));
+impl_syscall!(sys_writev, writev, (usize, *const IoVec, usize));
+impl_syscall!(sys_pread64, pread64, (usize, *mut u8, usize, i64));
+impl_syscall!(sys_pwrite64, pwrite64, (usize, *const u8, usize, i64));
+impl_syscall!(sys_preadv, preadv, (usize, *const IoVec, usize, i64));
+impl_syscall!(sys_pwritev, pwritev, (usize, *const IoVec, usize, i64));
+impl_syscall!(sys_sendfile, sendfile, (usize, usize, *mut i64, usize));
 
 // 文件元数据与同步 (File Metadata and Synchronization)
 impl_syscall!(
