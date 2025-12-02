@@ -4,9 +4,8 @@
 
 use core::sync::atomic::Ordering;
 
+use crate::earlyprintln;
 use crate::ipc::check_signal;
-use crate::println;
-use alloc::task;
 use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
@@ -101,16 +100,16 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
             let scause_val = scause.bits();
 
             // 先直接打印到控制台，避免panic格式化时再次触发异常
-            println!("\n");
-            println!("================ KERNEL PANIC ================");
-            println!("Unexpected exception in S-Mode (Kernel)!");
-            println!("----------------------------------------------");
-            println!("  Exception: {:?} (Raw scause: {:#x})", e, scause_val);
-            println!("  Faulting VA (stval): {:#x}", stval_val);
-            println!("  Faulting PC (sepc):  {:#x}", sepc_old);
-            println!("  sstatus:             {:#x}", sstatus_old.bits());
-            println!("  sscratch:            {:#x}", sscratch_val);
-            println!("==============================================");
+            earlyprintln!("\n");
+            earlyprintln!("================ KERNEL PANIC ================");
+            earlyprintln!("Unexpected exception in S-Mode (Kernel)!");
+            earlyprintln!("----------------------------------------------");
+            earlyprintln!("  Exception: {:?} (Raw scause: {:#x})", e, scause_val);
+            earlyprintln!("  Faulting VA (stval): {:#x}", stval_val);
+            earlyprintln!("  Faulting PC (sepc):  {:#x}", sepc_old);
+            earlyprintln!("  sstatus:             {:#x}", sstatus_old.bits());
+            earlyprintln!("  sscratch:            {:#x}", sscratch_val);
+            earlyprintln!("==============================================");
             // sbi::shutdown(true);
             panic!("Kernel exception in S-Mode");
         }
