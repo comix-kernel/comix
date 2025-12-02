@@ -1,7 +1,7 @@
 //! 任务相关的系统调用实现
 
 use core::{
-    ffi::{c_char, c_int, c_ulong},
+    ffi::{c_char, c_int, c_ulong, c_void},
     sync::atomic::Ordering,
 };
 
@@ -97,14 +97,15 @@ pub fn exit_group(code: c_int) -> ! {
 /// # 返回值
 /// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
 pub fn clone(
-    clone_flags: c_ulong,
-    newsp: c_ulong,
-    parent_tidptr: *mut c_int,
-    child_tidptr: *mut c_int,
-    tls: c_ulong,
+    func: usize, // extern "C" fn(*mut c_void) -> c_int,
+    stack: c_ulong,
+    flags: c_ulong,
+    arg: *mut c_void,
+    ptid: *mut c_int,
+    newtls: *mut c_void,
+    // ctid: *mut c_int, TODO: 参数多于6个时需要通过栈传递
 ) -> c_int {
-    let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(clone_flags as usize)
-    {
+    let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(flags as usize) {
         requested_flags
     } else {
         return -EINVAL;
@@ -216,18 +217,24 @@ pub fn clone(
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
         unsafe {
-            write_to_user(child_tidptr, tid as c_int);
+            write_to_user(ptid, tid as c_int);
         }
     }
     if requested_flags.contains(CloneFlags::PARENT_SETTID) {
         unsafe {
-            write_to_user(parent_tidptr, tid as c_int);
+            write_to_user(ptid, tid as c_int);
         }
     }
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        (*tf).set_fork_trap_frame(&*ptf, newsp as usize);
+        (*tf).set_clone_trap_frame(
+            &*ptf,
+            func,
+            arg as usize,
+            child_task.kstack_base,
+            stack as usize,
+        );
     }
     let child_task = child_task.into_shared();
     current_task()
