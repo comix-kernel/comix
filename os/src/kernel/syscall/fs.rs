@@ -71,7 +71,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     };
     unsafe { sstatus::clear_sum() };
 
-    // 2. 解析标志位
+    // 解析标志位
     let open_flags = match OpenFlags::from_bits(flags) {
         Some(f) => f,
         None => return FsError::InvalidArgument.to_errno(),

@@ -2,11 +2,15 @@ use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::config::PAGE_SIZE;
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
+use crate::mm::memory_space::MmapFile;
 use crate::mm::page_table::{
     self, ActivePageTableInner, PageSize, PageTableInner, UniversalPTEFlag,
 };
+use crate::uapi::mm::MapFlags;
+use crate::{pr_err, pr_warn};
 
 /// 映射策略类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +37,7 @@ pub enum AreaType {
     UserBss,      // 用户 BSS 段
     UserStack,    // 用户栈
     UserHeap,     // 用户堆
+    UserMmap,     // 用户 mmap 匿名映射
 }
 
 /// 内存空间中的一个内存映射区域
@@ -40,10 +45,11 @@ pub enum AreaType {
 pub struct MappingArea {
     /// 此映射区域的虚拟页号范围
     ///
-    /// 注意！
+    /// 现已移除大页映射，不用在意
+    /// ~~ 注意！~~
     ///
-    /// 创建后不要更改它，
-    /// 不要用它来映射或解除映射页
+    /// ~~ 创建后不要更改它，~~
+    /// ~~ 不要用它来映射或解除映射页~~
     vpn_range: VpnRange,
 
     /// 此映射区域的类型
@@ -57,6 +63,9 @@ pub struct MappingArea {
 
     /// 用于帧映射区域的跟踪帧
     frames: BTreeMap<Vpn, TrackedFrames>,
+
+    /// 文件映射信息（如果是文件映射）
+    file: Option<MmapFile>,
 }
 
 impl MappingArea {
@@ -66,6 +75,10 @@ impl MappingArea {
 
     pub fn permission(&self) -> UniversalPTEFlag {
         self.permission.clone()
+    }
+
+    pub fn set_permission(&mut self, perm: UniversalPTEFlag) {
+        self.permission = perm;
     }
 
     pub fn map_type(&self) -> MapType {
@@ -93,6 +106,7 @@ impl MappingArea {
         area_type: AreaType,
         map_type: MapType,
         permission: UniversalPTEFlag,
+        file: Option<MmapFile>,
     ) -> Self {
         MappingArea {
             vpn_range,
@@ -100,6 +114,7 @@ impl MappingArea {
             map_type,
             permission,
             frames: BTreeMap::new(),
+            file,
         }
     }
 
@@ -210,6 +225,14 @@ impl MappingArea {
             map_type: self.map_type,
             permission: self.permission.clone(),
             frames: BTreeMap::new(), // 不克隆帧
+            // fork 时复制文件映射信息（MAP_SHARED 和 MAP_PRIVATE 都需要）
+            file: self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: f.len,
+                prot: f.prot,
+                flags: f.flags,
+            }),
         }
     }
 
@@ -330,6 +353,590 @@ impl MappingArea {
         }
 
         Ok(new_area)
+    }
+
+    /// 拆分区域为两部分：[start, split_vpn) 和 [split_vpn, end)
+    ///
+    /// # 参数
+    /// - `page_table`: 页表的可变引用
+    /// - `split_vpn`: 拆分点（必须在区域范围内，且不等于边界）
+    ///
+    /// # 返回值
+    /// - `Ok((left, right))`: 成功，返回拆分后的两个区域
+    /// - `Err(PagingError)`: 拆分失败
+    ///
+    /// # 注意
+    /// - 原区域会被消耗（moved）
+    /// - 调用者负责将拆分后的区域插入到 areas 列表中
+    /// - 只支持 Framed 映射类型
+    pub fn split_at(
+        mut self,
+        page_table: &mut ActivePageTableInner,
+        split_vpn: Vpn,
+    ) -> Result<(Self, Self), page_table::PagingError> {
+        // 验证拆分点
+        if !self.vpn_range.contains(split_vpn) {
+            return Err(page_table::PagingError::InvalidAddress);
+        }
+
+        if split_vpn == self.vpn_range.start() || split_vpn == self.vpn_range.end() {
+            return Err(page_table::PagingError::InvalidAddress);
+        }
+
+        // 只支持 Framed 映射
+        if self.map_type != MapType::Framed {
+            return Err(page_table::PagingError::UnsupportedMapType);
+        }
+
+        // 创建左右两个区域的元数据
+        let left_range = VpnRange::new(self.vpn_range.start(), split_vpn);
+        let right_range = VpnRange::new(split_vpn, self.vpn_range.end());
+
+        // 计算分割点相对于起始的页数
+        let left_pages = split_vpn.as_usize() - self.vpn_range.start().as_usize();
+
+        // 如果有文件映射，需要分割文件映射信息
+        let left_file = self.file.as_ref().map(|f| MmapFile {
+            file: f.file.clone(),
+            offset: f.offset,            // 左半部分保持原有偏移量
+            len: left_pages * PAGE_SIZE, // 长度调整为左半部分的大小
+            prot: f.prot,
+            flags: f.flags,
+        });
+
+        let right_file = self.file.as_ref().map(|f| MmapFile {
+            file: f.file.clone(),
+            offset: f.offset + left_pages * PAGE_SIZE, // 偏移量向后移动
+            len: f.len - left_pages * PAGE_SIZE,       // 剩余长度
+            prot: f.prot,
+            flags: f.flags,
+        });
+
+        let mut left_area = MappingArea::new(
+            left_range,
+            self.area_type,
+            self.map_type,
+            self.permission.clone(),
+            left_file,
+        );
+
+        let mut right_area = MappingArea::new(
+            right_range,
+            self.area_type,
+            self.map_type,
+            self.permission.clone(),
+            right_file,
+        );
+
+        // 分配帧：遍历原区域的 frames，根据 VPN 分配到左右区域 - 手动迭代并清空
+        let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+        for vpn in vpns {
+            if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                if vpn < split_vpn {
+                    left_area.frames.insert(vpn, tracked_frames);
+                } else {
+                    right_area.frames.insert(vpn, tracked_frames);
+                }
+            }
+        }
+
+        // 重新建立页表映射
+        // 注意：原区域的页表映射仍然存在，我们不需要重新映射
+        // 只需要确保 frames 的所有权转移正确
+
+        Ok((left_area, right_area))
+    }
+
+    /// 部分修改权限：修改 [start_vpn, end_vpn) 范围的权限
+    ///
+    /// # 参数
+    /// - `page_table`: 页表的可变引用
+    /// - `start_vpn`: 起始 VPN（包含）
+    /// - `end_vpn`: 结束 VPN（不包含）
+    /// - `new_perm`: 新的权限标志
+    ///
+    /// # 返回值
+    /// - `Ok(alloc::vec::Vec<Self>)`: 成功，返回修改后的区域列表
+    ///   - 如果整个区域都在范围内：返回包含1个区域的向量（权限已修改）
+    ///   - 如果部分在范围内：返回包含2-3个区域的向量（分割后的区域）
+    ///
+    /// # 注意
+    /// - 原区域会被消耗（moved）
+    /// - 调用者负责将返回的区域插入到 areas 列表中
+    /// - 只支持 Framed 映射类型
+    pub fn partial_change_permission(
+        mut self,
+        page_table: &mut ActivePageTableInner,
+        start_vpn: Vpn,
+        end_vpn: Vpn,
+        new_perm: UniversalPTEFlag,
+    ) -> Result<alloc::vec::Vec<Self>, page_table::PagingError> {
+        let area_start = self.vpn_range.start();
+        let area_end = self.vpn_range.end();
+
+        // 计算需要修改权限的实际范围
+        let change_start = core::cmp::max(start_vpn, area_start);
+        let change_end = core::cmp::min(end_vpn, area_end);
+
+        if change_start >= change_end {
+            // 没有重叠，返回原区域
+            return Ok(alloc::vec![self]);
+        }
+
+        // 只支持 Framed 映射
+        if self.map_type != MapType::Framed {
+            return Err(page_table::PagingError::UnsupportedMapType);
+        }
+
+        // 修改页表中的权限
+        for vpn in VpnRange::new(change_start, change_end) {
+            page_table.update_flags(vpn, new_perm)?;
+        }
+
+        // 根据修改范围决定如何分割区域
+        if change_start == area_start && change_end == area_end {
+            // 情况 1: 整个区域都需要修改权限
+            self.permission = new_perm;
+            return Ok(alloc::vec![self]);
+        } else if change_start == area_start {
+            // 情况 2: 修改了前半部分
+            // 分割为: [area_start, change_end) 新权限 + [change_end, area_end) 旧权限
+            let left_range = VpnRange::new(area_start, change_end);
+            let right_range = VpnRange::new(change_end, area_end);
+
+            let left_pages = change_end.as_usize() - area_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + left_pages * PAGE_SIZE,
+                len: f.len - left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                new_perm, // 新权限
+                left_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                right_file,
+            );
+
+            // 分配 frames
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < change_end {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                }
+            }
+
+            return Ok(alloc::vec![left_area, right_area]);
+        } else if change_end == area_end {
+            // 情况 3: 修改了后半部分
+            // 分割为: [area_start, change_start) 旧权限 + [change_start, area_end) 新权限
+            let left_range = VpnRange::new(area_start, change_start);
+            let right_range = VpnRange::new(change_start, area_end);
+
+            let left_pages = change_start.as_usize() - area_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + left_pages * PAGE_SIZE,
+                len: f.len - left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                left_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                new_perm, // 新权限
+                right_file,
+            );
+
+            // 分配 frames
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < change_start {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                }
+            }
+
+            return Ok(alloc::vec![left_area, right_area]);
+        } else {
+            // 情况 4: 修改了中间部分，需要分割为三个区域
+            // [area_start, change_start) 旧权限 + [change_start, change_end) 新权限 + [change_end, area_end) 旧权限
+            let left_range = VpnRange::new(area_start, change_start);
+            let middle_range = VpnRange::new(change_start, change_end);
+            let right_range = VpnRange::new(change_end, area_end);
+
+            let left_pages = change_start.as_usize() - area_start.as_usize();
+            let middle_pages = change_end.as_usize() - change_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset,
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let middle_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + left_pages * PAGE_SIZE,
+                len: middle_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + (left_pages + middle_pages) * PAGE_SIZE,
+                len: f.len - (left_pages + middle_pages) * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                left_file,
+            );
+
+            let mut middle_area = MappingArea::new(
+                middle_range,
+                self.area_type,
+                self.map_type,
+                new_perm, // 新权限
+                middle_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(), // 旧权限
+                right_file,
+            );
+
+            // 分配 frames
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < change_start {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else if vpn < change_end {
+                        middle_area.frames.insert(vpn, tracked_frames);
+                    } else {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                }
+            }
+
+            return Ok(alloc::vec![left_area, middle_area, right_area]);
+        }
+    }
+
+    /// 部分解除映射：解除 [start_vpn, end_vpn) 范围的映射
+    ///
+    /// # 参数
+    /// - `page_table`: 页表的可变引用
+    /// - `start_vpn`: 起始 VPN（包含）
+    /// - `end_vpn`: 结束 VPN（不包含）
+    ///
+    /// # 返回值
+    /// - `Ok(Option<(Self, Option<Self>)>)`: 成功
+    ///   - `None`: 整个区域被解除映射
+    ///   - `Some((left, None))`: 只剩左侧部分
+    ///   - `Some((left, Some(right)))`: 中间被解除映射，剩下左右两部分
+    ///
+    /// # 注意
+    /// - 原区域会被消耗（moved）
+    pub fn partial_unmap(
+        mut self,
+        page_table: &mut ActivePageTableInner,
+        start_vpn: Vpn,
+        end_vpn: Vpn,
+    ) -> Result<Option<(Self, Option<Self>)>, page_table::PagingError> {
+        let area_start = self.vpn_range.start();
+        let area_end = self.vpn_range.end();
+
+        // 计算需要解除映射的实际范围
+        let unmap_start = core::cmp::max(start_vpn, area_start);
+        let unmap_end = core::cmp::min(end_vpn, area_end);
+
+        if unmap_start >= unmap_end {
+            // 没有重叠，返回原区域
+            return Ok(Some((self, None)));
+        }
+
+        // 解除映射指定范围内的页
+        for vpn in VpnRange::new(unmap_start, unmap_end) {
+            self.unmap_one(page_table, vpn)?;
+        }
+
+        // 根据解除映射的位置，决定返回什么
+        if unmap_start == area_start && unmap_end == area_end {
+            // 情况 1: 整个区域被解除映射
+            return Ok(None);
+        } else if unmap_start == area_start {
+            // 情况 2: 解除映射了前半部分，保留 [unmap_end, area_end)
+            self.vpn_range = VpnRange::new(unmap_end, area_end);
+            return Ok(Some((self, None)));
+        } else if unmap_end == area_end {
+            // 情况 3: 解除映射了后半部分，保留 [area_start, unmap_start)
+            self.vpn_range = VpnRange::new(area_start, unmap_start);
+            return Ok(Some((self, None)));
+        } else {
+            // 情况 4: 解除映射了中间部分，需要拆分为两个区域
+            // 保留 [area_start, unmap_start) 和 [unmap_end, area_end)
+
+            let left_range = VpnRange::new(area_start, unmap_start);
+            let right_range = VpnRange::new(unmap_end, area_end);
+
+            // 计算左右部分的文件映射信息
+            let left_pages = unmap_start.as_usize() - area_start.as_usize();
+            let middle_pages = unmap_end.as_usize() - unmap_start.as_usize();
+
+            let left_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset, // 左半部分保持原有偏移量
+                len: left_pages * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let right_file = self.file.as_ref().map(|f| MmapFile {
+                file: f.file.clone(),
+                offset: f.offset + (left_pages + middle_pages) * PAGE_SIZE, // 跳过左半部分和中间被 unmap 的部分
+                len: f.len - (left_pages + middle_pages) * PAGE_SIZE,
+                prot: f.prot,
+                flags: f.flags,
+            });
+
+            let mut left_area = MappingArea::new(
+                left_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(),
+                left_file,
+            );
+
+            let mut right_area = MappingArea::new(
+                right_range,
+                self.area_type,
+                self.map_type,
+                self.permission.clone(),
+                right_file,
+            );
+
+            // 分配 frames - 手动迭代并清空
+            let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
+            for vpn in vpns {
+                if let Some(tracked_frames) = self.frames.remove(&vpn) {
+                    if vpn < unmap_start {
+                        left_area.frames.insert(vpn, tracked_frames);
+                    } else if vpn >= unmap_end {
+                        right_area.frames.insert(vpn, tracked_frames);
+                    }
+                    // unmap_start <= vpn < unmap_end 的 frames 已经在 unmap_one 中释放
+                }
+            }
+
+            return Ok(Some((left_area, Some(right_area))));
+        }
+    }
+
+    /// 从文件加载数据到已分配的物理页中
+    ///
+    /// # 错误
+    /// - 文件读取失败
+    /// - 页面未分配
+    pub fn load_from_file(&mut self) -> Result<(), page_table::PagingError> {
+        if let Some(ref mmap_file) = self.file {
+            let inode = mmap_file
+                .file
+                .inode()
+                .map_err(|_| page_table::PagingError::InvalidAddress)?;
+            let start_vpn = self.vpn_range.start();
+
+            for (vpn, tracked_frame) in &self.frames {
+                // 计算文件偏移量
+                let page_offset = vpn.as_usize() - start_vpn.as_usize();
+                let file_offset = mmap_file.offset + page_offset * PAGE_SIZE;
+
+                // 获取物理页并通过内核直接映射访问
+                let ppn = match tracked_frame {
+                    TrackedFrames::Single(frame) => frame.ppn(),
+                    TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
+                    TrackedFrames::Contiguous(_) => {
+                        panic!("当前实现不支持连续帧");
+                    }
+                };
+
+                let paddr = ppn.start_addr();
+                let kernel_vaddr = paddr_to_vaddr(paddr.as_usize());
+                let buffer =
+                    unsafe { core::slice::from_raw_parts_mut(kernel_vaddr as *mut u8, PAGE_SIZE) };
+
+                // 计算实际读取长度（处理文件末尾）
+                let read_len = min(
+                    PAGE_SIZE,
+                    mmap_file.len.saturating_sub(page_offset * PAGE_SIZE),
+                );
+
+                if read_len == 0 {
+                    continue; // 超出文件末尾，页面保持清零状态
+                }
+
+                // 从文件读取数据
+                let actual_read = inode
+                    .read_at(file_offset, &mut buffer[..read_len])
+                    .map_err(|_| page_table::PagingError::InvalidAddress)?;
+
+                // 部分读取时记录警告（剩余部分保持为零）
+                if actual_read < read_len {
+                    pr_warn!(
+                        "Partial read at offset {}: expected {}, got {}",
+                        file_offset,
+                        read_len,
+                        actual_read
+                    );
+                }
+
+                // buffer[actual_read..] 保持为零（新分配的物理帧默认清零）
+            }
+        }
+        Ok(())
+    }
+
+    /// 将脏页写回文件
+    ///
+    /// # 参数
+    /// - `page_table`: 页表引用，用于检查和清除 Dirty 位
+    ///
+    /// # 错误
+    /// - 文件写入失败
+    /// - 部分写入
+    pub fn sync_file(
+        &self,
+        page_table: &mut ActivePageTableInner,
+    ) -> Result<(), page_table::PagingError> {
+        if let Some(ref mmap_file) = self.file {
+            // 只有 MAP_SHARED 映射才需要写回
+            if !mmap_file.flags.contains(MapFlags::SHARED) {
+                return Ok(());
+            }
+
+            let inode = mmap_file
+                .file
+                .inode()
+                .map_err(|_| page_table::PagingError::InvalidAddress)?;
+            let start_vpn = self.vpn_range.start();
+
+            for (vpn, tracked_frame) in &self.frames {
+                // 获取页表项的标志位，检查 Dirty 位
+                let (_, _, flags) = match page_table.walk(*vpn) {
+                    Ok(result) => result,
+                    Err(_) => continue, // 页面未映射，跳过
+                };
+
+                if !flags.contains(UniversalPTEFlag::DIRTY) {
+                    continue; // 未被修改，跳过
+                }
+
+                // 计算文件偏移量
+                let page_offset = vpn.as_usize() - start_vpn.as_usize();
+                let file_offset = mmap_file.offset + page_offset * PAGE_SIZE;
+
+                // 获取物理页内容
+                let ppn = match tracked_frame {
+                    TrackedFrames::Single(frame) => frame.ppn(),
+                    TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
+                    TrackedFrames::Contiguous(_) => {
+                        panic!("当前实现不支持连续帧");
+                    }
+                };
+
+                let paddr = ppn.start_addr();
+                let kernel_vaddr = paddr_to_vaddr(paddr.as_usize());
+                let buffer =
+                    unsafe { core::slice::from_raw_parts(kernel_vaddr as *const u8, PAGE_SIZE) };
+
+                // 计算实际写入长度（处理文件末尾）
+                let write_len = min(
+                    PAGE_SIZE,
+                    mmap_file.len.saturating_sub(page_offset * PAGE_SIZE),
+                );
+
+                if write_len == 0 {
+                    continue; // 超出文件范围
+                }
+
+                // 写回文件
+                let actual_written = inode
+                    .write_at(file_offset, &buffer[..write_len])
+                    .map_err(|_| page_table::PagingError::InvalidAddress)?;
+
+                // 检查是否完全写入
+                if actual_written != write_len {
+                    pr_err!(
+                        "Partial write at offset {}: expected {}, got {}",
+                        file_offset,
+                        write_len,
+                        actual_written
+                    );
+                    return Err(page_table::PagingError::InvalidAddress);
+                }
+
+                // 清除 Dirty 位
+                page_table.update_flags(*vpn, flags & !UniversalPTEFlag::DIRTY)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -633,8 +1240,9 @@ impl MappingArea {
         let old_end = self.vpn_range.end();
         let new_end = Vpn::from_usize(old_end.as_usize() - count);
 
-        // 从末尾解除映射页（倒序）
-        for i in (0..count).rev() {
+        // 解除映射 [new_end, old_end) 范围内的页
+        // 对于 4K 页，解除映射顺序不影响正确性
+        for i in 0..count {
             let vpn = Vpn::from_usize(new_end.as_usize() + i);
             self.unmap_one(page_table, vpn)?;
         }

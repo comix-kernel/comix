@@ -10,6 +10,7 @@ pub mod fs;
 pub mod iovec;
 pub mod futex;
 pub mod log;
+pub mod mm;
 pub mod reboot;
 pub mod resource;
 pub mod sched;
