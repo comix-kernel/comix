@@ -1,12 +1,13 @@
 use core::ffi::c_void;
 
 use crate::config::PAGE_SIZE;
-use crate::kernel::current_memory_space;
+use crate::kernel::{current_memory_space, current_task};
 use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::mapping_area::AreaType;
+use crate::mm::memory_space::MmapFile;
 use crate::mm::page_table::UniversalPTEFlag;
 use crate::pr_err;
-use crate::uapi::errno::{EEXIST, EINVAL, ENOMEM, EOPNOTSUPP};
+use crate::uapi::errno::{EACCES, EBADF, EEXIST, EINVAL, EIO, ENOMEM, EOPNOTSUPP};
 use crate::uapi::mm::{MapFlags, ProtFlags, MAP_FAILED};
 
 /// brk - 改变数据段的结束地址（堆顶）
@@ -124,8 +125,46 @@ pub fn mmap(
         return -EINVAL as isize;
     }
 
-    // 匿名映射验证
-    if map_flags.contains(MapFlags::ANONYMOUS) {
+    // 创建 MmapFile（如果是文件映射）
+    let mmap_file = if !map_flags.contains(MapFlags::ANONYMOUS) {
+        // 文件映射：验证文件描述符和偏移量
+        if offset < 0 || (offset as usize) % PAGE_SIZE != 0 {
+            pr_err!("mmap: file offset must be non-negative and page-aligned");
+            return -EINVAL as isize;
+        }
+
+        // 获取文件对象
+        let task = current_task();
+        let file = match task.lock().fd_table.get(fd as usize) {
+            Ok(f) => f,
+            Err(_) => {
+                pr_err!("mmap: invalid file descriptor {}", fd);
+                return -EBADF as isize;
+            }
+        };
+
+        // 权限检查
+        if prot_flags.contains(ProtFlags::READ) && !file.readable() {
+            pr_err!("mmap: file not readable but PROT_READ requested");
+            return -EACCES as isize;
+        }
+        if prot_flags.contains(ProtFlags::WRITE)
+            && map_flags.contains(MapFlags::SHARED)
+            && !file.writable()
+        {
+            pr_err!("mmap: file not writable but PROT_WRITE + MAP_SHARED requested");
+            return -EACCES as isize;
+        }
+
+        Some(MmapFile {
+            file,
+            offset: offset as usize,
+            len,
+            prot: prot_flags,
+            flags: map_flags,
+        })
+    } else {
+        // 匿名映射验证
         if fd != -1 {
             pr_err!("mmap: anonymous mapping requires fd == -1");
             return -EINVAL as isize;
@@ -134,11 +173,8 @@ pub fn mmap(
             pr_err!("mmap: anonymous mapping requires offset == 0");
             return -EINVAL as isize;
         }
-    } else {
-        // 文件映射（暂未实现）
-        pr_err!("mmap: file mapping not yet supported");
-        return -EOPNOTSUPP as isize;
-    }
+        None
+    };
 
     // 确定映射地址
     let memory_space = current_memory_space();
@@ -235,16 +271,29 @@ pub fn mmap(
     let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start_addr + len));
     let vpn_range = VpnRange::new(start_vpn, end_vpn);
 
-    match space.insert_framed_area(vpn_range, AreaType::UserMmap, pte_flags, None) {
-        Ok(_) => start_addr as isize,
-        Err(e) => {
+    // 插入映射区域
+    if let Err(e) = space.insert_framed_area(vpn_range, AreaType::UserMmap, pte_flags, None, mmap_file) {
+        pr_err!(
+            "mmap failed to insert area: {:?}, addr=0x{:x}, len=0x{:x}, prot=0x{:x}, flags=0x{:x}",
+            e, hint, len, prot, flags
+        );
+        return MAP_FAILED;
+    }
+
+    // 如果是文件映射，立即加载数据
+    if let Some(area) = space.areas_mut().last_mut() {
+        if let Err(e) = area.load_from_file() {
             pr_err!(
-                "mmap failed: {:?}, addr=0x{:x}, len=0x{:x}, prot=0x{:x}, flags=0x{:x}",
-                e, hint, len, prot, flags
+                "mmap failed to load file data: {:?}, addr=0x{:x}, len=0x{:x}, fd={}",
+                e, start_addr, len, fd
             );
-            MAP_FAILED
+            // 加载失败，清理已创建的映射
+            let _ = space.munmap(start_addr, len);
+            return -EIO as isize;
         }
     }
+
+    start_addr as isize
 }
 
 /// munmap - 解除内存映射
