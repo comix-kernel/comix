@@ -27,12 +27,12 @@ pub fn init(transport: MmioTransport<'static>) {
         *count += 1;
         id
     };
-    println!("[Device] Find VirtioNetDevice with ID: {}", device_id);
+    earlyprintln!("[Device] Find VirtioNetDevice with ID: {}", device_id);
 
     // 创建VirtioNetDevice
     match VirtioNetDevice::new(transport, device_id) {
         Ok(virtio_device) => {
-            println!("[Device] VirtioNetDevice created with ID: {}", device_id);
+            earlyprintln!("[Device] VirtioNetDevice created with ID: {}", device_id);
 
             // 创建网络接口
             let interface_name = format!("eth{}", device_id);
@@ -50,13 +50,13 @@ pub fn init(transport: MmioTransport<'static>) {
             // 注册设备驱动
             crate::device::register_driver(network_interface.clone() as Arc<dyn Driver>);
 
-            println!(
+            earlyprintln!(
                 "[Device] Network interface {} initialized successfully",
                 network_interface.name()
             );
         }
         Err(e) => {
-            println!("[Device] Failed to initialize VirtioNetDevice: {:?}", e);
+            earlyprintln!("[Device] Failed to initialize VirtioNetDevice: {:?}", e);
         }
     }
 }
