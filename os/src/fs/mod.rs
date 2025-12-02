@@ -19,7 +19,7 @@ use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::simple_fs::SimpleFs;
 use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
-use crate::println;
+use crate::pr_info;
 use crate::vfs::dev::makedev;
 use crate::vfs::devno::{blkdev_major, chrdev_major};
 use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
@@ -47,14 +47,14 @@ static SIMPLE_FS_IMAGE: &[u8] = include_bytes!(env!("SIMPLE_FS_IMAGE"));
 /// 挂载 simple_fs 作为根文件系统
 pub fn init_simple_fs() -> Result<(), crate::vfs::FsError> {
     // 1. 创建 RamDisk，从静态镜像初始化
-    println!(
+    pr_info!(
         "[SimpleFS] Creating RamDisk ({} bytes)",
         SIMPLE_FS_IMAGE.len()
     );
     let ramdisk = RamDisk::from_bytes(SIMPLE_FS_IMAGE.to_vec(), 512, 0);
 
     // 2. 在 RamDisk 上创建 SimpleFS
-    println!("[SimpleFS] Mounting SimpleFS on RamDisk");
+    pr_info!("[SimpleFS] Mounting SimpleFS on RamDisk");
     let simplefs = SimpleFs::from_ramdisk(ramdisk)?;
 
     // 3. 挂载为根文件系统
@@ -65,15 +65,15 @@ pub fn init_simple_fs() -> Result<(), crate::vfs::FsError> {
         Some(String::from("ramdisk0")),
     )?;
 
-    println!("[SimpleFS] Root filesystem mounted at /");
+    pr_info!("[SimpleFS] Root filesystem mounted at /");
 
     // 4. 列出根目录内容（调试用）
     if let Ok(root_dentry) = crate::vfs::get_root_dentry() {
-        println!("[SimpleFS] Root directory contents:");
+        pr_info!("[SimpleFS] Root directory contents:");
         let inode = root_dentry.inode.clone();
         if let Ok(entries) = inode.readdir() {
             for entry in entries {
-                println!("  - {} (type: {:?})", entry.name, entry.inode_type);
+                pr_info!("  - {} (type: {:?})", entry.name, entry.inode_type);
             }
         }
     }
@@ -88,19 +88,19 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
     use crate::config::{EXT4_BLOCK_SIZE, FS_IMAGE_SIZE, VIRTIO_BLK_SECTOR_SIZE};
     use crate::vfs::FsError;
 
-    println!("[Ext4] Initializing Ext4 filesystem from block device");
+    pr_info!("[Ext4] Initializing Ext4 filesystem from block device");
 
     // 1. 获取第一个块设备驱动
     let blk_drivers = BLK_DRIVERS.read();
     if blk_drivers.is_empty() {
-        println!("[Ext4] No block device found");
+        pr_info!("[Ext4] No block device found");
         return Err(FsError::NoDevice);
     }
 
     let block_driver = blk_drivers[0].clone();
     drop(blk_drivers); // 释放锁
 
-    println!("[Ext4] Using block device: {}", block_driver.get_id());
+    pr_info!("[Ext4] Using block device: {}", block_driver.get_id());
 
     // 2. 获取块设备信息
     // Ext4 文件系统块大小 (必须与 mkfs.ext4 -b 参数一致)
@@ -109,7 +109,7 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
     // 计算总块数 (以 Ext4 块为单位, 而非扇区)
     let total_blocks = FS_IMAGE_SIZE / ext4_block_size;
 
-    println!(
+    pr_info!(
         "[Ext4] Ext4 block size: {}, Total blocks: {}, Image size: {} MB",
         ext4_block_size,
         total_blocks,
@@ -121,7 +121,7 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
     let ext4_fs = Ext4FileSystem::open(block_driver, ext4_block_size, total_blocks, 0)?;
 
     // 4. 挂载为根文件系统
-    println!("[Ext4] Mounting Ext4 as root filesystem");
+    pr_info!("[Ext4] Mounting Ext4 as root filesystem");
     MOUNT_TABLE.mount(
         ext4_fs,
         "/",
@@ -129,18 +129,18 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
         Some(String::from("virtio-blk0")),
     )?;
 
-    println!("[Ext4] Root filesystem mounted at /");
+    pr_info!("[Ext4] Root filesystem mounted at /");
 
     // 5. 列出根目录内容（调试用）
     if let Ok(root_dentry) = crate::vfs::get_root_dentry() {
-        println!("[Ext4] Root directory contents:");
+        pr_info!("[Ext4] Root directory contents:");
         let inode = root_dentry.inode.clone();
         if let Ok(entries) = inode.readdir() {
             for entry in entries {
-                println!("  - {} (type: {:?})", entry.name, entry.inode_type);
+                pr_info!("  - {} (type: {:?})", entry.name, entry.inode_type);
             }
         } else {
-            println!("[Ext4] Failed to read root directory");
+            pr_info!("[Ext4] Failed to read root directory");
         }
     }
 
@@ -157,7 +157,7 @@ pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::v
     use crate::vfs::FsError;
     use alloc::string::ToString;
 
-    println!(
+    pr_info!(
         "[Tmpfs] Creating tmpfs filesystem (max_size: {} MB)",
         if max_size_mb == 0 {
             "unlimited".to_string()
@@ -177,7 +177,7 @@ pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::v
         Some(String::from("tmpfs")),
     )?;
 
-    println!("[Tmpfs] Tmpfs mounted at {}", mount_point);
+    pr_info!("[Tmpfs] Tmpfs mounted at {}", mount_point);
 
     Ok(())
 }
@@ -235,7 +235,7 @@ pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
     use crate::vfs::MountFlags;
     use alloc::string::ToString;
 
-    println!("[ProcFS] Initializing procfs");
+    pr_info!("[ProcFS] Initializing procfs");
 
     // 创建 procfs
     let procfs = ProcFS::new();
@@ -251,7 +251,7 @@ pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
         Some(String::from("proc")),
     )?;
 
-    println!("[ProcFS] Procfs mounted at /proc");
+    pr_info!("[ProcFS] Procfs mounted at /proc");
 
     Ok(())
 }
@@ -262,7 +262,7 @@ pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
     use crate::vfs::MountFlags;
     use alloc::string::ToString;
 
-    println!("[SysFS] Initializing sysfs");
+    pr_info!("[SysFS] Initializing sysfs");
 
     // 创建 sysfs
     let sysfs = SysFS::new();
@@ -278,7 +278,7 @@ pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
         Some(String::from("sysfs")),
     )?;
 
-    println!("[SysFS] Sysfs mounted at /sys");
+    pr_info!("[SysFS] Sysfs mounted at /sys");
 
     Ok(())
 }

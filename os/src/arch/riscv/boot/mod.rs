@@ -18,7 +18,7 @@ use crate::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
     },
-    println,
+    pr_err, pr_info, println,
     sync::SpinLock,
     test::run_early_tests,
     uapi::{
@@ -109,11 +109,11 @@ fn init() {
     // 初始化 Ext4 文件系统（从真实块设备）
     // 必须在任务上下文中进行,因为 VFS 需要 current_task()
     if let Err(e) = crate::fs::init_ext4_from_block_device() {
-        println!(
+        pr_err!(
             "[Init] Warning: Failed to initialize Ext4 filesystem: {:?}",
             e
         );
-        println!("[Init] Continuing without filesystem...");
+        pr_info!("[Init] Continuing without filesystem...");
     }
 
     kernel_execve("/sbin/init", &["/sbin/init"], &[]);

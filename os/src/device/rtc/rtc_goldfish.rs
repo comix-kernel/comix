@@ -5,9 +5,9 @@ use crate::{
     device::{
         DRIVERS, DeviceType, Driver, RTC_DRIVERS, device_tree::DEVICE_TREE_REGISTRY, rtc::RtcDriver,
     },
-    earlyprintln,
     kernel::current_memory_space,
     mm::address::{Paddr, UsizeConvert},
+    pr_info, pr_warn,
     util::read,
 };
 
@@ -50,7 +50,7 @@ fn init_dt(dt: &FdtNode) {
     let paddr = reg.starting_address as usize;
     let size = reg.size.unwrap_or(0);
     if size == 0 {
-        earlyprintln!(
+        pr_warn!(
             "[Device] goldfish-rtc device tree node {} has no size",
             dt.name
         );
@@ -66,7 +66,7 @@ fn init_dt(dt: &FdtNode) {
     });
     DRIVERS.write().push(rtc.clone());
     RTC_DRIVERS.write().push(rtc);
-    earlyprintln!("[Device] RTC Goldfish initialized");
+    pr_info!("[Device] RTC Goldfish initialized");
 }
 
 pub fn driver_init() {
