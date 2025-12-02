@@ -7,5 +7,7 @@
 #![allow(clippy::module_inception)]
 pub mod mapping_area;
 mod memory_space;
+mod mmap_file;
 
 pub use memory_space::*;
+pub use mmap_file::MmapFile;
