@@ -96,8 +96,9 @@ impl SharedMemory {
 
         let flags = UniversalPTEFlag::READABLE
             | UniversalPTEFlag::WRITEABLE
-            | UniversalPTEFlag::USER_ACCESSIBLE;
+            | UniversalPTEFlag::USER_ACCESSIBLE
+            | UniversalPTEFlag::VALID;
 
-        space.lock().mmap(0, self.len, flags.bits())
+        space.lock().mmap(0, self.len, flags)
     }
 }

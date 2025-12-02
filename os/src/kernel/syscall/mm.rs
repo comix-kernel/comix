@@ -3,12 +3,12 @@ use core::ffi::c_void;
 use crate::config::PAGE_SIZE;
 use crate::kernel::{current_memory_space, current_task};
 use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn, VpnRange};
-use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::memory_space::MmapFile;
+use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
 use crate::pr_err;
 use crate::uapi::errno::{EACCES, EBADF, EEXIST, EINVAL, EIO, ENOMEM, EOPNOTSUPP};
-use crate::uapi::mm::{MapFlags, ProtFlags, MAP_FAILED};
+use crate::uapi::mm::{MAP_FAILED, MapFlags, ProtFlags};
 
 /// brk - 改变数据段的结束地址（堆顶）
 ///
@@ -43,7 +43,9 @@ pub fn brk(new_brk: usize) -> isize {
         Err(e) => {
             pr_err!(
                 "brk failed: {:?}, new_brk=0x{:x}, current=0x{:x}",
-                e, new_brk, current
+                e,
+                new_brk,
+                current
             );
             // Linux 语义：失败时返回当前 brk
             current as isize
@@ -81,14 +83,7 @@ pub fn brk(new_brk: usize) -> isize {
 /// - ❌ MAP_POPULATE（预分配，当前默认立即分配）
 /// - ❌ MAP_NORESERVE（延迟分配，当前默认立即分配）
 /// - ❌ 大页 (MAP_HUGETLB)
-pub fn mmap(
-    addr: *mut c_void,
-    len: usize,
-    prot: i32,
-    flags: i32,
-    fd: i32,
-    offset: i64,
-) -> isize {
+pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> isize {
     let hint = addr as usize;
 
     // 参数验证
@@ -201,10 +196,7 @@ pub fn mmap(
         let range = VpnRange::new(start_vpn, end_vpn);
 
         // 检查是否与现有区域重叠
-        let has_overlap = space
-            .areas()
-            .iter()
-            .any(|a| a.vpn_range().overlaps(&range));
+        let has_overlap = space.areas().iter().any(|a| a.vpn_range().overlaps(&range));
 
         if has_overlap {
             pr_err!("mmap: MAP_FIXED_NOREPLACE address already mapped");
@@ -231,10 +223,7 @@ pub fn mmap(
             let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(aligned_hint + len));
             let range = VpnRange::new(start_vpn, end_vpn);
 
-            let hint_available = !space
-                .areas()
-                .iter()
-                .any(|a| a.vpn_range().overlaps(&range));
+            let hint_available = !space.areas().iter().any(|a| a.vpn_range().overlaps(&range));
 
             if hint_available {
                 aligned_hint
@@ -272,10 +261,16 @@ pub fn mmap(
     let vpn_range = VpnRange::new(start_vpn, end_vpn);
 
     // 插入映射区域
-    if let Err(e) = space.insert_framed_area(vpn_range, AreaType::UserMmap, pte_flags, None, mmap_file) {
+    if let Err(e) =
+        space.insert_framed_area(vpn_range, AreaType::UserMmap, pte_flags, None, mmap_file)
+    {
         pr_err!(
             "mmap failed to insert area: {:?}, addr=0x{:x}, len=0x{:x}, prot=0x{:x}, flags=0x{:x}",
-            e, hint, len, prot, flags
+            e,
+            hint,
+            len,
+            prot,
+            flags
         );
         return MAP_FAILED;
     }
@@ -285,7 +280,10 @@ pub fn mmap(
         if let Err(e) = area.load_from_file() {
             pr_err!(
                 "mmap failed to load file data: {:?}, addr=0x{:x}, len=0x{:x}, fd={}",
-                e, start_addr, len, fd
+                e,
+                start_addr,
+                len,
+                fd
             );
             // 加载失败，清理已创建的映射
             let _ = space.munmap(start_addr, len);
@@ -325,8 +323,89 @@ pub fn munmap(addr: *mut c_void, len: usize) -> isize {
     match space.munmap(start, len) {
         Ok(()) => 0,
         Err(e) => {
-            pr_err!("munmap failed: {:?}, addr=0x{:x}, len=0x{:x}", e, start, len);
+            pr_err!(
+                "munmap failed: {:?}, addr=0x{:x}, len=0x{:x}",
+                e,
+                start,
+                len
+            );
             -EINVAL as isize
+        }
+    }
+}
+
+/// mprotect - 修改内存区域的保护权限
+///
+/// # 参数
+/// - `addr`: 要修改权限的起始地址（必须页对齐）
+/// - `len`: 要修改权限的长度（字节）
+/// - `prot`: 新的保护标志（PROT_READ | PROT_WRITE | PROT_EXEC | PROT_NONE）
+///
+/// # 返回值
+/// - 成功: 返回 0
+/// - 失败: 返回 -errno
+///
+/// # 注意
+/// - 地址必须页对齐，否则返回 EINVAL
+/// - 范围必须完全在现有映射区域内，否则返回 ENOMEM
+/// - 只能修改通过 mmap 或 brk 创建的用户空间映射
+///
+/// # 支持的特性
+/// - ✅ PROT_NONE - 不可访问
+/// - ✅ PROT_READ - 可读
+/// - ✅ PROT_WRITE - 可写（自动包含可读，RISC-V 特性）
+/// - ✅ PROT_EXEC - 可执行
+/// - ✅ 跨多个映射区域的权限修改
+pub fn mprotect(addr: *mut c_void, len: usize, prot: i32) -> isize {
+    let start = addr as usize;
+
+    // 参数验证
+    if len == 0 {
+        return 0; // len=0 是合法的，什么都不做
+    }
+
+    // 检查地址对齐
+    if start % PAGE_SIZE != 0 {
+        pr_err!("mprotect: address not page-aligned: 0x{:x}", start);
+        return -EINVAL as isize;
+    }
+
+    // 解析保护标志
+    let prot_flags = ProtFlags::from_bits_truncate(prot);
+
+    // 转换为页表标志
+    let mut pte_flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
+
+    if prot_flags.contains(ProtFlags::READ) {
+        pte_flags |= UniversalPTEFlag::READABLE;
+    }
+    if prot_flags.contains(ProtFlags::WRITE) {
+        pte_flags |= UniversalPTEFlag::WRITEABLE;
+        // RISC-V 特性：写权限需要读权限
+        pte_flags |= UniversalPTEFlag::READABLE;
+    }
+    if prot_flags.contains(ProtFlags::EXEC) {
+        pte_flags |= UniversalPTEFlag::EXECUTABLE;
+    }
+
+    // PROT_NONE: 不添加任何权限标志（只保留 VALID 和 USER_ACCESSIBLE）
+    // 注意：RISC-V 中，如果没有 R/W/X 权限，访问会触发页面故障
+
+    // 获取内存空间并执行权限修改
+    let memory_space = current_memory_space();
+    let mut space = memory_space.lock();
+
+    match space.mprotect(start, len, pte_flags) {
+        Ok(()) => 0,
+        Err(e) => {
+            pr_err!(
+                "mprotect failed: {:?}, addr=0x{:x}, len=0x{:x}, prot=0x{:x}",
+                e,
+                start,
+                len,
+                prot
+            );
+            -ENOMEM as isize
         }
     }
 }

@@ -220,12 +220,9 @@ impl_syscall!(
 
 // 内存管理 (Memory Management)
 impl_syscall!(sys_brk, brk, (usize));
-impl_syscall!(
-    sys_mmap,
-    mmap,
-    (*mut c_void, usize, i32, i32, i32, i64)
-);
+impl_syscall!(sys_mmap, mmap, (*mut c_void, usize, i32, i32, i32, i64));
 impl_syscall!(sys_munmap, munmap, (*mut c_void, usize));
+impl_syscall!(sys_mprotect, mprotect, (*mut c_void, usize, i32));
 
 // 文件系统同步 (续)
 impl_syscall!(sys_syncfs, syncfs, (usize));

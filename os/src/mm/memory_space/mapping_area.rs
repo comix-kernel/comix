@@ -2,13 +2,13 @@ use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::config::PAGE_SIZE;
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::page_table::{
     self, ActivePageTableInner, PageSize, PageTableInner, UniversalPTEFlag,
 };
-use crate::config::PAGE_SIZE;
 use crate::uapi::mm::MapFlags;
 use crate::{pr_err, pr_warn};
 
@@ -75,6 +75,10 @@ impl MappingArea {
 
     pub fn permission(&self) -> UniversalPTEFlag {
         self.permission.clone()
+    }
+
+    pub fn set_permission(&mut self, perm: UniversalPTEFlag) {
+        self.permission = perm;
     }
 
     pub fn map_type(&self) -> MapType {
@@ -370,7 +374,7 @@ impl MappingArea {
         page_table: &mut ActivePageTableInner,
         split_vpn: Vpn,
     ) -> Result<(Self, Self), page_table::PagingError> {
-        // 1. 验证拆分点
+        // 验证拆分点
         if !self.vpn_range.contains(split_vpn) {
             return Err(page_table::PagingError::InvalidAddress);
         }
@@ -379,12 +383,12 @@ impl MappingArea {
             return Err(page_table::PagingError::InvalidAddress);
         }
 
-        // 2. 只支持 Framed 映射
+        // 只支持 Framed 映射
         if self.map_type != MapType::Framed {
             return Err(page_table::PagingError::UnsupportedMapType);
         }
 
-        // 3. 创建左右两个区域的元数据
+        // 创建左右两个区域的元数据
         let left_range = VpnRange::new(self.vpn_range.start(), split_vpn);
         let right_range = VpnRange::new(split_vpn, self.vpn_range.end());
 
@@ -394,16 +398,16 @@ impl MappingArea {
         // 如果有文件映射，需要分割文件映射信息
         let left_file = self.file.as_ref().map(|f| MmapFile {
             file: f.file.clone(),
-            offset: f.offset,  // 左半部分保持原有偏移量
-            len: left_pages * PAGE_SIZE,  // 长度调整为左半部分的大小
+            offset: f.offset,            // 左半部分保持原有偏移量
+            len: left_pages * PAGE_SIZE, // 长度调整为左半部分的大小
             prot: f.prot,
             flags: f.flags,
         });
 
         let right_file = self.file.as_ref().map(|f| MmapFile {
             file: f.file.clone(),
-            offset: f.offset + left_pages * PAGE_SIZE,  // 偏移量向后移动
-            len: f.len - left_pages * PAGE_SIZE,  // 剩余长度
+            offset: f.offset + left_pages * PAGE_SIZE, // 偏移量向后移动
+            len: f.len - left_pages * PAGE_SIZE,       // 剩余长度
             prot: f.prot,
             flags: f.flags,
         });
@@ -424,7 +428,7 @@ impl MappingArea {
             right_file,
         );
 
-        // 4. 分配帧：遍历原区域的 frames，根据 VPN 分配到左右区域 - 手动迭代并清空
+        // 分配帧：遍历原区域的 frames，根据 VPN 分配到左右区域 - 手动迭代并清空
         let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
         for vpn in vpns {
             if let Some(tracked_frames) = self.frames.remove(&vpn) {
@@ -436,7 +440,7 @@ impl MappingArea {
             }
         }
 
-        // 5. 重新建立页表映射
+        // 重新建立页表映射
         // 注意：原区域的页表映射仍然存在，我们不需要重新映射
         // 只需要确保 frames 的所有权转移正确
 
@@ -467,7 +471,7 @@ impl MappingArea {
         let area_start = self.vpn_range.start();
         let area_end = self.vpn_range.end();
 
-        // 1. 计算需要解除映射的实际范围
+        // 计算需要解除映射的实际范围
         let unmap_start = core::cmp::max(start_vpn, area_start);
         let unmap_end = core::cmp::min(end_vpn, area_end);
 
@@ -476,12 +480,12 @@ impl MappingArea {
             return Ok(Some((self, None)));
         }
 
-        // 2. 解除映射指定范围内的页
+        // 解除映射指定范围内的页
         for vpn in VpnRange::new(unmap_start, unmap_end) {
             self.unmap_one(page_table, vpn)?;
         }
 
-        // 3. 根据解除映射的位置，决定返回什么
+        // 根据解除映射的位置，决定返回什么
         if unmap_start == area_start && unmap_end == area_end {
             // 情况 1: 整个区域被解除映射
             return Ok(None);
@@ -506,7 +510,7 @@ impl MappingArea {
 
             let left_file = self.file.as_ref().map(|f| MmapFile {
                 file: f.file.clone(),
-                offset: f.offset,  // 左半部分保持原有偏移量
+                offset: f.offset, // 左半部分保持原有偏移量
                 len: left_pages * PAGE_SIZE,
                 prot: f.prot,
                 flags: f.flags,
@@ -514,7 +518,7 @@ impl MappingArea {
 
             let right_file = self.file.as_ref().map(|f| MmapFile {
                 file: f.file.clone(),
-                offset: f.offset + (left_pages + middle_pages) * PAGE_SIZE,  // 跳过左半部分和中间被 unmap 的部分
+                offset: f.offset + (left_pages + middle_pages) * PAGE_SIZE, // 跳过左半部分和中间被 unmap 的部分
                 len: f.len - (left_pages + middle_pages) * PAGE_SIZE,
                 prot: f.prot,
                 flags: f.flags,
@@ -574,9 +578,7 @@ impl MappingArea {
                 // 获取物理页并通过内核直接映射访问
                 let ppn = match tracked_frame {
                     TrackedFrames::Single(frame) => frame.ppn(),
-                    TrackedFrames::Multiple(frames) => {
-                        frames.first().map(|f| f.ppn()).unwrap()
-                    }
+                    TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
                     TrackedFrames::Contiguous(_) => {
                         panic!("当前实现不支持连续帧");
                     }
@@ -584,9 +586,8 @@ impl MappingArea {
 
                 let paddr = ppn.start_addr();
                 let kernel_vaddr = paddr_to_vaddr(paddr.as_usize());
-                let buffer = unsafe {
-                    core::slice::from_raw_parts_mut(kernel_vaddr as *mut u8, PAGE_SIZE)
-                };
+                let buffer =
+                    unsafe { core::slice::from_raw_parts_mut(kernel_vaddr as *mut u8, PAGE_SIZE) };
 
                 // 计算实际读取长度（处理文件末尾）
                 let read_len = min(
@@ -644,7 +645,7 @@ impl MappingArea {
             let start_vpn = self.vpn_range.start();
 
             for (vpn, tracked_frame) in &self.frames {
-                // 1. 获取页表项的标志位，检查 Dirty 位
+                // 获取页表项的标志位，检查 Dirty 位
                 let (_, _, flags) = match page_table.walk(*vpn) {
                     Ok(result) => result,
                     Err(_) => continue, // 页面未映射，跳过
@@ -654,16 +655,14 @@ impl MappingArea {
                     continue; // 未被修改，跳过
                 }
 
-                // 2. 计算文件偏移量
+                // 计算文件偏移量
                 let page_offset = vpn.as_usize() - start_vpn.as_usize();
                 let file_offset = mmap_file.offset + page_offset * PAGE_SIZE;
 
-                // 3. 获取物理页内容
+                // 获取物理页内容
                 let ppn = match tracked_frame {
                     TrackedFrames::Single(frame) => frame.ppn(),
-                    TrackedFrames::Multiple(frames) => {
-                        frames.first().map(|f| f.ppn()).unwrap()
-                    }
+                    TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
                     TrackedFrames::Contiguous(_) => {
                         panic!("当前实现不支持连续帧");
                     }
@@ -671,11 +670,10 @@ impl MappingArea {
 
                 let paddr = ppn.start_addr();
                 let kernel_vaddr = paddr_to_vaddr(paddr.as_usize());
-                let buffer = unsafe {
-                    core::slice::from_raw_parts(kernel_vaddr as *const u8, PAGE_SIZE)
-                };
+                let buffer =
+                    unsafe { core::slice::from_raw_parts(kernel_vaddr as *const u8, PAGE_SIZE) };
 
-                // 4. 计算实际写入长度（处理文件末尾）
+                // 计算实际写入长度（处理文件末尾）
                 let write_len = min(
                     PAGE_SIZE,
                     mmap_file.len.saturating_sub(page_offset * PAGE_SIZE),
@@ -685,7 +683,7 @@ impl MappingArea {
                     continue; // 超出文件范围
                 }
 
-                // 5. 写回文件
+                // 写回文件
                 let actual_written = inode
                     .write_at(file_offset, &buffer[..write_len])
                     .map_err(|_| page_table::PagingError::InvalidAddress)?;
@@ -701,7 +699,7 @@ impl MappingArea {
                     return Err(page_table::PagingError::InvalidAddress);
                 }
 
-                // 6. 清除 Dirty 位
+                // 清除 Dirty 位
                 page_table.update_flags(*vpn, flags & !UniversalPTEFlag::DIRTY)?;
             }
         }
