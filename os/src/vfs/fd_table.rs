@@ -237,8 +237,8 @@ impl FDTable {
 
     /// 设置文件描述符标志 (F_SETFD)
     pub fn set_fd_flags(&self, fd: usize, flags: FdFlags) -> Result<(), FsError> {
-        let mut fd_flags = self.fd_flags.lock();
         let files = self.files.lock();
+        let mut fd_flags = self.fd_flags.lock();
 
         if fd >= files.len() || files[fd].is_none() {
             return Err(FsError::BadFileDescriptor);
