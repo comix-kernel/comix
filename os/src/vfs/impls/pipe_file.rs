@@ -227,7 +227,7 @@ impl File for PipeFile {
     }
 
     fn get_pipe_size(&self) -> Result<usize, FsError> {
-        Ok(self.get_pipe_size())
+        Ok(self.buffer.lock().get_capacity())
     }
 
     fn set_pipe_size(&self, size: usize) -> Result<(), FsError> {
