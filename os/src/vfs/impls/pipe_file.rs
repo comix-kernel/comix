@@ -3,8 +3,7 @@
 //! 管道是流式单向通信设备，读端和写端分别由两个 [`PipeFile`] 实例表示。
 
 use crate::sync::SpinLock;
-use crate::uapi::time::TimeSpec;
-use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType};
+use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType, OpenFlags, TimeSpec};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 
@@ -24,6 +23,8 @@ struct PipeRingBuffer {
 
 impl PipeRingBuffer {
     const DEFAULT_CAPACITY: usize = 4096; // POSIX 规定最小 512 字节
+    const MIN_CAPACITY: usize = 4096; // Linux 最小管道大小
+    const MAX_CAPACITY: usize = 1048576; // Linux 最大管道大小 (1MB)
 
     fn new() -> Self {
         Self {
@@ -32,6 +33,26 @@ impl PipeRingBuffer {
             write_end_count: 0,
             read_end_count: 0,
         }
+    }
+
+    /// 获取管道容量
+    fn get_capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// 设置管道容量
+    fn set_capacity(&mut self, new_capacity: usize) -> Result<(), FsError> {
+        if new_capacity < Self::MIN_CAPACITY || new_capacity > Self::MAX_CAPACITY {
+            return Err(FsError::InvalidArgument);
+        }
+
+        // 如果新容量小于当前数据量，拒绝修改
+        if new_capacity < self.buffer.len() {
+            return Err(FsError::InvalidArgument);
+        }
+
+        self.capacity = new_capacity;
+        Ok(())
     }
 
     /// 读取数据 (非阻塞)
@@ -86,6 +107,10 @@ pub struct PipeFile {
     buffer: Arc<SpinLock<PipeRingBuffer>>,
     /// 文件端点类型
     end_type: PipeEnd,
+    /// 打开标志位 (支持 O_NONBLOCK 等)
+    flags: SpinLock<OpenFlags>,
+    /// 异步 I/O 所有者 PID
+    owner: SpinLock<Option<i32>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,14 +141,35 @@ impl PipeFile {
         let read_end = Self {
             buffer: buffer.clone(),
             end_type: PipeEnd::Read,
+            flags: SpinLock::new(OpenFlags::empty()),
+            owner: SpinLock::new(None),
         };
 
         let write_end = Self {
             buffer,
             end_type: PipeEnd::Write,
+            flags: SpinLock::new(OpenFlags::empty()),
+            owner: SpinLock::new(None),
         };
 
         (read_end, write_end)
+    }
+
+    /// 设置文件状态标志 (F_SETFL)
+    pub fn set_flags(&self, new_flags: OpenFlags) -> Result<(), FsError> {
+        let mut flags = self.flags.lock();
+        *flags = new_flags;
+        Ok(())
+    }
+
+    /// 获取管道大小 (F_GETPIPE_SZ)
+    pub fn get_pipe_size(&self) -> usize {
+        self.buffer.lock().get_capacity()
+    }
+
+    /// 设置管道大小 (F_SETPIPE_SZ)
+    pub fn set_pipe_size(&self, new_size: usize) -> Result<(), FsError> {
+        self.buffer.lock().set_capacity(new_size)
     }
 }
 
@@ -170,6 +216,31 @@ impl File for PipeFile {
             blocks: 0,
             rdev: 0,
         })
+    }
+
+    fn flags(&self) -> OpenFlags {
+        *self.flags.lock()
+    }
+
+    fn set_status_flags(&self, new_flags: OpenFlags) -> Result<(), FsError> {
+        self.set_flags(new_flags)
+    }
+
+    fn get_pipe_size(&self) -> Result<usize, FsError> {
+        Ok(self.buffer.lock().get_capacity())
+    }
+
+    fn set_pipe_size(&self, size: usize) -> Result<(), FsError> {
+        self.buffer.lock().set_capacity(size)
+    }
+
+    fn get_owner(&self) -> Result<i32, FsError> {
+        Ok(self.owner.lock().unwrap_or(0))
+    }
+
+    fn set_owner(&self, pid: i32) -> Result<(), FsError> {
+        *self.owner.lock() = if pid == 0 { None } else { Some(pid) };
+        Ok(())
     }
 
     // lseek 使用默认实现 (返回 NotSupported)

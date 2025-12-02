@@ -9,9 +9,9 @@
 
 use alloc::vec::Vec;
 use core::ptr;
-use riscv::register::sstatus;
 
 use crate::arch::constant::{USER_BASE, USER_TOP};
+use crate::arch::trap::SumGuard;
 
 /// 向用户空间写入数据
 /// # 参数
@@ -20,10 +20,9 @@ use crate::arch::constant::{USER_BASE, USER_TOP};
 /// # Safety
 /// 调用者必须确保 `user_ptr` 指向的内存是有效且可写的用户空间地址。
 pub unsafe fn write_to_user<T>(user_ptr: *mut T, value: T) {
+    let _guard = SumGuard::new();
     unsafe {
-        sstatus::set_sum();
         ptr::write_volatile(user_ptr, value);
-        sstatus::clear_sum();
     }
 }
 
@@ -35,12 +34,8 @@ pub unsafe fn write_to_user<T>(user_ptr: *mut T, value: T) {
 /// # Safety
 /// 调用者必须确保 `user_ptr` 指向的内存是有效且可读的用户空间地址。
 pub unsafe fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
-    unsafe {
-        sstatus::set_sum();
-        let value = ptr::read_volatile(user_ptr);
-        sstatus::clear_sum();
-        value
-    }
+    let _guard = SumGuard::new();
+    unsafe { ptr::read_volatile(user_ptr) }
 }
 
 /// 用户缓冲区结构体
@@ -69,10 +64,9 @@ impl UserBuffer {
         }
         let mut vec = Vec::with_capacity(self.len);
         unsafe {
-            sstatus::set_sum();
+            let _guard = SumGuard::new();
             vec.set_len(self.len);
             ptr::copy_nonoverlapping(self.data as *const u8, vec.as_mut_ptr(), self.len);
-            sstatus::clear_sum();
         }
         vec
     }
@@ -88,9 +82,8 @@ impl UserBuffer {
         }
         let n = core::cmp::min(self.len, data.len());
         unsafe {
-            sstatus::set_sum();
+            let _guard = SumGuard::new();
             ptr::copy_nonoverlapping(data.as_ptr(), self.data, n);
-            sstatus::clear_sum();
         }
     }
 

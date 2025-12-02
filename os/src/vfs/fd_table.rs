@@ -222,4 +222,29 @@ impl FDTable {
             }
         }
     }
+
+    /// 获取文件描述符标志 (F_GETFD)
+    pub fn get_fd_flags(&self, fd: usize) -> Result<FdFlags, FsError> {
+        let files = self.files.lock();
+        let fd_flags = self.fd_flags.lock();
+
+        if fd >= files.len() || files[fd].is_none() {
+            return Err(FsError::BadFileDescriptor);
+        }
+
+        Ok(fd_flags[fd])
+    }
+
+    /// 设置文件描述符标志 (F_SETFD)
+    pub fn set_fd_flags(&self, fd: usize, flags: FdFlags) -> Result<(), FsError> {
+        let files = self.files.lock();
+        let mut fd_flags = self.fd_flags.lock();
+
+        if fd >= files.len() || files[fd].is_none() {
+            return Err(FsError::BadFileDescriptor);
+        }
+
+        fd_flags[fd] = flags;
+        Ok(())
+    }
 }
