@@ -231,7 +231,7 @@ impl File for PipeFile {
     }
 
     fn set_pipe_size(&self, size: usize) -> Result<(), FsError> {
-        self.set_pipe_size(size)
+        self.buffer.lock().set_capacity(size)
     }
 
     fn get_owner(&self) -> Result<i32, FsError> {
