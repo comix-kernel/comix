@@ -226,7 +226,14 @@ impl_syscall!(
 impl_syscall!(
     sys_clone,
     clone,
-    (c_ulong, c_ulong, *mut c_int, *mut c_int, c_ulong)
+    (
+        usize,
+        c_ulong,
+        c_ulong,
+        *mut c_void,
+        *mut c_int,
+        *mut c_void
+    )
 );
 impl_syscall!(
     sys_execve,
