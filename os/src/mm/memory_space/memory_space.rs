@@ -889,7 +889,7 @@ impl MemorySpace {
     /// # 注意
     /// - 地址必须页对齐
     /// - 范围必须完全在现有映射区域内
-    /// - 如果范围跨越多个区域，会分别修改每个区域的权限
+    /// - 如果 mprotect 只应用于区域的一部分，会自动分割区域
     /// - 只能修改 Framed 类型的映射区域
     pub fn mprotect(
         &mut self,
@@ -910,40 +910,56 @@ impl MemorySpace {
         // 计算需要修改权限的 VPN 范围
         let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
         let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start + len));
+        let change_range = VpnRange::new(start_vpn, end_vpn);
 
-        // 遍历所有受影响的 VPN，修改权限
+        // 收集需要处理的区域
+        // 注意：不能在迭代时修改 self.areas，所以先收集索引
+        let mut affected_indices = alloc::vec::Vec::new();
+
+        for (idx, area) in self.areas.iter().enumerate() {
+            if area.vpn_range().overlaps(&change_range) {
+                // 只处理 Framed 类型的映射
+                if area.map_type() == MapType::Framed {
+                    affected_indices.push(idx);
+                } else {
+                    // Direct 映射不允许修改权限
+                    return Err(PagingError::UnsupportedMapType);
+                }
+            }
+        }
+
+        // 如果没有重叠的区域，返回错误（地址无效）
+        if affected_indices.is_empty() {
+            return Err(PagingError::InvalidAddress);
+        }
+
+        // 验证所有需要修改的 VPN 都在某个 Framed 区域中
         for vpn in start_vpn.as_usize()..end_vpn.as_usize() {
             let vpn = Vpn::from_usize(vpn);
-
-            // 检查该 VPN 是否在某个区域中
-            let area_found = self.areas.iter_mut().any(|area| {
-                if area.vpn_range().contains(vpn) && area.map_type() == MapType::Framed {
-                    // 更新页表权限
-                    if let Err(_) = self.page_table.update_flags(vpn, prot) {
-                        return false;
-                    }
-                    true
-                } else {
-                    false
-                }
-            });
-
-            // 如果该 VPN 不在任何 Framed 区域中，返回错误
-            if !area_found {
+            let found = self
+                .areas
+                .iter()
+                .any(|area| area.vpn_range().contains(vpn) && area.map_type() == MapType::Framed);
+            if !found {
                 return Err(PagingError::InvalidAddress);
             }
         }
 
-        // 更新受影响区域的权限标志
-        for area in self.areas.iter_mut() {
-            let area_range = area.vpn_range();
+        // 处理每个受影响的区域
+        // 从后往前处理，避免索引失效
+        affected_indices.reverse();
 
-            // 检查区域是否与保护范围重叠
-            if area.map_type() == MapType::Framed
-                && area_range.start() < end_vpn
-                && area_range.end() > start_vpn
-            {
-                area.set_permission(prot);
+        for idx in affected_indices {
+            // 移除原区域
+            let area = self.areas.remove(idx);
+
+            // 使用 partial_change_permission 方法处理区域
+            let new_areas =
+                area.partial_change_permission(&mut self.page_table, start_vpn, end_vpn, prot)?;
+
+            // 将新区域按顺序插入回 areas 列表
+            for (offset, new_area) in new_areas.into_iter().enumerate() {
+                self.areas.insert(idx + offset, new_area);
             }
         }
 
@@ -1737,5 +1753,271 @@ mod memory_space_tests {
         println!("  Changed permissions across 2 areas");
 
         println!("  mprotect multiple areas test passed");
+    });
+
+    // 23. 测试 mprotect 部分修改 - 修改前半部分
+    test_case!(test_mprotect_partial_front, {
+        println!("Testing mprotect partial modification - front half");
+
+        let mut ms = MemorySpace::new();
+
+        // 创建一个4页的区域
+        let vpn_range = VpnRange::new(Vpn::from_usize(0x7000), Vpn::from_usize(0x7004));
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area");
+
+        println!("  Created 4-page area with RW permissions");
+
+        // 只修改前2页的权限为只读
+        let start = vpn_range.start().start_addr().as_usize();
+        let len = 2 * PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+        kassert!(result.is_ok());
+
+        println!("  Changed first 2 pages to R-only");
+
+        // 验证区域被分割为2个
+        let area_count = ms
+            .areas
+            .iter()
+            .filter(|a| {
+                a.vpn_range().start() >= vpn_range.start() && a.vpn_range().end() <= vpn_range.end()
+            })
+            .count();
+        kassert!(area_count == 2);
+
+        // 验证前2页是只读
+        let front_area = ms.find_area(Vpn::from_usize(0x7000)).unwrap();
+        kassert!(front_area.permission() == UniversalPTEFlag::user_read());
+        println!("  Front area has R-only permission");
+
+        // 验证后2页是读写
+        let back_area = ms.find_area(Vpn::from_usize(0x7002)).unwrap();
+        kassert!(back_area.permission() == UniversalPTEFlag::user_rw());
+        println!("  Back area has RW permission");
+
+        println!("  mprotect partial front test passed");
+    });
+
+    // 24. 测试 mprotect 部分修改 - 修改后半部分
+    test_case!(test_mprotect_partial_back, {
+        println!("Testing mprotect partial modification - back half");
+
+        let mut ms = MemorySpace::new();
+
+        // 创建一个4页的区域
+        let vpn_range = VpnRange::new(Vpn::from_usize(0x8000), Vpn::from_usize(0x8004));
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area");
+
+        println!("  Created 4-page area with RW permissions");
+
+        // 只修改后2页的权限为只读
+        let start = Vpn::from_usize(0x8002).start_addr().as_usize();
+        let len = 2 * PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+        kassert!(result.is_ok());
+
+        println!("  Changed last 2 pages to R-only");
+
+        // 验证区域被分割为2个
+        let area_count = ms
+            .areas
+            .iter()
+            .filter(|a| {
+                a.vpn_range().start() >= vpn_range.start() && a.vpn_range().end() <= vpn_range.end()
+            })
+            .count();
+        kassert!(area_count == 2);
+
+        // 验证前2页是读写
+        let front_area = ms.find_area(Vpn::from_usize(0x8000)).unwrap();
+        kassert!(front_area.permission() == UniversalPTEFlag::user_rw());
+        println!("  Front area has RW permission");
+
+        // 验证后2页是只读
+        let back_area = ms.find_area(Vpn::from_usize(0x8002)).unwrap();
+        kassert!(back_area.permission() == UniversalPTEFlag::user_read());
+        println!("  Back area has R-only permission");
+
+        println!("  mprotect partial back test passed");
+    });
+
+    // 25. 测试 mprotect 部分修改 - 修改中间部分（三分割）
+    test_case!(test_mprotect_partial_middle, {
+        println!("Testing mprotect partial modification - middle part (3-way split)");
+
+        let mut ms = MemorySpace::new();
+
+        // 创建一个6页的区域
+        let vpn_range = VpnRange::new(Vpn::from_usize(0x9000), Vpn::from_usize(0x9006));
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area");
+
+        println!("  Created 6-page area with RW permissions");
+
+        // 只修改中间2页（第2-3页，索引从0开始）的权限为只读
+        let start = Vpn::from_usize(0x9002).start_addr().as_usize();
+        let len = 2 * PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+        kassert!(result.is_ok());
+
+        println!("  Changed middle 2 pages to R-only");
+
+        // 验证区域被分割为3个
+        let area_count = ms
+            .areas
+            .iter()
+            .filter(|a| {
+                a.vpn_range().start() >= vpn_range.start() && a.vpn_range().end() <= vpn_range.end()
+            })
+            .count();
+        kassert!(area_count == 3);
+
+        // 验证前2页是读写
+        let front_area = ms.find_area(Vpn::from_usize(0x9000)).unwrap();
+        kassert!(front_area.permission() == UniversalPTEFlag::user_rw());
+        kassert!(front_area.vpn_range().len() == 2);
+        println!("  Front area (2 pages) has RW permission");
+
+        // 验证中间2页是只读
+        let middle_area = ms.find_area(Vpn::from_usize(0x9002)).unwrap();
+        kassert!(middle_area.permission() == UniversalPTEFlag::user_read());
+        kassert!(middle_area.vpn_range().len() == 2);
+        println!("  Middle area (2 pages) has R-only permission");
+
+        // 验证后2页是读写
+        let back_area = ms.find_area(Vpn::from_usize(0x9004)).unwrap();
+        kassert!(back_area.permission() == UniversalPTEFlag::user_rw());
+        kassert!(back_area.vpn_range().len() == 2);
+        println!("  Back area (2 pages) has RW permission");
+
+        println!("  mprotect partial middle test passed");
+    });
+
+    // 26. 测试 mprotect 部分修改 - 验证页表权限正确性
+    test_case!(test_mprotect_partial_pte_flags, {
+        println!("Testing mprotect partial modification - verify PTE flags");
+
+        let mut ms = MemorySpace::new();
+
+        // 创建一个4页的区域，并立即映射
+        let vpn_range = VpnRange::new(Vpn::from_usize(0xa000), Vpn::from_usize(0xa004));
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area");
+
+        println!("  Created 4-page area with RW permissions");
+
+        // 修改前2页的权限为只读
+        let start = vpn_range.start().start_addr().as_usize();
+        let len = 2 * PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+        kassert!(result.is_ok());
+
+        println!("  Changed first 2 pages to R-only");
+
+        // 验证页表中的权限标志
+        for i in 0..2 {
+            let vpn = Vpn::from_usize(0xa000 + i);
+            if let Ok((_, _, flags)) = ms.page_table().walk(vpn) {
+                kassert!(flags.contains(UniversalPTEFlag::READABLE));
+                kassert!(!flags.contains(UniversalPTEFlag::WRITEABLE));
+                println!(
+                    "  VPN 0x{:x} has correct R-only flags in page table",
+                    vpn.as_usize()
+                );
+            }
+        }
+
+        for i in 2..4 {
+            let vpn = Vpn::from_usize(0xa000 + i);
+            if let Ok((_, _, flags)) = ms.page_table().walk(vpn) {
+                kassert!(flags.contains(UniversalPTEFlag::READABLE));
+                kassert!(flags.contains(UniversalPTEFlag::WRITEABLE));
+                println!(
+                    "  VPN 0x{:x} has correct RW flags in page table",
+                    vpn.as_usize()
+                );
+            }
+        }
+
+        println!("  mprotect partial PTE flags test passed");
+    });
+
+    // 27. 测试 mprotect 部分修改 - 边界情况（单页修改）
+    test_case!(test_mprotect_partial_single_page, {
+        println!("Testing mprotect partial modification - single page");
+
+        let mut ms = MemorySpace::new();
+
+        // 创建一个3页的区域
+        let vpn_range = VpnRange::new(Vpn::from_usize(0xb000), Vpn::from_usize(0xb003));
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area");
+
+        println!("  Created 3-page area with RW permissions");
+
+        // 只修改中间1页的权限为只读
+        let start = Vpn::from_usize(0xb001).start_addr().as_usize();
+        let len = PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+        kassert!(result.is_ok());
+
+        println!("  Changed middle page to R-only");
+
+        // 验证区域被分割为3个
+        let area_count = ms
+            .areas
+            .iter()
+            .filter(|a| {
+                a.vpn_range().start() >= vpn_range.start() && a.vpn_range().end() <= vpn_range.end()
+            })
+            .count();
+        kassert!(area_count == 3);
+
+        // 验证每页的权限
+        let page0 = ms.find_area(Vpn::from_usize(0xb000)).unwrap();
+        kassert!(page0.permission() == UniversalPTEFlag::user_rw());
+        println!("  Page 0 has RW permission");
+
+        let page1 = ms.find_area(Vpn::from_usize(0xb001)).unwrap();
+        kassert!(page1.permission() == UniversalPTEFlag::user_read());
+        println!("  Page 1 has R-only permission");
+
+        let page2 = ms.find_area(Vpn::from_usize(0xb002)).unwrap();
+        kassert!(page2.permission() == UniversalPTEFlag::user_rw());
+        println!("  Page 2 has RW permission");
+
+        println!("  mprotect partial single page test passed");
     });
 }
