@@ -1,14 +1,14 @@
 use core::cmp::Ordering;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
-use crate::config::{MAX_USER_HEAP_SIZE, MEMORY_END, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
-use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
 use crate::mm::memory_space::MmapFile;
+use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
 use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag};
 use crate::println;
 use crate::sync::SpinLock;
-use crate::{pr_warn, pr_err};
+use crate::{pr_err, pr_warn};
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 
@@ -221,7 +221,7 @@ impl MemorySpace {
             AreaType::KernelHeap,
             MapType::Direct,
             UniversalPTEFlag::kernel_rw(),
-            None,  // 内核直接映射，无文件
+            None, // 内核直接映射，无文件
         );
 
         phys_mem_area.map(&mut self.page_table)?;
@@ -370,7 +370,7 @@ impl MemorySpace {
             area_type,
             MapType::Direct,
             flags,
-            None,  // Direct 映射无文件
+            None, // Direct 映射无文件
         );
 
         area.map(&mut space.page_table)?;
@@ -396,7 +396,7 @@ impl MemorySpace {
             AreaType::KernelMmio,
             MapType::Direct,
             UniversalPTEFlag::kernel_rw(),
-            None,  // MMIO 映射无文件
+            None, // MMIO 映射无文件
         );
 
         area.map(&mut self.page_table)?;
@@ -634,7 +634,8 @@ impl MemorySpace {
         let heap_start = self.heap_start?.start_addr().as_usize();
 
         // 获取当前堆的实际结束地址（不包含 mmap 区域）
-        let heap_end = self.areas
+        let heap_end = self
+            .areas
             .iter()
             .filter(|a| a.area_type() == AreaType::UserHeap)
             .map(|a| a.vpn_range().end().start_addr().as_usize())
@@ -649,18 +650,19 @@ impl MemorySpace {
         let search_limit = stack_bottom.saturating_sub(STACK_GUARD_SIZE);
 
         // 收集所有用户区域（包括 heap 和 mmap），按起始地址排序
-        let mut user_areas: alloc::vec::Vec<(usize, usize)> = self.areas
+        let mut user_areas: alloc::vec::Vec<(usize, usize)> = self
+            .areas
             .iter()
             .filter(|a| {
                 matches!(
                     a.area_type(),
                     AreaType::UserHeap
-                    | AreaType::UserMmap
-                    | AreaType::UserStack
-                    | AreaType::UserText
-                    | AreaType::UserRodata
-                    | AreaType::UserData
-                    | AreaType::UserBss
+                        | AreaType::UserMmap
+                        | AreaType::UserStack
+                        | AreaType::UserText
+                        | AreaType::UserRodata
+                        | AreaType::UserData
+                        | AreaType::UserBss
                 )
             })
             .map(|a| {
@@ -676,8 +678,8 @@ impl MemorySpace {
         let mut search_start = heap_end;
 
         // 对齐到页边界（向上取整）
-        search_start = (search_start + crate::config::PAGE_SIZE - 1)
-            & !(crate::config::PAGE_SIZE - 1);
+        search_start =
+            (search_start + crate::config::PAGE_SIZE - 1) & !(crate::config::PAGE_SIZE - 1);
 
         for &(area_start, area_end) in &user_areas {
             // 跳过在 heap_end 之前的区域
@@ -720,13 +722,18 @@ impl MemorySpace {
     /// # 参数
     /// - `hint`: 建议的起始地址（0 = 由内核选择）
     /// - `len`: 长度（字节）
-    /// - `prot`: 保护标志（PROT_READ | PROT_WRITE | PROT_EXEC）
-    pub fn mmap(&mut self, hint: usize, len: usize, prot: usize) -> Result<usize, PagingError> {
+    /// - `pte_flags`: 页表项标志（应包含 VALID 和 USER_ACCESSIBLE）
+    pub fn mmap(
+        &mut self,
+        hint: usize,
+        len: usize,
+        pte_flags: UniversalPTEFlag,
+    ) -> Result<usize, PagingError> {
         if len == 0 {
             return Err(PagingError::InvalidAddress);
         }
 
-        // 2. 确定起始地址
+        // 确定起始地址
         let start = if hint == 0 {
             // 内核选择地址：查找空闲区域
             self.find_free_region(len, crate::config::PAGE_SIZE)
@@ -749,7 +756,10 @@ impl MemorySpace {
             );
 
             // 检查是否与现有区域重叠
-            let has_overlap = self.areas.iter().any(|a| a.vpn_range().overlaps(&vpn_range_check));
+            let has_overlap = self
+                .areas
+                .iter()
+                .any(|a| a.vpn_range().overlaps(&vpn_range_check));
 
             if has_overlap {
                 // hint 不可用，尝试查找附近的空闲区域
@@ -762,36 +772,23 @@ impl MemorySpace {
             }
         };
 
-        // 3. 计算 VPN 范围（start 已经是页对齐的）
+        // 计算 VPN 范围（start 已经是页对齐的）
         let vpn_range = VpnRange::new(
             Vpn::from_addr_floor(Vaddr::from_usize(start)),
             Vpn::from_addr_ceil(Vaddr::from_usize(start + len)),
         );
 
-        // 4. 最终重叠检查（防御性编程）
+        // 最终重叠检查（防御性编程）
         for area in &self.areas {
             if area.vpn_range().overlaps(&vpn_range) {
                 return Err(PagingError::AlreadyMapped);
             }
         }
 
-        // 5. 转换权限标志
-        let mut flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
-        if prot & 0x1 != 0 {  // PROT_READ
-            flags |= UniversalPTEFlag::READABLE;
-        }
-        if prot & 0x2 != 0 {  // PROT_WRITE
-            flags |= UniversalPTEFlag::WRITEABLE;
-        }
-        if prot & 0x4 != 0 {  // PROT_EXEC
-            flags |= UniversalPTEFlag::EXECUTABLE;
-        }
+        // 创建映射区域
+        self.insert_framed_area(vpn_range, AreaType::UserMmap, pte_flags, None, None)?;
 
-        // 6. 创建映射区域
-        // ✅ 使用正确的 AreaType::UserMmap
-        self.insert_framed_area(vpn_range, AreaType::UserMmap, flags, None, None)?;
-
-        // 7. 返回对齐后的地址
+        // 返回对齐后的地址
         Ok(start)
     }
 
@@ -811,32 +808,32 @@ impl MemorySpace {
     /// - 如果只覆盖区域的一部分，会拆分区域
     /// - 如果地址未映射，返回成功（幂等）
     pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), PagingError> {
-        // 1. 参数验证
+        // 参数验证
         if len == 0 {
-            return Ok(());  // POSIX: len=0 是合法的，什么都不做
+            return Ok(()); // POSIX: len=0 是合法的，什么都不做
         }
 
-        // 2. 计算需要解除映射的 VPN 范围
+        // 计算需要解除映射的 VPN 范围
         let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
         let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start + len));
         let unmap_range = VpnRange::new(start_vpn, end_vpn);
 
-        // 3. 收集需要处理的区域
+        // 收集需要处理的区域
         // 注意：不能在迭代时修改 self.areas，所以先收集索引
         let mut affected_indices = alloc::vec::Vec::new();
-        
+
         for (idx, area) in self.areas.iter().enumerate() {
             if area.vpn_range().overlaps(&unmap_range) {
                 affected_indices.push(idx);
             }
         }
 
-        // 4. 如果没有重叠的区域，直接返回成功（幂等）
+        // 如果没有重叠的区域，直接返回成功（幂等）
         if affected_indices.is_empty() {
             return Ok(());
         }
 
-        // 5. 处理每个受影响的区域
+        // 处理每个受影响的区域
         // 从后往前处理，避免索引失效
         affected_indices.reverse();
 
@@ -873,6 +870,81 @@ impl MemorySpace {
 
             // 如果写回失败，返回错误（但映射已经被解除）
             sync_result?;
+        }
+
+        Ok(())
+    }
+
+    /// 修改内存区域的保护权限（mprotect 系统调用）
+    ///
+    /// # 参数
+    /// - `start`: 起始地址（字节），必须页对齐
+    /// - `len`: 长度（字节）
+    /// - `prot`: 新的保护标志
+    ///
+    /// # 返回值
+    /// - 成功: 返回 Ok(())
+    /// - 失败: 返回 PagingError
+    ///
+    /// # 注意
+    /// - 地址必须页对齐
+    /// - 范围必须完全在现有映射区域内
+    /// - 如果范围跨越多个区域，会分别修改每个区域的权限
+    /// - 只能修改 Framed 类型的映射区域
+    pub fn mprotect(
+        &mut self,
+        start: usize,
+        len: usize,
+        prot: UniversalPTEFlag,
+    ) -> Result<(), PagingError> {
+        // 参数验证
+        if len == 0 {
+            return Ok(()); // len=0 是合法的，什么都不做
+        }
+
+        // 检查地址对齐
+        if start % PAGE_SIZE != 0 {
+            return Err(PagingError::InvalidAddress);
+        }
+
+        // 计算需要修改权限的 VPN 范围
+        let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
+        let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start + len));
+
+        // 遍历所有受影响的 VPN，修改权限
+        for vpn in start_vpn.as_usize()..end_vpn.as_usize() {
+            let vpn = Vpn::from_usize(vpn);
+
+            // 检查该 VPN 是否在某个区域中
+            let area_found = self.areas.iter_mut().any(|area| {
+                if area.vpn_range().contains(vpn) && area.map_type() == MapType::Framed {
+                    // 更新页表权限
+                    if let Err(_) = self.page_table.update_flags(vpn, prot) {
+                        return false;
+                    }
+                    true
+                } else {
+                    false
+                }
+            });
+
+            // 如果该 VPN 不在任何 Framed 区域中，返回错误
+            if !area_found {
+                return Err(PagingError::InvalidAddress);
+            }
+        }
+
+        // 更新受影响区域的权限标志
+        for area in self.areas.iter_mut() {
+            let area_range = area.vpn_range();
+
+            // 检查区域是否与保护范围重叠
+            if area.map_type() == MapType::Framed
+                && area_range.start() < end_vpn
+                && area_range.end() > start_vpn
+            {
+                area.set_permission(prot);
+            }
         }
 
         Ok(())
@@ -1452,8 +1524,8 @@ mod memory_space_tests {
     // 16. 测试 mmap 文件映射基本功能
     test_case!(test_mmap_file_basic, {
         use crate::fs::tmpfs::TmpFs;
-        use crate::vfs::{File, FileMode, FileSystem};
         use crate::uapi::mm::{MapFlags, ProtFlags};
+        use crate::vfs::{File, FileMode, FileSystem};
         use alloc::sync::Arc;
 
         println!("Testing mmap file mapping basic functionality");
@@ -1565,5 +1637,105 @@ mod memory_space_tests {
         }
 
         println!("  MemorySpace dropped successfully (no panic)");
+    });
+
+    // 20. 测试 mprotect 基本功能
+    test_case!(test_mprotect_basic, {
+        println!("Testing mprotect basic functionality");
+
+        let mut ms = MemorySpace::new();
+        let vpn_range = VpnRange::new(Vpn::from_usize(0x4000), Vpn::from_usize(0x4002));
+
+        // 创建一个可读写的区域
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area");
+
+        println!("  Created area with R/W permissions");
+
+        // 修改为只读
+        let start = vpn_range.start().start_addr().as_usize();
+        let len = (vpn_range.end().as_usize() - vpn_range.start().as_usize()) * PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+
+        kassert!(result.is_ok());
+        println!("  Changed permissions to R only");
+
+        // 修改为可执行
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_rx());
+        kassert!(result.is_ok());
+        println!("  Changed permissions to R+X");
+
+        println!("  mprotect basic test passed");
+    });
+
+    // 21. 测试 mprotect 错误处理
+    test_case!(test_mprotect_errors, {
+        println!("Testing mprotect error handling");
+
+        let mut ms = MemorySpace::new();
+
+        // 测试未对齐的地址
+        let result = ms.mprotect(0x1001, PAGE_SIZE, UniversalPTEFlag::user_read());
+        kassert!(result.is_err());
+        println!("  Correctly rejected unaligned address");
+
+        // 测试未映射的区域
+        let result = ms.mprotect(0x5000 * PAGE_SIZE, PAGE_SIZE, UniversalPTEFlag::user_read());
+        kassert!(result.is_err());
+        println!("  Correctly rejected unmapped region");
+
+        // 测试 len=0
+        let result = ms.mprotect(0x1000, 0, UniversalPTEFlag::user_read());
+        kassert!(result.is_ok());
+        println!("  Correctly handled len=0");
+
+        println!("  mprotect error handling test passed");
+    });
+
+    // 22. 测试 mprotect 跨多个区域
+    test_case!(test_mprotect_multiple_areas, {
+        println!("Testing mprotect across multiple areas");
+
+        let mut ms = MemorySpace::new();
+
+        // 创建两个连续的区域
+        let vpn_range1 = VpnRange::new(Vpn::from_usize(0x6000), Vpn::from_usize(0x6002));
+        let vpn_range2 = VpnRange::new(Vpn::from_usize(0x6002), Vpn::from_usize(0x6004));
+
+        ms.insert_framed_area(
+            vpn_range1,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area 1");
+
+        ms.insert_framed_area(
+            vpn_range2,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            None,
+        )
+        .expect("Failed to insert area 2");
+
+        println!("  Created 2 consecutive areas");
+
+        // 修改跨越两个区域的权限
+        let start = vpn_range1.start().start_addr().as_usize();
+        let len = (vpn_range2.end().as_usize() - vpn_range1.start().as_usize()) * PAGE_SIZE;
+        let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
+
+        kassert!(result.is_ok());
+        println!("  Changed permissions across 2 areas");
+
+        println!("  mprotect multiple areas test passed");
     });
 }

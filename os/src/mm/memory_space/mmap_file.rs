@@ -1,8 +1,8 @@
 //! mmap 文件映射信息
 
-use alloc::sync::Arc;
-use crate::vfs::File;
 use crate::uapi::mm::{MapFlags, ProtFlags};
+use crate::vfs::File;
+use alloc::sync::Arc;
 
 /// 文件映射信息
 pub struct MmapFile {
