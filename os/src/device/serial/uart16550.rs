@@ -9,9 +9,9 @@ use crate::{
         DRIVERS, DeviceType, Driver, SERIAL_DRIVERS, console::uart_console,
         device_tree::DEVICE_TREE_REGISTRY, serial::SerialDriver,
     },
-    earlyprintln,
     kernel::current_memory_space,
     mm::address::{Paddr, UsizeConvert},
+    pr_info, pr_warn,
     sync::SpinLock,
 };
 
@@ -62,7 +62,7 @@ pub fn init(node: &FdtNode) {
     let paddr = reg.starting_address as usize;
     let size = reg.size.unwrap_or(0);
     if size == 0 {
-        earlyprintln!(
+        pr_warn!(
             "[Device] ns16550a device tree node {} has no size",
             node.name
         );
@@ -81,7 +81,7 @@ pub fn init(node: &FdtNode) {
     DRIVERS.write().push(driver.clone());
     SERIAL_DRIVERS.write().push(driver.clone());
     uart_console::init(driver);
-    earlyprintln!("[Device] Serial driver (uart16550) is initialized");
+    pr_info!("[Device] Serial driver (uart16550) is initialized");
 }
 
 pub fn driver_init() {

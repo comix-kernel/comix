@@ -5,9 +5,8 @@ use crate::{
         Driver,
         net::{add_network_device, net_device::VirtioNetDevice},
     },
-    earlyprintln,
     net::interface::NetworkInterface,
-    println,
+    pr_info, pr_warn, println,
     sync::SpinLock,
 };
 use alloc::{format, sync::Arc};
@@ -18,7 +17,7 @@ lazy_static! {
 }
 
 pub fn init(transport: MmioTransport<'static>) {
-    earlyprintln!("[Device] Initializing network driver (virtio-net)");
+    pr_info!("[Device] Initializing network driver (virtio-net)");
 
     // 获取设备ID
     let device_id = {
@@ -27,12 +26,12 @@ pub fn init(transport: MmioTransport<'static>) {
         *count += 1;
         id
     };
-    earlyprintln!("[Device] Find VirtioNetDevice with ID: {}", device_id);
+    pr_info!("[Device] Find VirtioNetDevice with ID: {}", device_id);
 
     // 创建VirtioNetDevice
     match VirtioNetDevice::new(transport, device_id) {
         Ok(virtio_device) => {
-            earlyprintln!("[Device] VirtioNetDevice created with ID: {}", device_id);
+            pr_info!("[Device] VirtioNetDevice created with ID: {}", device_id);
 
             // 创建网络接口
             let interface_name = format!("eth{}", device_id);
@@ -50,13 +49,13 @@ pub fn init(transport: MmioTransport<'static>) {
             // 注册设备驱动
             crate::device::register_driver(network_interface.clone() as Arc<dyn Driver>);
 
-            earlyprintln!(
+            pr_info!(
                 "[Device] Network interface {} initialized successfully",
                 network_interface.name()
             );
         }
         Err(e) => {
-            earlyprintln!("[Device] Failed to initialize VirtioNetDevice: {:?}", e);
+            pr_warn!("[Device] Failed to initialize VirtioNetDevice: {:?}", e);
         }
     }
 }

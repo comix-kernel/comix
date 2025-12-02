@@ -20,8 +20,8 @@ use crate::{
     impl_syscall,
     uapi::{
         fs::LinuxStatFs,
-        iovec::IoVec,
         futex::RobustListHead,
+        iovec::IoVec,
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,

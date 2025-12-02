@@ -18,7 +18,7 @@ pub struct BlockDeviceAdapter {
 impl BlockDeviceAdapter {
     pub fn new(device: Arc<dyn BlockDriver>, block_size: usize) -> Self {
         let sector_size = VIRTIO_BLK_SECTOR_SIZE;
-        crate::println!(
+        crate::pr_info!(
             "[Ext4Adapter] Created adapter: ext4_block_size={}, sector_size={}",
             block_size,
             sector_size
