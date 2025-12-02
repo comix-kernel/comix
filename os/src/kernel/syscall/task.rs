@@ -13,22 +13,24 @@ use crate::{
         timer::{clock_freq, get_time},
         trap::restore,
     },
-    ipc::{SignalHandlerTable, SignalPending},
+    ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{
-        SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
-        TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
-        sleep_task_with_block,
+        FUTEX_MANAGER, SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE,
+        TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
+        exit_process, schedule, sleep_task_with_block,
         syscall::util::{get_args_safe, get_path_safe},
-        time::REALTIME,
+        time::{REALTIME, realtime_now},
         yield_task,
     },
     mm::{
+        address::{UsizeConvert, Vaddr},
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
     sync::SpinLock,
     uapi::{
-        errno::{EINTR, EINVAL, ENOSYS, ESRCH},
+        errno::{EAGAIN, EFAULT, EINTR, EINVAL, ENOSYS, EPERM, ESRCH, ETIMEDOUT},
+        futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
         signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
@@ -41,7 +43,7 @@ use crate::{
             },
             itimer_id::{ITIMER_PROF, ITIMER_REAL, ITIMER_VIRTUAL},
         },
-        types::StackT,
+        types::{SizeT, StackT},
         wait::{WaitFlags, WaitStatus},
     },
     util::user_buffer::{read_from_user, write_to_user},
@@ -57,6 +59,8 @@ use crate::{
 /// # 参数
 /// - `code`: 退出代码
 pub fn exit(code: c_int) -> c_int {
+    // TODO: 处理 tid_addr 和 robust_list
+    // TODO: clear_child_tid 的处理
     let task = current_task();
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
@@ -78,6 +82,7 @@ pub fn exit(code: c_int) -> c_int {
 /// # 参数
 /// - `code`: 退出代码
 pub fn exit_group(code: c_int) -> ! {
+    // TODO: 处理 tid_addr 和 robust_list
     exit_process(current_task(), code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
@@ -683,4 +688,201 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
     }
 
     0
+}
+
+/// Futex 系统调用实现
+/// # 参数
+/// - `uaddr`: 指向用户空间中 futex 变量的指针
+/// - `op`: 操作码和标志
+/// - `val`: 操作相关的值
+/// - `_timeout`: 指向 TimeSpec 结构体的指针, 用于指定超时时间
+/// - `_uaddr2`: 指向用户空间中第二个 futex 变量的指针
+/// - `_val3`: 额外的操作相关值
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn futex(
+    uaddr: *mut u32,
+    op: c_int,
+    val: u32,
+    timeout: *const TimeSpec,
+    _uaddr2: *mut u32,
+    _val3: u32,
+) -> c_int {
+    let _private = (op & FUTEX_PRIVATE as c_int) != 0; // TODO: 目前不区分 PRIVATE 和 SHARED
+    let realtime = (op & FUTEX_CLOCK_REALTIME as c_int) != 0;
+    let op = op & !(FUTEX_PRIVATE as c_int) & !(FUTEX_CLOCK_REALTIME as c_int);
+    // HACK: 其实只需要锁定与 uaddr 对应的 Futex 等待队列
+    let mut fm = FUTEX_MANAGER.lock();
+    match op as u32 {
+        FUTEX_WAIT => {
+            // 必须保证获 取锁 → 读取用户数据 → 比较 → 释放锁 整个序列是原子的
+            let user_val = unsafe { read_from_user(uaddr) };
+            let memory_space = current_task()
+                .lock()
+                .memory_space
+                .as_ref()
+                .expect("futex: current task has no memory space.")
+                .clone();
+            let paddr = if let Some(paddr) = memory_space
+                .lock()
+                .translate(Vaddr::from_usize(uaddr as usize))
+            {
+                paddr.as_usize()
+            } else {
+                return -EFAULT;
+            };
+            if user_val != val as u32 {
+                return -EAGAIN;
+            }
+
+            let task = current_task();
+            let waitq = fm.get_wait_queue(paddr);
+            waitq.sleep(task.clone());
+            sleep_task_with_block(task.clone(), true);
+
+            if !timeout.is_null() {
+                let ts = unsafe { read_from_user(timeout) };
+                if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec > 999999999 {
+                    return -EINVAL;
+                }
+                let sleep_ticks = ts.into_freq(clock_freq());
+                let trigger = if realtime {
+                    let now = realtime_now().into_freq(clock_freq());
+                    now.saturating_add(sleep_ticks)
+                } else {
+                    let now = get_time();
+                    now.saturating_add(sleep_ticks)
+                };
+                TIMER_QUEUE.lock().push(trigger, task.clone());
+                drop(fm);
+                yield_task();
+                if TIMER_QUEUE.lock().remove_task(&task).is_none() {
+                    // 超时唤醒
+                    let mut fm = FUTEX_MANAGER.lock();
+                    let waitq = fm.get_wait_queue(paddr);
+                    // 虽然任务已经被唤醒, 但仍然需要从等待队列中移除
+                    waitq.remove_task(&task);
+                    return -ETIMEDOUT;
+                }
+            } else {
+                drop(fm);
+                yield_task();
+            }
+            if signal_pending(&task) {
+                // 信号唤醒
+                let mut fm = FUTEX_MANAGER.lock();
+                let waitq = fm.get_wait_queue(paddr);
+                waitq.remove_task(&task);
+                return -EINTR;
+            }
+            // 正常唤醒
+            // NOTE: 此时任务已经不在等待队列中
+            0
+        }
+        FUTEX_WAKE => {
+            let mut wake_count = 0;
+            let paddr = {
+                let memory_space = current_task()
+                    .lock()
+                    .memory_space
+                    .as_ref()
+                    .expect("futex: current task has no memory space.")
+                    .clone();
+                if let Some(paddr) = memory_space
+                    .lock()
+                    .translate(Vaddr::from_usize(uaddr as usize))
+                {
+                    paddr.as_usize()
+                } else {
+                    return -EFAULT;
+                }
+            };
+            let mut fm = FUTEX_MANAGER.lock();
+            let waitq = fm.get_wait_queue(paddr);
+            for _ in 0..val {
+                waitq.wake_up_one();
+                wake_count += 1;
+            }
+            wake_count
+        }
+        _ => -ENOSYS,
+    }
+}
+
+//    long syscall(SYS_get_robust_list, int pid,
+//                 struct robust_list_head **head_ptr, size_t *sizep);
+//    long syscall(SYS_set_robust_list,
+//                 struct robust_list_head *head, size_t size);
+
+/// 设置线程 ID 地址
+/// # 参数
+/// - `tidptr`: 指向存储线程 ID 的用户空间地址
+/// # 返回值
+/// - 返回当前线程的线程 ID (TID)
+pub fn set_tid_address(tidptr: *mut c_int) -> c_int {
+    let task = current_task();
+    task.lock().clear_child_tid = tidptr as usize;
+    current_task().lock().tid as c_int
+}
+
+/// 获取线程的 robust futex 列表头指针和大小
+/// # 参数
+/// - `pid`: 目标进程 ID, 为 0 表示当前进程
+/// - `head_ptr`: 指向存储 robust futex 列表头指针的用户空间地址
+/// - `sizep`: 指向存储 robust futex 列表大小的用户空间地址
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn get_robust_list(pid: c_int, head_ptr: *mut *mut RobustListHead, sizep: *mut SizeT) -> c_int {
+    let task = if pid == 0 {
+        current_task()
+    } else {
+        let tm = TASK_MANAGER.lock();
+        match tm.get_task(pid as u32) {
+            Some(t) => t,
+            None => return -ESRCH,
+        }
+    };
+    let (head, size) = {
+        let t = task.lock();
+        let head = match t.robust_list {
+            Some(h) => h as *mut RobustListHead,
+            None => core::ptr::null_mut(),
+        };
+        let size = size_of::<RobustListHead>() as SizeT;
+        (head, size)
+    };
+    unsafe {
+        write_to_user(head_ptr, head);
+        write_to_user(sizep, size);
+    }
+    0
+}
+
+/// 设置线程的 robust futex 列表头指针
+/// # 参数
+/// - `head`: 指向 robust futex 列表头的指针
+/// - `size`: robust futex 列表的大小
+/// # 返回值
+/// - 成功返回 0, 失败返回负错误码
+pub fn set_robust_list(head: *const RobustListHead, size: SizeT) -> c_int {
+    if size != size_of::<RobustListHead>() as SizeT {
+        return -EINVAL;
+    }
+    let task = current_task();
+    task.lock().robust_list = Some(head as usize);
+    0
+}
+
+/// 创建一个新的会话并设置进程组 ID
+/// # 返回值
+/// - 成功返回新会话的进程组 ID, 失败返回负错误码
+pub fn setsid() -> c_int {
+    let task = current_task();
+    let mut t = task.lock();
+    if t.pid == t.pgid {
+        return -EPERM;
+    }
+    let new_pgid = t.pid;
+    t.pgid = new_pgid;
+    new_pgid as c_int
 }
