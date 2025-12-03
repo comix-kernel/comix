@@ -168,9 +168,9 @@ impl TrapFrame {
         entry: usize,
         user_sp: usize,
         kernel_sp: usize,
-        argc: usize,
-        argv: usize,
-        envp: usize,
+        _argc: usize,
+        _argv: usize,
+        _envp: usize,
     ) {
         let mut sstatus = sstatus::read();
         sstatus.set_spp(sstatus::SPP::User);
@@ -180,9 +180,9 @@ impl TrapFrame {
         self.sstatus = sstatus.bits();
         self.kernel_sp = kernel_sp;
         self.x2_sp = user_sp;
-        self.x10_a0 = argc;
-        self.x11_a1 = argv;
-        self.x12_a2 = envp;
+        self.x10_a0 = 0; // a0 = rtld_fini (0 for static binaries)
+        self.x11_a1 = 0; // undefined
+        self.x12_a2 = 0; // undefined
         // 清零 ra，避免意外返回路径，用户态程序应通过正常的退出机制结束
         self.x1_ra = 0;
     }

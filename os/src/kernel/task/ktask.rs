@@ -140,13 +140,17 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
 /// * `argv`: 传递给新程序的参数列表
 /// * `envp`: 传递给新程序的环境变量列表
 pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
+    // 1. 加载 ELF 文件
     crate::pr_info!("[kernel_execve] Loading: {}", path);
     let data = crate::vfs::vfs_load_elf(path).expect("kernel_execve: file not found");
     crate::pr_info!("[kernel_execve] Loaded {} bytes", data.len());
 
-    let (space, entry, sp) = MemorySpace::from_elf(&data)
+    // 2. 从 ELF 创建内存空间
+    let (space, entry, sp, phdr_addr, phnum, phent) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
     crate::pr_info!("[kernel_execve] Created memory space, entry=0x{:x}", entry);
+
+    // 3. 包装内存空间
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
     current_cpu().lock().switch_space(space.clone());
@@ -162,7 +166,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     unsafe { disable_interrupts() };
     {
         let mut t = task.lock();
-        t.execve(space, entry, sp, argv, envp);
+        t.execve(space, entry, sp, argv, envp, phdr_addr, phnum, phent);
     }
     crate::pr_info!("[kernel_execve] Switching to user mode");
 

@@ -280,7 +280,7 @@ pub fn execve(
 
     task.lock().fd_table.close_exec();
 
-    let (space, entry, sp) = MemorySpace::from_elf(&data)
+    let (space, entry, sp, phdr_addr, phnum, phent) = MemorySpace::from_elf(&data)
         .expect("kernel_execve: failed to create memory space from ELF");
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
@@ -289,7 +289,9 @@ pub fn execve(
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {
         let mut t = task.lock();
-        t.execve(space, entry, sp, &argv_refs, &envp_refs);
+        t.execve(
+            space, entry, sp, &argv_refs, &envp_refs, phdr_addr, phnum, phent,
+        );
     }
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
