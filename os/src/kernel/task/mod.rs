@@ -105,8 +105,13 @@ pub fn notify_parent(task: SharedTask) {
     };
 
     let t = TASK_MANAGER.lock();
-    let p = t.get_task(ppid).unwrap();
-    t.send_signal(p, NUM_SIGCHLD);
+    if let Some(p) = t.get_task(ppid) {
+        t.send_signal(p, NUM_SIGCHLD);
+    } else {
+        // Parent not found (e.g. init process exiting), ignore
+        crate::pr_warn!("notify_parent: parent task {} not found for child {}", ppid, task.lock().pid);
+        panic!("[notify_parent] Parent Task Not Found")
+    }
 }
 
 /// 获取当前任务的文件描述符表

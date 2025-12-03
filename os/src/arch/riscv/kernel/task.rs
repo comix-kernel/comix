@@ -8,15 +8,21 @@ use crate::arch::constant::STACK_ALIGN_MASK;
 
 /// 为新任务设置用户栈布局，包含命令行参数和环境变量
 /// 返回新的栈指针位置，以及 argc, argv, envp 的地址
-pub fn setup_stack_layout(sp: usize, argv: &[&str], envp: &[&str]) -> (usize, usize, usize, usize) {
+pub fn setup_stack_layout(
+    sp: usize,
+    argv: &[&str],
+    envp: &[&str],
+    phdr_addr: usize,
+    phnum: usize,
+    phent: usize,
+) -> (usize, usize, usize, usize) {
     let mut sp = sp;
     let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
     let mut env_ptrs: Vec<usize> = Vec::with_capacity(envp.len());
     unsafe {
         sstatus::set_sum();
     }
-
-    // 环境变量 (envp)
+    
     for &env in envp.iter().rev() {
         let bytes = env.as_bytes();
         sp -= bytes.len() + 1; // 预留 NUL
@@ -43,6 +49,36 @@ pub fn setup_stack_layout(sp: usize, argv: &[&str], envp: &[&str]) -> (usize, us
 
     // --- 构建 argc, argv, envp 数组 (ABI 标准布局: [argc] -> [argv] -> [NULL] -> [envp] -> [NULL]) ---
     // 注意：栈向下增长，所以压栈顺序是从 envp NULL 往回压到 argc
+
+    // 0. 写入 auxv (Auxiliary Vector)
+    // 必须位于 envp NULL 之后（高地址），但在 envp 数组之前。
+    // 常见的 auxv 条目：AT_PAGESZ(6), AT_NULL(0), AT_RANDOM(25)
+    let random_bytes = [
+        0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+        0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+    ]; // Non-zero random bytes
+    let random_ptr = sp - 16;
+    unsafe { ptr::copy_nonoverlapping(random_bytes.as_ptr(), random_ptr as *mut u8, 16) };
+    sp = random_ptr;
+
+    let auxv = [
+        (3, phdr_addr), // AT_PHDR
+        (4, phent),     // AT_PHENT
+        (5, phnum),     // AT_PHNUM
+        (6, 4096),      // AT_PAGESZ = 4096
+        (11, 0),        // AT_UID = 0 (root)
+        (12, 0),        // AT_EUID = 0 (root)
+        (13, 0),        // AT_GID = 0 (root)
+        (14, 0),        // AT_EGID = 0 (root)
+        (25, random_ptr), // AT_RANDOM
+        (0, 0),         // AT_NULL
+    ];
+    for (type_, val) in auxv.iter().rev() {
+        sp -= size_of::<usize>();
+        unsafe { ptr::write(sp as *mut usize, *val) };
+        sp -= size_of::<usize>();
+        unsafe { ptr::write(sp as *mut usize, *type_) };
+    }
 
     // 1. 写入 envp NULL 终止符
     sp -= size_of::<usize>();

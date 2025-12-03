@@ -422,7 +422,7 @@ impl MemorySpace {
     /// - ELF 解析失败
     /// - 架构不匹配（非 RISC-V）
     /// - 段与保留区域重叠
-    pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, usize), PagingError> {
+    pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
         use xmas_elf::program::{SegmentData, Type};
 
@@ -526,7 +526,7 @@ impl MemorySpace {
                 area_type,
                 flags,
                 data,
-                ph.offset() as usize,
+                start_va % PAGE_SIZE, // Use page offset, not file offset
                 None, // 非文件映射
             )?;
         }
@@ -548,8 +548,37 @@ impl MemorySpace {
         )?;
 
         let entry_point = elf.header.pt2.entry_point() as usize;
+        let ph_off = elf.header.pt2.ph_offset() as usize;
+        let ph_num = elf.header.pt2.ph_count();
+        let ph_ent = elf.header.pt2.ph_entry_size();
 
-        Ok((space, entry_point, USER_STACK_TOP))
+        // PHDR 在虚拟内存中的地址 = 第一个 LOAD 段的虚拟地址 + PHDR 在文件中的偏移
+        // 假设第一个 LOAD 段映射了 ELF 头（通常如此，偏移为 0）
+        // 如果第一个 LOAD 段偏移不为 0，则需要更复杂的逻辑，但对于标准 ELF 通常足够
+        // 简单起见，我们假设 ELF 头被映射到了 base_addr
+        // 实际上，我们应该找到包含 ph_off 的那个段
+        let mut phdr_addr = 0;
+        for ph in elf.program_iter() {
+            if ph.get_type() == Ok(Type::Load) {
+                let vaddr = ph.virtual_addr() as usize;
+                let offset = ph.offset() as usize;
+                let filesz = ph.file_size() as usize;
+                if ph_off >= offset && ph_off < offset + filesz {
+                    phdr_addr = vaddr + (ph_off - offset);
+                    break;
+                }
+            }
+        }
+
+        println!("[from_elf] 程序入口点: 0x{:x}", entry_point);
+        println!("[from_elf] PHDR info: addr=0x{:x}, num={}, size={}", phdr_addr, ph_num, ph_ent);
+
+        println!("[from_elf] ✅ from_elf 完成，返回结果:");
+        println!("[from_elf]   - entry_point = 0x{:x}", entry_point);
+        println!("[from_elf]   - user_stack_top = 0x{:x}", USER_STACK_TOP);
+        println!("[from_elf]   - 内存空间区域数: {}", space.areas.len());
+
+        Ok((space, entry_point, USER_STACK_TOP, phdr_addr, ph_num as usize, ph_ent as usize))
     }
 
     /// 扩展或收缩堆区域 (brk 系统调用)
