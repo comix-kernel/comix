@@ -68,7 +68,7 @@ pub trait Scheduler {
     /// * `receive_signal`: 是否可被信号中断
     /// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
     ///       尽量不要使用该函数，除非你非常清楚自己在做什么
-    fn sleep_task_with_graud(
+    fn sleep_task_with_guard(
         &mut self,
         task: &mut SpinLockGuard<'_, TaskStruct>,
         stask: SharedTask,
@@ -140,5 +140,5 @@ pub fn sleep_task_with_guard_and_block(
 ) {
     SCHEDULER
         .lock()
-        .sleep_task_with_graud(task, stask, receive_signal);
+        .sleep_task_with_guard(task, stask, receive_signal);
 }
