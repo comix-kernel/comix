@@ -229,12 +229,11 @@ impl_syscall!(
     sys_clone,
     clone,
     (
-        usize,
-        c_ulong,
-        c_ulong,
-        *mut c_void,
-        *mut c_int,
-        *mut c_void
+        c_ulong,      // flags (a0)
+        c_ulong,      // stack (a1)
+        *mut c_int,   // parent_tid (a2)
+        *mut c_void,  // tls (a3)
+        *mut c_int    // child_tid (a4)
     )
 );
 impl_syscall!(
