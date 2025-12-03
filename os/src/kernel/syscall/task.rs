@@ -114,6 +114,11 @@ pub fn clone(
     if !requested_flags.is_supported() {
         return -ENOSYS;
     }
+    // 根据 clone(2) 的 man page，当指定 CLONE_VM 标志时，必须为子进程提供一个新的栈
+    // 否则父子进程将共享同一个栈，导致栈污染和程序崩溃
+    if requested_flags.contains(CloneFlags::VM) && stack == 0 {
+        return -EINVAL;
+    }
     let tid = { TASK_MANAGER.lock().allocate_tid() };
     let (
         c_pid,
