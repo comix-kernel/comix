@@ -97,13 +97,11 @@ pub fn exit_group(code: c_int) -> ! {
 /// # 返回值
 /// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
 pub fn clone(
-    func: usize, // extern "C" fn(*mut c_void) -> c_int,
-    stack: c_ulong,
-    flags: c_ulong,
-    arg: *mut c_void,
-    ptid: *mut c_int,
-    newtls: *mut c_void,
-    // ctid: *mut c_int, TODO: 参数多于6个时需要通过栈传递
+    flags: c_ulong,       // a0: clone flags
+    stack: c_ulong,       // a1: child stack pointer
+    ptid: *mut c_int,     // a2: parent_tid pointer
+    tls: *mut c_void,     // a3: TLS pointer
+    ctid: *mut c_int,     // a4: child_tid pointer
 ) -> c_int {
     let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(flags as usize) {
         requested_flags
@@ -217,7 +215,7 @@ pub fn clone(
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
         unsafe {
-            write_to_user(ptid, tid as c_int);
+            write_to_user(ctid, tid as c_int);
         }
     }
     if requested_flags.contains(CloneFlags::PARENT_SETTID) {
@@ -230,8 +228,6 @@ pub fn clone(
     unsafe {
         (*tf).set_clone_trap_frame(
             &*ptf,
-            func,
-            arg as usize,
             child_task.kstack_base,
             stack as usize,
         );
