@@ -261,9 +261,14 @@ pub fn execve(
     envp: *const *const c_char,
 ) -> c_int {
     unsafe { sstatus::set_sum() };
-    let path_str = get_path_safe(path).unwrap_or("");
-
-    let data = match crate::vfs::vfs_load_elf(path_str) {
+    let path_str = match get_path_safe(path) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            unsafe { sstatus::clear_sum() };
+            return FsError::InvalidArgument.to_errno() as i32;
+        }
+    };
+    let data = match crate::vfs::vfs_load_elf(&path_str) {
         Ok(data) => data,
         Err(FsError::NotFound) => return -ENOENT,
         Err(FsError::IsDirectory) => return -EISDIR,
@@ -272,6 +277,8 @@ pub fn execve(
 
     let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
     let envp_strings = get_args_safe(envp, "envp").unwrap_or_else(|_| Vec::new());
+
+    unsafe { sstatus::clear_sum() };
 
     let (data, argv_strings, envp_strings) =
         if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
@@ -282,7 +289,7 @@ pub fn execve(
                 if let Some(arg) = args {
                     new_argv.push(arg.to_string());
                 }
-                new_argv.push(path_str.to_string());
+                new_argv.push(path_str);
                 new_argv.extend(argv_strings.iter().skip(1).cloned());
                 let data = match crate::vfs::vfs_load_elf(path) {
                     Ok(d) => d,
@@ -374,6 +381,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         {
             let mut t = cur_task.lock();
             if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
+                crate::earlyprintln!("wait4: found child pid={}", res.lock().pid);
                 break res;
             } else {
                 if opt.contains(WaitFlags::NOHANG) {
@@ -405,6 +413,8 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
             unreachable!("wait4: unexpected task state.")
         }
     };
+
+    crate::earlyprintln!("wait4: returning pid={} status={:#x}", tid, status.raw());
 
     unsafe {
         write_to_user(wstatus, status.raw());
