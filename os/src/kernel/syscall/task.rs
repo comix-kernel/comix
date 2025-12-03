@@ -17,7 +17,7 @@ use crate::{
     kernel::{
         FUTEX_MANAGER, SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE,
         TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
-        exit_process, schedule, sleep_task_with_block, sleep_task_with_graud_and_block,
+        exit_process, schedule, sleep_task_with_block, sleep_task_with_guard_and_block,
         syscall::util::{get_args_safe, get_path_safe},
         time::{REALTIME, realtime_now},
         yield_task,
@@ -373,7 +373,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
                 }
             }
             t.wait_child.lock().add_task(cur_task.clone());
-            sleep_task_with_graud_and_block(&mut t, cur_task.clone(), true);
+            sleep_task_with_guard_and_block(&mut t, cur_task.clone(), true);
         }
         // 在没有持有任何锁的情况下调用调度相关操作
         yield_task();
