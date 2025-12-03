@@ -260,6 +260,9 @@ impl Task {
         sp_high: usize,
         argv: &[&str],
         envp: &[&str],
+        phdr_addr: usize,
+        phnum: usize,
+        phent: usize,
     ) {
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
@@ -270,7 +273,7 @@ impl Task {
         //      也就是说，new_memory_space 已经被激活（切换 satp）
         //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
         // 2. 设置用户栈布局，包含命令行参数和环境变量
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(sp_high, argv, envp);
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(sp_high, argv, envp, phdr_addr, phnum, phent);
 
         // 3. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
@@ -283,7 +286,7 @@ impl Task {
                 self.kstack_base,
                 argc,
                 argv_vec_ptr,
-                envp_vec_ptr,
+                envp_vec_ptr
             );
         }
     }
