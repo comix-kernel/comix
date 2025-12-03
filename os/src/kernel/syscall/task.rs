@@ -29,7 +29,10 @@ use crate::{
     },
     sync::SpinLock,
     uapi::{
-        errno::{EAGAIN, EFAULT, EINTR, EINVAL, ENOSYS, EPERM, ESRCH, ETIMEDOUT},
+        errno::{
+            EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOSYS, EPERM, ESRCH,
+            ETIMEDOUT,
+        },
         futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
@@ -47,6 +50,7 @@ use crate::{
         wait::{WaitFlags, WaitStatus},
     },
     util::user_buffer::{read_from_user, write_to_user},
+    vfs::FsError,
 };
 
 /// 线程退出系统调用
@@ -261,7 +265,9 @@ pub fn execve(
 
     let data = match crate::vfs::vfs_load_elf(path_str) {
         Ok(data) => data,
-        Err(_) => return -1,
+        Err(FsError::NotFound) => return -ENOENT,
+        Err(FsError::IsDirectory) => return -EISDIR,
+        Err(_) => return -EIO,
     };
 
     let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
@@ -278,9 +284,11 @@ pub fn execve(
                 }
                 new_argv.push(path_str.to_string());
                 new_argv.extend(argv_strings.iter().skip(1).cloned());
-                let data = match crate::vfs::vfs_load_elf(&path) {
+                let data = match crate::vfs::vfs_load_elf(path) {
                     Ok(d) => d,
-                    Err(_) => return -1,
+                    Err(FsError::NotFound) => return -ENOENT,
+                    Err(FsError::IsDirectory) => return -EISDIR,
+                    Err(_) => return -EIO,
                 };
                 (data, new_argv, envp_strings)
             } else {
@@ -913,12 +921,14 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
     }
 
     // 解释器路径
-    let interpreter_path = core::str::from_utf8(parts[0]).unwrap_or_default();
+    let interpreter_path = core::str::from_utf8(parts[0]).map_err(|_| ())?;
 
     // 可选参数
     let interpreter_arg = parts
         .get(1)
-        .map(|&p| core::str::from_utf8(p).unwrap_or_default());
+        .map(|p| core::str::from_utf8(p))
+        .transpose()
+        .map_err(|_| ())?;
 
     Ok((interpreter_path, interpreter_arg))
 }
@@ -930,8 +940,11 @@ fn do_execve(data: &[u8], argv: &[&str], envp: &[&str]) -> c_int {
 
     task.lock().fd_table.close_exec();
 
-    let (space, entry, sp, phdr_addr, phnum, phent) = MemorySpace::from_elf(&data)
-        .expect("kernel_execve: failed to create memory space from ELF");
+    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
+        Ok(res) => res,
+        Err(_) => return -ENOEXEC,
+    };
+
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
     current_cpu().lock().switch_space(space.clone());
