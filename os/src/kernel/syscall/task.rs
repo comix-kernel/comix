@@ -5,7 +5,7 @@ use core::{
     sync::atomic::Ordering,
 };
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 use riscv::register::sstatus;
 
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
     kernel::{
         FUTEX_MANAGER, SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE,
         TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
-        exit_process, schedule, sleep_task_with_block,
+        exit_process, schedule, sleep_task_with_block, sleep_task_with_guard_and_block,
         syscall::util::{get_args_safe, get_path_safe},
         time::{REALTIME, realtime_now},
         yield_task,
@@ -29,7 +29,10 @@ use crate::{
     },
     sync::SpinLock,
     uapi::{
-        errno::{EAGAIN, EFAULT, EINTR, EINVAL, ENOSYS, EPERM, ESRCH, ETIMEDOUT},
+        errno::{
+            EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOSYS, EPERM, ESRCH,
+            ETIMEDOUT,
+        },
         futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
         sched::CloneFlags,
@@ -47,6 +50,7 @@ use crate::{
         wait::{WaitFlags, WaitStatus},
     },
     util::user_buffer::{read_from_user, write_to_user},
+    vfs::FsError,
 };
 
 /// 线程退出系统调用
@@ -255,49 +259,49 @@ pub fn execve(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
-) -> isize {
+) -> c_int {
     unsafe { sstatus::set_sum() };
     let path_str = get_path_safe(path).unwrap_or("");
+
     let data = match crate::vfs::vfs_load_elf(path_str) {
         Ok(data) => data,
-        Err(_) => return -1,
+        Err(FsError::NotFound) => return -ENOENT,
+        Err(FsError::IsDirectory) => return -EISDIR,
+        Err(_) => return -EIO,
     };
 
-    // 将 C 风格的 argv/envp (*const *const u8) 转为 Vec<String> / Vec<&str>
     let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
     let envp_strings = get_args_safe(envp, "envp").unwrap_or_else(|_| Vec::new());
+
+    let (data, argv_strings, envp_strings) =
+        if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
+            if let Ok((path, args)) = parse_hashbang(&data) {
+                let mut new_argv = Vec::new();
+                new_argv.push(path.to_string());
+                // XXX: 目前仅支持单个参数
+                if let Some(arg) = args {
+                    new_argv.push(arg.to_string());
+                }
+                new_argv.push(path_str.to_string());
+                new_argv.extend(argv_strings.iter().skip(1).cloned());
+                let data = match crate::vfs::vfs_load_elf(path) {
+                    Ok(d) => d,
+                    Err(FsError::NotFound) => return -ENOENT,
+                    Err(FsError::IsDirectory) => return -EISDIR,
+                    Err(_) => return -EIO,
+                };
+                (data, new_argv, envp_strings)
+            } else {
+                return -EINVAL;
+            }
+        } else {
+            (data, argv_strings, envp_strings)
+        };
+
     // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
     let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
-    unsafe { sstatus::clear_sum() };
-    let task = {
-        let cpu = current_cpu().lock();
-        cpu.current_task.as_ref().unwrap().clone()
-    };
-
-    task.lock().fd_table.close_exec();
-
-    let (space, entry, sp, phdr_addr, phnum, phent) = MemorySpace::from_elf(&data)
-        .expect("kernel_execve: failed to create memory space from ELF");
-    let space = Arc::new(SpinLock::new(space));
-    // 换掉当前任务的地址空间，e.g. 切换 satp
-    current_cpu().lock().switch_space(space.clone());
-
-    // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
-    {
-        let mut t = task.lock();
-        t.execve(
-            space, entry, sp, &argv_refs, &envp_refs, phdr_addr, phnum, phent,
-        );
-    }
-
-    let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
-    // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
-    // 直接按 trapframe 状态恢复并 sret 到用户态
-    unsafe {
-        restore(&*tfp);
-    }
-    -1
+    do_execve(&data, argv_refs.as_slice(), envp_refs.as_slice())
 }
 
 /// 等待子进程状态变化（wait4）
@@ -376,7 +380,8 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
                     return 0;
                 }
             }
-            t.wait_child.lock().sleep(cur_task.clone());
+            t.wait_child.lock().add_task(cur_task.clone());
+            sleep_task_with_guard_and_block(&mut t, cur_task.clone(), true);
         }
         // 在没有持有任何锁的情况下调用调度相关操作
         yield_task();
@@ -891,4 +896,70 @@ pub fn setsid() -> c_int {
     let new_pgid = t.pid;
     t.pgid = new_pgid;
     new_pgid as c_int
+}
+
+/// 辅助函数：解析 Hashbang 行
+fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
+    // 查找第一个换行符 ('\n')，只读取第一行
+    let line_end = data.iter().position(|&b| b == b'\n').unwrap_or(data.len());
+    // 跳过开头的空格和制表符
+    let line_start = data[2..line_end]
+        .iter()
+        .position(|&b| b != b' ' && b != b'\t')
+        .unwrap_or(line_end - 2)
+        + 2;
+    let line = &data[line_start..line_end];
+
+    // 假设用空格分隔解释器路径和可选参数
+    let parts: Vec<&[u8]> = line
+        .split(|&b| b == b' ' || b == b'\t')
+        .filter(|p| !p.is_empty()) // 过滤空串
+        .collect();
+
+    if parts.is_empty() {
+        return Err(()); // 格式错误或只包含 #!
+    }
+
+    // 解释器路径
+    let interpreter_path = core::str::from_utf8(parts[0]).map_err(|_| ())?;
+
+    // 可选参数
+    let interpreter_arg = parts
+        .get(1)
+        .map(|p| core::str::from_utf8(p))
+        .transpose()
+        .map_err(|_| ())?;
+
+    Ok((interpreter_path, interpreter_arg))
+}
+
+/// 执行一个新程序（execve）的核心逻辑
+fn do_execve(data: &[u8], argv: &[&str], envp: &[&str]) -> c_int {
+    unsafe { sstatus::clear_sum() };
+    let task = current_task();
+
+    task.lock().fd_table.close_exec();
+
+    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
+        Ok(res) => res,
+        Err(_) => return -ENOEXEC,
+    };
+
+    let space = Arc::new(SpinLock::new(space));
+    // 换掉当前任务的地址空间，e.g. 切换 satp
+    current_cpu().lock().switch_space(space.clone());
+
+    // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
+    {
+        let mut t = task.lock();
+        t.execve(space, entry, sp, argv, envp, phdr_addr, phnum, phent);
+    }
+
+    let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
+    // 直接按 trapframe 状态恢复并 sret 到用户态
+    unsafe {
+        restore(&*tfp);
+    }
+    -1
 }
