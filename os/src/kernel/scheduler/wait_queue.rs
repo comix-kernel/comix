@@ -81,6 +81,12 @@ impl WaitQueue {
         }
     }
 
+    /// 将任务加入等待队列（不阻塞）
+    pub fn add_task(&mut self, task: SharedTask) {
+        let _g = self.lock.lock();
+        self.tasks.add_task(task);
+    }
+
     /// 从等待队列中移除指定任务（不唤醒）
     pub fn remove_task(&mut self, task: &SharedTask) {
         let _g = self.lock.lock();
