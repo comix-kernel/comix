@@ -271,7 +271,7 @@ bitflags! {
         /// exec 时关闭 (O_CLOEXEC)
         const O_CLOEXEC   = 0o2000000;
 
-        /// 大文件 (O_LARGEFILE) (空操作) 
+        /// 大文件 (O_LARGEFILE) (空操作)
         const O_LARGEFILE = 0o100000;
     }
 }
