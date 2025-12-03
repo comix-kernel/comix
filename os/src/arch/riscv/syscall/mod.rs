@@ -7,6 +7,7 @@ mod syscall_number;
 /// 分发系统调用
 /// 按照系统调用号顺序排列，参考 syscall_number.rs 中的分类
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
+    crate::println!("syscall: {}", frame.x17_a7);
     match frame.x17_a7 {
         // 文件系统/目录操作 (Filesystem/Directory Operations)
         syscall_number::SYS_GETCWD => sys_getcwd(frame),
