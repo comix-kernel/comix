@@ -146,12 +146,8 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     crate::pr_info!("[kernel_execve] Loaded {} bytes", data.len());
 
     // 2. 从 ELF 创建内存空间
-    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(&data) {
-        Ok((s, e, sp, phdr, num, ent)) => (s, e, sp, phdr, num, ent),
-        Err(_) => {
-            panic!("kernel_execve: failed to create memory space from ELF");
-        }
-    };
+    let (space, entry, sp, phdr_addr, phnum, phent) = MemorySpace::from_elf(&data)
+        .expect("kernel_execve: failed to create memory space from ELF");
     crate::pr_info!("[kernel_execve] Created memory space, entry=0x{:x}", entry);
 
     // 3. 包装内存空间

@@ -572,17 +572,6 @@ impl MemorySpace {
             }
         }
 
-        println!("[from_elf] 程序入口点: 0x{:x}", entry_point);
-        println!(
-            "[from_elf] PHDR info: addr=0x{:x}, num={}, size={}",
-            phdr_addr, ph_num, ph_ent
-        );
-
-        println!("[from_elf] ✅ from_elf 完成，返回结果:");
-        println!("[from_elf]   - entry_point = 0x{:x}", entry_point);
-        println!("[from_elf]   - user_stack_top = 0x{:x}", USER_STACK_TOP);
-        println!("[from_elf]   - 内存空间区域数: {}", space.areas.len());
-
         Ok((
             space,
             entry_point,

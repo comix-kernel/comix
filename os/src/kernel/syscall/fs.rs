@@ -75,11 +75,6 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     let open_flags = match OpenFlags::from_bits(flags) {
         Some(f) => f,
         None => {
-            crate::println!(
-                "[openat] Invalid flags: 0x{:x} for path: {}",
-                flags,
-                path_str
-            );
             return FsError::InvalidArgument.to_errno();
         }
     };
