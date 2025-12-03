@@ -114,7 +114,6 @@ pub fn notify_parent(task: SharedTask) {
             ppid,
             task.lock().pid
         );
-        panic!("[notify_parent] Parent Task Not Found")
     }
 }
 
