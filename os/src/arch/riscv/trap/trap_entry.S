@@ -68,7 +68,9 @@ trap_entry:
         bnez t0, .L1    # 如果 SPP=1，说明是内核态中断，跳过切换栈
         ld sp, 264(a0)
 .L1:
-        j trap_handler
+        # 使用寄存器间接跳转以支持大代码模型（避免 JAL 范围限制）
+        la t0, trap_handler
+        jr t0
 
 __restore:
         # 约束: a0 = trapframe 指针
