@@ -75,11 +75,15 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     let open_flags = match OpenFlags::from_bits(flags) {
         Some(f) => f,
         None => {
-            crate::println!("[openat] Invalid flags: 0x{:x} for path: {}", flags, path_str);
+            crate::println!(
+                "[openat] Invalid flags: 0x{:x} for path: {}",
+                flags,
+                path_str
+            );
             return FsError::InvalidArgument.to_errno();
         }
     };
-    
+
     // crate::println!("[openat] path: {}, flags: {:?} (raw: 0x{:x})", path_str, open_flags, flags);
 
     // 解析路径（处理AT_FDCWD和相对路径）

@@ -422,7 +422,9 @@ impl MemorySpace {
     /// - ELF 解析失败
     /// - 架构不匹配（非 RISC-V）
     /// - 段与保留区域重叠
-    pub fn from_elf(elf_data: &[u8]) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
+    pub fn from_elf(
+        elf_data: &[u8],
+    ) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
         use xmas_elf::program::{SegmentData, Type};
 
@@ -527,7 +529,7 @@ impl MemorySpace {
                 flags,
                 data,
                 start_va % PAGE_SIZE, // Use page offset, not file offset
-                None, // 非文件映射
+                None,                 // 非文件映射
             )?;
         }
 
@@ -571,14 +573,24 @@ impl MemorySpace {
         }
 
         println!("[from_elf] 程序入口点: 0x{:x}", entry_point);
-        println!("[from_elf] PHDR info: addr=0x{:x}, num={}, size={}", phdr_addr, ph_num, ph_ent);
+        println!(
+            "[from_elf] PHDR info: addr=0x{:x}, num={}, size={}",
+            phdr_addr, ph_num, ph_ent
+        );
 
         println!("[from_elf] ✅ from_elf 完成，返回结果:");
         println!("[from_elf]   - entry_point = 0x{:x}", entry_point);
         println!("[from_elf]   - user_stack_top = 0x{:x}", USER_STACK_TOP);
         println!("[from_elf]   - 内存空间区域数: {}", space.areas.len());
 
-        Ok((space, entry_point, USER_STACK_TOP, phdr_addr, ph_num as usize, ph_ent as usize))
+        Ok((
+            space,
+            entry_point,
+            USER_STACK_TOP,
+            phdr_addr,
+            ph_num as usize,
+            ph_ent as usize,
+        ))
     }
 
     /// 扩展或收缩堆区域 (brk 系统调用)

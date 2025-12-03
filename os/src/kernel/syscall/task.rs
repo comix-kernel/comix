@@ -289,7 +289,9 @@ pub fn execve(
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     {
         let mut t = task.lock();
-        t.execve(space, entry, sp, &argv_refs, &envp_refs, phdr_addr, phnum, phent);
+        t.execve(
+            space, entry, sp, &argv_refs, &envp_refs, phdr_addr, phnum, phent,
+        );
     }
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
