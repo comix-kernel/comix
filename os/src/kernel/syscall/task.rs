@@ -97,11 +97,11 @@ pub fn exit_group(code: c_int) -> ! {
 /// # 返回值
 /// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
 pub fn clone(
-    flags: c_ulong,   // a0: clone flags
-    stack: c_ulong,   // a1: child stack pointer
-    ptid: *mut c_int, // a2: parent_tid pointer
+    flags: c_ulong,    // a0: clone flags
+    stack: c_ulong,    // a1: child stack pointer
+    ptid: *mut c_int,  // a2: parent_tid pointer
     _tls: *mut c_void, // a3: TLS pointer
-    ctid: *mut c_int, // a4: child_tid pointer
+    ctid: *mut c_int,  // a4: child_tid pointer
 ) -> c_int {
     let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(flags as usize) {
         requested_flags
