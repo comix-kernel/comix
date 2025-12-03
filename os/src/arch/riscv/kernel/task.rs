@@ -22,7 +22,7 @@ pub fn setup_stack_layout(
     unsafe {
         sstatus::set_sum();
     }
-    
+
     for &env in envp.iter().rev() {
         let bytes = env.as_bytes();
         sp -= bytes.len() + 1; // 预留 NUL
@@ -54,24 +54,24 @@ pub fn setup_stack_layout(
     // 必须位于 envp NULL 之后（高地址），但在 envp 数组之前。
     // 常见的 auxv 条目：AT_PAGESZ(6), AT_NULL(0), AT_RANDOM(25)
     let random_bytes = [
-        0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
-        0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+        0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
+        0x67,
     ]; // Non-zero random bytes
     let random_ptr = sp - 16;
     unsafe { ptr::copy_nonoverlapping(random_bytes.as_ptr(), random_ptr as *mut u8, 16) };
     sp = random_ptr;
 
     let auxv = [
-        (3, phdr_addr), // AT_PHDR
-        (4, phent),     // AT_PHENT
-        (5, phnum),     // AT_PHNUM
-        (6, 4096),      // AT_PAGESZ = 4096
-        (11, 0),        // AT_UID = 0 (root)
-        (12, 0),        // AT_EUID = 0 (root)
-        (13, 0),        // AT_GID = 0 (root)
-        (14, 0),        // AT_EGID = 0 (root)
+        (3, phdr_addr),   // AT_PHDR
+        (4, phent),       // AT_PHENT
+        (5, phnum),       // AT_PHNUM
+        (6, 4096),        // AT_PAGESZ = 4096
+        (11, 0),          // AT_UID = 0 (root)
+        (12, 0),          // AT_EUID = 0 (root)
+        (13, 0),          // AT_GID = 0 (root)
+        (14, 0),          // AT_EGID = 0 (root)
         (25, random_ptr), // AT_RANDOM
-        (0, 0),         // AT_NULL
+        (0, 0),           // AT_NULL
     ];
     for (type_, val) in auxv.iter().rev() {
         sp -= size_of::<usize>();

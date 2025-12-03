@@ -147,9 +147,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
 
     // 2. 从 ELF 创建内存空间
     let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(&data) {
-        Ok((s, e, sp, phdr, num, ent)) => {
-            (s, e, sp, phdr, num, ent)
-        }
+        Ok((s, e, sp, phdr, num, ent)) => (s, e, sp, phdr, num, ent),
         Err(_) => {
             panic!("kernel_execve: failed to create memory space from ELF");
         }
