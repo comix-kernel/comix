@@ -241,7 +241,7 @@ pub fn chdir(path: *const c_char) -> isize {
     // 解析路径
     unsafe { sstatus::set_sum() };
     let path_str = match get_path_safe(path) {
-        Ok(s) => s,
+        Ok(s) => s.to_string(),
         Err(_) => {
             unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
@@ -250,7 +250,7 @@ pub fn chdir(path: *const c_char) -> isize {
     unsafe { sstatus::clear_sum() };
 
     // 查找目标目录
-    let dentry = match vfs_lookup(path_str) {
+    let dentry = match vfs_lookup(&path_str) {
         Ok(d) => d,
         Err(e) => return e.to_errno(),
     };
