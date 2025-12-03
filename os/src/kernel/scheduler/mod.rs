@@ -133,7 +133,7 @@ pub fn exit_task_with_block(task: SharedTask) {
 /// * `receive_signal`: 是否可被信号中断
 /// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
 ///       尽量不要使用该函数，除非你非常清楚自己在做什么
-pub fn sleep_task_with_graud_and_block(
+pub fn sleep_task_with_guard_and_block(
     task: &mut SpinLockGuard<'_, TaskStruct>,
     stask: SharedTask,
     receive_signal: bool,
