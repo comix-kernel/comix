@@ -131,8 +131,6 @@ impl TrapFrame {
     pub unsafe fn set_clone_trap_frame(
         &mut self,
         parent_frame: &TrapFrame,
-        entry: usize,
-        arg: usize,
         kernel_sp: usize,
         user_sp: usize,
     ) {
@@ -148,10 +146,14 @@ impl TrapFrame {
                 core::mem::size_of::<TrapFrame>(),
             );
         }
-        self.sepc = entry;
+        // 子进程返回 0
+        self.x10_a0 = 0;
         self.kernel_sp = kernel_sp;
-        self.x2_sp = user_sp;
-        self.x10_a0 = arg;
+        // 如果提供了新栈，使用新栈；否则使用父进程的栈
+        if user_sp != 0 {
+            self.x2_sp = user_sp;
+        }
+        // sepc 不变，子进程从当前位置继续执行（类似 fork）
     }
 
     /// 设置用户态的 TrapFrame
