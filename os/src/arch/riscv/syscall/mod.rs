@@ -7,7 +7,16 @@ mod syscall_number;
 /// 分发系统调用
 /// 按照系统调用号顺序排列，参考 syscall_number.rs 中的分类
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
-    crate::println!("syscall: {}", frame.x17_a7);
+    crate::println!(
+        "syscall: {} args: [{:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
+        frame.x17_a7,
+        frame.x10_a0,
+        frame.x11_a1,
+        frame.x12_a2,
+        frame.x13_a3,
+        frame.x14_a4,
+        frame.x15_a5
+    );
     match frame.x17_a7 {
         // 文件系统/目录操作 (Filesystem/Directory Operations)
         syscall_number::SYS_GETCWD => sys_getcwd(frame),
@@ -179,6 +188,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
             pr_err!("Unknown syscall: {}", frame.x17_a7);
         }
     }
+    crate::println!("syscall exit, return: {}", frame.x10_a0 as isize);
 }
 
 /// 宏：实现系统调用函数的自动包装器

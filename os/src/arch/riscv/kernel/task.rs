@@ -1,4 +1,5 @@
 //! RISC-V 架构的任务管理相关功能
+use core::mem::size_of;
 use core::ptr;
 
 use alloc::vec::Vec;
@@ -73,6 +74,20 @@ pub fn setup_stack_layout(
         (25, random_ptr), // AT_RANDOM
         (0, 0),           // AT_NULL
     ];
+
+    // Calculate total size of the pointer block to ensure final sp is 16-byte aligned
+    // Block includes: auxv[], envp NULL, envp[], argv NULL, argv[], argc
+    let total_size = auxv.len() * 2 * size_of::<usize>()
+        + size_of::<usize>() // envp NULL
+        + env_ptrs.len() * size_of::<usize>()
+        + size_of::<usize>() // argv NULL
+        + arg_ptrs.len() * size_of::<usize>()
+        + size_of::<usize>(); // argc
+
+    // Align the final stack pointer
+    let sp_final = (sp - total_size) & !STACK_ALIGN_MASK;
+    sp = sp_final + total_size;
+
     for (type_, val) in auxv.iter().rev() {
         sp -= size_of::<usize>();
         unsafe { ptr::write(sp as *mut usize, *val) };
@@ -124,7 +139,7 @@ pub fn setup_stack_layout(
         sstatus::clear_sum();
     }
 
-    // 6. 最终 16 字节对齐（应用到最终栈指针 sp）
-    sp &= !STACK_ALIGN_MASK;
+    // 6. 最终 sp 应该已经是 16 字节对齐的
+    // sp &= !STACK_ALIGN_MASK;
     (sp, argc, argv_vec_ptr, envp_vec_ptr)
 }
