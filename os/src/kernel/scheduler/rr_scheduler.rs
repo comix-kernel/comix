@@ -140,7 +140,7 @@ impl Scheduler for RRScheduler {
         self.run_queue.remove_task(&task);
     }
 
-    fn sleep_task_with_graud(
+    fn sleep_task_with_guard(
         &mut self,
         task: &mut crate::sync::SpinLockGuard<'_, crate::kernel::TaskStruct>,
         stask: SharedTask,
