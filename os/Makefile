@@ -44,6 +44,8 @@ gdb:
 		-ex "file $(PROJECT_DIR)" \
 		-ex "target remote :1234" \
         -ex "b *0x80200000" \
+		-ex "dir ../.ignore/" \
+		-ex "add-symbol-file ../data/bin/busybox"\
         -ex "c"
 
 # 目标 4: debug (一键启动，QEMU在前台，需要另一个终端运行gdb)
