@@ -16,6 +16,7 @@ pub fn setup_stack_layout(
     phdr_addr: usize,
     phnum: usize,
     phent: usize,
+    entry_point: usize,
 ) -> (usize, usize, usize, usize) {
     let mut sp = sp;
     let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
@@ -57,27 +58,60 @@ pub fn setup_stack_layout(
     let random_bytes = [
         0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
         0x67,
-    ]; // Non-zero random bytes
+    ];
     let random_ptr = sp - 16;
     unsafe { ptr::copy_nonoverlapping(random_bytes.as_ptr(), random_ptr as *mut u8, 16) };
     sp = random_ptr;
+
+    // 2. Platform string "riscv64\0" (8 bytes)
+    let platform = "riscv64\0";
+    let platform_len = platform.len();
+    sp -= platform_len;
+    unsafe { ptr::copy_nonoverlapping(platform.as_ptr(), sp as *mut u8, platform_len) };
+    let platform_ptr = sp;
+
+    // 3. Align sp to 16 bytes (auxv requirement)
+    sp &= !(size_of::<usize>() * 2 - 1); // Align to 16 bytes
+
+    // 4. AT_EXECFN (use argv[0] if available)
+    let execfn = if !arg_ptrs.is_empty() {
+        arg_ptrs[0]
+    } else {
+        0
+    };
 
     let auxv = [
         (3, phdr_addr),   // AT_PHDR
         (4, phent),       // AT_PHENT
         (5, phnum),       // AT_PHNUM
-        (6, 4096),        // AT_PAGESZ = 4096
-        (11, 0),          // AT_UID = 0 (root)
-        (12, 0),          // AT_EUID = 0 (root)
-        (13, 0),          // AT_GID = 0 (root)
-        (14, 0),          // AT_EGID = 0 (root)
+        (6, 4096),        // AT_PAGESZ
+        (7, 0),           // AT_BASE
+        (8, 0),           // AT_FLAGS
+        (9, entry_point), // AT_ENTRY
+        (11, 0),          // AT_UID
+        (12, 0),          // AT_EUID
+        (13, 0),          // AT_GID
+        (14, 0),          // AT_EGID
+        (15, platform_ptr), // AT_PLATFORM
+        (16, 0),          // AT_HWCAP
+        (17, 100),        // AT_CLKTCK
+        (23, 0),          // AT_SECURE
         (25, random_ptr), // AT_RANDOM
+        (31, execfn),     // AT_EXECFN
         (0, 0),           // AT_NULL
     ];
 
+    // Debug print auxv
+    for (i, (k, v)) in auxv.iter().enumerate() {
+        crate::pr_debug!("auxv[{}]: type={}, val={:#x}", i, k, v);
+    }
+    crate::pr_debug!("setup_stack_layout: sp={:#x}, random_ptr={:#x}, phdr_addr={:#x}, entry={:#x}", sp, random_ptr, phdr_addr, entry_point);
+
+
     // Calculate total size of the pointer block to ensure final sp is 16-byte aligned
-    // Block includes: auxv[], envp NULL, envp[], argv NULL, argv[], argc
+    // Block includes: auxv[], padding, envp NULL, envp[], argv NULL, argv[], argc
     let total_size = auxv.len() * 2 * size_of::<usize>()
+        + size_of::<usize>() // Padding (Experimental fix for busybox misalignment) 
         + size_of::<usize>() // envp NULL
         + env_ptrs.len() * size_of::<usize>()
         + size_of::<usize>() // argv NULL
@@ -93,6 +127,7 @@ pub fn setup_stack_layout(
         unsafe { ptr::write(sp as *mut usize, *val) };
         sp -= size_of::<usize>();
         unsafe { ptr::write(sp as *mut usize, *type_) };
+        crate::pr_debug!("auxv: type={}, val={:#x}", type_, val);
     }
 
     // 1. 写入 envp NULL 终止符
