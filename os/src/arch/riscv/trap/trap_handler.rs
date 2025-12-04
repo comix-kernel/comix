@@ -63,6 +63,7 @@ pub fn user_trap(
     sstatus_old: sstatus::Sstatus,
     trap_frame: &mut super::TrapFrame,
 ) {
+    crate::pr_debug!("[user_trap] scause: {:?}", scause.cause());
     match scause.cause() {
         Trap::Exception(8) => {
             // 设置返回地址为下一个指令
@@ -75,12 +76,154 @@ pub fn user_trap(
             crate::arch::timer::set_next_trigger();
             check_timer();
         }
-        _ => panic!(
-            "Unexpected trap in user mode: {:?}, sepc = {:#x}, sstatus = {:#x}",
-            scause.cause(),
-            sepc_old,
-            sstatus_old.bits()
-        ),
+        _ => {
+            // 立即读取相关寄存器的当前值
+            let stval_val = stval::read();
+            let scause_val = scause.bits();
+            let sscratch_val = sscratch::read();
+
+            // 打印详细的异常信息
+            crate::earlyprintln!("\n");
+            crate::earlyprintln!("===============================================");
+            crate::earlyprintln!("   UNEXPECTED TRAP IN USER MODE (U-Mode)");
+            crate::earlyprintln!("===============================================");
+            crate::earlyprintln!("");
+            crate::earlyprintln!("[!] Exception Type:");
+            crate::earlyprintln!("   Trap: {:?}", scause.cause());
+            crate::earlyprintln!("   Raw scause: {:#x}", scause_val);
+            crate::earlyprintln!("");
+            crate::earlyprintln!("[!] Exception Location:");
+            crate::earlyprintln!("   sepc (fault PC):  {:#x}", sepc_old);
+            crate::earlyprintln!("   stval (fault VA): {:#x}", stval_val);
+            crate::earlyprintln!("");
+            crate::earlyprintln!("[!] Register State:");
+            crate::earlyprintln!("   sstatus: {:#x}", sstatus_old.bits());
+            crate::earlyprintln!("   sscratch: {:#x}", sscratch_val);
+            crate::earlyprintln!("");
+            crate::earlyprintln!("[!] TrapFrame Details:");
+            crate::earlyprintln!("   Stack Pointers:");
+            crate::earlyprintln!("     x2_sp (user stack): {:#x} <===", trap_frame.x2_sp);
+            crate::earlyprintln!("     kernel_sp:          {:#x}", trap_frame.kernel_sp);
+            crate::earlyprintln!("");
+            crate::earlyprintln!("   General Registers:");
+            crate::earlyprintln!(
+                "     x1_ra:  {:#x}  x3_gp:  {:#x}  x4_tp:  {:#x}",
+                trap_frame.x1_ra,
+                trap_frame.x3_gp,
+                trap_frame.x4_tp
+            );
+            crate::earlyprintln!(
+                "     x5_t0:  {:#x}  x6_t1:  {:#x}  x7_t2:  {:#x}",
+                trap_frame.x5_t0,
+                trap_frame.x6_t1,
+                trap_frame.x7_t2
+            );
+            crate::earlyprintln!("");
+            crate::earlyprintln!("   Argument Registers:");
+            crate::earlyprintln!(
+                "     x10_a0: {:#x}  x11_a1: {:#x}  x12_a2: {:#x}",
+                trap_frame.x10_a0,
+                trap_frame.x11_a1,
+                trap_frame.x12_a2
+            );
+            crate::earlyprintln!(
+                "     x13_a3: {:#x}  x14_a4: {:#x}  x15_a5: {:#x}",
+                trap_frame.x13_a3,
+                trap_frame.x14_a4,
+                trap_frame.x15_a5
+            );
+            crate::earlyprintln!(
+                "     x16_a6: {:#x}  x17_a7: {:#x}",
+                trap_frame.x16_a6,
+                trap_frame.x17_a7
+            );
+            crate::earlyprintln!("");
+            crate::earlyprintln!("   Saved Registers:");
+            crate::earlyprintln!(
+                "     x8_s0:  {:#x}  x9_s1:  {:#x}",
+                trap_frame.x8_s0,
+                trap_frame.x9_s1
+            );
+            crate::earlyprintln!(
+                "     x18_s2: {:#x}  x19_s3: {:#x}",
+                trap_frame.x18_s2,
+                trap_frame.x19_s3
+            );
+            crate::earlyprintln!("");
+
+            // 解释常见的异常类型
+            crate::earlyprintln!("[!] Exception Explanation:");
+            match scause.cause() {
+                Trap::Exception(0) => {
+                    crate::earlyprintln!("   Instruction Address Misaligned");
+                    crate::earlyprintln!("   -> PC address {:#x} is not 2-byte aligned", sepc_old);
+                }
+                Trap::Exception(1) => {
+                    crate::earlyprintln!("   Instruction Access Fault");
+                    crate::earlyprintln!("   -> Cannot fetch instruction from {:#x}", sepc_old);
+                }
+                Trap::Exception(2) => {
+                    crate::earlyprintln!("   Illegal Instruction");
+                    crate::earlyprintln!("   -> Illegal instruction at {:#x}", sepc_old);
+                }
+                Trap::Exception(4) => {
+                    crate::earlyprintln!("   Load Address Misaligned");
+                    crate::earlyprintln!(
+                        "   -> Tried to load from misaligned address {:#x}",
+                        stval_val
+                    );
+                }
+                Trap::Exception(5) => {
+                    crate::earlyprintln!("   Load Access Fault");
+                    crate::earlyprintln!("   -> Cannot read from address {:#x}", stval_val);
+                }
+                Trap::Exception(6) => {
+                    crate::earlyprintln!("   Store/AMO Address Misaligned");
+                    crate::earlyprintln!(
+                        "   -> Tried to store to misaligned address {:#x}",
+                        stval_val
+                    );
+                }
+                Trap::Exception(7) => {
+                    crate::earlyprintln!("   Store/AMO Access Fault");
+                    crate::earlyprintln!("   -> Cannot write to address {:#x}", stval_val);
+                }
+                Trap::Exception(12) => {
+                    crate::earlyprintln!("   Instruction Page Fault");
+                    crate::earlyprintln!(
+                        "   -> Page table entry invalid or no permission at {:#x}",
+                        sepc_old
+                    );
+                }
+                Trap::Exception(13) => {
+                    crate::earlyprintln!("   Load Page Fault");
+                    crate::earlyprintln!(
+                        "   -> Page table entry invalid or no read permission at {:#x}",
+                        stval_val
+                    );
+                }
+                Trap::Exception(15) => {
+                    crate::earlyprintln!("   Store Page Fault");
+                    crate::earlyprintln!(
+                        "   -> Page table entry invalid or no write permission at {:#x}",
+                        stval_val
+                    );
+                }
+                _ => {
+                    crate::earlyprintln!("   Unknown exception type");
+                }
+            }
+            crate::earlyprintln!("");
+            crate::earlyprintln!("===============================================");
+
+            panic!(
+                "Unexpected trap in user mode: {:?}, sepc = {:#x}, stval = {:#x}, sstatus = {:#x}",
+                scause.cause(),
+                sepc_old,
+                stval_val,
+                sstatus_old.bits()
+            );
+        }
     }
 }
 
