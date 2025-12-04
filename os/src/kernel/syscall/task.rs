@@ -381,7 +381,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         {
             let mut t = cur_task.lock();
             if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
-                crate::earlyprintln!("wait4: found child pid={}", res.lock().pid);
+                crate::pr_debug!("wait4: found child pid={}", res.lock().pid);
                 break res;
             } else {
                 if opt.contains(WaitFlags::NOHANG) {

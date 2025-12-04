@@ -106,24 +106,49 @@ pub fn user_trap(
             crate::earlyprintln!("     kernel_sp:          {:#x}", trap_frame.kernel_sp);
             crate::earlyprintln!("");
             crate::earlyprintln!("   General Registers:");
-            crate::earlyprintln!("     x1_ra:  {:#x}  x3_gp:  {:#x}  x4_tp:  {:#x}",
-                trap_frame.x1_ra, trap_frame.x3_gp, trap_frame.x4_tp);
-            crate::earlyprintln!("     x5_t0:  {:#x}  x6_t1:  {:#x}  x7_t2:  {:#x}",
-                trap_frame.x5_t0, trap_frame.x6_t1, trap_frame.x7_t2);
+            crate::earlyprintln!(
+                "     x1_ra:  {:#x}  x3_gp:  {:#x}  x4_tp:  {:#x}",
+                trap_frame.x1_ra,
+                trap_frame.x3_gp,
+                trap_frame.x4_tp
+            );
+            crate::earlyprintln!(
+                "     x5_t0:  {:#x}  x6_t1:  {:#x}  x7_t2:  {:#x}",
+                trap_frame.x5_t0,
+                trap_frame.x6_t1,
+                trap_frame.x7_t2
+            );
             crate::earlyprintln!("");
             crate::earlyprintln!("   Argument Registers:");
-            crate::earlyprintln!("     x10_a0: {:#x}  x11_a1: {:#x}  x12_a2: {:#x}",
-                trap_frame.x10_a0, trap_frame.x11_a1, trap_frame.x12_a2);
-            crate::earlyprintln!("     x13_a3: {:#x}  x14_a4: {:#x}  x15_a5: {:#x}",
-                trap_frame.x13_a3, trap_frame.x14_a4, trap_frame.x15_a5);
-            crate::earlyprintln!("     x16_a6: {:#x}  x17_a7: {:#x}",
-                trap_frame.x16_a6, trap_frame.x17_a7);
+            crate::earlyprintln!(
+                "     x10_a0: {:#x}  x11_a1: {:#x}  x12_a2: {:#x}",
+                trap_frame.x10_a0,
+                trap_frame.x11_a1,
+                trap_frame.x12_a2
+            );
+            crate::earlyprintln!(
+                "     x13_a3: {:#x}  x14_a4: {:#x}  x15_a5: {:#x}",
+                trap_frame.x13_a3,
+                trap_frame.x14_a4,
+                trap_frame.x15_a5
+            );
+            crate::earlyprintln!(
+                "     x16_a6: {:#x}  x17_a7: {:#x}",
+                trap_frame.x16_a6,
+                trap_frame.x17_a7
+            );
             crate::earlyprintln!("");
             crate::earlyprintln!("   Saved Registers:");
-            crate::earlyprintln!("     x8_s0:  {:#x}  x9_s1:  {:#x}",
-                trap_frame.x8_s0, trap_frame.x9_s1);
-            crate::earlyprintln!("     x18_s2: {:#x}  x19_s3: {:#x}",
-                trap_frame.x18_s2, trap_frame.x19_s3);
+            crate::earlyprintln!(
+                "     x8_s0:  {:#x}  x9_s1:  {:#x}",
+                trap_frame.x8_s0,
+                trap_frame.x9_s1
+            );
+            crate::earlyprintln!(
+                "     x18_s2: {:#x}  x19_s3: {:#x}",
+                trap_frame.x18_s2,
+                trap_frame.x19_s3
+            );
             crate::earlyprintln!("");
 
             // 解释常见的异常类型
@@ -143,7 +168,10 @@ pub fn user_trap(
                 }
                 Trap::Exception(4) => {
                     crate::earlyprintln!("   Load Address Misaligned");
-                    crate::earlyprintln!("   -> Tried to load from misaligned address {:#x}", stval_val);
+                    crate::earlyprintln!(
+                        "   -> Tried to load from misaligned address {:#x}",
+                        stval_val
+                    );
                 }
                 Trap::Exception(5) => {
                     crate::earlyprintln!("   Load Access Fault");
@@ -151,7 +179,10 @@ pub fn user_trap(
                 }
                 Trap::Exception(6) => {
                     crate::earlyprintln!("   Store/AMO Address Misaligned");
-                    crate::earlyprintln!("   -> Tried to store to misaligned address {:#x}", stval_val);
+                    crate::earlyprintln!(
+                        "   -> Tried to store to misaligned address {:#x}",
+                        stval_val
+                    );
                 }
                 Trap::Exception(7) => {
                     crate::earlyprintln!("   Store/AMO Access Fault");
@@ -159,15 +190,24 @@ pub fn user_trap(
                 }
                 Trap::Exception(12) => {
                     crate::earlyprintln!("   Instruction Page Fault");
-                    crate::earlyprintln!("   -> Page table entry invalid or no permission at {:#x}", sepc_old);
+                    crate::earlyprintln!(
+                        "   -> Page table entry invalid or no permission at {:#x}",
+                        sepc_old
+                    );
                 }
                 Trap::Exception(13) => {
                     crate::earlyprintln!("   Load Page Fault");
-                    crate::earlyprintln!("   -> Page table entry invalid or no read permission at {:#x}", stval_val);
+                    crate::earlyprintln!(
+                        "   -> Page table entry invalid or no read permission at {:#x}",
+                        stval_val
+                    );
                 }
                 Trap::Exception(15) => {
                     crate::earlyprintln!("   Store Page Fault");
-                    crate::earlyprintln!("   -> Page table entry invalid or no write permission at {:#x}", stval_val);
+                    crate::earlyprintln!(
+                        "   -> Page table entry invalid or no write permission at {:#x}",
+                        stval_val
+                    );
                 }
                 _ => {
                     crate::earlyprintln!("   Unknown exception type");
