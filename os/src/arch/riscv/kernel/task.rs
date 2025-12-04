@@ -74,39 +74,40 @@ pub fn setup_stack_layout(
     sp &= !(size_of::<usize>() * 2 - 1); // Align to 16 bytes
 
     // 4. AT_EXECFN (use argv[0] if available)
-    let execfn = if !arg_ptrs.is_empty() {
-        arg_ptrs[0]
-    } else {
-        0
-    };
+    let execfn = if !arg_ptrs.is_empty() { arg_ptrs[0] } else { 0 };
 
     let auxv = [
-        (3, phdr_addr),   // AT_PHDR
-        (4, phent),       // AT_PHENT
-        (5, phnum),       // AT_PHNUM
-        (6, 4096),        // AT_PAGESZ
-        (7, 0),           // AT_BASE
-        (8, 0),           // AT_FLAGS
-        (9, entry_point), // AT_ENTRY
-        (11, 0),          // AT_UID
-        (12, 0),          // AT_EUID
-        (13, 0),          // AT_GID
-        (14, 0),          // AT_EGID
+        (3, phdr_addr),     // AT_PHDR
+        (4, phent),         // AT_PHENT
+        (5, phnum),         // AT_PHNUM
+        (6, 4096),          // AT_PAGESZ
+        (7, 0),             // AT_BASE
+        (8, 0),             // AT_FLAGS
+        (9, entry_point),   // AT_ENTRY
+        (11, 0),            // AT_UID
+        (12, 0),            // AT_EUID
+        (13, 0),            // AT_GID
+        (14, 0),            // AT_EGID
         (15, platform_ptr), // AT_PLATFORM
-        (16, 0),          // AT_HWCAP
-        (17, 100),        // AT_CLKTCK
-        (23, 0),          // AT_SECURE
-        (25, random_ptr), // AT_RANDOM
-        (31, execfn),     // AT_EXECFN
-        (0, 0),           // AT_NULL
+        (16, 0),            // AT_HWCAP
+        (17, 100),          // AT_CLKTCK
+        (23, 0),            // AT_SECURE
+        (25, random_ptr),   // AT_RANDOM
+        (31, execfn),       // AT_EXECFN
+        (0, 0),             // AT_NULL
     ];
 
     // Debug print auxv
     for (i, (k, v)) in auxv.iter().enumerate() {
         crate::pr_debug!("auxv[{}]: type={}, val={:#x}", i, k, v);
     }
-    crate::pr_debug!("setup_stack_layout: sp={:#x}, random_ptr={:#x}, phdr_addr={:#x}, entry={:#x}", sp, random_ptr, phdr_addr, entry_point);
-
+    crate::pr_debug!(
+        "setup_stack_layout: sp={:#x}, random_ptr={:#x}, phdr_addr={:#x}, entry={:#x}",
+        sp,
+        random_ptr,
+        phdr_addr,
+        entry_point
+    );
 
     // Calculate total size of the pointer block to ensure final sp is 16-byte aligned
     // Block includes: auxv[], padding, envp NULL, envp[], argv NULL, argv[], argc
