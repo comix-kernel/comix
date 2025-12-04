@@ -109,10 +109,11 @@ pub fn notify_parent(task: SharedTask) {
         t.send_signal(p, NUM_SIGCHLD);
     } else {
         // Parent not found (e.g. init process exiting), ignore
+        let pid = task.lock().pid;
         crate::pr_warn!(
             "notify_parent: parent task {} not found for child {}",
             ppid,
-            task.lock().pid
+            pid
         );
     }
 }
