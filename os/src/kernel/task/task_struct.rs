@@ -267,14 +267,14 @@ impl Task {
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
 
-        let tf_ptr = self.trap_frame_ptr.load(Ordering::SeqCst);
-
         // 2. 处理文件描述符：取消共享并关闭 CLOEXEC 文件
         // execve 应该让当前进程拥有独立的 FD 表（如果之前是共享的）
         // 并且关闭所有标记为 FD_CLOEXEC 的文件
         let new_fd_table = self.fd_table.clone_table();
         new_fd_table.close_exec();
         self.fd_table = Arc::new(new_fd_table);
+
+        let tf_ptr = self.trap_frame_ptr.load(Ordering::SeqCst);
 
         // 注意：以下拷贝时对sp进行的操作均要求已经可以访问用户栈空间
         //      也就是说，new_memory_space 已经被激活（切换 satp）

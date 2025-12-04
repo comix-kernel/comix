@@ -131,6 +131,12 @@ pub fn setup_stack_layout(
         crate::pr_debug!("auxv: type={}, val={:#x}", type_, val);
     }
 
+    // Experimental Padding: Insert an extra NULL between auxv and envp
+    sp -= size_of::<usize>();
+    unsafe {
+        ptr::write(sp as *mut usize, 0);
+    }
+
     // 1. 写入 envp NULL 终止符
     sp -= size_of::<usize>();
     unsafe {
