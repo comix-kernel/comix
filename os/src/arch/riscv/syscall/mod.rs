@@ -7,7 +7,7 @@ mod syscall_number;
 /// 分发系统调用
 /// 按照系统调用号顺序排列，参考 syscall_number.rs 中的分类
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
-    crate::pr_debug!(
+    crate::earlyprintln!(
         "syscall: {} args: [{:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
         frame.x17_a7,
         frame.x10_a0,
