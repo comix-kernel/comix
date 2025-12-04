@@ -112,7 +112,7 @@ pub fn setup_stack_layout(
     // Calculate total size of the pointer block to ensure final sp is 16-byte aligned
     // Block includes: auxv[], padding, envp NULL, envp[], argv NULL, argv[], argc
     let total_size = auxv.len() * 2 * size_of::<usize>()
-        + size_of::<usize>() // Padding (Experimental fix for busybox misalignment) 
+        + size_of::<usize>() // 为兼容某些加载器（如 BusyBox），在 auxv 和 envp 之间插入一个额外的 NULL。
         + size_of::<usize>() // envp NULL
         + env_ptrs.len() * size_of::<usize>()
         + size_of::<usize>() // argv NULL
@@ -129,6 +129,13 @@ pub fn setup_stack_layout(
         sp -= size_of::<usize>();
         unsafe { ptr::write(sp as *mut usize, *type_) };
         crate::pr_debug!("auxv: type={}, val={:#x}", type_, val);
+    }
+
+    // 为兼容某些加载器（如 BusyBox），在 auxv 和 envp 之间插入一个额外的 NULL。
+    // 这解决了 BusyBox init 进程启动时因栈布局解析错位导致的 Load Page Fault。
+    sp -= size_of::<usize>();
+    unsafe {
+        ptr::write(sp as *mut usize, 0);
     }
 
     // 1. 写入 envp NULL 终止符
