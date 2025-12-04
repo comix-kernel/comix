@@ -230,11 +230,11 @@ fn create_empty_ext4_image(path: &PathBuf, size_mb: usize) {
 
 /// 创建完整的 ext4 镜像 (包含 data/ 和 user/bin/)
 fn create_full_ext4_image(path: &PathBuf, project_root: &Path) {
-    const IMG_SIZE_MB: usize = 1024; // 1GB
+    const IMG_SIZE_MB: usize = 4096; // 4GB
     const BLOCK_SIZE: usize = 1024 * 1024;
 
     println!(
-        "cargo:warning=[build.rs] Creating {}MB (1GB) full ext4 image at {}",
+        "cargo:warning=[build.rs] Creating {}MB (4GB) full ext4 image at {}",
         IMG_SIZE_MB,
         path.display()
     );
