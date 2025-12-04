@@ -414,8 +414,6 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         }
     };
 
-    crate::earlyprintln!("wait4: returning pid={} status={:#x}", tid, status.raw());
-
     unsafe {
         write_to_user(wstatus, status.raw());
     }
