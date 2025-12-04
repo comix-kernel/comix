@@ -27,3 +27,5 @@ user/bin/**
 
 # 磁盘镜像文件
 *.img
+
+.ignore/**
