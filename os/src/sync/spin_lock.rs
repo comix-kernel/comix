@@ -40,6 +40,14 @@ impl<T> SpinLock<T> {
         }
     }
 
+    /// 尝试获取自旋锁，如果成功则返回 RAII 保护器，否则返回 None。
+    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
+        self.raw_lock.try_lock().map(|_raw_guard| SpinLockGuard {
+            _raw_guard,
+            data: unsafe { &mut *self.data.get() },
+        })
+    }
+
     /// 检查锁是否被占用 (仅用于调试/测试)
     /// 返回值：锁是否被占用
     #[cfg(test)]
