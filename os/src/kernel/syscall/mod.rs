@@ -7,6 +7,7 @@ mod cred;
 mod fcntl;
 mod fs;
 mod io;
+mod ioctl;
 mod ipc;
 mod mm;
 mod network;
@@ -36,6 +37,7 @@ use cred::*;
 use fcntl::*;
 use fs::*;
 use io::*;
+use ioctl::*;
 use ipc::*;
 use mm::*;
 use network::*;
@@ -53,7 +55,7 @@ impl_syscall!(sys_getcwd, getcwd, (*mut u8, usize));
 impl_syscall!(sys_dup, dup, (usize));
 impl_syscall!(sys_dup3, dup3, (usize, usize, u32));
 impl_syscall!(sys_fcntl, fcntl, (usize, i32, usize));
-impl_syscall!(sys_ioctl, ioctl, (i32, u32, *mut u8));
+impl_syscall!(sys_ioctl, ioctl, (i32, u32, usize));
 
 // 文件/目录创建与链接 (File/Directory Creation and Linking)
 impl_syscall!(sys_mknodat, mknodat, (i32, *const c_char, u32, u64));

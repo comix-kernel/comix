@@ -116,6 +116,13 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
+    // 挂载 /dev 并创建设备节点
+    if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
+        pr_err!("[Init] Failed to mount /dev: {:?}", e);
+    } else if let Err(e) = crate::fs::init_dev() {
+        pr_err!("[Init] Failed to create devices: {:?}", e);
+    }
+
     kernel_execve("/sbin/init", &["/sbin/init"], &[]);
 }
 

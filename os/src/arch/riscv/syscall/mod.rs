@@ -1,13 +1,13 @@
 //! RISC-V 架构的系统调用分发模块
 use crate::kernel::syscall::*;
-use crate::pr_err;
+use crate::{earlyprintln, pr_err};
 
 mod syscall_number;
 
 /// 分发系统调用
 /// 按照系统调用号顺序排列，参考 syscall_number.rs 中的分类
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
-    crate::pr_debug!(
+    crate::earlyprintln!(
         "syscall: {} args: [{:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
         frame.x17_a7,
         frame.x10_a0,
@@ -185,7 +185,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-2isize) as usize; // -ENOSYS
-            pr_err!("Unknown syscall: {}", frame.x17_a7);
+            earlyprintln!("Unknown syscall: {}", frame.x17_a7);
         }
     }
     crate::pr_debug!("syscall exit, return: {}", frame.x10_a0 as isize);
