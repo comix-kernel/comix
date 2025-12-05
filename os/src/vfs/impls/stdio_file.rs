@@ -11,18 +11,7 @@ use crate::{
 use alloc::sync::Arc;
 
 /// 全局终端设置（所有标准I/O文件共享）
-static STDIO_TERMIOS: SpinLock<Termios> = SpinLock::new(Termios {
-    c_iflag: 0x0100,
-    c_oflag: 0x0001 | 0x0004,
-    c_cflag: 0x0030 | 0x0080,
-    c_lflag: 0x0001 | 0x0002 | 0x0008 | 0x0010,
-    c_line: 0,
-    c_cc: [
-        3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0,
-    ],
-    c_ispeed: 0x0000000f,
-    c_ospeed: 0x0000000f,
-});
+static STDIO_TERMIOS: SpinLock<Termios> = SpinLock::new(Termios::DEFAULT);
 
 /// 标准输入文件
 ///
