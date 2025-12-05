@@ -206,8 +206,8 @@ impl File for CharDeviceFile {
     }
 
     fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
-        use crate::uapi::ioctl::*;
         use crate::uapi::errno::{EINVAL, ENOTTY};
+        use crate::uapi::ioctl::*;
         use riscv::register::sstatus;
 
         // 仅 TTY 设备（主设备号 5）支持终端 ioctl

@@ -43,7 +43,13 @@ use riscv::register::sstatus;
 /// - 大部分 ioctl 操作需要相应的设备驱动程序支持
 /// - 无效的 request 码会返回 ENOTTY
 pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
-    earlyprintln!("ioctl: fd={}, request={:#x} ({}), arg={:#x}", fd, request, request, arg);
+    earlyprintln!(
+        "ioctl: fd={}, request={:#x} ({}), arg={:#x}",
+        fd,
+        request,
+        request,
+        arg
+    );
 
     // 参数验证
     if fd < 0 {
@@ -107,7 +113,12 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         }
     };
 
-    earlyprintln!("ioctl: fd={}, request={:#x} => result={}", fd, request, result);
+    earlyprintln!(
+        "ioctl: fd={}, request={:#x} => result={}",
+        fd,
+        request,
+        result
+    );
     result
 }
 
@@ -251,7 +262,11 @@ fn handle_tiocswinsz(_file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize)
 }
 
 /// TCGETS/TCSETS - 终端属性
-fn handle_termios(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, arg: usize) -> isize {
+fn handle_termios(
+    _file: &alloc::sync::Arc<dyn crate::vfs::File>,
+    request: u32,
+    arg: usize,
+) -> isize {
     if arg == 0 {
         return -EINVAL as isize;
     }
@@ -291,7 +306,11 @@ fn handle_termios(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, 
 }
 
 /// TIOCGPGRP/TIOCSPGRP - 终端进程组
-fn handle_tty_pgrp(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, arg: usize) -> isize {
+fn handle_tty_pgrp(
+    _file: &alloc::sync::Arc<dyn crate::vfs::File>,
+    request: u32,
+    arg: usize,
+) -> isize {
     unsafe {
         sstatus::set_sum();
         let pid_ptr = arg as *mut i32;
