@@ -17,7 +17,9 @@ static STDIO_TERMIOS: SpinLock<Termios> = SpinLock::new(Termios {
     c_cflag: 0x0030 | 0x0080,
     c_lflag: 0x0001 | 0x0002 | 0x0008 | 0x0010,
     c_line: 0,
-    c_cc: [3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0],
+    c_cc: [
+        3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0,
+    ],
     c_ispeed: 0x0000000f,
     c_ospeed: 0x0000000f,
 });
@@ -211,8 +213,15 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
 
                 // 调试：打印返回的termios内容
                 use crate::earlyprintln;
-                earlyprintln!("TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
-                    termios.c_iflag, termios.c_oflag, termios.c_cflag, termios.c_lflag, termios.c_ispeed, termios.c_ospeed);
+                earlyprintln!(
+                    "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
+                    termios.c_iflag,
+                    termios.c_oflag,
+                    termios.c_cflag,
+                    termios.c_lflag,
+                    termios.c_ispeed,
+                    termios.c_ospeed
+                );
             }
             Ok(0)
         }
@@ -235,8 +244,15 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
 
                 // 调试：打印接收到的termios内容
                 use crate::earlyprintln;
-                earlyprintln!("TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
-                    new_termios.c_iflag, new_termios.c_oflag, new_termios.c_cflag, new_termios.c_lflag, new_termios.c_ispeed, new_termios.c_ospeed);
+                earlyprintln!(
+                    "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
+                    new_termios.c_iflag,
+                    new_termios.c_oflag,
+                    new_termios.c_cflag,
+                    new_termios.c_lflag,
+                    new_termios.c_ispeed,
+                    new_termios.c_ospeed
+                );
 
                 *STDIO_TERMIOS.lock() = new_termios;
                 sstatus::clear_sum();

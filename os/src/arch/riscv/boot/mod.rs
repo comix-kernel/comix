@@ -123,7 +123,6 @@ fn init() {
         pr_err!("[Init] Failed to create devices: {:?}", e);
     }
 
-
     kernel_execve("/sbin/init", &["/sbin/init"], &[]);
 }
 
