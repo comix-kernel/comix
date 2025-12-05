@@ -133,4 +133,15 @@ pub trait File: Send + Sync {
     fn write_at(&self, _offset: usize, _buf: &[u8]) -> Result<usize, FsError> {
         Err(FsError::NotSupported)
     }
+
+    /// 执行设备特定的控制操作（可选方法，用于 ioctl）
+    ///
+    /// 用于设备驱动程序特定的控制命令。
+    /// - `request`: ioctl 请求码
+    /// - `arg`: 参数指针（作为 usize 传递）
+    ///
+    /// 默认返回 `NotSupported`，仅由支持 ioctl 的设备类型实现
+    fn ioctl(&self, _request: u32, _arg: usize) -> Result<isize, FsError> {
+        Err(FsError::NotSupported)
+    }
 }

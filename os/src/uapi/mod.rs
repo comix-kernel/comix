@@ -8,6 +8,7 @@ pub mod errno;
 pub mod fcntl;
 pub mod fs;
 pub mod futex;
+pub mod ioctl;
 pub mod iovec;
 pub mod log;
 pub mod mm;

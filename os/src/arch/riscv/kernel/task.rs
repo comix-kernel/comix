@@ -112,7 +112,6 @@ pub fn setup_stack_layout(
     // Calculate total size of the pointer block to ensure final sp is 16-byte aligned
     // Block includes: auxv[], padding, envp NULL, envp[], argv NULL, argv[], argc
     let total_size = auxv.len() * 2 * size_of::<usize>()
-        + size_of::<usize>() // 为兼容某些加载器（如 BusyBox），在 auxv 和 envp 之间插入一个额外的 NULL。
         + size_of::<usize>() // envp NULL
         + env_ptrs.len() * size_of::<usize>()
         + size_of::<usize>() // argv NULL

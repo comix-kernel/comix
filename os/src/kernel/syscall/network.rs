@@ -369,22 +369,3 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         0 // 成功
     }
 }
-
-// 获取网络接口统计信息
-// Linux 标准: int ioctl(int sockfd, unsigned long request, ...);
-pub fn ioctl(sockfd: i32, request: u32, arg: *mut u8) -> isize {
-    unsafe {
-        sstatus::set_sum();
-
-        // TODO: 实现ioctl逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
-        }
-
-        // 暂时返回成功
-        sstatus::clear_sum();
-        0
-    }
-}
