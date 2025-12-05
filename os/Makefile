@@ -44,7 +44,8 @@ gdb:
 		-ex "file $(PROJECT_DIR)" \
 		-ex "target remote :1234" \
         -ex "b *0x80200000" \
-		-ex "dir ../.ignore/" \
+		-ex "dir ../.ignore/busybox" \
+		-ex "dir ../.ignore/riscv-musl" \
 		-ex "add-symbol-file ../data/bin/busybox"\
         -ex "c"
 
