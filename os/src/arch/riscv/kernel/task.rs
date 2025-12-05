@@ -128,14 +128,6 @@ pub fn setup_stack_layout(
         unsafe { ptr::write(sp as *mut usize, *val) };
         sp -= size_of::<usize>();
         unsafe { ptr::write(sp as *mut usize, *type_) };
-        crate::pr_debug!("auxv: type={}, val={:#x}", type_, val);
-    }
-
-    // 为兼容某些加载器（如 BusyBox），在 auxv 和 envp 之间插入一个额外的 NULL。
-    // 这解决了 BusyBox init 进程启动时因栈布局解析错位导致的 Load Page Fault。
-    sp -= size_of::<usize>();
-    unsafe {
-        ptr::write(sp as *mut usize, 0);
     }
 
     // 1. 写入 envp NULL 终止符
