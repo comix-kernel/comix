@@ -127,7 +127,6 @@ pub fn setup_stack_layout(
         unsafe { ptr::write(sp as *mut usize, *val) };
         sp -= size_of::<usize>();
         unsafe { ptr::write(sp as *mut usize, *type_) };
-        crate::pr_debug!("auxv: type={}, val={:#x}", type_, val);
     }
 
     // 1. 写入 envp NULL 终止符
