@@ -242,48 +242,55 @@ pub struct Termios {
     pub c_ospeed: u32,
 }
 
+impl Termios {
+    /// 默认终端配置常量
+    ///
+    /// 提供标准的终端默认设置，适用于交互式 shell 和一般终端应用。
+    pub const DEFAULT: Self = Self {
+        // 输入模式：ICRNL (将 CR 转换为 NL)
+        c_iflag: 0x0100,
+        // 输出模式：OPOST | ONLCR (启用输出处理，将 NL 转换为 CR-NL)
+        c_oflag: 0x0001 | 0x0004,
+        // 控制模式：CS8 | CREAD (8位字符，允许接收)
+        c_cflag: 0x0030 | 0x0080,
+        // 本地模式：ISIG | ICANON | ECHO | ECHOE
+        c_lflag: 0x0001 | 0x0002 | 0x0008 | 0x0010,
+        // 行规程：0 (N_TTY)
+        c_line: 0,
+        // 特殊控制字符（使用常见默认值）
+        // 索引: 0=VINTR, 1=VQUIT, 2=VERASE, 3=VKILL, 4=VEOF, 5=VTIME, 6=VMIN,
+        //       7=VSWTC, 8=VSTART, 9=VSTOP, 10=VSUSP, 11=VEOL, 12=VREPRINT,
+        //       13=VDISCARD, 14=VWERASE, 15=VLNEXT, 16=VEOL2, 17-18=保留
+        c_cc: [
+            3,   // 0: VINTR (Ctrl-C)
+            28,  // 1: VQUIT (Ctrl-\)
+            127, // 2: VERASE (DEL)
+            21,  // 3: VKILL (Ctrl-U)
+            4,   // 4: VEOF (Ctrl-D)
+            0,   // 5: VTIME
+            1,   // 6: VMIN
+            0,   // 7: VSWTC
+            17,  // 8: VSTART (Ctrl-Q)
+            19,  // 9: VSTOP (Ctrl-S)
+            26,  // 10: VSUSP (Ctrl-Z)
+            0,   // 11: VEOL
+            18,  // 12: VREPRINT (Ctrl-R)
+            15,  // 13: VDISCARD (Ctrl-O)
+            23,  // 14: VWERASE (Ctrl-W)
+            22,  // 15: VLNEXT (Ctrl-V)
+            0,   // 16: VEOL2
+            0,   // 17: 保留
+            0,   // 18: 保留
+        ],
+        // 波特率：38400 (B38400 = 0x0000000f)
+        c_ispeed: 0x0000000f,
+        c_ospeed: 0x0000000f,
+    };
+}
+
 impl Default for Termios {
     fn default() -> Self {
-        Self {
-            // 输入模式：ICRNL (将 CR 转换为 NL)
-            c_iflag: 0x0100,
-            // 输出模式：OPOST | ONLCR (启用输出处理，将 NL 转换为 CR-NL)
-            c_oflag: 0x0001 | 0x0004,
-            // 控制模式：CS8 | CREAD (8位字符，允许接收)
-            c_cflag: 0x0030 | 0x0080,
-            // 本地模式：ISIG | ICANON | ECHO | ECHOE
-            c_lflag: 0x0001 | 0x0002 | 0x0008 | 0x0010,
-            // 行规程：0 (N_TTY)
-            c_line: 0,
-            // 特殊控制字符（使用常见默认值）
-            // 索引: 0=VINTR, 1=VQUIT, 2=VERASE, 3=VKILL, 4=VEOF, 5=VTIME, 6=VMIN,
-            //       7=VSWTC, 8=VSTART, 9=VSTOP, 10=VSUSP, 11=VEOL, 12=VREPRINT,
-            //       13=VDISCARD, 14=VWERASE, 15=VLNEXT, 16=VEOL2, 17-18=保留
-            c_cc: [
-                3,   // 0: VINTR (Ctrl-C)
-                28,  // 1: VQUIT (Ctrl-\)
-                127, // 2: VERASE (DEL)
-                21,  // 3: VKILL (Ctrl-U)
-                4,   // 4: VEOF (Ctrl-D)
-                0,   // 5: VTIME
-                1,   // 6: VMIN
-                0,   // 7: VSWTC
-                17,  // 8: VSTART (Ctrl-Q)
-                19,  // 9: VSTOP (Ctrl-S)
-                26,  // 10: VSUSP (Ctrl-Z)
-                0,   // 11: VEOL
-                18,  // 12: VREPRINT (Ctrl-R)
-                15,  // 13: VDISCARD (Ctrl-O)
-                23,  // 14: VWERASE (Ctrl-W)
-                22,  // 15: VLNEXT (Ctrl-V)
-                0,   // 16: VEOL2
-                0,   // 17: 保留
-                0,   // 18: 保留
-            ],
-            // 波特率：38400 (B38400 = 0x0000000f)
-            c_ispeed: 0x0000000f,
-            c_ospeed: 0x0000000f,
-        }
+        Self::DEFAULT
     }
 }
 
