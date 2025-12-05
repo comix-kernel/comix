@@ -1,5 +1,6 @@
 use crate::device::Driver;
 use crate::sync::SpinLock;
+use crate::uapi::ioctl::Termios;
 use crate::vfs::dev::{major, minor};
 use crate::vfs::devno::{chrdev_major, get_chrdev_driver};
 use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
@@ -24,6 +25,9 @@ pub struct CharDeviceFile {
 
     /// 偏移量（某些字符设备可能需要）
     offset: SpinLock<usize>,
+
+    /// 终端属性（用于 TTY 设备）
+    termios: SpinLock<Termios>,
 }
 
 impl CharDeviceFile {
@@ -59,6 +63,7 @@ impl CharDeviceFile {
             driver,
             flags,
             offset: SpinLock::new(0),
+            termios: SpinLock::new(Termios::default()),
         })
     }
 
@@ -198,5 +203,67 @@ impl File for CharDeviceFile {
 
     fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
         Ok(self.dentry.clone())
+    }
+
+    fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
+        use crate::uapi::ioctl::*;
+        use crate::uapi::errno::{EINVAL, ENOTTY};
+        use riscv::register::sstatus;
+
+        // 仅 TTY 设备（主设备号 5）支持终端 ioctl
+        let maj = major(self.dev);
+        if maj != chrdev_major::CONSOLE {
+            return Err(FsError::NotSupported);
+        }
+
+        match request {
+            TCGETS => {
+                if arg == 0 {
+                    return Ok(-EINVAL as isize);
+                }
+
+                unsafe {
+                    sstatus::set_sum();
+                    let termios_ptr = arg as *mut Termios;
+                    if termios_ptr.is_null() {
+                        sstatus::clear_sum();
+                        return Ok(-EINVAL as isize);
+                    }
+
+                    // 清零结构体（包括 padding），避免泄露内核栈数据
+                    core::ptr::write_bytes(termios_ptr, 0, 1);
+
+                    // 返回保存的 termios 设置
+                    let termios = *self.termios.lock();
+                    core::ptr::write_volatile(termios_ptr, termios);
+                    sstatus::clear_sum();
+                }
+                Ok(0)
+            }
+
+            TCSETS | TCSETSW | TCSETSF => {
+                if arg == 0 {
+                    return Ok(-EINVAL as isize);
+                }
+
+                unsafe {
+                    sstatus::set_sum();
+                    let termios_ptr = arg as *const Termios;
+                    if termios_ptr.is_null() {
+                        sstatus::clear_sum();
+                        return Ok(-EINVAL as isize);
+                    }
+
+                    // 读取新的 termios 设置并保存
+                    let new_termios = core::ptr::read_volatile(termios_ptr);
+                    *self.termios.lock() = new_termios;
+                    sstatus::clear_sum();
+                }
+                Ok(0)
+            }
+
+            // 其他 ioctl 命令不支持
+            _ => Ok(-ENOTTY as isize),
+        }
     }
 }
