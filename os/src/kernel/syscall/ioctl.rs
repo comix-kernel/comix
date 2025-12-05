@@ -6,7 +6,7 @@ use crate::kernel::current_task;
 use crate::uapi::errno::{EBADF, EINVAL, ENOTTY, EOPNOTSUPP};
 use crate::uapi::ioctl::*;
 use crate::vfs::FsError;
-use crate::{pr_debug, pr_err, pr_warn};
+use crate::{earlyprintln, pr_debug, pr_err, pr_warn};
 use riscv::register::sstatus;
 
 /// ioctl - 设备特定的输入/输出控制
@@ -43,7 +43,7 @@ use riscv::register::sstatus;
 /// - 大部分 ioctl 操作需要相应的设备驱动程序支持
 /// - 无效的 request 码会返回 ENOTTY
 pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
-    pr_debug!("ioctl: fd={}, request={:#x}, arg={:#x}", fd, request, arg);
+    earlyprintln!("ioctl: fd={}, request={:#x} ({}), arg={:#x}", fd, request, request, arg);
 
     // 参数验证
     if fd < 0 {
@@ -72,7 +72,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         //  终端控制
         TIOCGWINSZ => handle_tiocgwinsz(&file, arg),
         TIOCSWINSZ => handle_tiocswinsz(&file, arg),
-        TCGETS | TCSETS | TCSETSW | TCSETSF => handle_termios(&file, request, arg),
+        // TCGETS/TCSETS 等终端属性操作委托给文件对象的 ioctl 方法处理
         TIOCGPGRP | TIOCSPGRP => handle_tty_pgrp(&file, request, arg),
         TIOCSCTTY => handle_tiocsctty(&file, arg),
         VT_OPENQRY => handle_vt_openqry(arg),
@@ -86,7 +86,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         //  设备特定
         // 尝试委托给文件对象的 ioctl 方法
         _ => {
-            pr_debug!("ioctl: delegating request {:#x} to file object", request);
+            earlyprintln!("ioctl: delegating request {:#x} to file object", request);
             match file.ioctl(request, arg) {
                 Ok(ret) => ret,
                 Err(FsError::NotSupported) => {
@@ -107,7 +107,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         }
     };
 
-    pr_debug!("ioctl: fd={}, request={:#x} => {}", fd, request, result);
+    earlyprintln!("ioctl: fd={}, request={:#x} => result={}", fd, request, result);
     result
 }
 
@@ -208,6 +208,9 @@ fn handle_tiocgwinsz(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) 
             return -EINVAL as isize;
         }
 
+        // 先清零整个结构体（包括padding），避免泄露内核栈数据
+        core::ptr::write_bytes(winsize_ptr, 0, 1);
+
         // 默认终端大小：24 行 x 80 列
         let winsize = WinSize {
             ws_row: 24,
@@ -219,7 +222,7 @@ fn handle_tiocgwinsz(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) 
         core::ptr::write_volatile(winsize_ptr, winsize);
         sstatus::clear_sum();
 
-        pr_debug!(
+        earlyprintln!(
             "ioctl: TIOCGWINSZ returned {}x{}",
             winsize.ws_row,
             winsize.ws_col
@@ -242,7 +245,7 @@ fn handle_tiocswinsz(_file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize)
         sstatus::clear_sum();
 
         // TODO: 实际设置终端窗口大小（需要终端驱动支持）
-        pr_debug!("ioctl: TIOCSWINSZ accepted but not implemented");
+        earlyprintln!("ioctl: TIOCSWINSZ accepted but not implemented");
         0
     }
 }
@@ -264,17 +267,19 @@ fn handle_termios(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, 
         match request {
             TCGETS => {
                 // 返回默认的 termios 设置
+                // 使用 write_bytes 先清零整个结构体（包括padding），避免泄露内核栈数据
+                core::ptr::write_bytes(termios_ptr, 0, 1);
                 let termios = Termios::default();
                 core::ptr::write_volatile(termios_ptr, termios);
                 sstatus::clear_sum();
-                pr_debug!("ioctl: TCGETS returned default termios");
+                earlyprintln!("ioctl: TCGETS returned default termios");
                 0
             }
             TCSETS | TCSETSW | TCSETSF => {
                 // 读取新的 termios 设置（但不真正应用）
                 let _termios = core::ptr::read_volatile(termios_ptr);
                 sstatus::clear_sum();
-                pr_debug!("ioctl: TCSETS* accepted but not applied");
+                earlyprintln!("ioctl: TCSETS* accepted but not applied");
                 0
             }
             _ => {
@@ -297,6 +302,8 @@ fn handle_tty_pgrp(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32,
 
         match request {
             TIOCGPGRP => {
+                // 先清零，避免泄露内核栈数据
+                core::ptr::write_bytes(pid_ptr, 0, 1);
                 // TODO: 返回实际的进程组 ID
                 core::ptr::write_volatile(pid_ptr, 1);
                 sstatus::clear_sum();
@@ -324,7 +331,7 @@ fn handle_tty_pgrp(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32,
 fn handle_tiocsctty(_file: &alloc::sync::Arc<dyn crate::vfs::File>, _arg: usize) -> isize {
     // TODO: 实现完整的控制终端管理
     // 目前只是返回成功，让 init 可以继续运行
-    pr_debug!("ioctl: TIOCSCTTY accepted (not fully implemented)");
+    earlyprintln!("ioctl: TIOCSCTTY accepted (not fully implemented)");
     0
 }
 
@@ -338,7 +345,7 @@ fn handle_vt_openqry(arg: usize) -> isize {
     }
 
     // 对于不支持虚拟终端的系统，返回 ENOTTY
-    pr_debug!("ioctl: VT_OPENQRY not supported (no VT subsystem)");
+    earlyprintln!("ioctl: VT_OPENQRY not supported (no VT subsystem)");
     -ENOTTY as isize
 }
 
@@ -356,19 +363,18 @@ fn handle_siocgifconf(arg: usize) -> isize {
 
         // 读取 ifconf 结构
         let ifconf = core::ptr::read_volatile(ifconf_ptr);
-        sstatus::clear_sum();
+
+        // 先清零原结构体，避免泄露内核栈数据
+        core::ptr::write_bytes(ifconf_ptr, 0, 1);
 
         // TODO: 填充实际的网络接口列表
         // 目前返回空列表
-        unsafe {
-            sstatus::set_sum();
-            let mut new_ifconf = ifconf;
-            new_ifconf.ifc_len = 0;
-            core::ptr::write_volatile(ifconf_ptr, new_ifconf);
-            sstatus::clear_sum();
-        }
+        let mut new_ifconf = ifconf;
+        new_ifconf.ifc_len = 0;
+        core::ptr::write_volatile(ifconf_ptr, new_ifconf);
+        sstatus::clear_sum();
 
-        pr_debug!("ioctl: SIOCGIFCONF returned 0 interfaces");
+        earlyprintln!("ioctl: SIOCGIFCONF returned 0 interfaces");
         0
     }
 }
@@ -390,11 +396,11 @@ fn handle_ifreq(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, ar
         match request {
             SIOCGIFADDR | SIOCGIFFLAGS | SIOCGIFNETMASK | SIOCGIFMTU | SIOCGIFHWADDR
             | SIOCGIFINDEX => {
-                pr_debug!("ioctl: network get request {:#x} not implemented", request);
+                earlyprintln!("ioctl: network get request {:#x} not implemented", request);
                 -EOPNOTSUPP as isize
             }
             SIOCSIFADDR | SIOCSIFFLAGS | SIOCSIFNETMASK | SIOCSIFMTU | SIOCSIFHWADDR => {
-                pr_debug!("ioctl: network set request {:#x} not implemented", request);
+                earlyprintln!("ioctl: network set request {:#x} not implemented", request);
                 -EOPNOTSUPP as isize
             }
             _ => -EINVAL as isize,
