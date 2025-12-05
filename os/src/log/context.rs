@@ -27,11 +27,12 @@ pub(super) fn collect_context() -> LogContext {
 
     // 尝试获取当前任务的 tid
     // 注意：在早期启动或中断上下文中可能没有当前任务
+    // 更重要的是：如果当前已经在持有 task lock 的上下文中（例如 wait4），
+    // 再次尝试获取锁会导致死锁。因此这里必须使用 try_lock。
     let task_id = crate::kernel::current_cpu()
-        .lock()
-        .current_task
-        .as_ref()
-        .map(|task| task.lock().tid)
+        .try_lock()
+        .and_then(|cpu| cpu.current_task.as_ref().cloned())
+        .and_then(|task| task.try_lock().map(|t| t.tid))
         .unwrap_or(0);
 
     LogContext {

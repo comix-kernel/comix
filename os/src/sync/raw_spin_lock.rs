@@ -47,6 +47,27 @@ impl RawSpinLock {
         }
     }
 
+    /// 尝试获取自旋锁，如果成功则返回 RAII 保护器，否则返回 None。
+    ///
+    /// 内部原子地尝试获取锁，并在当前 CPU 禁用本地中断。
+    /// 如果获取失败，会立即恢复中断状态（通过 Drop IntrGuard）。
+    pub fn try_lock(&self) -> Option<RawSpinLockGuard<'_>> {
+        let guard = IntrGuard::new();
+
+        if self
+            .lock
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Some(RawSpinLockGuard {
+                lock: self,
+                intr_guard: guard,
+            })
+        } else {
+            None
+        }
+    }
+
     /// 仅释放锁标志。
     fn unlock(&self) {
         self.lock.store(false, Ordering::Release);
