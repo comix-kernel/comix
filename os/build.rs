@@ -176,6 +176,8 @@ fn should_rebuild(target: &Path, dependencies: &[PathBuf]) -> bool {
             if latest_dep_mtime > target_mtime {
                 return true;
             }
+        } else {
+            return true;
         }
     }
 
