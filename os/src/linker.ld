@@ -55,7 +55,7 @@ SECTIONS
     . = ALIGN(4K);
     ebss = .;
     sheap = .;
-    . = . + 16M;
+    . = . + 32M;
     eheap = .;
     ekernel = .;
 
