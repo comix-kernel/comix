@@ -115,25 +115,89 @@ fn main() {
     let ext4_embed_img = PathBuf::from(&out_dir).join("ext4_test.img");
     if is_test {
         // 测试模式: 创建 8MB 镜像用于测试
+        // 只有在测试模式下才需要这个环境变量
         println!("cargo:warning=[build.rs] Creating ext4 test image for embedding (8MB)...");
         create_ext4_test_image(&ext4_embed_img);
+        println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_embed_img.display());
     } else {
-        // 非测试模式: 创建最小镜像 (1MB) 以减少二进制体积
-        println!("cargo:warning=[build.rs] Creating minimal ext4 image for embedding (1MB)...");
-        create_minimal_ext4_image(&ext4_embed_img);
+        println!("cargo:warning=[build.rs] Skipping ext4 test image creation (not in test mode)");
     }
-    println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_embed_img.display());
 
     // 3.2: 非测试模式下创建完整的运行时镜像
     if !is_test {
-        println!("cargo:warning=[build.rs] Creating full ext4 runtime image (128MB) at fs.img...");
         let fs_img_path = PathBuf::from(&manifest_dir).join("fs.img");
-        create_full_ext4_image(&fs_img_path, &project_root);
-        println!(
-            "cargo:warning=[build.rs] Runtime image created: {}",
-            fs_img_path.display()
-        );
+        let data_dir = project_root.join("data");
+        // user_bin_dir 已经在上面通过 user_dir 引用了, user/bin
+        let user_bin_dir = user_dir.join("bin");
+        
+        // 检查依赖
+        let dependencies = vec![data_dir, user_bin_dir];
+        
+        if should_rebuild(&fs_img_path, &dependencies) {
+             println!("cargo:warning=[build.rs] Creating full ext4 runtime image (4GB) at fs.img...");
+             create_full_ext4_image(&fs_img_path, &project_root);
+             println!(
+                 "cargo:warning=[build.rs] Runtime image created: {}",
+                 fs_img_path.display()
+             );
+        } else {
+             println!("cargo:warning=[build.rs] fs.img is up to date, skipping regeneration.");
+        }
     }
+}
+
+/// 检查目标文件是否需要重新构建
+/// 
+/// 如果目标不存在，或者任何依赖项(目录或文件)比目标新，则返回 true
+fn should_rebuild(target: &Path, dependencies: &[PathBuf]) -> bool {
+    if !target.exists() {
+        return true;
+    }
+
+    let target_mtime = match fs::metadata(target).and_then(|m| m.modified()) {
+        Ok(t) => t,
+        Err(_) => return true, // 无法获取时间，为了安全起见重新构建
+    };
+
+    for dep in dependencies {
+        if let Some(latest_dep_mtime) = get_latest_mtime(dep) {
+            if latest_dep_mtime > target_mtime {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// 递归获取目录中最新的修改时间
+fn get_latest_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    if !path.exists() {
+        return None;
+    }
+
+    if path.is_file() {
+        return fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    }
+
+    let mut latest = None;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // 忽略隐藏文件 (.git 等)
+            if path.file_name().and_then(|n| n.to_str()).map(|s| s.starts_with('.')).unwrap_or(false) {
+                continue;
+            }
+            
+            let mtime = get_latest_mtime(&path);
+            match (latest, mtime) {
+                (None, Some(m)) => latest = Some(m),
+                (Some(l), Some(m)) if m > l => latest = Some(m),
+                _ => {}
+            }
+        }
+    }
+    latest
 }
 
 /// 创建空的 simple_fs 镜像
