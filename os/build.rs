@@ -120,7 +120,17 @@ fn main() {
         create_ext4_test_image(&ext4_embed_img);
         println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_embed_img.display());
     } else {
-        println!("cargo:warning=[build.rs] Skipping ext4 test image creation (not in test mode)");
+        // IDE 修复: 即使不在测试模式下，也需要定义 EXT4_FS_IMAGE 环境变量
+        // 这里的代码会被 rust-analyzer 分析，如果缺少环境变量会报错
+        // 我们创建一个空的伪文件来满足 include_bytes! 的需求
+        let dummy_img = PathBuf::from(&out_dir).join("ext4_test_dummy.img");
+        if !dummy_img.exists() {
+            let _ = fs::write(&dummy_img, &[]);
+        }
+        println!(
+            "cargo:warning=[build.rs] Skipping real test image creation (using dummy for IDE)"
+        );
+        println!("cargo:rustc-env=EXT4_FS_IMAGE={}", dummy_img.display());
     }
 
     // 3.2: 非测试模式下创建完整的运行时镜像
@@ -129,25 +139,27 @@ fn main() {
         let data_dir = project_root.join("data");
         // user_bin_dir 已经在上面通过 user_dir 引用了, user/bin
         let user_bin_dir = user_dir.join("bin");
-        
+
         // 检查依赖
         let dependencies = vec![data_dir, user_bin_dir];
-        
+
         if should_rebuild(&fs_img_path, &dependencies) {
-             println!("cargo:warning=[build.rs] Creating full ext4 runtime image (4GB) at fs.img...");
-             create_full_ext4_image(&fs_img_path, &project_root);
-             println!(
-                 "cargo:warning=[build.rs] Runtime image created: {}",
-                 fs_img_path.display()
-             );
+            println!(
+                "cargo:warning=[build.rs] Creating full ext4 runtime image (4GB) at fs.img..."
+            );
+            create_full_ext4_image(&fs_img_path, &project_root);
+            println!(
+                "cargo:warning=[build.rs] Runtime image created: {}",
+                fs_img_path.display()
+            );
         } else {
-             println!("cargo:warning=[build.rs] fs.img is up to date, skipping regeneration.");
+            println!("cargo:warning=[build.rs] fs.img is up to date, skipping regeneration.");
         }
     }
 }
 
 /// 检查目标文件是否需要重新构建
-/// 
+///
 /// 如果目标不存在，或者任何依赖项(目录或文件)比目标新，则返回 true
 fn should_rebuild(target: &Path, dependencies: &[PathBuf]) -> bool {
     if !target.exists() {
@@ -185,10 +197,15 @@ fn get_latest_mtime(path: &Path) -> Option<std::time::SystemTime> {
         for entry in entries.flatten() {
             let path = entry.path();
             // 忽略隐藏文件 (.git 等)
-            if path.file_name().and_then(|n| n.to_str()).map(|s| s.starts_with('.')).unwrap_or(false) {
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.starts_with('.'))
+                .unwrap_or(false)
+            {
                 continue;
             }
-            
+
             let mtime = get_latest_mtime(&path);
             match (latest, mtime) {
                 (None, Some(m)) => latest = Some(m),
