@@ -24,11 +24,6 @@ use crate::vfs::dev::makedev;
 use crate::vfs::devno::{blkdev_major, chrdev_major};
 use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
-/// 嵌入的 EXT4 镜像
-///
-/// 由 build.rs 在编译时生成
-static EXT4_FS_IMAGE: &[u8] = include_bytes!(env!("EXT4_FS_IMAGE"));
-
 // pub fn init_ext4() -> Result<(), crate::vfs::FsError> {
 //     unimplemented!()
 // }
