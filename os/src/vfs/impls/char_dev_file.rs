@@ -28,6 +28,9 @@ pub struct CharDeviceFile {
 
     /// 终端属性（用于 TTY 设备）
     termios: SpinLock<Termios>,
+
+    /// 终端窗口大小（用于 TTY 设备）
+    winsize: SpinLock<crate::uapi::ioctl::WinSize>,
 }
 
 impl CharDeviceFile {
@@ -64,6 +67,12 @@ impl CharDeviceFile {
             flags,
             offset: SpinLock::new(0),
             termios: SpinLock::new(Termios::default()),
+            winsize: SpinLock::new(crate::uapi::ioctl::WinSize {
+                ws_row: 24,
+                ws_col: 80,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            }),
         })
     }
 
@@ -257,6 +266,51 @@ impl File for CharDeviceFile {
                     // 读取新的 termios 设置并保存
                     let new_termios = core::ptr::read_volatile(termios_ptr);
                     *self.termios.lock() = new_termios;
+                    sstatus::clear_sum();
+                }
+                Ok(0)
+            }
+
+            TIOCGWINSZ => {
+                if arg == 0 {
+                    return Ok(-EINVAL as isize);
+                }
+
+                unsafe {
+                    sstatus::set_sum();
+                    let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
+                    if winsize_ptr.is_null() {
+                        sstatus::clear_sum();
+                        return Ok(-EINVAL as isize);
+                    }
+
+                    // 清零结构体（包括 padding），避免泄露内核栈数据
+                    core::ptr::write_bytes(winsize_ptr, 0, 1);
+
+                    // 返回保存的窗口大小
+                    let winsize = *self.winsize.lock();
+                    core::ptr::write_volatile(winsize_ptr, winsize);
+                    sstatus::clear_sum();
+                }
+                Ok(0)
+            }
+
+            TIOCSWINSZ => {
+                if arg == 0 {
+                    return Ok(-EINVAL as isize);
+                }
+
+                unsafe {
+                    sstatus::set_sum();
+                    let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
+                    if winsize_ptr.is_null() {
+                        sstatus::clear_sum();
+                        return Ok(-EINVAL as isize);
+                    }
+
+                    // 读取新的窗口大小并保存
+                    let new_winsize = core::ptr::read_volatile(winsize_ptr);
+                    *self.winsize.lock() = new_winsize;
                     sstatus::clear_sum();
                 }
                 Ok(0)

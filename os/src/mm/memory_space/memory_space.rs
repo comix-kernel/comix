@@ -427,6 +427,7 @@ impl MemorySpace {
     ) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
         use xmas_elf::program::{SegmentData, Type};
+        use xmas_elf::symbol_table::Entry;
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
 
@@ -608,28 +609,42 @@ impl MemorySpace {
         }
 
         // 查找或创建堆区域
-        let heap_area = self
+        let heap_area_idx = self
             .areas
-            .iter_mut()
-            .find(|a| a.area_type() == AreaType::UserHeap);
+            .iter()
+            .position(|a| a.area_type() == AreaType::UserHeap);
 
-        if let Some(area) = heap_area {
+        if let Some(idx) = heap_area_idx {
             // 存在堆区域，调整大小
-            let old_end = area.vpn_range().end();
+            let old_end = self.areas[idx].vpn_range().end();
 
             match new_end_vpn.cmp(&old_end) {
                 Ordering::Greater => {
-                    // 扩展
+                    // 扩展：检查是否与其他区域冲突
+                    let new_range = VpnRange::new(old_end, new_end_vpn);
+                    for (i, area) in self.areas.iter().enumerate() {
+                        if i != idx && area.vpn_range().overlaps(&new_range) {
+                            // 与mmap或其他区域冲突
+                            return Err(PagingError::AlreadyMapped);
+                        }
+                    }
+
                     let count = new_end_vpn.as_usize() - old_end.as_usize();
                     if count != 0 {
-                        area.extend(&mut self.page_table, count)?;
+                        self.areas[idx].extend(&mut self.page_table, count)?;
                     }
                 }
                 Ordering::Less => {
                     // 收缩
-                    let count = old_end.as_usize() - new_end_vpn.as_usize();
-                    if count != 0 {
-                        area.shrink(&mut self.page_table, count)?;
+                    if new_end_vpn <= heap_bottom {
+                        // 收缩到起始位置或更低，删除整个堆区域
+                        let mut area = self.areas.remove(idx);
+                        area.unmap(&mut self.page_table)?;
+                    } else {
+                        let count = old_end.as_usize() - new_end_vpn.as_usize();
+                        if count != 0 {
+                            self.areas[idx].shrink(&mut self.page_table, count)?;
+                        }
                     }
                 }
                 Ordering::Equal => { /* 无操作 */ }
@@ -637,8 +652,16 @@ impl MemorySpace {
         } else {
             // 第一次分配堆，创建新区域
             if new_end_vpn > heap_bottom {
+                // 检查是否与现有区域冲突
+                let new_range = VpnRange::new(heap_bottom, new_end_vpn);
+                for area in &self.areas {
+                    if area.vpn_range().overlaps(&new_range) {
+                        return Err(PagingError::AlreadyMapped);
+                    }
+                }
+
                 self.insert_framed_area(
-                    VpnRange::new(heap_bottom, new_end_vpn),
+                    new_range,
                     AreaType::UserHeap,
                     UniversalPTEFlag::user_rw(),
                     None,

@@ -13,6 +13,15 @@ use alloc::sync::Arc;
 /// 全局终端设置（所有标准I/O文件共享）
 static STDIO_TERMIOS: SpinLock<Termios> = SpinLock::new(Termios::DEFAULT);
 
+/// 全局窗口大小（所有标准I/O文件共享）
+static STDIO_WINSIZE: SpinLock<crate::uapi::ioctl::WinSize> =
+    SpinLock::new(crate::uapi::ioctl::WinSize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    });
+
 /// 标准输入文件
 ///
 /// 从控制台读取输入，行缓冲模式。
@@ -33,7 +42,8 @@ impl File for StdinFile {
         let mut count = 0;
         for byte in buf.iter_mut() {
             let ch = console_getchar();
-            if ch == 0 {
+            // SBI console_getchar 返回 -1 (usize::MAX) 表示无输入
+            if ch == usize::MAX {
                 break;
             }
 
@@ -245,6 +255,69 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
 
                 *STDIO_TERMIOS.lock() = new_termios;
                 sstatus::clear_sum();
+            }
+            Ok(0)
+        }
+
+        TIOCGWINSZ => {
+            if arg == 0 {
+                return Ok(-EINVAL as isize);
+            }
+
+            unsafe {
+                sstatus::set_sum();
+                let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
+                if winsize_ptr.is_null() {
+                    sstatus::clear_sum();
+                    return Ok(-EINVAL as isize);
+                }
+
+                // 清零结构体（包括 padding），避免泄露内核栈数据
+                core::ptr::write_bytes(winsize_ptr, 0, 1);
+
+                // 返回保存的窗口大小
+                let winsize = *STDIO_WINSIZE.lock();
+                core::ptr::write_volatile(winsize_ptr, winsize);
+                sstatus::clear_sum();
+
+                use crate::earlyprintln;
+                earlyprintln!(
+                    "TIOCGWINSZ: returning {}x{} ({}x{} pixels)",
+                    winsize.ws_row,
+                    winsize.ws_col,
+                    winsize.ws_xpixel,
+                    winsize.ws_ypixel
+                );
+            }
+            Ok(0)
+        }
+
+        TIOCSWINSZ => {
+            if arg == 0 {
+                return Ok(-EINVAL as isize);
+            }
+
+            unsafe {
+                sstatus::set_sum();
+                let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
+                if winsize_ptr.is_null() {
+                    sstatus::clear_sum();
+                    return Ok(-EINVAL as isize);
+                }
+
+                // 读取新的窗口大小并保存
+                let new_winsize = core::ptr::read_volatile(winsize_ptr);
+                *STDIO_WINSIZE.lock() = new_winsize;
+                sstatus::clear_sum();
+
+                use crate::earlyprintln;
+                earlyprintln!(
+                    "TIOCSWINSZ: set to {}x{} ({}x{} pixels)",
+                    new_winsize.ws_row,
+                    new_winsize.ws_col,
+                    new_winsize.ws_xpixel,
+                    new_winsize.ws_ypixel
+                );
             }
             Ok(0)
         }

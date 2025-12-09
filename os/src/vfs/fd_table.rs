@@ -156,6 +156,41 @@ impl FDTable {
         self.alloc(file)
     }
 
+    /// 复制文件描述符，新 fd >= min_fd（F_DUPFD 语义）
+    ///
+    /// 返回新的 fd，与 old_fd 指向同一个 `Arc<dyn File>` (共享 offset)。
+    /// 新分配的 fd 是 >= min_fd 的最小未使用文件描述符。
+    pub fn dup_from(&self, old_fd: usize, min_fd: usize, flags: FdFlags) -> Result<usize, FsError> {
+        let file = self.get(old_fd)?;
+        let mut files = self.files.lock();
+        let mut fd_flags = self.fd_flags.lock();
+
+        // 从 min_fd 开始查找最小可用 FD
+        for (fd, slot) in files.iter_mut().enumerate().skip(min_fd) {
+            if slot.is_none() {
+                *slot = Some(file);
+                fd_flags[fd] = flags;
+                return Ok(fd);
+            }
+        }
+
+        // 如果没有空闲槽位，扩展数组
+        let fd = files.len().max(min_fd);
+        if fd >= self.max_fds {
+            return Err(FsError::TooManyOpenFiles);
+        }
+
+        // 扩展到 min_fd（如果需要）
+        while files.len() < min_fd {
+            files.push(None);
+            fd_flags.push(FdFlags::empty());
+        }
+
+        files.push(Some(file));
+        fd_flags.push(flags);
+        Ok(fd)
+    }
+
     /// 复制文件描述符到指定位置
     ///
     /// 如果 new_fd 已打开，先关闭它。
