@@ -75,12 +75,31 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         FIONREAD => handle_fionread(&file, arg),
         FIOASYNC => handle_fioasync(&file, arg),
 
-        //  终端控制
-        TIOCGWINSZ => handle_tiocgwinsz(&file, arg),
-        TIOCSWINSZ => handle_tiocswinsz(&file, arg),
-        // TCGETS/TCSETS 等终端属性操作委托给文件对象的 ioctl 方法处理
-        TIOCGPGRP | TIOCSPGRP => handle_tty_pgrp(&file, request, arg),
+        //  终端控制 - 委托给文件对象的 ioctl 方法
+        TIOCGWINSZ | TIOCSWINSZ | TCGETS | TCSETS | TCSETSW | TCSETSF => {
+            match file.ioctl(request, arg) {
+                Ok(ret) => ret,
+                Err(FsError::NotSupported) => {
+                    pr_warn!(
+                        "ioctl: fd={}, terminal request {:#x} ({}) not supported by file type",
+                        fd,
+                        request,
+                        request
+                    );
+                    -ENOTTY as isize
+                }
+                Err(e) => fs_error_to_errno(e),
+            }
+        }
+
+        //  终端进程组控制 - 读取/设置任务的 pgid
+        TIOCGPGRP => handle_tiocgpgrp(&task, arg),
+        TIOCSPGRP => handle_tiocspgrp(&task, arg),
+
+        //  控制终端设置
         TIOCSCTTY => handle_tiocsctty(&file, arg),
+
+        //  虚拟终端查询
         VT_OPENQRY => handle_vt_openqry(arg),
 
         //  网络 Socket 控制
@@ -209,106 +228,9 @@ fn handle_fioasync(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) ->
 
 //  终端控制处理函数
 
-/// TIOCGWINSZ - 获取终端窗口大小
-fn handle_tiocgwinsz(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
-    unsafe {
-        sstatus::set_sum();
-        let winsize_ptr = arg as *mut WinSize;
-        if winsize_ptr.is_null() {
-            sstatus::clear_sum();
-            return -EINVAL as isize;
-        }
-
-        // 先清零整个结构体（包括padding），避免泄露内核栈数据
-        core::ptr::write_bytes(winsize_ptr, 0, 1);
-
-        // 默认终端大小：24 行 x 80 列
-        let winsize = WinSize {
-            ws_row: 24,
-            ws_col: 80,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-
-        core::ptr::write_volatile(winsize_ptr, winsize);
-        sstatus::clear_sum();
-
-        earlyprintln!(
-            "ioctl: TIOCGWINSZ returned {}x{}",
-            winsize.ws_row,
-            winsize.ws_col
-        );
-        0
-    }
-}
-
-/// TIOCSWINSZ - 设置终端窗口大小
-fn handle_tiocswinsz(_file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
-    unsafe {
-        sstatus::set_sum();
-        let winsize_ptr = arg as *const WinSize;
-        if winsize_ptr.is_null() {
-            sstatus::clear_sum();
-            return -EINVAL as isize;
-        }
-
-        let _winsize = core::ptr::read_volatile(winsize_ptr);
-        sstatus::clear_sum();
-
-        // TODO: 实际设置终端窗口大小（需要终端驱动支持）
-        earlyprintln!("ioctl: TIOCSWINSZ accepted but not implemented");
-        0
-    }
-}
-
-/// TCGETS/TCSETS - 终端属性
-fn handle_termios(
-    _file: &alloc::sync::Arc<dyn crate::vfs::File>,
-    request: u32,
-    arg: usize,
-) -> isize {
-    if arg == 0 {
-        return -EINVAL as isize;
-    }
-
-    unsafe {
-        sstatus::set_sum();
-        let termios_ptr = arg as *mut Termios;
-        if termios_ptr.is_null() {
-            sstatus::clear_sum();
-            return -EINVAL as isize;
-        }
-
-        match request {
-            TCGETS => {
-                // 返回默认的 termios 设置
-                // 使用 write_bytes 先清零整个结构体（包括padding），避免泄露内核栈数据
-                core::ptr::write_bytes(termios_ptr, 0, 1);
-                let termios = Termios::default();
-                core::ptr::write_volatile(termios_ptr, termios);
-                sstatus::clear_sum();
-                earlyprintln!("ioctl: TCGETS returned default termios");
-                0
-            }
-            TCSETS | TCSETSW | TCSETSF => {
-                // 读取新的 termios 设置（但不真正应用）
-                let _termios = core::ptr::read_volatile(termios_ptr);
-                sstatus::clear_sum();
-                earlyprintln!("ioctl: TCSETS* accepted but not applied");
-                0
-            }
-            _ => {
-                sstatus::clear_sum();
-                -EINVAL as isize
-            }
-        }
-    }
-}
-
-/// TIOCGPGRP/TIOCSPGRP - 终端进程组
-fn handle_tty_pgrp(
-    _file: &alloc::sync::Arc<dyn crate::vfs::File>,
-    request: u32,
+/// TIOCGPGRP - 获取终端前台进程组 ID
+fn handle_tiocgpgrp(
+    task: &alloc::sync::Arc<crate::sync::SpinLock<crate::kernel::task::TaskStruct>>,
     arg: usize,
 ) -> isize {
     unsafe {
@@ -319,26 +241,37 @@ fn handle_tty_pgrp(
             return -EINVAL as isize;
         }
 
-        match request {
-            TIOCGPGRP => {
-                // 先清零，避免泄露内核栈数据
-                core::ptr::write_bytes(pid_ptr, 0, 1);
-                // TODO: 返回实际的进程组 ID
-                core::ptr::write_volatile(pid_ptr, 1);
-                sstatus::clear_sum();
-                0
-            }
-            TIOCSPGRP => {
-                let _pgid = core::ptr::read_volatile(pid_ptr);
-                sstatus::clear_sum();
-                // TODO: 设置实际的进程组 ID
-                0
-            }
-            _ => {
-                sstatus::clear_sum();
-                -EINVAL as isize
-            }
+        // 返回当前任务的进程组 ID
+        let pgid = task.lock().pgid as i32;
+        core::ptr::write_volatile(pid_ptr, pgid);
+        sstatus::clear_sum();
+
+        earlyprintln!("ioctl: TIOCGPGRP returned pgid={}", pgid);
+        0
+    }
+}
+
+/// TIOCSPGRP - 设置终端前台进程组 ID
+fn handle_tiocspgrp(
+    task: &alloc::sync::Arc<crate::sync::SpinLock<crate::kernel::task::TaskStruct>>,
+    arg: usize,
+) -> isize {
+    unsafe {
+        sstatus::set_sum();
+        let pid_ptr = arg as *const i32;
+        if pid_ptr.is_null() {
+            sstatus::clear_sum();
+            return -EINVAL as isize;
         }
+
+        let pgid = core::ptr::read_volatile(pid_ptr);
+        sstatus::clear_sum();
+
+        // 设置当前任务的进程组 ID
+        task.lock().pgid = pgid as u32;
+
+        earlyprintln!("ioctl: TIOCSPGRP set pgid={}", pgid);
+        0
     }
 }
 
