@@ -165,7 +165,13 @@ impl FDTable {
         let mut files = self.files.lock();
         let mut fd_flags = self.fd_flags.lock();
 
-        // 从 min_fd 开始查找最小可用 FD
+        // 1. 先确保数组至少有 min_fd 个元素
+        while files.len() < min_fd {
+            files.push(None);
+            fd_flags.push(FdFlags::empty());
+        }
+
+        // 2. 从 min_fd 开始查找最小可用 FD
         for (fd, slot) in files.iter_mut().enumerate().skip(min_fd) {
             if slot.is_none() {
                 *slot = Some(file);
@@ -174,16 +180,10 @@ impl FDTable {
             }
         }
 
-        // 如果没有空闲槽位，扩展数组
-        let fd = files.len().max(min_fd);
+        // 3. 如果没有空闲槽位，在数组末尾分配新的 fd
+        let fd = files.len();
         if fd >= self.max_fds {
             return Err(FsError::TooManyOpenFiles);
-        }
-
-        // 扩展到 min_fd（如果需要）
-        while files.len() < min_fd {
-            files.push(None);
-            fd_flags.push(FdFlags::empty());
         }
 
         files.push(Some(file));

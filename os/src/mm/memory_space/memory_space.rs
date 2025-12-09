@@ -427,7 +427,6 @@ impl MemorySpace {
     ) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
         use xmas_elf::program::{SegmentData, Type};
-        use xmas_elf::symbol_table::Entry;
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
 
