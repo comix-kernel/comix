@@ -308,62 +308,29 @@ fn fcntl_dupfd(
     min_fd: usize,
     cloexec: bool,
 ) -> isize {
-    // 获取原文件对象
-    let file = match task.lock().fd_table.get(old_fd) {
-        Ok(f) => f,
-        Err(e) => return e.to_errno(),
-    };
-
-    // 分配新的文件描述符，起始位置 >= min_fd
-    let fd_table = &task.lock().fd_table;
-    let new_fd = match alloc_fd_from(fd_table, min_fd, file, cloexec) {
-        Ok(fd) => fd,
-        Err(e) => return e.to_errno(),
-    };
-
-    new_fd as isize
-}
-
-/// 从指定的最小 fd 开始分配文件描述符
-///
-/// 实现 F_DUPFD 和 F_DUPFD_CLOEXEC 语义：
-/// - 分配一个 >= min_fd 的最小未使用文件描述符
-/// - 不会覆盖已存在的文件描述符
-///
-/// # 参数
-/// - `fd_table`: 文件描述符表
-/// - `min_fd`: 最小文件描述符号
-/// - `file`: 要安装的文件对象
-/// - `cloexec`: 是否设置 CLOEXEC 标志
-///
-/// # 返回值
-/// 成功返回新分配的 fd，失败返回错误
-fn alloc_fd_from(
-    fd_table: &crate::vfs::FDTable,
-    min_fd: usize,
-    file: Arc<dyn crate::vfs::File>,
-    cloexec: bool,
-) -> Result<usize, FsError> {
-    use crate::config::DEFAULT_MAX_FDS;
-
     let flags = if cloexec {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
     };
 
-    // 从 min_fd 开始线性扫描，查找第一个未使用的 fd
-    for try_fd in min_fd..DEFAULT_MAX_FDS {
-        // 尝试获取该 fd，如果返回 BadFileDescriptor 说明该 fd 未被使用
-        if fd_table.get(try_fd).is_err() {
-            // 找到一个未使用的 fd，安装文件
-            // 注意：install_at_with_flags 在这个位置安装文件
-            // 由于 fd_table 有内部锁保护，且我们在系统调用上下文中串行执行，
-            // 在 get() 和 install_at_with_flags() 之间不会有并发修改
-            fd_table.install_at_with_flags(try_fd, file, flags)?;
-            return Ok(try_fd);
+    // 使用 FDTable 的标准方法进行复制
+    let new_fd = match task.lock().fd_table.dup_from(old_fd, min_fd, flags) {
+        Ok(fd) => {
+            crate::earlyprintln!(
+                "fcntl_dupfd: old_fd={} -> new_fd={}, min_fd={}, cloexec={}",
+                old_fd,
+                fd,
+                min_fd,
+                cloexec
+            );
+            fd
         }
-    }
+        Err(e) => {
+            crate::earlyprintln!("fcntl_dupfd: failed: {:?}", e);
+            return e.to_errno();
+        }
+    };
 
-    Err(FsError::TooManyOpenFiles)
+    new_fd as isize
 }
