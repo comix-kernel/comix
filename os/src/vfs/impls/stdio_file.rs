@@ -273,7 +273,11 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 }
 
                 // 清零结构体（包括 padding），避免泄露内核栈数据
-                core::ptr::write_bytes(winsize_ptr, 0, 1);
+                core::ptr::write_bytes(
+                    winsize_ptr as *mut u8,
+                    0,
+                    core::mem::size_of::<crate::uapi::ioctl::WinSize>(),
+                );
 
                 // 返回保存的窗口大小
                 let winsize = *STDIO_WINSIZE.lock();

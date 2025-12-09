@@ -81,7 +81,9 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
                 Ok(ret) => ret,
                 Err(FsError::NotSupported) => {
                     pr_warn!(
-                        "ioctl: terminal request {:#x} not supported by file",
+                        "ioctl: fd={}, terminal request {:#x} ({}) not supported by file type",
+                        fd,
+                        request,
                         request
                     );
                     -ENOTTY as isize
@@ -238,9 +240,6 @@ fn handle_tiocgpgrp(
             sstatus::clear_sum();
             return -EINVAL as isize;
         }
-
-        // 清零，避免泄露内核栈数据
-        core::ptr::write_bytes(pid_ptr, 0, 1);
 
         // 返回当前任务的进程组 ID
         let pgid = task.lock().pgid as i32;
