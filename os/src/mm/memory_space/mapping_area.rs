@@ -200,9 +200,15 @@ impl MappingArea {
                 paddr.as_usize()
             };
 
+            let page_capacity = if i == 0 {
+                crate::config::PAGE_SIZE - offset
+            } else {
+                crate::config::PAGE_SIZE
+            };
+
             // 计算此页需要复制多少数据
             let remaining = total_len - copied;
-            let to_copy = min(remaining, crate::config::PAGE_SIZE);
+            let to_copy = min(remaining, page_capacity);
 
             // 复制数据到物理页
             unsafe {
