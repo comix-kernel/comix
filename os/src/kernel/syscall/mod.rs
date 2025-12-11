@@ -93,6 +93,7 @@ impl_syscall!(sys_pwrite64, pwrite64, (usize, *const u8, usize, i64));
 impl_syscall!(sys_preadv, preadv, (usize, *const IoVec, usize, i64));
 impl_syscall!(sys_pwritev, pwritev, (usize, *const IoVec, usize, i64));
 impl_syscall!(sys_sendfile, sendfile, (usize, usize, *mut i64, usize));
+impl_syscall!(sys_ppoll, ppoll, (usize, usize, usize, usize));
 
 // 文件元数据与同步 (File Metadata and Synchronization)
 impl_syscall!(
@@ -185,6 +186,7 @@ impl_syscall!(sys_getresuid, getresuid, (*mut u32, *mut u32, *mut u32));
 impl_syscall!(sys_setresgid, setresgid, (u32, u32, u32));
 impl_syscall!(sys_getresgid, getresgid, (*mut u32, *mut u32, *mut u32));
 impl_syscall!(sys_setsid, setsid, ());
+impl_syscall!(sys_setpgid, set_pgid, (c_int, c_int));
 
 // 系统信息 (System Information)
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
