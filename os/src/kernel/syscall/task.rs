@@ -200,7 +200,7 @@ pub fn clone(
         )
     };
 
-    let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
+    let kstack_tracker = alloc_contig_frames(16).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
     let child_task = TaskStruct::utask_create(
         tid,
@@ -308,7 +308,19 @@ pub fn execve(
     // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
     let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
-    do_execve(&data, argv_refs.as_slice(), envp_refs.as_slice())
+
+    // 解析 ELF 并准备新的地址空间（但不切换）
+    let (space, entry, sp, phdr_addr, phnum, phent) = match do_execve_prepare(&data) {
+        Ok(res) => res,
+        Err(e) => return e,
+    };
+
+    // 显式释放 data 缓冲区，避免内存泄漏
+    crate::earlyprintln!("[execve] Dropping {} byte ELF buffer before switching to user space", data.len());
+    drop(data);
+
+    // 切换到新的地址空间并恢复到用户态（此函数不会返回）
+    do_execve_switch(space, entry, sp, argv_refs.as_slice(), envp_refs.as_slice(), phdr_addr, phnum, phent)
 }
 
 /// 等待子进程状态变化（wait4）
@@ -432,6 +444,11 @@ pub fn get_pid() -> c_int {
 /// - 父进程 ID, 该进程要么是创建该进程的进程, 要么是重新归属的父进程
 pub fn get_ppid() -> c_int {
     current_task().lock().ppid as c_int
+}
+
+/// 获取进程组 ID
+pub fn get_pgid(_pid: c_int) -> c_int {
+    current_task().lock().pgid as c_int
 }
 
 /// 获取资源限制
@@ -941,19 +958,37 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
     Ok((interpreter_path, interpreter_arg))
 }
 
-/// 执行一个新程序（execve）的核心逻辑
-fn do_execve(data: &[u8], argv: &[&str], envp: &[&str]) -> c_int {
+/// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
+fn do_execve_prepare(
+    data: &[u8],
+) -> Result<(Arc<SpinLock<MemorySpace>>, usize, usize, usize, usize, usize), c_int> {
     unsafe { sstatus::clear_sum() };
+
+    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
+        Ok(res) => res,
+        Err(_) => return Err(-ENOEXEC),
+    };
+
+    let space = Arc::new(SpinLock::new(space));
+    Ok((space, entry, sp, phdr_addr, phnum, phent))
+}
+
+/// 执行一个新程序（execve）的切换阶段：切换地址空间并恢复到用户态
+/// 注意：此函数不会返回！
+fn do_execve_switch(
+    space: Arc<SpinLock<MemorySpace>>,
+    entry: usize,
+    sp: usize,
+    argv: &[&str],
+    envp: &[&str],
+    phdr_addr: usize,
+    phnum: usize,
+    phent: usize,
+) -> c_int {
     let task = current_task();
 
     task.lock().fd_table.close_exec();
 
-    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
-        Ok(res) => res,
-        Err(_) => return -ENOEXEC,
-    };
-
-    let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
     current_cpu().lock().switch_space(space.clone());
 
