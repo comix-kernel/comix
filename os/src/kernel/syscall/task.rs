@@ -316,11 +316,23 @@ pub fn execve(
     };
 
     // 显式释放 data 缓冲区，避免内存泄漏
-    crate::earlyprintln!("[execve] Dropping {} byte ELF buffer before switching to user space", data.len());
+    crate::earlyprintln!(
+        "[execve] Dropping {} byte ELF buffer before switching to user space",
+        data.len()
+    );
     drop(data);
 
     // 切换到新的地址空间并恢复到用户态（此函数不会返回）
-    do_execve_switch(space, entry, sp, argv_refs.as_slice(), envp_refs.as_slice(), phdr_addr, phnum, phent)
+    do_execve_switch(
+        space,
+        entry,
+        sp,
+        argv_refs.as_slice(),
+        envp_refs.as_slice(),
+        phdr_addr,
+        phnum,
+        phent,
+    )
 }
 
 /// 等待子进程状态变化（wait4）
@@ -961,7 +973,17 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
 fn do_execve_prepare(
     data: &[u8],
-) -> Result<(Arc<SpinLock<MemorySpace>>, usize, usize, usize, usize, usize), c_int> {
+) -> Result<
+    (
+        Arc<SpinLock<MemorySpace>>,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+    ),
+    c_int,
+> {
     unsafe { sstatus::clear_sum() };
 
     let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
