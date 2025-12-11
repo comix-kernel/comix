@@ -435,18 +435,14 @@ impl MemorySpace {
             return Err(PagingError::InvalidAddress);
         }
 
-        // 从当前的 memory_space 克隆，这样可以继承所有内核映射（包括 MMIO）
+        // 创建新的内存空间，只复制内核映射（不复制用户空间数据）
         let current_space = crate::kernel::current_memory_space();
-        let mut space = current_space
-            .lock()
-            .clone_for_fork()
-            .expect("Failed to clone memory space for execve");
+        let current_locked = current_space.lock();
 
-        // 移除所有用户空间区域，只保留内核空间区域
-        // 这样我们可以为新程序加载 ELF 段
-        // 先 unmap 用户空间区域，再从 areas 中移除
-        let mut areas_to_keep = alloc::vec::Vec::new();
-        for mut area in space.areas.drain(..) {
+        let mut space = MemorySpace::new();
+
+        // 只复制内核空间区域的元数据和映射
+        for area in current_locked.areas.iter() {
             let is_kernel = matches!(
                 area.area_type(),
                 AreaType::KernelText
@@ -458,15 +454,14 @@ impl MemorySpace {
                     | AreaType::KernelMmio
             );
             if is_kernel {
-                areas_to_keep.push(area);
-            } else {
-                // unmap 用户空间区域
-                let _ = area.unmap(&mut space.page_table);
+                // 对于内核区域，只需要克隆元数据并重新映射（不复制数据）
+                let mut new_area = area.clone_metadata();
+                new_area.map(&mut space.page_table)?;
+                space.areas.push(new_area);
             }
         }
-        space.areas = areas_to_keep;
-        // 重置堆起始地址
-        space.heap_start = None;
+
+        drop(current_locked);
 
         let mut max_end_vpn = Vpn::from_usize(0);
 
