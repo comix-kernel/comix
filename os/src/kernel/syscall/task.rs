@@ -465,16 +465,18 @@ pub fn get_ppid() -> c_int {
 ///
 /// # 返回值
 /// - 成功: 返回进程组 ID
-/// - 失败: 返回 -ESRCH (进程不存在)
+/// - 失败: 返回 -ESRCH (进程不存在或 pid 为负数)
 pub fn get_pgid(pid: c_int) -> c_int {
     use crate::uapi::errno::ESRCH;
 
-    // 如果 pid 为 0，返回当前进程的 PGID
     if pid == 0 {
         return current_task().lock().pgid as c_int;
     }
 
-    // 查找指定 PID 的进程
+    if pid < 0 {
+        return -ESRCH as c_int;
+    }
+
     let manager = TASK_MANAGER.lock();
     let task_opt = manager.get_task(pid as u32);
     drop(manager);
