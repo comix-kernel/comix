@@ -122,6 +122,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_UMASK => sys_umask(frame),
         syscall_number::SYS_GETPID => sys_getpid(frame),
         syscall_number::SYS_GETPPID => sys_getppid(frame),
+        syscall_number::SYS_GETPGID => sys_getpgid(frame),
         syscall_number::SYS_GETUID => sys_getuid(frame),
         syscall_number::SYS_GETEUID => sys_geteuid(frame),
         syscall_number::SYS_GETGID => sys_getgid(frame),
