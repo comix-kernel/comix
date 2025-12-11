@@ -7,7 +7,7 @@ mod syscall_number;
 /// 分发系统调用
 /// 按照系统调用号顺序排列，参考 syscall_number.rs 中的分类
 pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
-    crate::earlyprintln!(
+    crate::pr_debug!(
         "syscall: {} args: [{:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
         frame.x17_a7,
         frame.x10_a0,
@@ -61,6 +61,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_PREADV => sys_preadv(frame),
         syscall_number::SYS_PWRITEV => sys_pwritev(frame),
         syscall_number::SYS_SENDFILE => sys_sendfile(frame),
+        syscall_number::SYS_PPOLL => sys_ppoll(frame),
 
         // 文件元数据与同步 (File Metadata and Synchronization)
         syscall_number::SYS_READLINKAT => sys_readlinkat(frame),
@@ -112,6 +113,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_GETRESUID => sys_getresuid(frame),
         syscall_number::SYS_SETRESGID => sys_setresgid(frame),
         syscall_number::SYS_GETRESGID => sys_getresgid(frame),
+        syscall_number::SYS_SETPGID => sys_setpgid(frame),
         syscall_number::SYS_SETSID => sys_setsid(frame),
 
         // 系统信息 (System Information)

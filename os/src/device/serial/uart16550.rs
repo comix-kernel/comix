@@ -32,6 +32,10 @@ impl Driver for Uart16550 {
     fn get_id(&self) -> alloc::string::String {
         format!("ns16550a")
     }
+
+    fn as_serial(&self) -> Option<&dyn SerialDriver> {
+        Some(self)
+    }
 }
 
 impl SerialDriver for Uart16550 {

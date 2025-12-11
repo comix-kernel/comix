@@ -487,6 +487,33 @@ pub fn get_pgid(pid: c_int) -> c_int {
     }
 }
 
+/// 设置进程组 ID
+pub fn set_pgid(pid: c_int, pgid: c_int) -> c_int {
+    use crate::uapi::errno::{EINVAL, EPERM, ESRCH};
+
+    let current = current_task();
+    let current_pid = current.lock().tid as c_int;
+
+    let target_pid = if pid == 0 { current_pid } else { pid };
+    let target_pgid = if pgid == 0 { target_pid } else { pgid };
+
+    if target_pgid < 0 {
+        return -EINVAL as c_int;
+    }
+
+    let manager = TASK_MANAGER.lock();
+    let task_opt = manager.get_task(target_pid as u32);
+    drop(manager);
+
+    match task_opt {
+        Some(task) => {
+            task.lock().pgid = target_pgid as u32;
+            0
+        }
+        None => -ESRCH as c_int,
+    }
+}
+
 /// 获取资源限制
 /// # 参数
 /// - `resource`: 资源限制 ID
