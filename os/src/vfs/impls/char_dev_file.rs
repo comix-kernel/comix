@@ -140,19 +140,45 @@ impl File for CharDeviceFile {
 
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
-            // 这里需要根据具体驱动类型调用相应方法
-            // 示例：串口设备
-            unimplemented!()
-            // if let Some(serial) = driver.as_serial() {
-            //     // 假设 SerialDriver 有 read 方法
-            //     // let n = serial.read(buf)?;
-            //     // return Ok(n);
+            if let Some(serial) = driver.as_serial() {
+                let is_nonblock = self.flags.contains(OpenFlags::O_NONBLOCK);
 
-            //     // 临时实现：返回空
-            //     Ok(0)
-            // } else {
-            //     Err(FsError::NotSupported)
-            // }
+                if is_nonblock {
+                    // 非阻塞模式：尝试读取，没有数据则返回 EAGAIN
+                    if let Some(byte) = serial.try_read() {
+                        buf[0] = byte;
+                        let mut count = 1;
+                        // 尽可能多读，但不阻塞
+                        while count < buf.len() {
+                            if let Some(b) = serial.try_read() {
+                                buf[count] = b;
+                                count += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        Ok(count)
+                    } else {
+                        Err(FsError::WouldBlock)
+                    }
+                } else {
+                    // 阻塞模式：至少读取一个字节
+                    buf[0] = serial.read();
+                    let mut count = 1;
+                    // 尝试读取更多，但不阻塞
+                    while count < buf.len() {
+                        if let Some(b) = serial.try_read() {
+                            buf[count] = b;
+                            count += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    Ok(count)
+                }
+            } else {
+                Err(FsError::NotSupported)
+            }
         } else {
             Err(FsError::NoDevice)
         }
@@ -172,17 +198,12 @@ impl File for CharDeviceFile {
 
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
-            unimplemented!()
-            // if let Some(serial) = driver.as_serial() {
-            //     // 假设 SerialDriver 有 write 方法
-            //     // let n = serial.write(buf)?;
-            //     // return Ok(n);
-
-            //     // 临时实现
-            //     Ok(buf.len())
-            // } else {
-            //     Err(FsError::NotSupported)
-            // }
+            if let Some(serial) = driver.as_serial() {
+                serial.write(buf);
+                Ok(buf.len())
+            } else {
+                Err(FsError::NotSupported)
+            }
         } else {
             Err(FsError::NoDevice)
         }

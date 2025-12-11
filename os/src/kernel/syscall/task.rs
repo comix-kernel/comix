@@ -487,6 +487,49 @@ pub fn get_pgid(pid: c_int) -> c_int {
     }
 }
 
+/// 设置进程组 ID
+pub fn set_pgid(pid: c_int, pgid: c_int) -> c_int {
+    use crate::uapi::errno::{EACCES, EINVAL, EPERM, ESRCH};
+
+    let current = current_task();
+    let current_locked = current.lock();
+    let current_pid = current_locked.tid as c_int;
+    let current_ppid = current_locked.ppid as c_int;
+    drop(current_locked);
+
+    let target_pid = if pid == 0 { current_pid } else { pid };
+    let target_pgid = if pgid == 0 { target_pid } else { pgid };
+
+    if target_pgid < 0 {
+        return -EINVAL as c_int;
+    }
+
+    let manager = TASK_MANAGER.lock();
+    let task_opt = manager.get_task(target_pid as u32);
+    drop(manager);
+
+    let task = match task_opt {
+        Some(t) => t,
+        None => return -ESRCH as c_int,
+    };
+
+    let mut task_locked = task.lock();
+
+    // 权限检查：目标进程必须是调用者本身或其子进程
+    if target_pid != current_pid && task_locked.ppid as c_int != current_pid {
+        return -ESRCH as c_int;
+    }
+
+    // 不能更改已经是会话领导者的进程（简化检查：pgid == tid）
+    if task_locked.pgid == task_locked.tid {
+        return -EPERM as c_int;
+    }
+
+    // 设置进程组 ID
+    task_locked.pgid = target_pgid as u32;
+    0
+}
+
 /// 获取资源限制
 /// # 参数
 /// - `resource`: 资源限制 ID
