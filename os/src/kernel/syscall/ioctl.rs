@@ -235,6 +235,10 @@ fn handle_tiocgpgrp(
     task: &alloc::sync::Arc<crate::sync::SpinLock<crate::kernel::task::TaskStruct>>,
     arg: usize,
 ) -> isize {
+    if arg == 0 {
+        return -EINVAL as isize;
+    }
+
     let pgid = task.lock().pgid as i32;
     earlyprintln!("ioctl: TIOCGPGRP writing pgid={} to {:#x}", pgid, arg);
 
