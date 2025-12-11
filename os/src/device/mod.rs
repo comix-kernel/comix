@@ -89,6 +89,11 @@ pub trait Driver: Send + Sync {
     fn as_rtc_arc(self: Arc<Self>) -> Option<Arc<dyn RtcDriver>> {
         None
     }
+
+    /// 将驱动程序转换为串口驱动程序（如果适用）
+    fn as_serial(&self) -> Option<&dyn serial::SerialDriver> {
+        None
+    }
 }
 
 lazy_static! {

@@ -140,19 +140,14 @@ impl File for CharDeviceFile {
 
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
-            // 这里需要根据具体驱动类型调用相应方法
-            // 示例：串口设备
-            unimplemented!()
-            // if let Some(serial) = driver.as_serial() {
-            //     // 假设 SerialDriver 有 read 方法
-            //     // let n = serial.read(buf)?;
-            //     // return Ok(n);
-
-            //     // 临时实现：返回空
-            //     Ok(0)
-            // } else {
-            //     Err(FsError::NotSupported)
-            // }
+            if let Some(serial) = driver.as_serial() {
+                for i in 0..buf.len() {
+                    buf[i] = serial.read();
+                }
+                Ok(buf.len())
+            } else {
+                Err(FsError::NotSupported)
+            }
         } else {
             Err(FsError::NoDevice)
         }
@@ -172,17 +167,12 @@ impl File for CharDeviceFile {
 
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
-            unimplemented!()
-            // if let Some(serial) = driver.as_serial() {
-            //     // 假设 SerialDriver 有 write 方法
-            //     // let n = serial.write(buf)?;
-            //     // return Ok(n);
-
-            //     // 临时实现
-            //     Ok(buf.len())
-            // } else {
-            //     Err(FsError::NotSupported)
-            // }
+            if let Some(serial) = driver.as_serial() {
+                serial.write(buf);
+                Ok(buf.len())
+            } else {
+                Err(FsError::NotSupported)
+            }
         } else {
             Err(FsError::NoDevice)
         }

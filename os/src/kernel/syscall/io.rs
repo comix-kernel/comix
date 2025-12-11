@@ -459,3 +459,9 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
 
     total_sent as isize
 }
+
+/// ppoll - poll 的变体，支持信号掩码
+pub fn ppoll(_fds: usize, _nfds: usize, _timeout: usize, _sigmask: usize) -> isize {
+    use crate::uapi::errno::ENOSYS;
+    -ENOSYS as isize
+}

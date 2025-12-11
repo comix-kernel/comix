@@ -43,7 +43,7 @@ use riscv::register::sstatus;
 /// - 大部分 ioctl 操作需要相应的设备驱动程序支持
 /// - 无效的 request 码会返回 ENOTTY
 pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
-    earlyprintln!(
+    pr_debug!(
         "ioctl: fd={}, request={:#x} ({}), arg={:#x}",
         fd,
         request,
@@ -113,7 +113,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         //  设备特定
         // 尝试委托给文件对象的 ioctl 方法
         _ => {
-            earlyprintln!("ioctl: delegating request {:#x} to file object", request);
+            pr_debug!("ioctl: delegating request {:#x} to file object", request);
             match file.ioctl(request, arg) {
                 Ok(ret) => ret,
                 Err(FsError::NotSupported) => {
@@ -134,7 +134,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         }
     };
 
-    earlyprintln!(
+    pr_debug!(
         "ioctl: fd={}, request={:#x} => result={}",
         fd,
         request,
