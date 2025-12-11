@@ -59,12 +59,14 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
 
     // 获取文件对象
     let task = current_task();
-    let task_lock = task.lock();
-    let file = match task_lock.fd_table.get(fd as usize) {
-        Ok(f) => f,
-        Err(_) => {
-            pr_err!("ioctl: fd {} not found", fd);
-            return -EBADF as isize;
+    let file = {
+        let task_lock = task.lock();
+        match task_lock.fd_table.get(fd as usize) {
+            Ok(f) => f,
+            Err(_) => {
+                pr_err!("ioctl: fd {} not found", fd);
+                return -EBADF as isize;
+            }
         }
     };
 
@@ -233,22 +235,15 @@ fn handle_tiocgpgrp(
     task: &alloc::sync::Arc<crate::sync::SpinLock<crate::kernel::task::TaskStruct>>,
     arg: usize,
 ) -> isize {
+    let pgid = task.lock().pgid as i32;
+    earlyprintln!("ioctl: TIOCGPGRP writing pgid={} to {:#x}", pgid, arg);
+
     unsafe {
-        sstatus::set_sum();
-        let pid_ptr = arg as *mut i32;
-        if pid_ptr.is_null() {
-            sstatus::clear_sum();
-            return -EINVAL as isize;
-        }
-
-        // 返回当前任务的进程组 ID
-        let pgid = task.lock().pgid as i32;
-        core::ptr::write_volatile(pid_ptr, pgid);
-        sstatus::clear_sum();
-
-        earlyprintln!("ioctl: TIOCGPGRP returned pgid={}", pgid);
-        0
+        crate::util::user_buffer::write_to_user(arg as *mut i32, pgid);
     }
+
+    earlyprintln!("ioctl: TIOCGPGRP completed");
+    0
 }
 
 /// TIOCSPGRP - 设置终端前台进程组 ID
