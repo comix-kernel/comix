@@ -141,10 +141,41 @@ impl File for CharDeviceFile {
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
             if let Some(serial) = driver.as_serial() {
-                for i in 0..buf.len() {
-                    buf[i] = serial.read();
+                let is_nonblock = self.flags.contains(OpenFlags::O_NONBLOCK);
+
+                if is_nonblock {
+                    // 非阻塞模式：尝试读取，没有数据则返回 EAGAIN
+                    if let Some(byte) = serial.try_read() {
+                        buf[0] = byte;
+                        let mut count = 1;
+                        // 尽可能多读，但不阻塞
+                        while count < buf.len() {
+                            if let Some(b) = serial.try_read() {
+                                buf[count] = b;
+                                count += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        Ok(count)
+                    } else {
+                        Err(FsError::WouldBlock)
+                    }
+                } else {
+                    // 阻塞模式：至少读取一个字节
+                    buf[0] = serial.read();
+                    let mut count = 1;
+                    // 尝试读取更多，但不阻塞
+                    while count < buf.len() {
+                        if let Some(b) = serial.try_read() {
+                            buf[count] = b;
+                            count += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    Ok(count)
                 }
-                Ok(buf.len())
             } else {
                 Err(FsError::NotSupported)
             }
