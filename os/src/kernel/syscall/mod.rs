@@ -194,6 +194,7 @@ impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
 impl_syscall!(sys_umask, umask, (u32));
 impl_syscall!(sys_getpid, get_pid, ());
 impl_syscall!(sys_getppid, get_ppid, ());
+impl_syscall!(sys_getpgid, get_pgid, (c_int));
 impl_syscall!(sys_getuid, getuid, ());
 impl_syscall!(sys_geteuid, geteuid, ());
 impl_syscall!(sys_getgid, getgid, ());
