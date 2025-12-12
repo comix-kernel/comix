@@ -373,7 +373,7 @@ pub struct LinuxDirent64 {
 }
 
 impl LinuxDirent64 {
-    const BASE_SIZE: usize = core::mem::size_of::<Self>();
+    const BASE_SIZE: usize = 19;
 
     /// 计算包含文件名的总长度（8字节对齐）
     pub fn total_len(name: &str) -> usize {

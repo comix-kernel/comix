@@ -351,19 +351,28 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     };
 
     // 读取目录项
+    // TODO: readdir 返回所有项，对于大目录效率低，且 racey。
+    // 应改进为支持从 offset 读取，或者缓存 readdir 结果。
     let entries = match inode.readdir() {
         Ok(e) => e,
         Err(e) => return e.to_errno(),
     };
 
+    // 获取当前文件偏移量 (作为 entry 索引)
+    // 假设目录的 offset 就是 entry 的 index
+    let start_index = match file.lseek(0, SeekWhence::Cur) {
+        Ok(pos) => pos,
+        Err(e) => return e.to_errno(),
+    };
+
     // 写入目录项到用户空间
     let mut written = 0usize;
-    let mut offset = 0i64;
+    let mut items_written = 0usize;
 
     unsafe {
         sstatus::set_sum();
 
-        for entry in entries {
+        for (_, entry) in entries.iter().skip(start_index).enumerate() {
             // 计算这个 dirent 需要的空间
             let dirent_len = LinuxDirent64::total_len(&entry.name);
 
@@ -372,30 +381,50 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
                 break;
             }
 
+            // 计算下一个 entry 的 offset (index + 1)
+            let current_off = (start_index + items_written + 1) as i64;
+
             // 写入 dirent 头部
             let dirent_ptr = dirp.add(written) as *mut LinuxDirent64;
             core::ptr::write(
                 dirent_ptr,
                 LinuxDirent64 {
                     d_ino: entry.inode_no as u64,
-                    d_off: offset + dirent_len as i64,
+                    d_off: current_off,
                     d_reclen: dirent_len as u16,
                     d_type: inode_type_to_d_type(entry.inode_type),
                 },
             );
 
-            // 写入文件名（在 dirent 结构体之后）
-            let name_ptr = dirp.add(written + core::mem::size_of::<LinuxDirent64>());
+            // 写入文件名
+            // 注意：LinuxDirent64 在 Rust 中由 padding (到 24 字节)
+            // 但 d_name 实际上应该从 offset 19 开始 (u64+u64+u16+u8 = 8+8+2+1 = 19)
+            // 我们必须覆盖 padding 区域
+            let name_ptr = dirp.add(written + 19);
             let name_bytes = entry.name.as_bytes();
             core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, name_bytes.len());
             // 添加 null 终止符
             core::ptr::write(name_ptr.add(name_bytes.len()), 0);
 
             written += dirent_len;
-            offset += dirent_len as i64;
+            items_written += 1;
         }
 
         sstatus::clear_sum();
+    }
+
+    // 更新文件偏移量
+    if items_written > 0 {
+        // 更新为新的 index
+        if let Err(e) = file.lseek((start_index + items_written) as isize, SeekWhence::Set) {
+            crate::pr_warn!(
+                "[getdents64] failed to update file offset for fd {}: {:?}",
+                fd,
+                e
+            );
+            // 即使更新 offset 失败，我们已经写入了数据，返回 written 更合理。
+            // 下一次 getdents64 调用可能会重复读取一些条目，但这比丢失数据或为部分成功的读取返回错误要好。
+        }
     }
 
     // 返回写入的字节数
