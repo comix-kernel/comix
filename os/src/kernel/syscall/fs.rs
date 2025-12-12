@@ -417,7 +417,11 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     if items_written > 0 {
         // 更新为新的 index
         if let Err(e) = file.lseek((start_index + items_written) as isize, SeekWhence::Set) {
-            crate::pr_warn!("[getdents64] failed to update file offset for fd {}: {:?}", fd, e);
+            crate::pr_warn!(
+                "[getdents64] failed to update file offset for fd {}: {:?}",
+                fd,
+                e
+            );
             // 即使更新 offset 失败，我们已经写入了数据，返回 written 更合理。
             // 下一次 getdents64 调用可能会重复读取一些条目，但这比丢失数据或为部分成功的读取返回错误要好。
         }
