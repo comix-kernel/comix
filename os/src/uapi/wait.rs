@@ -116,7 +116,7 @@ bitflags! {
         /// WNOHANG: 非阻塞等待。如果没有子进程状态立即可用，则立即返回 0。
         const NOHANG = 0x1;
 
-        /// WUNTRACED: 报告已停止的子进程状态。
+        /// WUNTRACED: 报告已停止/终止的子进程状态。
         /// 报告那些因接收到信号（如 SIGSTOP 或 SIGTTIN/SIGTTOU）而停止的子进程。
         const UNTRACED = 0x2;
 
