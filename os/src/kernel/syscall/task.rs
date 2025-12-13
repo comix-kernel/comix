@@ -389,7 +389,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         |_ch| false
     };
     let stopped: fn(TaskState) -> bool = if opt.contains(WaitFlags::STOPPED) {
-        |ch| ch == TaskState::Stopped
+        |ch| ch == TaskState::Stopped || ch == TaskState::Zombie
     } else {
         |_ch| false
     };
