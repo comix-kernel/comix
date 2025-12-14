@@ -4,8 +4,14 @@ use core::ffi::{CStr, c_char};
 
 use riscv::register::sstatus;
 
+use alloc::sync::Arc;
 use crate::{
-    net::{config::NetworkConfigManager, interface::NETWORK_INTERFACE_MANAGER},
+    kernel::current_cpu,
+    net::{
+        config::NetworkConfigManager,
+        interface::NETWORK_INTERFACE_MANAGER,
+        socket::{SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket, parse_sockaddr_in, write_sockaddr_in},
+    },
     println,
 };
 
@@ -72,59 +78,138 @@ pub fn set_network_interface_config(
 }
 
 /// 创建套接字
-pub fn socket(domain: i32, socket_type: i32, protocol: i32) -> isize {
-    // 目前只支持IPv4和TCP/UDP
-    if domain != 2 || (socket_type != 1 && socket_type != 2) {
-        return -1; // EAFNOSUPPORT 或 ESOCKTNOSUPPORT
-    }
+pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
+    if domain != 2 { return -97; } // EAFNOSUPPORT
 
-    // TODO: 实现套接字创建
-    // 暂时返回一个虚拟的文件描述符
-    3
+    let handle = match socket_type {
+        1 => create_tcp_socket(),
+        2 => create_udp_socket(),
+        _ => return -94, // ESOCKTNOSUPPORT
+    }.unwrap();
+
+    let socket_file = Arc::new(SocketFile::new(handle));
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+
+    match task.lock().fd_table.alloc(socket_file) {
+        Ok(fd) => fd as isize,
+        Err(_) => -24, // EMFILE
+    }
 }
 
 /// 绑定套接字
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    // TODO: 实现绑定逻辑
+    let endpoint = unsafe {
+        sstatus::set_sum();
+        let ep = parse_sockaddr_in(addr, addrlen);
+        sstatus::clear_sum();
+        match ep {
+            Ok(e) => e,
+            Err(_) => return -22,
+        }
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9,
+    };
+
     0
 }
 
 /// 监听连接
-pub fn listen(sockfd: i32, backlog: i32) -> isize {
-    // TODO: 实现监听逻辑
-    0
+pub fn listen(sockfd: i32, _backlog: i32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.get(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
+    }
 }
 
 /// 接受连接
-pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    // TODO: 实现接受连接逻辑
-    // 暂时返回一个虚拟的文件描述符
-    4
+pub fn accept(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.get(sockfd as usize) {
+        Ok(_) => {},
+        Err(_) => return -9,
+    };
+
+    let handle = create_tcp_socket().unwrap();
+    let socket_file = Arc::new(SocketFile::new(handle));
+    match task.lock().fd_table.alloc(socket_file) {
+        Ok(fd) => fd as isize,
+        Err(_) => -24,
+    }
 }
 
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    // TODO: 实现连接逻辑
-    0
+    let _endpoint = unsafe {
+        sstatus::set_sum();
+        let ep = parse_sockaddr_in(addr, addrlen);
+        sstatus::clear_sum();
+        match ep {
+            Ok(e) => e,
+            Err(_) => return -22,
+        }
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.get(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
+    }
 }
 
 /// 发送数据
-pub fn send(sockfd: i32, buf: *const u8, len: usize, flags: i32) -> isize {
-    // TODO: 实现发送逻辑
-    len as isize
+pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9,
+    };
+
+    match file.write(data) {
+        Ok(n) => n as isize,
+        Err(_) => -11, // EAGAIN
+    }
 }
 
 /// 接收数据
-pub fn recv(sockfd: i32, buf: *mut u8, len: usize, flags: i32) -> isize {
-    // TODO: 实现接收逻辑
-    // 暂时返回0，表示没有数据可读
-    0
+pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9,
+    };
+
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts_mut(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    match file.read(data) {
+        Ok(n) => n as isize,
+        Err(_) => -11, // EAGAIN
+    }
 }
 
 /// 关闭套接字
 pub fn close_sock(sockfd: i32) -> isize {
-    // TODO: 实现关闭逻辑
-    0
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.close(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
+    }
 }
 
 /// 安全地获取C字符串
@@ -257,23 +342,11 @@ pub fn sendto(
     sockfd: i32,
     buf: *const u8,
     len: usize,
-    flags: i32,
-    dest_addr: *const u8,
-    addrlen: u32,
+    _flags: i32,
+    _dest_addr: *const u8,
+    _addrlen: u32,
 ) -> isize {
-    unsafe {
-        sstatus::set_sum();
-
-        // TODO: 实现发送逻辑
-        // 检查套接字、缓冲区和地址是否有效
-        if sockfd < 0 || buf.is_null() || dest_addr.is_null() {
-            sstatus::clear_sum();
-            return -1; // EBADF 或 EFAULT
-        }
-
-        sstatus::clear_sum();
-        len as isize // 假设所有数据都已发送
-    }
+    send(sockfd, buf, len, 0)
 }
 
 // Linux 标准: ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
@@ -281,91 +354,37 @@ pub fn recvfrom(
     sockfd: i32,
     buf: *mut u8,
     len: usize,
-    flags: i32,
-    src_addr: *mut u8,
-    addrlen: *mut u32,
+    _flags: i32,
+    _src_addr: *mut u8,
+    _addrlen: *mut u32,
 ) -> isize {
-    unsafe {
-        sstatus::set_sum();
-
-        // TODO: 实现接收逻辑
-        // 检查套接字和缓冲区是否有效
-        if sockfd < 0 || buf.is_null() {
-            sstatus::clear_sum();
-            return -1; // EBADF 或 EFAULT
-        }
-
-        // 暂时返回0，表示没有数据可读
-        sstatus::clear_sum();
-        0
-    }
+    recv(sockfd, buf, len, 0)
 }
 
 // 关闭套接字
 pub fn shutdown(sockfd: i32, how: i32) -> isize {
-    unsafe {
-        sstatus::set_sum();
-
-        // TODO: 实现关闭套接字逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
-        }
-
-        // 检查how参数是否有效
-        if how < 0 || how > 2 {
-            sstatus::clear_sum();
-            return -1; // EINVAL
-        }
-
-        sstatus::clear_sum();
-        0 // 成功
+    if how < 0 || how > 2 { return -22; }
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.get(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
     }
 }
 
 // 获取套接字地址
-pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    unsafe {
-        sstatus::set_sum();
-
-        // TODO: 实现获取套接字名称逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
-        }
-
-        // 检查addr和addrlen是否有效
-        if addr.is_null() || addrlen.is_null() {
-            sstatus::clear_sum();
-            return -1; // EFAULT
-        }
-
-        sstatus::clear_sum();
-        0 // 成功
+pub fn getsockname(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.get(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
     }
 }
 
 // 获取对端套接字地址
-pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    unsafe {
-        sstatus::set_sum();
-
-        // TODO: 实现获取对端套接字名称逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
-        }
-
-        // 检查addr和addrlen是否有效
-        if addr.is_null() || addrlen.is_null() {
-            sstatus::clear_sum();
-            return -1; // EFAULT
-        }
-
-        sstatus::clear_sum();
-        0 // 成功
+pub fn getpeername(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    match task.lock().fd_table.get(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
     }
 }
