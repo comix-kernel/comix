@@ -460,8 +460,64 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
     total_sent as isize
 }
 
+/// pollfd 结构体
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct PollFd {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
+}
+
+/// poll 事件标志
+pub const POLLIN: i16 = 0x0001;
+pub const POLLOUT: i16 = 0x0004;
+pub const POLLERR: i16 = 0x0008;
+pub const POLLHUP: i16 = 0x0010;
+pub const POLLNVAL: i16 = 0x0020;
+
 /// ppoll - poll 的变体，支持信号掩码
-pub fn ppoll(_fds: usize, _nfds: usize, _timeout: usize, _sigmask: usize) -> isize {
-    use crate::uapi::errno::ENOSYS;
-    -ENOSYS as isize
+pub fn ppoll(fds: usize, nfds: usize, _timeout: usize, _sigmask: usize) -> isize {
+    use crate::arch::trap::SumGuard;
+    use crate::kernel::current_cpu;
+    use crate::uapi::errno::{EFAULT, EINVAL};
+
+    if fds == 0 || nfds == 0 {
+        return -(EINVAL as isize);
+    }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let _guard = SumGuard::new();
+
+    let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
+
+    let mut ready_count = 0;
+    for pollfd in pollfds.iter_mut() {
+        pollfd.revents = 0;
+
+        if pollfd.fd < 0 {
+            continue;
+        }
+
+        let file = match task.lock().fd_table.get(pollfd.fd as usize) {
+            Ok(f) => f,
+            Err(_) => {
+                pollfd.revents = POLLNVAL;
+                ready_count += 1;
+                continue;
+            }
+        };
+
+        if (pollfd.events & POLLIN) != 0 && file.readable() {
+            pollfd.revents |= POLLIN;
+            ready_count += 1;
+        }
+
+        if (pollfd.events & POLLOUT) != 0 && file.writable() {
+            pollfd.revents |= POLLOUT;
+            ready_count += 1;
+        }
+    }
+
+    ready_count
 }
