@@ -125,7 +125,7 @@ pub struct MyInfoGenerator;
 
 impl Generator for MyInfoGenerator {
     fn generate(&self) -> Vec<u8> {
-        format!("my_value: {}\\n", get_my_value())
+        format!("my_value: {}\n", get_my_value())
             .into_bytes()
     }
 }

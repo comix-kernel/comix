@@ -406,7 +406,7 @@ pub const SIMPLE_FS_IMAGE: &str = env!("SIMPLE_FS_IMAGE");
 // 列出所有挂载点
 let mounts = MOUNT_TABLE.list_mounts();
 for (path, fstype) in mounts {
-    pr_info!("{} on {} type {}", path, path, fstype);
+    pr_info!("Mount point: {}, Type: {}", path, fstype);
 }
 ```
 
