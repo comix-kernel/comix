@@ -1,7 +1,58 @@
-//! Ext4 文件系统实现
+//! Ext4 - Linux Ext4 文件系统支持
 //!
-//! 基于 ext4_rs crate，提供 VFS 接口
-
+//! 该模块提供了与 **Linux Ext4 文件系统兼容** 的读写支持，基于 `ext4_rs` crate 实现。
+//!
+//! # 组件
+//!
+//! - [`Ext4FileSystem`] - 文件系统结构，实现 `FileSystem` trait
+//! - [`Ext4Inode`] - Inode 包装，将 `ext4_rs` 操作映射到 VFS
+//! - [`BlockDeviceAdapter`] - 块设备适配器，桥接 VirtIO 和 ext4_rs
+//!
+//! # 设计概览
+//!
+//! ## 适配层架构
+//!
+//! ```text
+//! VFS (Inode trait)
+//!       ↓
+//! Ext4Inode (包装层)
+//!       ↓
+//! ext4_rs::Ext4 (第三方库)
+//!       ↓
+//! BlockDeviceAdapter
+//!       ↓
+//! BlockDriver (VirtIO Block)
+//! ```
+//!
+//! ## 支持的操作
+//!
+//! - **文件操作**：read、write、truncate、sync
+//! - **目录操作**：lookup、create、mkdir、readdir、rmdir
+//! - **链接操作**：symlink、link、unlink、readlink
+//! - **元数据**：chmod、chown、set_times
+//! - **重命名**：rename（支持跨目录移动）
+//!
+//! # 使用示例
+//!
+//! ```rust
+//! use crate::fs::init_ext4_from_block_device;
+//!
+//! // 从第一个块设备挂载 ext4 为根文件系统
+//! init_ext4_from_block_device()?;
+//!
+//! // 读写文件
+//! let content = vfs_load_file("/bin/hello")?;
+//! ```
+//!
+//! # 配置要求
+//!
+//! - **块大小**：必须为 4096 字节（与 `mkfs.ext4 -b 4096` 匹配）
+//! - **块设备**：需要支持 VirtIO Block 或兼容驱动
+//!
+//! # 限制
+//!
+//! - `mknod` 未实现（设备文件创建）
+//! - 非日志模式，崩溃可能导致不一致
 pub mod adpaters;
 pub mod inode;
 
