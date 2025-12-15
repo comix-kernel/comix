@@ -76,7 +76,7 @@ pub fn sys_open(path: &str, flags: OpenFlags, mode: FileMode)
         match parent.inode.lookup(&name) {
             Ok(inode) => {
                 if flags.contains(OpenFlags::O_EXCL) {
-                    return Err(FsError::FileExists);
+                    return Err(FsError::AlreadyExists);
                 }
                 Dentry::new(name, inode)
             }

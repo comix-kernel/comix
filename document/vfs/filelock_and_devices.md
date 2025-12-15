@@ -90,7 +90,7 @@ pub fn test_lock(
     
     // 构造请求的锁
     let requested_lock = FileLockEntry {
-        lock_type: LockType::from_raw(flock.l_type).unwrap(),
+        lock_type: LockType::from_raw(flock.l_type).ok_or(FsError::InvalidArgument)?,
         start,
         len,
         pid,
