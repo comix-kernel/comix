@@ -82,8 +82,8 @@
 //! # 并发安全
 //!
 //! FDTable 内部使用 `SpinLock` 保护：
-//! - `files`: Vec<Option<Arc<dyn File>>>
-//! - `fd_flags`: Vec<FdFlags>
+//! - `files`: `Vec<Option<Arc<dyn File>>>`
+//! - `fd_flags`: `Vec<FdFlags>`
 //!
 //! 多线程访问 FDTable 时会竞争锁，但 File 对象本身（如 RegFile 的 offset）
 //! 使用原子操作，无需额外锁定。

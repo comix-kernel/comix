@@ -217,7 +217,7 @@ pub const NCCS: usize = 19;
 /// 内存布局：
 /// - offset 0-15:  c_iflag, c_oflag, c_cflag, c_lflag (4 * u32 = 16 bytes)
 /// - offset 16:    c_line (u8 = 1 byte)
-/// - offset 17-35: c_cc[19] (19 * u8 = 19 bytes)
+/// - offset 17-35: c_cc\[19\] (19 * u8 = 19 bytes)
 /// - offset 36-39: c_ispeed (u32 = 4 bytes, 对齐到4字节边界)
 /// - offset 40-43: c_ospeed (u32 = 4 bytes)
 /// 总大小：44字节

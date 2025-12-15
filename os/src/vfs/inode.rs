@@ -295,7 +295,7 @@ pub trait Inode: Send + Sync + Any {
     fn chmod(&self, _mode: FileMode) -> Result<(), FsError>;
 }
 
-/// 为 Arc<dyn Inode> 提供向下转型辅助方法
+/// 为 `Arc<dyn Inode>` 提供向下转型辅助方法
 impl dyn Inode {
     /// 尝试向下转型为具体的 Inode 类型
     pub fn downcast_arc<T: Inode>(self: Arc<Self>) -> Result<Arc<T>, Arc<Self>> {

@@ -4,7 +4,7 @@
 //!
 //! # 组件
 //!
-//! - [`file`] - 会话层接口定义 (File trait)
+//! - [`mod@file`] - 会话层接口定义 (File trait)
 //! - [`inode`] - 存储层接口定义 (Inode trait)
 //! - [`dentry`] - 目录项结构和全局缓存
 //! - [`path`] - 路径解析引擎（绝对/相对路径、符号链接）
@@ -48,7 +48,7 @@
 //!
 //! ### 目录项缓存
 //!
-//! - **全局缓存** ([`DENTRY_CACHE`])：路径 → Weak<Dentry> 映射，避免重复解析
+//! - **全局缓存** ([`DENTRY_CACHE`])：路径 → `Weak<Dentry>` 映射，避免重复解析
 //! - **树状缓存**：Dentry 内部维护父子关系，加速相对路径查找
 //! - **自动失效**：使用 `Weak` 引用，不再使用的 Dentry 自动回收
 //!
@@ -190,7 +190,7 @@ use alloc::{vec, vec::Vec};
 /// 参数：
 ///     - path: 文件路径（绝对路径或相对于当前工作目录的相对路径）
 ///
-/// 返回：Ok(Vec<u8>) 文件内容字节数组；Err(FsError::NotFound) 文件不存在；Err(FsError::IsDirectory) 路径指向目录
+/// 返回：`Ok(Vec<u8>)` 文件内容字节数组；`Err(FsError::NotFound)` 文件不存在；`Err(FsError::IsDirectory)` 路径指向目录
 pub fn vfs_load_elf(path: &str) -> Result<Vec<u8>, FsError> {
     let dentry = vfs_lookup(path)?;
     let inode = &dentry.inode;
