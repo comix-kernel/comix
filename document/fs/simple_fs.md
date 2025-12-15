@@ -101,7 +101,7 @@ fn test_with_simplefs() {
     init_simple_fs().unwrap();
     
     // 测试文件系统操作
-    let content =vfs_load_file("/bin/hello").unwrap();
+    let content = vfs_load_file("/bin/hello").unwrap();
     assert_eq!(content, b"Hello, World!");
 }
 ```
@@ -126,7 +126,7 @@ make build
 let files = vec![
     ("bin/init", "user/target/.../init"),
     ("bin/sh", "user/target/.../sh"),
-   ("etc/rc", "scripts/rc"),
+    ("etc/rc", "scripts/rc"),
 ];
 
 for (dest, src) in files {
