@@ -48,6 +48,17 @@
   - [上下文保存](kernel/trap/context.md)
   - [特权级切换](kernel/trap/switch.md)
 
+# 虚拟文件系统
+
+- [VFS 概述](vfs/README.md)
+  - [整体架构](vfs/architecture.md)
+  - [Inode 与 Dentry](vfs/inode_and_dentry.md)
+  - [File 与 FDTable](vfs/file_and_fdtable.md)
+  - [路径解析与挂载](vfs/path_and_mount.md)
+  - [FileSystem 与错误处理](vfs/filesystem_and_errors.md)
+  - [文件锁与设备管理](vfs/filelock_and_devices.md)
+  - [使用指南](vfs/usage.md)
+
 # 进程间通信
 - [进程间通信概述](ipc/README.md)
   - [管道](ipc/pipe.md)
