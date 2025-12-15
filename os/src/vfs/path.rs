@@ -1,3 +1,172 @@
+//! 路径解析引擎
+//!
+//! 该模块实现了 VFS 的路径解析功能，负责将路径字符串转换为 Dentry，支持绝对路径、
+//! 相对路径和符号链接解析。
+//!
+//! # 核心组件
+//!
+//! - [`PathComponent`] - 路径组件枚举（Root、Parent、Current、Normal）
+//! - [`parse_path`] - 路径字符串解析器
+//! - [`normalize_path`] - 路径规范化函数
+//! - [`split_path`] - 路径分割函数
+//! - [`vfs_lookup`] - 主路径查找函数
+//! - [`vfs_lookup_no_follow`] - 不跟随符号链接的查找
+//!
+//! # 路径解析流程
+//!
+//! 完整的路径查找需要经过多个步骤：
+//!
+//! ```text
+//! 用户输入: "/home/../etc/./passwd"
+//!     ↓
+//! parse_path() → [Root, Normal("home"), Parent, Normal("etc"), Current, Normal("passwd")]
+//!     ↓
+//! normalize_path() → "/etc/passwd"
+//!     ↓
+//! 检查缓存 (DENTRY_CACHE)
+//!     ├─ 命中 → 返回缓存的 Dentry
+//!     └─ 未命中 ↓
+//! vfs_lookup() - 逐级查找
+//!     ├─ "/" → 根 Dentry
+//!     ├─ "etc" → 查找子项，检查挂载点
+//!     └─ "passwd" → 最终 Dentry
+//! ```
+//!
+//! # 路径组件
+//!
+//! ## PathComponent 枚举
+//!
+//! ```rust
+//! pub enum PathComponent {
+//!     Root,           // "/"
+//!     Current,        // "."
+//!     Parent,         // ".."
+//!     Normal(String), // 普通文件名
+//! }
+//! ```
+//!
+//! ### 解析示例
+//!
+//! ```text
+//! "/home/user/file.txt"  → [Root, Normal("home"), Normal("user"), Normal("file.txt")]
+//! "../file.txt"          → [Parent, Normal("file.txt")]
+//! "./file.txt"           → [Current, Normal("file.txt")]
+//! "//foo///bar//"        → [Root, Normal("foo"), Normal("bar")]
+//! ```
+//!
+//! # 路径规范化
+//!
+//! `normalize_path()` 处理 `.` 和 `..`，移除冗余斜杠：
+//!
+//! ```rust
+//! normalize_path("/home/../etc/./passwd")  // → "/etc/passwd"
+//! normalize_path("./file.txt")             // → "file.txt"
+//! normalize_path("///foo//bar//")          // → "/foo/bar"
+//! normalize_path("/../../../etc")          // → "/etc" (不能越过根目录)
+//! ```
+//!
+//! # 符号链接处理
+//!
+//! ## 跟随符号链接
+//!
+//! `vfs_lookup()` 默认跟随符号链接，最多 8 层：
+//!
+//! ```text
+//! /link1 → /link2 → /link3 → /real_file
+//!   ↓        ↓        ↓         ↓
+//! 解析    解析     解析      返回
+//! ```
+//!
+//! ## 不跟随符号链接
+//!
+//! `vfs_lookup_no_follow()` 返回符号链接本身：
+//!
+//! ```rust
+//! // 对于符号链接 /link → /target
+//! vfs_lookup("/link")?;           // 返回 /target 的 Dentry
+//! vfs_lookup_no_follow("/link")?; // 返回 /link 的 Dentry
+//! ```
+//!
+//! # 挂载点处理
+//!
+//! 查找过程中自动处理挂载点：
+//!
+//! ```text
+//! /mnt 挂载了 tmpfs
+//!
+//! 查找 "/mnt/file"：
+//!   1. 找到 /mnt 的 Dentry
+//!   2. 检测到挂载点，切换到 tmpfs 的根 Dentry
+//!   3. 在 tmpfs 中查找 "file"
+//! ```
+//!
+//! # 相对路径处理
+//!
+//! 相对路径基于当前工作目录（cwd）：
+//!
+//! ```rust
+//! // 当前工作目录: /home/user
+//! vfs_lookup("file.txt")?;      // → /home/user/file.txt
+//! vfs_lookup("../other")?;      // → /home/other
+//! ```
+//!
+//! # 使用示例
+//!
+//! ## 基本路径查找
+//!
+//! ```rust
+//! use vfs::vfs_lookup;
+//!
+//! // 查找绝对路径
+//! let dentry = vfs_lookup("/etc/passwd")?;
+//!
+//! // 查找相对路径（基于当前工作目录）
+//! let dentry = vfs_lookup("file.txt")?;
+//! ```
+//!
+//! ## 路径解析和规范化
+//!
+//! ```rust
+//! use vfs::{parse_path, normalize_path, PathComponent};
+//!
+//! // 解析路径
+//! let components = parse_path("/home/../etc");
+//! // → [Root, Normal("home"), Parent, Normal("etc")]
+//!
+//! // 规范化路径
+//! let normalized = normalize_path("/home/../etc");
+//! // → "/etc"
+//! ```
+//!
+//! ## 分割路径
+//!
+//! ```rust
+//! use vfs::split_path;
+//!
+//! // 分割为目录和文件名
+//! let (dir, name) = split_path("/etc/passwd")?;
+//! // dir = "/etc", name = "passwd"
+//!
+//! let (dir, name) = split_path("/file")?;
+//! // dir = "/", name = "file"
+//! ```
+//!
+//! ## 符号链接操作
+//!
+//! ```rust
+//! use vfs::{vfs_lookup, vfs_lookup_no_follow};
+//!
+//! // 创建符号链接 /link → /target
+//! parent.inode.symlink("link", "/target")?;
+//!
+//! // 跟随符号链接
+//! let target = vfs_lookup("/link")?;  // 返回 /target
+//!
+//! // 不跟随符号链接
+//! let link = vfs_lookup_no_follow("/link")?;  // 返回 /link
+//! let link_target = link.inode.readlink()?;   // 读取链接目标
+//! ```
+
 use crate::kernel::current_task;
 use crate::vfs::{Dentry, FsError, get_root_dentry};
 use alloc::string::String;
