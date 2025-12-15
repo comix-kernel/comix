@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::{fs::proc::ContentGenerator, kernel::SharedTask, vfs::FsError};
 
-/// 为指定任务生成 /proc/[pid]/cmdline 内容的生成器
+/// 为指定任务生成 /proc/\[pid\]/cmdline 内容的生成器
 pub struct CmdlineGenerator {
     task: SharedTask,
 }

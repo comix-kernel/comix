@@ -308,7 +308,7 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
 /// 参数：
 ///     - path: 文件或目录路径（绝对路径从根目录开始，相对路径从当前工作目录开始）
 ///
-/// 返回：Ok(Arc<Dentry>) 路径对应的目录项；Err(FsError::NotFound) 路径不存在；Err(FsError::NotDirectory) 中间组件不是目录
+/// 返回：`Ok(Arc<Dentry>)` 路径对应的目录项；`Err(FsError::NotFound)` 路径不存在；`Err(FsError::NotDirectory)` 中间组件不是目录
 pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
     let components = parse_path(path);
 

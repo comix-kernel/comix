@@ -6,7 +6,7 @@ use crate::{
     vfs::FsError,
 };
 
-/// 为指定任务生成 /proc/[pid]/stat 内容的生成器
+/// 为指定任务生成 /proc/\[pid\]/stat 内容的生成器
 pub struct StatGenerator {
     task: SharedTask,
 }
@@ -33,7 +33,7 @@ impl ContentGenerator for StatGenerator {
         // 获取进程名称（简化实现）
         let name = format!("task_{}", task.tid);
 
-        // Linux /proc/[pid]/stat 格式（简化版）
+        // Linux /proc/\[pid\]/stat 格式（简化版）
         // 格式参考: man 5 proc
         let content = format!(
             "{} ({}) {} {} {} {} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",

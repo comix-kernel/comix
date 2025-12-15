@@ -31,7 +31,7 @@ pub(crate) const MAX_LOG_ENTRIES: usize = GLOBAL_LOG_BUFFER_SIZE / LOG_ENTRY_SIZ
 /// # 组成部分计算
 /// - ANSI 颜色代码: entry.level().color_code().len() (开始)
 /// - ANSI 重置代码: entry.level().reset_color_code().len() (结束)
-/// - 级别标签: entry.level().as_str().len() (例如 "[INFO]")
+/// - 级别标签: entry.level().as_str().len() (例如 "\\[INFO\\]")
 /// - 时间戳: 14 字节 (" [" + 12位数字 + "]")
 /// - CPU ID: " [CPU" + digit_count(cpu_id)
 /// - 任务 ID: "/T" + digit_count_padded(task_id, 3) + "]"

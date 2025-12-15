@@ -6,7 +6,7 @@ use crate::{
     vfs::FsError,
 };
 
-/// 为指定任务生成 /proc/[pid]/status 内容的生成器
+/// 为指定任务生成 /proc/\[pid\]/status 内容的生成器
 pub struct StatusGenerator {
     task: SharedTask,
 }
