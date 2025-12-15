@@ -1,3 +1,112 @@
+//! 目录项（Dentry）与全局缓存
+//!
+//! 该模块实现了 VFS 路径层的核心组件，提供目录树结构管理和路径到 Inode 的映射缓存。
+//!
+//! # 组件
+//!
+//! - [`Dentry`] - 目录项结构，表示路径中的一个节点
+//! - [`DentryCache`] - 全局路径缓存，加速重复路径查找
+//! - [`DENTRY_CACHE`] - 全局缓存单例
+//!
+//! # 核心概念
+//!
+//! ## Dentry 的作用
+//!
+//! Dentry (Directory Entry) 是文件系统目录树中的一个节点，它：
+//! - 缓存文件名到 Inode 的映射
+//! - 维护父子关系，构成目录树
+//! - 标记挂载点信息
+//!
+//! ## 与 Inode 的关系
+//!
+//! - **Dentry**: 路径层组件，可能有多个 Dentry 指向同一个 Inode (硬链接)
+//! - **Inode**: 存储层组件，代表实际的文件或目录
+//!
+//! ```text
+//! /home/user/file.txt ──┐
+//!                       ├──> Dentry ──> Inode (文件数据)
+//! /tmp/link_to_file  ───┘
+//! ```
+//!
+//! # 引用计数设计
+//!
+//! Dentry 使用 `Arc` 和 `Weak` 管理生命周期，避免循环引用：
+//!
+//! - **parent**: `Weak<Dentry>` - 弱引用父节点，避免循环
+//! - **children**: `Arc<Dentry>` - 强引用子节点
+//! - **全局缓存**: `Weak<Dentry>` - 不延长生命周期
+//!
+//! ```text
+//! Arc<Dentry("/")>
+//!   └─> Arc<Dentry("/etc")> { parent: Weak<Dentry("/">") }
+//!         └─> Arc<Dentry("/etc/passwd")> { parent: Weak<Dentry("/etc")> }
+//! ```
+//!
+//! # 缓存机制
+//!
+//! ## 全局缓存 (DENTRY_CACHE)
+//!
+//! 维护路径字符串到 Dentry 的映射：
+//!
+//! - **插入**: 路径解析成功后自动插入
+//! - **查找**: O(log n) BTreeMap 查找
+//! - **失效**: Weak 引用自动失效，无需手动清理
+//!
+//! ## 树状缓存
+//!
+//! Dentry 内部维护子项缓存，加速相对路径查找：
+//!
+//! ```rust
+//! let parent = vfs_lookup("/etc")?;
+//! // 快速查找，不需要再次访问 Inode
+//! if let Some(child) = parent.lookup_child("passwd") {
+//!     // 缓存命中
+//! }
+//! ```
+//!
+//! # 使用示例
+//!
+//! ## 创建 Dentry
+//!
+//! ```rust
+//! use vfs::{Dentry, Inode};
+//!
+//! let inode = create_inode()?;
+//! let dentry = Dentry::new(String::from("file.txt"), inode);
+//! ```
+//!
+//! ## 管理父子关系
+//!
+//! ```rust
+//! // 添加子项
+//! parent.add_child(child_dentry.clone());
+//!
+//! // 查找子项
+//! if let Some(child) = parent.lookup_child("file.txt") {
+//!     println!("找到: {}", child.name);
+//! }
+//!
+//! // 删除子项
+//! parent.remove_child("file.txt");
+//! ```
+//!
+//! ## 使用全局缓存
+//!
+//! ```rust
+//! use vfs::DENTRY_CACHE;
+//!
+//! // 插入缓存
+//! DENTRY_CACHE.insert(&dentry);
+//!
+//! // 查找缓存
+//! if let Some(cached) = DENTRY_CACHE.lookup("/etc/passwd") {
+//!     // 缓存命中，避免重复路径解析
+//! }
+//!
+//! // 删除缓存
+//! DENTRY_CACHE.remove("/etc/passwd");
+//! ```
+
 use crate::sync::SpinLock;
 use crate::vfs::inode::Inode;
 use alloc::collections::BTreeMap;

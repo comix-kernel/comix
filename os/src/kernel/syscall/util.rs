@@ -48,7 +48,7 @@ pub fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> 
 /// - `ptr_array`: 指向用户空间字符串指针数组的指针
 /// - `name`: 参数名称，用于错误报告
 /// # 返回值
-/// - 成功时返回包含参数字符串的 Vec<String>
+/// - 成功时返回包含参数字符串的 `Vec<String>`
 /// - 失败时返回错误字符串
 pub fn get_args_safe(
     ptr_array: *const *const c_char,

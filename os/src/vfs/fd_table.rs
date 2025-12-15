@@ -1,7 +1,137 @@
 //! 文件描述符表
 //!
-//! 每个进程维护一个 [`FDTable`]，管理打开的文件。文件以 `Arc<dyn File>` 形式存储，
-//! 支持异构文件类型（RegFile、PipeFile、StdioFile等）。
+//! 该模块实现了进程级的文件描述符管理，提供 POSIX 兼容的文件描述符操作。
+//!
+//! # 核心组件
+//!
+//! - [`FDTable`] - 文件描述符表，每个进程维护一个实例
+//! - [`FdFlags`] - 文件描述符标志（如 FD_CLOEXEC）
+//!
+//! # 设计理念
+//!
+//! ## 文件描述符的本质
+//!
+//! 文件描述符（FD）是进程级的整数索引，指向打开的文件对象：
+//!
+//! ```text
+//! FDTable
+//! ┌────┬──────────────────────┐
+//! │ 0  │ Arc<StdinFile>       │ ← stdin
+//! │ 1  │ Arc<StdoutFile>      │ ← stdout
+//! │ 2  │ Arc<StderrFile>      │ ← stderr
+//! │ 3  │ Arc<RegFile>         │
+//! │ 4  │ Arc<PipeFile>        │
+//! │ 5  │ None                 │
+//! └────┴──────────────────────┘
+//! ```
+//!
+//! ## POSIX 语义
+//!
+//! ### 最小可用 FD
+//!
+//! `alloc()` 总是返回最小的可用文件描述符：
+//!
+//! ```rust
+//! let fd1 = fd_table.alloc(file1)?;  // 返回 3
+//! let fd2 = fd_table.alloc(file2)?;  // 返回 4
+//! fd_table.close(3)?;
+//! let fd3 = fd_table.alloc(file3)?;  // 返回 3 (重用)
+//! ```
+//!
+//! ### dup 语义
+//!
+//! `dup` 系列操作共享 File 对象（包括 offset）：
+//!
+//! ```text
+//! fd[3] ──┐
+//!         ├──> Arc<RegFile> { offset: AtomicUsize }
+//! fd[4] ──┘
+//!
+//! // fd[3] 和 fd[4] 共享 offset，一个 read() 会影响另一个
+//! ```
+//!
+//! ### FD 标志 vs 文件状态标志
+//!
+//! - **FD 标志** (FdFlags): 文件描述符级别，dup 时不共享
+//!   - `FD_CLOEXEC`: exec 时关闭
+//! - **文件状态标志** (OpenFlags): File 对象级别，dup 时共享
+//!   - `O_RDONLY`/`O_WRONLY`/`O_RDWR`: 访问模式
+//!   - `O_APPEND`: 追加模式
+//!   - `O_NONBLOCK`: 非阻塞模式
+//!
+//! ## fork 和 exec
+//!
+//! ### fork 时
+//!
+//! 父子进程共享整个 FDTable：
+//!
+//! ```text
+//! 父进程 ──┐
+//!          ├──> Arc<FDTable>
+//! 子进程 ──┘
+//! ```
+//!
+//! ### exec 时
+//!
+//! 自动关闭带 `FD_CLOEXEC` 标志的文件：
+//!
+//! ```rust
+//! fd_table.close_exec();  // exec 前调用
+//! ```
+//!
+//! # 并发安全
+//!
+//! FDTable 内部使用 `SpinLock` 保护：
+//! - `files`: `Vec<Option<Arc<dyn File>>>`
+//! - `fd_flags`: `Vec<FdFlags>`
+//!
+//! 多线程访问 FDTable 时会竞争锁，但 File 对象本身（如 RegFile 的 offset）
+//! 使用原子操作，无需额外锁定。
+//!
+//! # 使用示例
+//!
+//! ## 基本操作
+//!
+//! ```rust
+//! use vfs::{FDTable, RegFile};
+//!
+//! let fd_table = FDTable::new();
+//!
+//! // 分配文件描述符
+//! let file = Arc::new(RegFile::new(dentry, OpenFlags::O_RDONLY));
+//! let fd = fd_table.alloc(file)?;
+//!
+//! // 访问文件
+//! let file = fd_table.get(fd)?;
+//! file.read(&mut buf)?;
+//!
+//! // 关闭文件描述符
+//! fd_table.close(fd)?;
+//! ```
+//!
+//! ## dup 操作
+//!
+//! ```rust
+//! // dup: 复制到最小可用 FD
+//! let new_fd = fd_table.dup(old_fd)?;
+//!
+//! // dup2: 复制到指定 FD
+//! fd_table.dup2(old_fd, new_fd)?;
+//!
+//! // dup3: dup2 + 设置标志
+//! fd_table.dup3(old_fd, new_fd, OpenFlags::O_CLOEXEC)?;
+//! ```
+//!
+//! ## 重定向示例
+//!
+//! ```rust
+//! // 将 stdout 重定向到文件
+//! let file = open_file("/tmp/output.txt", O_WRONLY | O_CREAT)?;
+//! let fd = fd_table.alloc(file)?;
+//! fd_table.dup2(fd, 1)?;  // 1 = stdout
+//! fd_table.close(fd)?;
+//! // 现在所有 println! 都会写到文件
+//! ```
 
 use crate::config::DEFAULT_MAX_FDS;
 use crate::sync::SpinLock;
