@@ -1,14 +1,87 @@
 //! Inode 抽象层 - VFS 存储层接口
 //!
-//! 定义了文件系统的底层存储接口，包括：
-//! - [`Inode`] trait：文件/目录的元数据和数据访问
-//! - [`InodeMetadata`]：文件元数据（大小、权限、时间等）
-//! - [`InodeType`]：文件类型枚举
+//! 该模块定义了文件系统的底层存储接口，提供无状态的文件和目录访问能力。
 //!
-//! # 与 File trait 的区别
+//! # 组件
 //!
-//! - **Inode**：存储层，无状态，方法带 offset 参数（如 `read_at`）
-//! - **File**：会话层，有状态，方法不带 offset 参数（如 `read`）
+//! - [`Inode`] trait：文件/目录的核心操作接口
+//! - [`InodeMetadata`]：文件元数据（大小、权限、时间戳等）
+//! - [`InodeType`]：文件类型枚举（普通文件、目录、符号链接等）
+//! - [`FileMode`]：POSIX 兼容的权限位
+//! - [`DirEntry`]：轻量级目录项（用于 readdir）
+//!
+//! # 与 File trait 的关系
+//!
+//! | 方面 | File (会话层) | Inode (存储层) |
+//! |------|---------------|----------------|
+//! | 状态 | 有状态 (offset、flags) | 无状态 |
+//! | 方法 | `read(buf)` | `read_at(offset, buf)` |
+//! | 实例 | 每次 open 创建新实例 | 多个 File 可共享同一 Inode |
+//! | 职责 | 维护会话状态 | 提供存储访问 |
+//!
+//! ## 为什么 Inode 是无状态的?
+//!
+//! 无状态设计使得：
+//! - 同一文件可被多次打开，各自维护独立的 offset
+//! - 硬链接可以共享同一个 Inode
+//! - 多线程读写时无需锁定 Inode（offset 由 File 管理）
+//!
+//! ```text
+//! File { offset: 0 }  ──┐
+//!                       ├──> Inode { data: [...] }
+//! File { offset: 100 }──┘
+//! ```
+//!
+//! # 设计要点
+//!
+//! ## 随机访问
+//!
+//! 所有读写方法都携带 `offset` 参数，支持真正的随机访问：
+//!
+//! ```rust
+//! // 可以乱序访问，不影响彼此
+//! inode.read_at(100, &mut buf1)?;  // 读取位置 100
+//! inode.read_at(0, &mut buf2)?;    // 读取位置 0
+//! ```
+//!
+//! ## 幂等性
+//!
+//! 读取操作应该是幂等的（多次调用返回相同结果）：
+//!
+//! ```rust
+//! let n1 = inode.read_at(0, &mut buf)?;
+//! let n2 = inode.read_at(0, &mut buf)?;
+//! assert_eq!(n1, n2);  // 相同的读取结果
+//! ```
+//!
+//! ## 目录操作
+//!
+//! Inode 不仅支持文件读写，还支持目录操作：
+//!
+//! - `lookup(name)` - 查找子项
+//! - `create(name)` - 创建文件
+//! - `mkdir(name)` - 创建目录
+//! - `unlink(name)` - 删除文件
+//! - `readdir()` - 列出目录内容
+//!
+//! # 使用示例
+//!
+//! ```rust
+//! use vfs::{Inode, FileMode};
+//!
+//! // 1. 读写文件
+//! let mut buf = [0u8; 512];
+//! let n = inode.read_at(0, &mut buf)?;
+//! inode.write_at(512, b"hello")?;
+//!
+//! // 2. 目录操作
+//! let child_inode = parent_inode.lookup("file.txt")?;
+//! parent_inode.create("new.txt", FileMode::S_IFREG | FileMode::S_IRUSR)?;
+//!
+//! // 3. 获取元数据
+//! let metadata = inode.metadata()?;
+//! println!("大小: {}, 类型: {:?}", metadata.size, metadata.inode_type);
+//! ```
 
 use core::any::Any;
 
@@ -222,7 +295,7 @@ pub trait Inode: Send + Sync + Any {
     fn chmod(&self, _mode: FileMode) -> Result<(), FsError>;
 }
 
-/// 为 Arc<dyn Inode> 提供向下转型辅助方法
+/// 为 `Arc<dyn Inode>` 提供向下转型辅助方法
 impl dyn Inode {
     /// 尝试向下转型为具体的 Inode 类型
     pub fn downcast_arc<T: Inode>(self: Arc<Self>) -> Result<Arc<T>, Arc<Self>> {

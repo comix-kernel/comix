@@ -1,18 +1,86 @@
 //! 文件抽象层 - VFS 会话层接口
 //!
-//! 定义了统一的文件操作接口 [`File`] trait，支持普通文件、管道、字符设备等多种文件类型。
+//! 该模块定义了统一的文件操作接口 [`File`] trait，支持普通文件、管道、字符设备等多种文件类型。
+//! 所有打开的文件以 `Arc<dyn File>` 形式存储在进程的文件描述符表中。
 //!
-//! # 架构
+//! # 架构定位
 //!
 //! VFS 采用两层设计：
-//! - **会话层**: [`File`] trait - 维护会话状态（offset、flags）
-//! - **存储层**: [`Inode`](crate::vfs::Inode) trait - 提供无状态的随机访问
+//! - **会话层**: [`File`] trait - 维护会话状态（offset、flags），有状态操作
+//! - **存储层**: [`Inode`] trait - 提供无状态的随机访问
+//!
+//! ## 为什么分离会话层和存储层?
+//!
+//! 同一个文件可以被多次打开或 dup，每次打开都需要独立的会话状态（如 offset），
+//! 但它们共享相同的底层存储（Inode）。这种设计支持：
+//!
+//! - **dup 语义**: 复制的文件描述符共享 offset
+//! - **硬链接**: 多个路径指向同一个 Inode
+//! - **fork 继承**: 父子进程共享文件表
+//!
+//! ```text
+//! 进程 A: fd[3] ──┐
+//!                 ├──> Arc<RegFile> { offset: 100 }
+//! 进程 A: fd[4] ──┘          │
+//!                            ▼
+//!                       Arc<Dentry>
+//!                            │
+//!                            ▼
+//!                       Arc<Inode> ←─── 进程 B: fd[5] -> Arc<RegFile> { offset: 200 }
+//! ```
 //!
 //! # 实现类型
 //!
-//! - [`RegFile`](crate::vfs::RegFile) - 普通文件（Regular File），基于 Inode，支持 seek
-//! - [`PipeFile`](crate::vfs::PipeFile) - 管道，流式设备，不支持 seek
-//! - [`StdinFile`](crate::vfs::StdinFile) / [`StdoutFile`](crate::vfs::StdoutFile) - 标准 I/O
+//! - [`RegFile`](crate::vfs::RegFile) - 普通文件，基于 Inode，支持 seek
+//! - [`PipeFile`](crate::vfs::PipeFile) - 管道，环形缓冲区，流式设备
+//! - [`StdinFile`](crate::vfs::StdinFile) / [`StdoutFile`](crate::vfs::StdoutFile) / [`StderrFile`](crate::vfs::StderrFile) - 标准 I/O
+//! - `CharDevFile` - 字符设备文件（串口、终端等）
+//! - `BlkDevFile` - 块设备文件（磁盘等）
+//!
+//! # 设计特点
+//!
+//! ## 可选方法
+//!
+//! File trait 中的许多方法提供了默认实现（返回 `NotSupported`），
+//! 允许不同文件类型只实现自己支持的功能：
+//!
+//! - `lseek()`: 仅 RegFile 和 BlkDevFile 支持
+//! - `get_pipe_size()`: 仅 PipeFile 支持
+//! - `ioctl()`: 仅设备文件支持
+//!
+//! ## 原子操作
+//!
+//! RegFile 使用 `AtomicUsize` 管理 offset，支持无锁并发读写：
+//!
+//! ```text
+//! 线程 1: read() -> fetch_add(n)
+//! 线程 2: read() -> fetch_add(m)  // 并发安全
+//! ```
+//!
+//! # 使用示例
+//!
+//! ```rust
+//! use vfs::{vfs_lookup, RegFile, OpenFlags, File};
+//! use alloc::sync::Arc;
+//!
+//! // 1. 创建 File 对象
+//! let dentry = vfs_lookup("/etc/passwd")?;
+//! let file: Arc<dyn File> = Arc::new(
+//!     RegFile::new(dentry, OpenFlags::O_RDONLY)
+//! );
+//!
+//! // 2. 读取数据
+//! let mut buf = [0u8; 1024];
+//! let n = file.read(&mut buf)?;
+//!
+//! // 3. 检查文件属性
+//! assert!(file.readable());
+//! assert!(!file.writable());
+//!
+//! // 4. 获取元数据
+//! let metadata = file.metadata()?;
+//! println!("文件大小: {}", metadata.size);
+//! ```
 
 use crate::uapi::fcntl::{OpenFlags, SeekWhence};
 use crate::vfs::{Dentry, FsError, Inode, InodeMetadata};
