@@ -737,8 +737,32 @@ impl Inode for Ext4Inode {
     }
 
     fn readlink(&self) -> Result<String, FsError> {
-        // TODO: 实现 ext4 符号链接读取
-        Err(FsError::NotSupported)
+        // 检查是否为符号链接
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Symlink {
+            return Err(FsError::InvalidArgument);
+        }
+
+        // 获取符号链接的大小（即目标路径的长度）
+        let size = metadata.size;
+        if size == 0 {
+            return Ok(String::new());
+        }
+
+        // 读取符号链接目标
+        // 符号链接的目标存储在inode的数据区（与普通文件相同的方式）
+        let fs = self.fs.lock();
+        let mut buf = alloc::vec![0u8; size];
+
+        let bytes_read = fs
+            .read_at(self.ino, 0, &mut buf)
+            .map_err(|_| FsError::IoError)?;
+
+        // 截断到实际读取的长度
+        buf.truncate(bytes_read);
+
+        // 转换为UTF-8字符串
+        String::from_utf8(buf).map_err(|_| FsError::InvalidArgument)
     }
 
     fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {

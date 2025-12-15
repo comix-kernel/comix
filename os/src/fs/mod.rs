@@ -1,8 +1,79 @@
-//! 文件系统模块
+//! # 文件系统模块 (FS)
 //!
-//! 包含文件系统相关的实现
-//! 包括文件系统接口、文件操作等
-//! 目前只实现了一个简单的内存文件系统
+//! 本模块提供了多种具体的文件系统实现，通过实现VFS的`FileSystem`和`Inode` trait与虚拟文件系统层集成。
+//!
+//! ## 支持的文件系统
+//!
+//! - **[tmpfs](tmpfs)**: 临时文件系统(纯内存)
+//!   - 高性能，所有数据存储在内存中
+//!   - 支持配置最大容量限制
+//!   - 适用于`/tmp`、缓存等临时存储
+//!
+//! - **[procfs](proc)**: 进程信息伪文件系统
+//!   - 动态生成进程和系统信息
+//!   - 标准Linux `/proc` 接口
+//!   - 只读，使用Generator模式
+//!
+//! - **[sysfs](sysfs)**: 系统设备伪文件系统
+//!   - 导出设备树和属性
+//!   - 标准Linux `/sys` 接口
+//!   - 使用Builder模式构建设备树
+//!
+//! - **[ext4]**: Linux Ext4文件系统
+//!   - 持久化存储支持
+//!   - 通过块设备访问
+//!   - 支持完整的读写操作
+//!
+//! - **[simple_fs]**: 简单测试文件系统
+//!   - 编译时嵌入镜像
+//!   - 快速启动，用于测试
+//!   - 只读，预加载用户程序
+//!
+//! ## 文件系统初始化流程
+//!
+//! ```no_run
+//! # use crate::fs::*;
+//! # use crate::vfs::*;
+//! // 1. 挂载根文件系统(Ext4或SimpleFS)
+//! init_ext4_from_block_device()
+//!     .or_else(|_| init_simple_fs())?;
+//!
+//! // 2. 创建必要的目录
+//! let root = vfs::get_root_dentry()?;
+//! root.inode.mkdir("dev", FileMode::S_IFDIR | FileMode::S_IRWXU)?;
+//! root.inode.mkdir("proc", FileMode::S_IFDIR | FileMode::S_IRWXU)?;
+//! root.inode.mkdir("sys", FileMode::S_IFDIR | FileMode::S_IRWXU)?;
+//! root.inode.mkdir("tmp", FileMode::S_IFDIR | FileMode::S_IRWXU)?;
+//!
+//! // 3. 挂载伪文件系统
+//! init_procfs()?;
+//! init_sysfs()?;
+//!
+//! // 4. 挂载tmpfs
+//! mount_tmpfs("/tmp", 64)?;  // 64MB
+//!
+//! // 5. 初始化设备文件
+//! init_dev()?;
+//! # Ok::<(), FsError>(())
+//! ```
+//!
+//! ## 文档参考
+//!
+//! 详细文档请参阅: `document/fs/README.md`
+//!
+//! ## 架构说明
+//!
+//! FS模块位于VFS层之下，作为VFS的具体实现：
+//!
+//! ```text
+//! 系统调用层 (sys_open, sys_read, ...)
+//!      ↓
+//! VFS抽象层 (File, Inode, FileSystem traits)
+//!      ↓
+//! FS实现层 (TmpFs, ProcFS, Ext4, ...) ← 本模块
+//!      ↓
+//! 设备层 (BlockDriver, CharDriver)
+//! ```
 pub mod ext4;
 pub mod proc;
 pub mod simple_fs;
