@@ -441,6 +441,11 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
     unsafe {
         write_to_user(wstatus, status.raw());
     }
+
+    // 如果子任务是 Zombie 状态，从 TASK_MANAGER 中释放它
+    // 这样 Task 结构体和其拥有的资源（kstack, trap_frame）才会被释放
+    TASK_MANAGER.lock().release_task(task);
+
     tid as c_int
 }
 
@@ -637,9 +642,14 @@ pub fn nanosleep(duration: *const TimeSpec, rem: *mut TimeSpec) -> c_int {
 
     let mut timer_q = TIMER_QUEUE.lock();
     timer_q.push(trigger, task.clone());
-    sleep_task_with_block(task, true);
+    sleep_task_with_block(task.clone(), true);
     drop(timer_q);
     yield_task();
+
+    // 被唤醒后（可能是超时，也可能是信号），必须确保将任务从定时器队列中清理掉
+    // 如果是超时唤醒，pop_due_task 已经移除了
+    // 如果是信号唤醒，任务还在队列中，需要手动移除以避免 Arc 泄漏
+    TIMER_QUEUE.lock().remove_task(&task);
 
     if !rem.is_null() {
         let dur = trigger.saturating_sub(get_time());
@@ -698,9 +708,12 @@ pub fn clock_nanosleep(
 
     let mut timer_q = TIMER_QUEUE.lock();
     timer_q.push(trigger, task.clone());
-    sleep_task_with_block(task, true);
+    sleep_task_with_block(task.clone(), true);
     drop(timer_q);
     yield_task();
+
+    // 同 sys_nanosleep，防止信号唤醒导致的 Arc 泄漏
+    TIMER_QUEUE.lock().remove_task(&task);
 
     if !rem.is_null() {
         let dur = trigger.saturating_sub(get_time());
