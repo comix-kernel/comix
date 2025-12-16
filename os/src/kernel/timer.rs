@@ -64,10 +64,13 @@ impl TimerQueue {
     /// # 返回值:
     /// - 被移除的任务（如果存在）
     pub fn remove_task(&mut self, task: &SharedTask) -> Option<SharedTask> {
-        let key = self
-            .queue
-            .iter()
-            .find_map(|(time, t)| if Arc::ptr_eq(task, t) { Some(*time) } else { None })?;
+        let key = self.queue.iter().find_map(|(time, t)| {
+            if Arc::ptr_eq(task, t) {
+                Some(*time)
+            } else {
+                None
+            }
+        })?;
         self.queue.remove(&key)
     }
 }
