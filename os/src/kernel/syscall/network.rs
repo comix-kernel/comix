@@ -11,12 +11,14 @@ use crate::{
         interface::NETWORK_INTERFACE_MANAGER,
         socket::{
             SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket,
-            parse_sockaddr_in, write_sockaddr_in,
+            get_socket_handle, parse_sockaddr_in, register_socket_fd, unregister_socket_fd,
+            write_sockaddr_in,
         },
     },
     println,
 };
 use alloc::sync::Arc;
+use smoltcp::socket::{tcp, udp};
 
 /// 获取网络接口列表
 pub fn get_network_interfaces() -> isize {
@@ -102,7 +104,10 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
 
     match task.lock().fd_table.alloc(socket_file) {
-        Ok(fd) => fd as isize,
+        Ok(fd) => {
+            register_socket_fd(task.lock().tid, fd, handle);
+            fd as isize
+        }
         Err(_) => -24, // EMFILE
     }
 }
@@ -115,15 +120,33 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         sstatus::clear_sum();
         match ep {
             Ok(e) => e,
-            Err(_) => return -22,
+            Err(_) => return -22, // EINVAL
         }
     };
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let file = match task.lock().fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => return -9,
+    let tid = task.lock().tid;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
     };
+
+    let mut sockets = SOCKET_SET.lock();
+    match handle {
+        SocketHandle::Tcp(h) => {
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            if socket.listen(endpoint).is_err() {
+                return -98; // EADDRINUSE
+            }
+        }
+        SocketHandle::Udp(h) => {
+            let socket = sockets.get_mut::<udp::Socket>(h);
+            if socket.bind(endpoint).is_err() {
+                return -98; // EADDRINUSE
+            }
+        }
+    }
 
     0
 }
@@ -131,28 +154,71 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 /// 监听连接
 pub fn listen(sockfd: i32, _backlog: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => 0,
-        Err(_) => -9,
+    let tid = task.lock().tid;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    match handle {
+        SocketHandle::Tcp(_) => 0,
+        SocketHandle::Udp(_) => -95, // EOPNOTSUPP - UDP doesn't support listen
     }
 }
 
 /// 接受连接
-pub fn accept(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
+pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => {}
-        Err(_) => return -9,
+    let tid = task.lock().tid;
+
+    let listen_handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(SocketHandle::Tcp(h)) => h,
+        Some(SocketHandle::Udp(_)) => return -95, // EOPNOTSUPP
+        None => return -88,                       // ENOTSOCK
     };
 
-    let handle = match create_tcp_socket() {
+    let mut sockets = SOCKET_SET.lock();
+    let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
+
+    if !listen_socket.is_listening() {
+        return -22; // EINVAL - not in listening state
+    }
+
+    if !listen_socket.is_active() {
+        return -11; // EAGAIN - no pending connection
+    }
+
+    // Get remote endpoint before accepting
+    let remote_endpoint = match listen_socket.remote_endpoint() {
+        Some(ep) => ep,
+        None => return -11, // EAGAIN
+    };
+
+    drop(sockets);
+
+    // Create new socket for the accepted connection
+    let new_handle = match create_tcp_socket() {
         Ok(h) => h,
         Err(_) => return -12, // ENOMEM
     };
-    let socket_file = Arc::new(SocketFile::new(handle));
+
+    // Write address info if requested
+    if !addr.is_null() && !addrlen.is_null() {
+        unsafe {
+            sstatus::set_sum();
+            let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
+            sstatus::clear_sum();
+        }
+    }
+
+    let socket_file = Arc::new(SocketFile::new(new_handle));
     match task.lock().fd_table.alloc(socket_file) {
-        Ok(fd) => fd as isize,
-        Err(_) => -24,
+        Ok(fd) => {
+            register_socket_fd(tid, fd, new_handle);
+            fd as isize
+        }
+        Err(_) => -24, // EMFILE
     }
 }
 
@@ -220,6 +286,10 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
 /// 关闭套接字
 pub fn close_sock(sockfd: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
+
+    unregister_socket_fd(tid, sockfd as usize);
+
     match task.lock().fd_table.close(sockfd as usize) {
         Ok(_) => 0,
         Err(_) => -9,

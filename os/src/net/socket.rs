@@ -14,8 +14,12 @@ pub enum SocketHandle {
     Udp(SmoltcpHandle),
 }
 
+use alloc::collections::BTreeMap;
+
 lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
+    /// Map from fd to socket handle for syscall operations
+    pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
 }
 
 pub struct SocketFile {
@@ -30,6 +34,35 @@ impl SocketFile {
     pub fn handle(&self) -> SocketHandle {
         self.handle
     }
+}
+
+impl Drop for SocketFile {
+    fn drop(&mut self) {
+        let mut sockets = SOCKET_SET.lock();
+        match self.handle {
+            SocketHandle::Tcp(h) => {
+                sockets.remove(h);
+            }
+            SocketHandle::Udp(h) => {
+                sockets.remove(h);
+            }
+        }
+    }
+}
+
+/// Register a socket fd mapping (tid, fd) -> handle
+pub fn register_socket_fd(tid: usize, fd: usize, handle: SocketHandle) {
+    FD_SOCKET_MAP.lock().insert((tid, fd), handle);
+}
+
+/// Unregister a socket fd mapping
+pub fn unregister_socket_fd(tid: usize, fd: usize) {
+    FD_SOCKET_MAP.lock().remove(&(tid, fd));
+}
+
+/// Get socket handle from (tid, fd)
+pub fn get_socket_handle(tid: usize, fd: usize) -> Option<SocketHandle> {
+    FD_SOCKET_MAP.lock().get(&(tid, fd)).copied()
 }
 
 impl File for SocketFile {
@@ -81,18 +114,43 @@ impl File for SocketFile {
 }
 
 pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
-    let rx_buffer = tcp::SocketBuffer::new(vec![0; 4096]);
-    let tx_buffer = tcp::SocketBuffer::new(vec![0; 4096]);
+    // Allocate buffers with fallible allocation
+    let mut rx_vec = alloc::vec::Vec::new();
+    rx_vec.try_reserve(4096).map_err(|_| ())?;
+    rx_vec.resize(4096, 0);
+
+    let mut tx_vec = alloc::vec::Vec::new();
+    tx_vec.try_reserve(4096).map_err(|_| ())?;
+    tx_vec.resize(4096, 0);
+
+    let rx_buffer = tcp::SocketBuffer::new(rx_vec);
+    let tx_buffer = tcp::SocketBuffer::new(tx_vec);
     let socket = tcp::Socket::new(rx_buffer, tx_buffer);
     let handle = SOCKET_SET.lock().add(socket);
     Ok(SocketHandle::Tcp(handle))
 }
 
 pub fn create_udp_socket() -> Result<SocketHandle, ()> {
-    let rx_meta = udp::PacketMetadata::EMPTY;
-    let tx_meta = udp::PacketMetadata::EMPTY;
-    let rx_buffer = udp::PacketBuffer::new(vec![rx_meta; 4], vec![0; 4096]);
-    let tx_buffer = udp::PacketBuffer::new(vec![tx_meta; 4], vec![0; 4096]);
+    // Allocate metadata buffers
+    let mut rx_meta_vec = alloc::vec::Vec::new();
+    rx_meta_vec.try_reserve(4).map_err(|_| ())?;
+    rx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
+
+    let mut tx_meta_vec = alloc::vec::Vec::new();
+    tx_meta_vec.try_reserve(4).map_err(|_| ())?;
+    tx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
+
+    // Allocate data buffers
+    let mut rx_data_vec = alloc::vec::Vec::new();
+    rx_data_vec.try_reserve(4096).map_err(|_| ())?;
+    rx_data_vec.resize(4096, 0);
+
+    let mut tx_data_vec = alloc::vec::Vec::new();
+    tx_data_vec.try_reserve(4096).map_err(|_| ())?;
+    tx_data_vec.resize(4096, 0);
+
+    let rx_buffer = udp::PacketBuffer::new(rx_meta_vec, rx_data_vec);
+    let tx_buffer = udp::PacketBuffer::new(tx_meta_vec, tx_data_vec);
     let socket = udp::Socket::new(rx_buffer, tx_buffer);
     let handle = SOCKET_SET.lock().add(socket);
     Ok(SocketHandle::Udp(handle))
