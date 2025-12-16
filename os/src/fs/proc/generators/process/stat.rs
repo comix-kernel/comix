@@ -1,25 +1,27 @@
-use alloc::{format, vec::Vec};
+use alloc::{format, vec::Vec, sync::Weak};
 
 use crate::{
     fs::proc::ContentGenerator,
-    kernel::{SharedTask, TaskState},
+    kernel::{TaskStruct, TaskState},
+    sync::SpinLock,
     vfs::FsError,
 };
 
 /// 为指定任务生成 /proc/\[pid\]/stat 内容的生成器
 pub struct StatGenerator {
-    task: SharedTask,
+    task: Weak<SpinLock<TaskStruct>>,
 }
 
 impl StatGenerator {
-    pub fn new(task: SharedTask) -> Self {
+    pub fn new(task: Weak<SpinLock<TaskStruct>>) -> Self {
         Self { task }
     }
 }
 
 impl ContentGenerator for StatGenerator {
     fn generate(&self) -> Result<Vec<u8>, FsError> {
-        let task = self.task.lock();
+        let task_arc = self.task.upgrade().ok_or(FsError::NotFound)?;
+        let task = task_arc.lock();
 
         // 状态字符
         let state_char = match task.state {
