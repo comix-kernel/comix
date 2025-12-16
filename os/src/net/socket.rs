@@ -15,6 +15,7 @@ pub enum SocketHandle {
 }
 
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
 
 lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
