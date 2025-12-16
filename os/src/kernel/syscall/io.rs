@@ -477,9 +477,9 @@ pub const POLLHUP: i16 = 0x0010;
 pub const POLLNVAL: i16 = 0x0020;
 
 /// ppoll - poll 的变体，支持信号掩码
-pub fn ppoll(fds: usize, nfds: usize, _timeout: usize, _sigmask: usize) -> isize {
+pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::kernel::current_cpu;
+    use crate::kernel::{current_cpu, yield_task};
     use crate::uapi::errno::EINVAL;
 
     if fds == 0 || nfds == 0 {
@@ -491,35 +491,67 @@ pub fn ppoll(fds: usize, nfds: usize, _timeout: usize, _sigmask: usize) -> isize
 
     let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
 
-    let mut ready_count = 0;
-    for pollfd in pollfds.iter_mut() {
-        pollfd.revents = 0;
-
-        if pollfd.fd < 0 {
-            continue;
+    // Parse timeout: null pointer means infinite, otherwise it's a timespec
+    let timeout_ms = if timeout == 0 {
+        None // Infinite timeout
+    } else {
+        unsafe {
+            let timespec = timeout as *const crate::uapi::time::TimeSpec;
+            if (*timespec).tv_sec < 0 {
+                None // Negative means infinite
+            } else {
+                Some(((*timespec).tv_sec as u64 * 1000) + ((*timespec).tv_nsec as u64 / 1_000_000))
+            }
         }
+    };
 
-        let file = match task.lock().fd_table.get(pollfd.fd as usize) {
-            Ok(f) => f,
-            Err(_) => {
-                pollfd.revents = POLLNVAL;
-                ready_count += 1;
+    let start_time = crate::arch::timer::get_time_ms();
+
+    loop {
+        let mut ready_count = 0;
+
+        for pollfd in pollfds.iter_mut() {
+            pollfd.revents = 0;
+
+            if pollfd.fd < 0 {
                 continue;
             }
-        };
 
-        if (pollfd.events & POLLIN) != 0 && file.readable() {
-            pollfd.revents |= POLLIN;
+            let file = match task.lock().fd_table.get(pollfd.fd as usize) {
+                Ok(f) => f,
+                Err(_) => {
+                    pollfd.revents = POLLNVAL;
+                    ready_count += 1;
+                    continue;
+                }
+            };
+
+            if (pollfd.events & POLLIN) != 0 && file.readable() {
+                pollfd.revents |= POLLIN;
+            }
+
+            if (pollfd.events & POLLOUT) != 0 && file.writable() {
+                pollfd.revents |= POLLOUT;
+            }
+
+            if pollfd.revents != 0 {
+                ready_count += 1;
+            }
         }
 
-        if (pollfd.events & POLLOUT) != 0 && file.writable() {
-            pollfd.revents |= POLLOUT;
+        if ready_count > 0 {
+            return ready_count;
         }
 
-        if pollfd.revents != 0 {
-            ready_count += 1;
+        // Check timeout
+        if let Some(timeout_ms) = timeout_ms {
+            let elapsed = crate::arch::timer::get_time_ms() - start_time;
+            if elapsed >= timeout_ms as usize {
+                return 0; // Timeout
+            }
         }
+
+        // Yield to other tasks
+        yield_task();
     }
-
-    ready_count
 }
