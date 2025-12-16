@@ -480,7 +480,7 @@ pub const POLLNVAL: i16 = 0x0020;
 pub fn ppoll(fds: usize, nfds: usize, _timeout: usize, _sigmask: usize) -> isize {
     use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
-    use crate::uapi::errno::{EFAULT, EINVAL};
+    use crate::uapi::errno::EINVAL;
 
     if fds == 0 || nfds == 0 {
         return -(EINVAL as isize);
@@ -510,11 +510,13 @@ pub fn ppoll(fds: usize, nfds: usize, _timeout: usize, _sigmask: usize) -> isize
 
         if (pollfd.events & POLLIN) != 0 && file.readable() {
             pollfd.revents |= POLLIN;
-            ready_count += 1;
         }
 
         if (pollfd.events & POLLOUT) != 0 && file.writable() {
             pollfd.revents |= POLLOUT;
+        }
+
+        if pollfd.revents != 0 {
             ready_count += 1;
         }
     }

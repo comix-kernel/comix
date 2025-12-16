@@ -224,21 +224,45 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    let _endpoint = unsafe {
+    let endpoint = unsafe {
         sstatus::set_sum();
         let ep = parse_sockaddr_in(addr, addrlen);
         sstatus::clear_sum();
         match ep {
             Ok(e) => e,
-            Err(_) => return -22,
+            Err(_) => return -22, // EINVAL
         }
     };
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => 0,
-        Err(_) => -9,
+    let tid = task.lock().tid;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+
+    match handle {
+        SocketHandle::Tcp(h) => {
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            if socket.connect(endpoint, 49152).is_err() {
+                return -111; // ECONNREFUSED
+            }
+        }
+        SocketHandle::Udp(_) => {
+            // UDP connect just sets the remote endpoint
+            use crate::net::socket::set_socket_remote_endpoint;
+            let _ = set_socket_remote_endpoint(&file, endpoint);
+        }
     }
+
+    0
 }
 
 /// 发送数据
@@ -427,10 +451,44 @@ pub fn sendto(
     buf: *const u8,
     len: usize,
     _flags: i32,
-    _dest_addr: *const u8,
-    _addrlen: u32,
+    dest_addr: *const u8,
+    addrlen: u32,
 ) -> isize {
-    send(sockfd, buf, len, 0)
+    // If dest_addr is null, behave like send()
+    if dest_addr.is_null() {
+        return send(sockfd, buf, len, 0);
+    }
+
+    let endpoint = unsafe {
+        sstatus::set_sum();
+        let ep = parse_sockaddr_in(dest_addr, addrlen);
+        sstatus::clear_sum();
+        match ep {
+            Ok(e) => e,
+            Err(_) => return -22, // EINVAL
+        }
+    };
+
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    use crate::net::socket::socket_sendto;
+    match socket_sendto(handle, data, endpoint) {
+        Ok(n) => n as isize,
+        Err(e) => e.to_errno(),
+    }
 }
 
 // Linux 标准: ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
