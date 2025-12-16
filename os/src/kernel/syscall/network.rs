@@ -87,11 +87,16 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     } // EAFNOSUPPORT
 
     let handle = match socket_type {
-        1 => create_tcp_socket(),
-        2 => create_udp_socket(),
+        1 => match create_tcp_socket() {
+            Ok(h) => h,
+            Err(_) => return -12, // ENOMEM
+        },
+        2 => match create_udp_socket() {
+            Ok(h) => h,
+            Err(_) => return -12, // ENOMEM
+        },
         _ => return -94, // ESOCKTNOSUPPORT
-    }
-    .unwrap();
+    };
 
     let socket_file = Arc::new(SocketFile::new(handle));
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
@@ -140,7 +145,10 @@ pub fn accept(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
         Err(_) => return -9,
     };
 
-    let handle = create_tcp_socket().unwrap();
+    let handle = match create_tcp_socket() {
+        Ok(h) => h,
+        Err(_) => return -12, // ENOMEM
+    };
     let socket_file = Arc::new(SocketFile::new(handle));
     match task.lock().fd_table.alloc(socket_file) {
         Ok(fd) => fd as isize,
