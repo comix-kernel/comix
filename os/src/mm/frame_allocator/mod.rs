@@ -125,6 +125,18 @@ pub fn get_free_frames() -> usize {
     FRAME_ALLOCATOR.lock().free_frames()
 }
 
+/// 获取帧分配器的当前状态
+///
+/// # 返回值
+/// - 当前分配指针的 Ppn
+/// - 物理帧的结束 Ppn (不包含)
+/// - 回收栈的长度
+/// - 已分配的帧数
+/// - 空闲的帧数
+pub fn get_stats() -> (usize, usize, usize, usize, usize) {
+    FRAME_ALLOCATOR.lock().get_stats()
+}
+
 #[cfg(test)]
 mod frame_allocator_tests {
     use super::*;
