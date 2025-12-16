@@ -328,4 +328,21 @@ impl FrameAllocator {
         let allocated = self.allocated_frames();
         total - allocated
     }
+
+    /// 获取帧分配器的当前状态
+    /// # 返回值
+    /// - 当前分配指针的 Ppn
+    /// - 物理帧的结束 Ppn (不包含)
+    /// - 回收栈的长度
+    /// - 已分配的帧数
+    /// - 空闲的帧数
+    pub fn get_stats(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.cur.as_usize(),
+            self.end.as_usize(),
+            self.recycled.len(),
+            self.allocated_frames(),
+            self.free_frames(),
+        )
+    }
 }

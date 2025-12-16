@@ -201,7 +201,7 @@ impl ProcInode {
         // 创建 status 文件
         let status = Self::new_dynamic_file(
             "status",
-            Arc::new(StatusGenerator::new(task.clone())),
+            Arc::new(StatusGenerator::new(Arc::downgrade(&task))),
             FileMode::from_bits_truncate(0o444),
         );
         let _ = proc_dir.add_child("status", status);
@@ -209,7 +209,7 @@ impl ProcInode {
         // 创建 stat 文件
         let stat = Self::new_dynamic_file(
             "stat",
-            Arc::new(StatGenerator::new(task.clone())),
+            Arc::new(StatGenerator::new(Arc::downgrade(&task))),
             FileMode::from_bits_truncate(0o444),
         );
         let _ = proc_dir.add_child("stat", stat);
@@ -217,7 +217,7 @@ impl ProcInode {
         // 创建 cmdline 文件
         let cmdline = Self::new_dynamic_file(
             "cmdline",
-            Arc::new(CmdlineGenerator::new(task)),
+            Arc::new(CmdlineGenerator::new(Arc::downgrade(&task))),
             FileMode::from_bits_truncate(0o444),
         );
         let _ = proc_dir.add_child("cmdline", cmdline);
