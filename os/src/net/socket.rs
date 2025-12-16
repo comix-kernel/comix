@@ -1,19 +1,18 @@
 //! Socket implementation using smoltcp
 
-use alloc::vec;
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
-use smoltcp::iface::{SocketSet, SocketHandle as SmoltcpHandle};
-use smoltcp::socket::{tcp, udp};
-use smoltcp::wire::{IpEndpoint, IpAddress, Ipv4Address};
+use alloc::vec;
 use lazy_static::lazy_static;
+use smoltcp::iface::{SocketHandle as SmoltcpHandle, SocketSet};
+use smoltcp::socket::{tcp, udp};
+use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
 #[derive(Clone, Copy)]
 pub enum SocketHandle {
     Tcp(SmoltcpHandle),
     Udp(SmoltcpHandle),
 }
-
 
 lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
@@ -34,8 +33,12 @@ impl SocketFile {
 }
 
 impl File for SocketFile {
-    fn readable(&self) -> bool { true }
-    fn writable(&self) -> bool { true }
+    fn readable(&self) -> bool {
+        true
+    }
+    fn writable(&self) -> bool {
+        true
+    }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
         let mut sockets = SOCKET_SET.lock();
@@ -46,7 +49,10 @@ impl File for SocketFile {
             }
             SocketHandle::Udp(h) => {
                 let socket = sockets.get_mut::<udp::Socket>(h);
-                socket.recv_slice(buf).map(|(n, _)| n).map_err(|_| FsError::WouldBlock)
+                socket
+                    .recv_slice(buf)
+                    .map(|(n, _)| n)
+                    .map_err(|_| FsError::WouldBlock)
             }
         }
     }
@@ -61,7 +67,9 @@ impl File for SocketFile {
             SocketHandle::Udp(h) => {
                 let socket = sockets.get_mut::<udp::Socket>(h);
                 let endpoint = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0);
-                socket.send_slice(buf, endpoint).map_err(|_| FsError::WouldBlock)?;
+                socket
+                    .send_slice(buf, endpoint)
+                    .map_err(|_| FsError::WouldBlock)?;
                 Ok(buf.len())
             }
         }
@@ -71,9 +79,6 @@ impl File for SocketFile {
         Err(FsError::NotSupported)
     }
 }
-
-
-
 
 pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
     let rx_buffer = tcp::SocketBuffer::new(vec![0; 4096]);
@@ -101,7 +106,8 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
 
     unsafe {
         let family = *(addr as *const u16);
-        if family != 2 {  // AF_INET
+        if family != 2 {
+            // AF_INET
             return Err(());
         }
 
@@ -126,7 +132,7 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
         }
 
         // family
-        *(addr as *mut u16) = 2;  // AF_INET
+        *(addr as *mut u16) = 2; // AF_INET
 
         // port
         *(addr.add(2) as *mut u16) = endpoint.port.to_be();
