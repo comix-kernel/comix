@@ -452,7 +452,8 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
 
     // 如果子任务是 Zombie 状态，从 TASK_MANAGER 中释放它
     // 这样 Task 结构体和其拥有的资源（kstack, trap_frame）才会被释放
-    if state == TaskState::Zombie {
+    // 当 wait4 使用 WNOWAIT 标志调用时，它不应该回收子进程
+    if state == TaskState::Zombie && !opt.contains(WaitFlags::NOWAIT) {
         // [FIX] 从父进程的 children 列表中移除该任务
         // 之前只从 wait_child 移除了，导致 children 列表一直持有引用，造成泄漏
         // XX: 这是否是必要的修复?
