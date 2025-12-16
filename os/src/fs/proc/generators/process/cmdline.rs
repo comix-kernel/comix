@@ -1,4 +1,4 @@
-use alloc::{vec::Vec, sync::Weak};
+use alloc::{sync::Weak, vec::Vec};
 
 use crate::{fs::proc::ContentGenerator, kernel::TaskStruct, sync::SpinLock, vfs::FsError};
 

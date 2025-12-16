@@ -1127,16 +1127,25 @@ fn do_execve_switch(
         let envp_refs: Vec<&str> = envp.iter().map(|s| s.as_str()).collect();
 
         let mut t = task.lock();
-        t.execve(space.clone(), entry, sp, argv_refs.as_slice(), envp_refs.as_slice(), phdr_addr, phnum, phent);
+        t.execve(
+            space.clone(),
+            entry,
+            sp,
+            argv_refs.as_slice(),
+            envp_refs.as_slice(),
+            phdr_addr,
+            phnum,
+            phent,
+        );
     } // argv_refs/envp_refs dropped here, ending borrow of argv/envp
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
-    
+
     // Explicitly drop all owned resources before diverging
     drop(argv);
     drop(envp);
     drop(space); // Drop the Arc<MemorySpace> passed in
-    drop(task);  // Drop current task ref
+    drop(task); // Drop current task ref
 
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态

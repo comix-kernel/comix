@@ -1,8 +1,8 @@
-use alloc::{format, vec::Vec, sync::Weak};
+use alloc::{format, sync::Weak, vec::Vec};
 
 use crate::{
     fs::proc::ContentGenerator,
-    kernel::{TaskStruct, TaskState},
+    kernel::{TaskState, TaskStruct},
     sync::SpinLock,
     vfs::FsError,
 };
