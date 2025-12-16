@@ -106,7 +106,24 @@ pub fn notify_parent(task: SharedTask) {
 
     let t = TASK_MANAGER.lock();
     if let Some(p) = t.get_task(ppid) {
-        t.send_signal(p, NUM_SIGCHLD);
+        // 1. 发送信号 (Wake up signal path)
+        // 注意：send_signal 会短暂获取 p 锁
+        t.send_signal(p.clone(), NUM_SIGCHLD);
+        
+        // 2. 唤醒等待队列 (WaitQueue path)
+        // 必须显式唤醒，因为 sys_wait4 等待在 wait_child 上
+        // 这里的关键是不能持有 p 锁调用 wake_up，否则死锁 (Recursive Parent Lock)
+        let wait_child = p.lock().wait_child.clone();
+        // 释放 p 锁 (t lock 也在 get_task 后如果 drop? 不，t held here)
+        // t is TASK_MANAGER lock. p.lock() is Parent lock.
+        // We hold TM lock. We hold Parent lock (briefly).
+        // Then we hold WaitQueue lock.
+        // wait_child.lock().wake_up_one() -> Locks Scheduler -> Locks Parent.
+        // If we hold TM lock: TM -> WaitQueue -> Parent.
+        // Is Parent -> TM possible? No.
+        
+        // So this is safe.
+        wait_child.lock().wake_up_one();
     } else {
         // Parent not found (e.g. init process exiting), ignore
         let pid = task.lock().pid;

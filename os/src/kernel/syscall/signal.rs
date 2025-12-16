@@ -424,6 +424,7 @@ fn wait_for_signal(
                 yield_task();
                 t = task.lock();
             }
+            TIMER_QUEUE.lock().remove_task(&task);
             let flag = t
                 .pending
                 .first_deliverable_signal(signal)
