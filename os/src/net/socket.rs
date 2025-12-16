@@ -78,6 +78,11 @@ pub fn get_socket_handle(tid: usize, fd: usize) -> Option<SocketHandle> {
     FD_SOCKET_MAP.lock().get(&(tid, fd)).copied()
 }
 
+/// Update socket handle for an existing fd (used in accept)
+pub fn update_socket_handle(tid: usize, fd: usize, handle: SocketHandle) {
+    FD_SOCKET_MAP.lock().insert((tid, fd), handle);
+}
+
 /// Set remote endpoint for a socket
 pub fn set_socket_remote_endpoint(
     file: &Arc<dyn crate::vfs::File>,
@@ -112,10 +117,30 @@ pub fn socket_sendto(
 
 impl File for SocketFile {
     fn readable(&self) -> bool {
-        true
+        let mut sockets = SOCKET_SET.lock();
+        match self.handle {
+            SocketHandle::Tcp(h) => {
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                socket.can_recv()
+            }
+            SocketHandle::Udp(h) => {
+                let socket = sockets.get_mut::<udp::Socket>(h);
+                socket.can_recv()
+            }
+        }
     }
     fn writable(&self) -> bool {
-        true
+        let mut sockets = SOCKET_SET.lock();
+        match self.handle {
+            SocketHandle::Tcp(h) => {
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                socket.can_send()
+            }
+            SocketHandle::Udp(h) => {
+                let socket = sockets.get_mut::<udp::Socket>(h);
+                socket.can_send()
+            }
+        }
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {

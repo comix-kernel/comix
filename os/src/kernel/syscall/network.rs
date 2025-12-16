@@ -189,19 +189,36 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         return -11; // EAGAIN - no pending connection
     }
 
-    // Get remote endpoint before accepting
+    // Get remote endpoint and local endpoint
     let remote_endpoint = match listen_socket.remote_endpoint() {
         Some(ep) => ep,
         None => return -11, // EAGAIN
     };
+    let local_endpoint = listen_socket.local_endpoint().unwrap();
+
+    // Create new listening socket to replace the old one
+    let new_listen_handle = match create_tcp_socket() {
+        Ok(SocketHandle::Tcp(h)) => h,
+        _ => return -12, // ENOMEM
+    };
+
+    // Set new socket to listen on the same address
+    let new_listen_socket = sockets.get_mut::<tcp::Socket>(new_listen_handle);
+    if new_listen_socket.listen(local_endpoint).is_err() {
+        sockets.remove(new_listen_handle);
+        return -12; // ENOMEM or other error
+    }
+
+    // The old listen_handle is now the established connection
+    // Update the mapping to point to the new listening socket
+    use crate::net::socket::update_socket_handle;
+    update_socket_handle(
+        tid as usize,
+        sockfd as usize,
+        SocketHandle::Tcp(new_listen_handle),
+    );
 
     drop(sockets);
-
-    // Create new socket for the accepted connection
-    let new_handle = match create_tcp_socket() {
-        Ok(h) => h,
-        Err(_) => return -12, // ENOMEM
-    };
 
     // Write address info if requested
     if !addr.is_null() && !addrlen.is_null() {
@@ -212,10 +229,12 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         }
     }
 
-    let socket_file = Arc::new(SocketFile::new(new_handle));
+    // Return the established connection as a new fd
+    let conn_handle = SocketHandle::Tcp(listen_handle);
+    let socket_file = Arc::new(SocketFile::new(conn_handle));
     match task.lock().fd_table.alloc(socket_file) {
         Ok(fd) => {
-            register_socket_fd(tid as usize, fd, new_handle);
+            register_socket_fd(tid as usize, fd, conn_handle);
             fd as isize
         }
         Err(_) => -24, // EMFILE
