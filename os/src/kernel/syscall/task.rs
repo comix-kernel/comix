@@ -200,7 +200,7 @@ pub fn clone(
         )
     };
 
-    let kstack_tracker = alloc_contig_frames(16).expect("fork: alloc kstack failed.");
+    let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
     let child_task = TaskStruct::utask_create(
         tid,
@@ -289,7 +289,7 @@ pub fn execve(
                 if let Some(arg) = args {
                     new_argv.push(arg.to_string());
                 }
-                new_argv.push(path_str);
+                new_argv.push(path_str.clone()); // Clone path_str instead of moving
                 new_argv.extend(argv_strings.iter().skip(1).cloned());
                 let data = match crate::vfs::vfs_load_elf(path) {
                     Ok(d) => d,
@@ -305,9 +305,9 @@ pub fn execve(
             (data, argv_strings, envp_strings)
         };
 
-    // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
-    let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
-    let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
+    // // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
+    // let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
+    // let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
 
     // 解析 ELF 并准备新的地址空间（但不切换）
     let (space, entry, sp, phdr_addr, phnum, phent) = match do_execve_prepare(&data) {
@@ -322,13 +322,16 @@ pub fn execve(
     );
     drop(data);
 
+    // Explicitly drop other stack resources
+    drop(path_str);
+
     // 切换到新的地址空间并恢复到用户态（此函数不会返回）
     do_execve_switch(
         space,
         entry,
         sp,
-        argv_refs.as_slice(),
-        envp_refs.as_slice(),
+        argv_strings, // Pass ownership
+        envp_strings, // Pass ownership
         phdr_addr,
         phnum,
         phent,
@@ -412,7 +415,12 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
                     return 0;
                 }
             }
-            t.wait_child.lock().add_task(cur_task.clone());
+            {
+                let mut wc = t.wait_child.lock();
+                if !wc.contains(&cur_task) {
+                    wc.add_task(cur_task.clone());
+                }
+            }
             sleep_task_with_guard_and_block(&mut t, cur_task.clone(), true);
         }
         // 在没有持有任何锁的情况下调用调度相关操作
@@ -441,6 +449,29 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
     unsafe {
         write_to_user(wstatus, status.raw());
     }
+
+    // 如果子任务是 Zombie 状态，从 TASK_MANAGER 中释放它
+    // 这样 Task 结构体和其拥有的资源（kstack, trap_frame）才会被释放
+    // 当 wait4 使用 WNOWAIT 标志调用时，它不应该回收子进程
+    if state == TaskState::Zombie && !opt.contains(WaitFlags::NOWAIT) {
+        // [FIX] 从父进程的 children 列表中移除该任务
+        // 之前只从 wait_child 移除了，导致 children 列表一直持有引用，造成泄漏
+        // XX: 这是否是必要的修复?
+        {
+            let parent = current_task();
+            let p_lock = parent.lock();
+            let mut children = p_lock.children.lock();
+            let old_len = children.len();
+            children.retain(|c| c.lock().tid != tid);
+            crate::earlyprintln!(
+                "[wait4] Removed from parent.children: {} -> {}",
+                old_len,
+                children.len()
+            );
+        }
+        TASK_MANAGER.lock().release_task(task);
+    }
+
     tid as c_int
 }
 
@@ -637,9 +668,14 @@ pub fn nanosleep(duration: *const TimeSpec, rem: *mut TimeSpec) -> c_int {
 
     let mut timer_q = TIMER_QUEUE.lock();
     timer_q.push(trigger, task.clone());
-    sleep_task_with_block(task, true);
+    sleep_task_with_block(task.clone(), true);
     drop(timer_q);
     yield_task();
+
+    // 被唤醒后（可能是超时，也可能是信号），必须确保将任务从定时器队列中清理掉
+    // 如果是超时唤醒，pop_due_task 已经移除了
+    // 如果是信号唤醒，任务还在队列中，需要手动移除以避免 Arc 泄漏
+    TIMER_QUEUE.lock().remove_task(&task);
 
     if !rem.is_null() {
         let dur = trigger.saturating_sub(get_time());
@@ -698,9 +734,12 @@ pub fn clock_nanosleep(
 
     let mut timer_q = TIMER_QUEUE.lock();
     timer_q.push(trigger, task.clone());
-    sleep_task_with_block(task, true);
+    sleep_task_with_block(task.clone(), true);
     drop(timer_q);
     yield_task();
+
+    // 同 sys_nanosleep，防止信号唤醒导致的 Arc 泄漏
+    TIMER_QUEUE.lock().remove_task(&task);
 
     if !rem.is_null() {
         let dur = trigger.saturating_sub(get_time());
@@ -1068,8 +1107,8 @@ fn do_execve_switch(
     space: Arc<SpinLock<MemorySpace>>,
     entry: usize,
     sp: usize,
-    argv: &[&str],
-    envp: &[&str],
+    argv: Vec<alloc::string::String>,
+    envp: Vec<alloc::string::String>,
     phdr_addr: usize,
     phnum: usize,
     phent: usize,
@@ -1082,12 +1121,33 @@ fn do_execve_switch(
     current_cpu().lock().switch_space(space.clone());
 
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
+    // 注意：space 被 clone 进了 execve，所以这里的 space 变量仍然有效
     {
+        // 构造 &str 切片供 execve 使用 (Inner scope to ensure borrows end)
+        let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+        let envp_refs: Vec<&str> = envp.iter().map(|s| s.as_str()).collect();
+
         let mut t = task.lock();
-        t.execve(space, entry, sp, argv, envp, phdr_addr, phnum, phent);
-    }
+        t.execve(
+            space.clone(),
+            entry,
+            sp,
+            argv_refs.as_slice(),
+            envp_refs.as_slice(),
+            phdr_addr,
+            phnum,
+            phent,
+        );
+    } // argv_refs/envp_refs dropped here, ending borrow of argv/envp
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+
+    // Explicitly drop all owned resources before diverging
+    drop(argv);
+    drop(envp);
+    drop(space); // Drop the Arc<MemorySpace> passed in
+    drop(task); // Drop current task ref
+
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态
     unsafe {

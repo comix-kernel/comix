@@ -4,7 +4,7 @@
 
 use core::ptr;
 
-use alloc::collections::btree_map::BTreeMap;
+use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 
 use crate::{kernel::SharedTask, sync::SpinLock, vfs::TimeSpec};
 
@@ -37,7 +37,10 @@ impl TimerQueue {
     /// # 参数:
     /// - `trigger_time`: 任务触发的时间点
     /// - `task`: 需要执行的任务
-    pub fn push(&mut self, trigger_time: usize, task: SharedTask) {
+    pub fn push(&mut self, mut trigger_time: usize, task: SharedTask) {
+        while self.queue.contains_key(&trigger_time) {
+            trigger_time += 1;
+        }
         self.queue.insert(trigger_time, task);
     }
 
@@ -61,10 +64,13 @@ impl TimerQueue {
     /// # 返回值:
     /// - 被移除的任务（如果存在）
     pub fn remove_task(&mut self, task: &SharedTask) -> Option<SharedTask> {
-        let key = self
-            .queue
-            .iter()
-            .find_map(|(time, t)| if ptr::eq(task, t) { Some(*time) } else { None })?;
+        let key = self.queue.iter().find_map(|(time, t)| {
+            if Arc::ptr_eq(task, t) {
+                Some(*time)
+            } else {
+                None
+            }
+        })?;
         self.queue.remove(&key)
     }
 }

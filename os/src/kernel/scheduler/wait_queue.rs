@@ -93,6 +93,12 @@ impl WaitQueue {
         self.tasks.remove_task(task);
     }
 
+    /// 检查任务是否在队列中
+    pub fn contains(&self, task: &SharedTask) -> bool {
+        let _g = self.lock.lock();
+        self.tasks.contains(task)
+    }
+
     /// 检查等待队列是否为空
     pub fn is_empty(&self) -> bool {
         let _g = self.lock.lock();

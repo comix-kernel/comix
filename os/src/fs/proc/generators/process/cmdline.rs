@@ -1,21 +1,22 @@
-use alloc::vec::Vec;
+use alloc::{sync::Weak, vec::Vec};
 
-use crate::{fs::proc::ContentGenerator, kernel::SharedTask, vfs::FsError};
+use crate::{fs::proc::ContentGenerator, kernel::TaskStruct, sync::SpinLock, vfs::FsError};
 
 /// 为指定任务生成 /proc/\[pid\]/cmdline 内容的生成器
 pub struct CmdlineGenerator {
-    task: SharedTask,
+    task: Weak<SpinLock<TaskStruct>>,
 }
 
 impl CmdlineGenerator {
-    pub fn new(task: SharedTask) -> Self {
+    pub fn new(task: Weak<SpinLock<TaskStruct>>) -> Self {
         Self { task }
     }
 }
 
 impl ContentGenerator for CmdlineGenerator {
     fn generate(&self) -> Result<Vec<u8>, FsError> {
-        let task = self.task.lock();
+        let task_arc = self.task.upgrade().ok_or(FsError::NotFound)?;
+        let task = task_arc.lock();
 
         // TODO: 从任务中获取真实的命令行参数
         // 目前简化实现：返回空内容或者进程名

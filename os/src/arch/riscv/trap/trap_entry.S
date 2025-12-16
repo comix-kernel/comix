@@ -68,14 +68,17 @@ trap_entry:
         bnez t0, .L1    # 如果 SPP=1，说明是内核态中断，跳过切换栈
         ld sp, 264(a0)
 .L1:
+        # 保存正确的内核 sp 到 TrapFrame.kernel_sp
+        # 必须在调用 trap_handler 之前保存，否则 sp 会因为函数调用而下降
+        sd sp, 264(a0)
+        
         # 使用寄存器间接跳转以支持大代码模型（避免 JAL 范围限制）
         la t0, trap_handler
         jr t0
 
 __restore:
         # 约束: a0 = trapframe 指针
-        # 保存内核栈指针
-        sd sp, 264(a0)
+        # 注意: kernel_sp 已在 trap_entry 中保存，这里不再保存
         # 恢复 sepc
         ld t0, 0(a0)
         csrw sepc, t0
