@@ -4,16 +4,19 @@ use core::ffi::{CStr, c_char};
 
 use riscv::register::sstatus;
 
-use alloc::sync::Arc;
 use crate::{
     kernel::current_cpu,
     net::{
         config::NetworkConfigManager,
         interface::NETWORK_INTERFACE_MANAGER,
-        socket::{SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket, parse_sockaddr_in, write_sockaddr_in},
+        socket::{
+            SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket,
+            parse_sockaddr_in, write_sockaddr_in,
+        },
     },
     println,
 };
+use alloc::sync::Arc;
 
 /// 获取网络接口列表
 pub fn get_network_interfaces() -> isize {
@@ -79,13 +82,16 @@ pub fn set_network_interface_config(
 
 /// 创建套接字
 pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
-    if domain != 2 { return -97; } // EAFNOSUPPORT
+    if domain != 2 {
+        return -97;
+    } // EAFNOSUPPORT
 
     let handle = match socket_type {
         1 => create_tcp_socket(),
         2 => create_udp_socket(),
         _ => return -94, // ESOCKTNOSUPPORT
-    }.unwrap();
+    }
+    .unwrap();
 
     let socket_file = Arc::new(SocketFile::new(handle));
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
@@ -130,7 +136,7 @@ pub fn listen(sockfd: i32, _backlog: i32) -> isize {
 pub fn accept(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(_) => return -9,
     };
 
@@ -363,7 +369,9 @@ pub fn recvfrom(
 
 // 关闭套接字
 pub fn shutdown(sockfd: i32, how: i32) -> isize {
-    if how < 0 || how > 2 { return -22; }
+    if how < 0 || how > 2 {
+        return -22;
+    }
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     match task.lock().fd_table.get(sockfd as usize) {
         Ok(_) => 0,
