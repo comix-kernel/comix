@@ -523,14 +523,48 @@ pub fn recvfrom(
 
 // 关闭套接字
 pub fn shutdown(sockfd: i32, how: i32) -> isize {
+    const SHUT_RD: i32 = 0;
+    const SHUT_WR: i32 = 1;
+    const SHUT_RDWR: i32 = 2;
+
     if how < 0 || how > 2 {
-        return -22;
+        return -22; // EINVAL
     }
+
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => 0,
-        Err(_) => -9,
+    let tid = task.lock().tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let mut sockets = SOCKET_SET.lock();
+    match handle {
+        SocketHandle::Tcp(h) => {
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            match how {
+                SHUT_RD => {
+                    // TCP doesn't support half-close for read, close both
+                    socket.close();
+                }
+                SHUT_WR => {
+                    socket.close();
+                }
+                SHUT_RDWR => {
+                    socket.close();
+                }
+                _ => return -22, // EINVAL
+            }
+        }
+        SocketHandle::Udp(h) => {
+            // UDP is connectionless, shutdown just marks it
+            let socket = sockets.get_mut::<udp::Socket>(h);
+            socket.close();
+        }
     }
+
+    0
 }
 
 // 获取套接字地址
