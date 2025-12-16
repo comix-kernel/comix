@@ -200,7 +200,7 @@ pub fn clone(
         )
     };
 
-    let kstack_tracker = alloc_contig_frames(16).expect("fork: alloc kstack failed.");
+    let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
     let child_task = TaskStruct::utask_create(
         tid,
