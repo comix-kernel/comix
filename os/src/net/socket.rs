@@ -24,15 +24,27 @@ lazy_static! {
 
 pub struct SocketFile {
     handle: SocketHandle,
+    remote_endpoint: SpinLock<Option<IpEndpoint>>,
 }
 
 impl SocketFile {
     pub fn new(handle: SocketHandle) -> Self {
-        Self { handle }
+        Self {
+            handle,
+            remote_endpoint: SpinLock::new(None),
+        }
     }
 
     pub fn handle(&self) -> SocketHandle {
         self.handle
+    }
+
+    pub fn set_remote_endpoint(&self, endpoint: IpEndpoint) {
+        *self.remote_endpoint.lock() = Some(endpoint);
+    }
+
+    pub fn get_remote_endpoint(&self) -> Option<IpEndpoint> {
+        *self.remote_endpoint.lock()
     }
 }
 
@@ -63,6 +75,38 @@ pub fn unregister_socket_fd(tid: usize, fd: usize) {
 /// Get socket handle from (tid, fd)
 pub fn get_socket_handle(tid: usize, fd: usize) -> Option<SocketHandle> {
     FD_SOCKET_MAP.lock().get(&(tid, fd)).copied()
+}
+
+/// Set remote endpoint for a socket
+pub fn set_socket_remote_endpoint(
+    file: &Arc<dyn crate::vfs::File>,
+    endpoint: IpEndpoint,
+) -> Result<(), ()> {
+    // SAFETY: We assume the file is a SocketFile if it's in FD_SOCKET_MAP
+    let ptr = Arc::as_ptr(file) as *const SocketFile;
+    unsafe {
+        (*ptr).set_remote_endpoint(endpoint);
+    }
+    Ok(())
+}
+
+/// Send data to a specific endpoint (for sendto syscall)
+pub fn socket_sendto(
+    handle: SocketHandle,
+    buf: &[u8],
+    endpoint: IpEndpoint,
+) -> Result<usize, FsError> {
+    let mut sockets = SOCKET_SET.lock();
+    match handle {
+        SocketHandle::Tcp(_) => Err(FsError::NotSupported), // TCP doesn't support sendto
+        SocketHandle::Udp(h) => {
+            let socket = sockets.get_mut::<udp::Socket>(h);
+            socket
+                .send_slice(buf, endpoint)
+                .map_err(|_| FsError::WouldBlock)?;
+            Ok(buf.len())
+        }
+    }
 }
 
 impl File for SocketFile {
@@ -98,8 +142,11 @@ impl File for SocketFile {
                 socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
             }
             SocketHandle::Udp(h) => {
+                let endpoint = match self.get_remote_endpoint() {
+                    Some(ep) => ep,
+                    None => return Err(FsError::NotConnected),
+                };
                 let socket = sockets.get_mut::<udp::Socket>(h);
-                let endpoint = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0);
                 socket
                     .send_slice(buf, endpoint)
                     .map_err(|_| FsError::WouldBlock)?;
