@@ -19,6 +19,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use smoltcp::socket::{tcp, udp};
+use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
 /// 获取网络接口列表
 pub fn get_network_interfaces() -> isize {
@@ -152,7 +153,11 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 }
 
 /// 监听连接
-pub fn listen(sockfd: i32, _backlog: i32) -> isize {
+pub fn listen(sockfd: i32, backlog: i32) -> isize {
+    if backlog < 0 {
+        return -22; // EINVAL
+    }
+
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let tid = task.lock().tid as usize;
 
@@ -162,7 +167,11 @@ pub fn listen(sockfd: i32, _backlog: i32) -> isize {
     };
 
     match handle {
-        SocketHandle::Tcp(_) => 0,
+        SocketHandle::Tcp(_) => {
+            // smoltcp doesn't support backlog parameter, but we validate it
+            // In a full implementation, we would limit pending connections to backlog
+            0
+        }
         SocketHandle::Udp(_) => -95, // EOPNOTSUPP - UDP doesn't support listen
     }
 }
@@ -266,18 +275,20 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         Err(_) => return -9, // EBADF
     };
 
+    use crate::net::socket::set_socket_remote_endpoint;
+    let _ = set_socket_remote_endpoint(&file, endpoint);
+
     match handle {
-        SocketHandle::Tcp(_) => {
-            // TCP connect needs network interface context, not implemented yet
-            // For now, just store the endpoint
-            use crate::net::socket::set_socket_remote_endpoint;
-            let _ = set_socket_remote_endpoint(&file, endpoint);
+        SocketHandle::Tcp(h) => {
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            if socket.is_open() {
+                return -106; // EISCONN
+            }
+            // TODO: Call socket.connect(cx, endpoint, local) with proper Context
+            // For now, just store endpoint and return success
         }
-        SocketHandle::Udp(_) => {
-            // UDP connect just sets the remote endpoint
-            use crate::net::socket::set_socket_remote_endpoint;
-            let _ = set_socket_remote_endpoint(&file, endpoint);
-        }
+        SocketHandle::Udp(_) => {}
     }
 
     0
@@ -539,48 +550,116 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
         None => return -88, // ENOTSOCK
     };
 
-    let mut sockets = SOCKET_SET.lock();
-    match handle {
-        SocketHandle::Tcp(h) => {
-            let socket = sockets.get_mut::<tcp::Socket>(h);
-            match how {
-                SHUT_RD => {
-                    // TCP doesn't support half-close for read, close both
-                    socket.close();
-                }
-                SHUT_WR => {
-                    socket.close();
-                }
-                SHUT_RDWR => {
-                    socket.close();
-                }
-                _ => return -22, // EINVAL
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+
+    use crate::net::socket::{socket_shutdown_read, socket_shutdown_write};
+
+    match how {
+        SHUT_RD => {
+            socket_shutdown_read(&file);
+        }
+        SHUT_WR => {
+            socket_shutdown_write(&file);
+            // For TCP, also initiate graceful close
+            if let SocketHandle::Tcp(h) = handle {
+                let mut sockets = SOCKET_SET.lock();
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                socket.close();
             }
         }
-        SocketHandle::Udp(h) => {
-            // UDP is connectionless, shutdown just marks it
-            let socket = sockets.get_mut::<udp::Socket>(h);
-            socket.close();
+        SHUT_RDWR => {
+            socket_shutdown_read(&file);
+            socket_shutdown_write(&file);
+            if let SocketHandle::Tcp(h) = handle {
+                let mut sockets = SOCKET_SET.lock();
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                socket.close();
+            }
         }
+        _ => return -22, // EINVAL
     }
 
     0
 }
 
 // 获取套接字地址
-pub fn getsockname(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
+pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => 0,
-        Err(_) => -9,
+    let tid = task.lock().tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let sockets = SOCKET_SET.lock();
+    let local_endpoint = match handle {
+        SocketHandle::Tcp(h) => {
+            let socket = sockets.get::<tcp::Socket>(h);
+            socket.local_endpoint()
+        }
+        SocketHandle::Udp(h) => {
+            let socket = sockets.get::<udp::Socket>(h);
+            let listen_ep = socket.endpoint();
+            listen_ep
+                .addr
+                .map(|addr| IpEndpoint::new(addr, listen_ep.port))
+        }
+    };
+
+    drop(sockets);
+
+    if let Some(ep) = local_endpoint {
+        unsafe {
+            sstatus::set_sum();
+            let _ = write_sockaddr_in(addr, addrlen, ep);
+            sstatus::clear_sum();
+        }
+        0
+    } else {
+        -22 // EINVAL
     }
 }
 
 // 获取对端套接字地址
-pub fn getpeername(sockfd: i32, _addr: *mut u8, _addrlen: *mut u32) -> isize {
+pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    match task.lock().fd_table.get(sockfd as usize) {
-        Ok(_) => 0,
-        Err(_) => -9,
+    let tid = task.lock().tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let sockets = SOCKET_SET.lock();
+    let remote_endpoint = match handle {
+        SocketHandle::Tcp(h) => {
+            let socket = sockets.get::<tcp::Socket>(h);
+            socket.remote_endpoint()
+        }
+        SocketHandle::Udp(_) => {
+            // UDP doesn't have a peer, use stored endpoint
+            drop(sockets);
+            let file = match task.lock().fd_table.get(sockfd as usize) {
+                Ok(f) => f,
+                Err(_) => return -9, // EBADF
+            };
+            use crate::net::socket::get_socket_remote_endpoint;
+            get_socket_remote_endpoint(&file)
+        }
+    };
+
+    if let Some(ep) = remote_endpoint {
+        unsafe {
+            sstatus::set_sum();
+            let _ = write_sockaddr_in(addr, addrlen, ep);
+            sstatus::clear_sum();
+        }
+        0
+    } else {
+        -107 // ENOTCONN
     }
 }

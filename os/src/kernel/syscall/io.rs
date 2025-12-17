@@ -487,14 +487,12 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     }
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let _guard = SumGuard::new();
-
-    let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
 
     // Parse timeout: null pointer means infinite, otherwise it's a timespec
     let timeout_ms = if timeout == 0 {
         None // Infinite timeout
     } else {
+        let _guard = SumGuard::new();
         unsafe {
             let timespec = timeout as *const crate::uapi::time::TimeSpec;
             if (*timespec).tv_sec < 0 {
@@ -510,32 +508,37 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     loop {
         let mut ready_count = 0;
 
-        for pollfd in pollfds.iter_mut() {
-            pollfd.revents = 0;
+        {
+            let _guard = SumGuard::new();
+            let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
 
-            if pollfd.fd < 0 {
-                continue;
-            }
+            for pollfd in pollfds.iter_mut() {
+                pollfd.revents = 0;
 
-            let file = match task.lock().fd_table.get(pollfd.fd as usize) {
-                Ok(f) => f,
-                Err(_) => {
-                    pollfd.revents = POLLNVAL;
-                    ready_count += 1;
+                if pollfd.fd < 0 {
                     continue;
                 }
-            };
 
-            if (pollfd.events & POLLIN) != 0 && file.readable() {
-                pollfd.revents |= POLLIN;
-            }
+                let file = match task.lock().fd_table.get(pollfd.fd as usize) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        pollfd.revents = POLLNVAL;
+                        ready_count += 1;
+                        continue;
+                    }
+                };
 
-            if (pollfd.events & POLLOUT) != 0 && file.writable() {
-                pollfd.revents |= POLLOUT;
-            }
+                if (pollfd.events & POLLIN) != 0 && file.readable() {
+                    pollfd.revents |= POLLIN;
+                }
 
-            if pollfd.revents != 0 {
-                ready_count += 1;
+                if (pollfd.events & POLLOUT) != 0 && file.writable() {
+                    pollfd.revents |= POLLOUT;
+                }
+
+                if pollfd.revents != 0 {
+                    ready_count += 1;
+                }
             }
         }
 
@@ -551,7 +554,12 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             }
         }
 
-        // Yield to other tasks
+        // Yield with small delay to reduce CPU usage
+        // TODO: Implement proper wait queue mechanism where tasks block
+        // until file becomes readable/writable
+        for _ in 0..100 {
+            core::hint::spin_loop();
+        }
         yield_task();
     }
 }

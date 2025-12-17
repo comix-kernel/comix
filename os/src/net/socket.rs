@@ -26,6 +26,8 @@ lazy_static! {
 pub struct SocketFile {
     handle: SocketHandle,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
+    shutdown_rd: SpinLock<bool>,
+    shutdown_wr: SpinLock<bool>,
 }
 
 impl SocketFile {
@@ -33,6 +35,8 @@ impl SocketFile {
         Self {
             handle,
             remote_endpoint: SpinLock::new(None),
+            shutdown_rd: SpinLock::new(false),
+            shutdown_wr: SpinLock::new(false),
         }
     }
 
@@ -46,6 +50,22 @@ impl SocketFile {
 
     pub fn get_remote_endpoint(&self) -> Option<IpEndpoint> {
         *self.remote_endpoint.lock()
+    }
+
+    pub fn shutdown_read(&self) {
+        *self.shutdown_rd.lock() = true;
+    }
+
+    pub fn shutdown_write(&self) {
+        *self.shutdown_wr.lock() = true;
+    }
+
+    pub fn is_shutdown_read(&self) -> bool {
+        *self.shutdown_rd.lock()
+    }
+
+    pub fn is_shutdown_write(&self) -> bool {
+        *self.shutdown_wr.lock()
     }
 }
 
@@ -88,12 +108,34 @@ pub fn set_socket_remote_endpoint(
     file: &Arc<dyn crate::vfs::File>,
     endpoint: IpEndpoint,
 ) -> Result<(), ()> {
-    // SAFETY: We assume the file is a SocketFile if it's in FD_SOCKET_MAP
-    let ptr = Arc::as_ptr(file) as *const SocketFile;
-    unsafe {
-        (*ptr).set_remote_endpoint(endpoint);
+    let any = file.as_any();
+    if let Some(socket_file) = any.downcast_ref::<SocketFile>() {
+        socket_file.set_remote_endpoint(endpoint);
+        Ok(())
+    } else {
+        Err(())
     }
-    Ok(())
+}
+
+/// Get remote endpoint from a socket
+pub fn get_socket_remote_endpoint(file: &Arc<dyn crate::vfs::File>) -> Option<IpEndpoint> {
+    let any = file.as_any();
+    any.downcast_ref::<SocketFile>()
+        .and_then(|socket_file| socket_file.get_remote_endpoint())
+}
+
+/// Shutdown socket read
+pub fn socket_shutdown_read(file: &Arc<dyn crate::vfs::File>) {
+    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+        socket_file.shutdown_read();
+    }
+}
+
+/// Shutdown socket write
+pub fn socket_shutdown_write(file: &Arc<dyn crate::vfs::File>) {
+    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+        socket_file.shutdown_write();
+    }
 }
 
 /// Send data to a specific endpoint (for sendto syscall)
@@ -117,33 +159,37 @@ pub fn socket_sendto(
 
 impl File for SocketFile {
     fn readable(&self) -> bool {
-        let mut sockets = SOCKET_SET.lock();
+        let sockets = SOCKET_SET.lock();
         match self.handle {
             SocketHandle::Tcp(h) => {
-                let socket = sockets.get_mut::<tcp::Socket>(h);
+                let socket = sockets.get::<tcp::Socket>(h);
                 socket.can_recv()
             }
             SocketHandle::Udp(h) => {
-                let socket = sockets.get_mut::<udp::Socket>(h);
+                let socket = sockets.get::<udp::Socket>(h);
                 socket.can_recv()
             }
         }
     }
     fn writable(&self) -> bool {
-        let mut sockets = SOCKET_SET.lock();
+        let sockets = SOCKET_SET.lock();
         match self.handle {
             SocketHandle::Tcp(h) => {
-                let socket = sockets.get_mut::<tcp::Socket>(h);
+                let socket = sockets.get::<tcp::Socket>(h);
                 socket.can_send()
             }
             SocketHandle::Udp(h) => {
-                let socket = sockets.get_mut::<udp::Socket>(h);
+                let socket = sockets.get::<udp::Socket>(h);
                 socket.can_send()
             }
         }
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+        if self.is_shutdown_read() {
+            return Ok(0); // EOF
+        }
+
         let mut sockets = SOCKET_SET.lock();
         match self.handle {
             SocketHandle::Tcp(h) => {
@@ -161,6 +207,10 @@ impl File for SocketFile {
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
+        if self.is_shutdown_write() {
+            return Err(FsError::BrokenPipe);
+        }
+
         let mut sockets = SOCKET_SET.lock();
         match self.handle {
             SocketHandle::Tcp(h) => {
@@ -183,6 +233,10 @@ impl File for SocketFile {
 
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
         Err(FsError::NotSupported)
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }
 
@@ -229,16 +283,18 @@ pub fn create_udp_socket() -> Result<SocketHandle, ()> {
     Ok(SocketHandle::Udp(handle))
 }
 
+const AF_INET: u16 = 2;
+const SOCKADDR_IN_SIZE: usize = 16;
+
 /// Parse sockaddr_in structure
 pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()> {
-    if addrlen < 16 {
+    if (addrlen as usize) < SOCKADDR_IN_SIZE {
         return Err(());
     }
 
     unsafe {
         let family = *(addr as *const u16);
-        if family != 2 {
-            // AF_INET
+        if family != AF_INET {
             return Err(());
         }
 
@@ -258,12 +314,12 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
 
     unsafe {
         let len = *addrlen as usize;
-        if len < 16 {
+        if len < SOCKADDR_IN_SIZE {
             return Err(());
         }
 
         // family
-        *(addr as *mut u16) = 2; // AF_INET
+        *(addr as *mut u16) = AF_INET;
 
         // port
         *(addr.add(2) as *mut u16) = endpoint.port.to_be();
@@ -277,7 +333,7 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
         // zero padding
         core::ptr::write_bytes(addr.add(8), 0, 8);
 
-        *addrlen = 16;
+        *addrlen = SOCKADDR_IN_SIZE as u32;
     }
 
     Ok(())
