@@ -258,7 +258,7 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
-    let _ = update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle));
+    update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
 
     drop(sockets);
 
@@ -311,7 +311,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     drop(task_lock);
 
     use crate::net::socket::set_socket_remote_endpoint;
-    let _ = set_socket_remote_endpoint(&file, endpoint);
+    set_socket_remote_endpoint(&file, endpoint).unwrap();
 
     let is_nonblock = file
         .flags()
@@ -651,7 +651,7 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
             socket_shutdown_write(&file);
             true
         }
-        _ => return -22, // EINVAL
+        _ => unreachable!(), // 这里是不可到达的到达即意味着有问题
     };
 
     if should_close_tcp {
