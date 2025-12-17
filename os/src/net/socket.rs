@@ -4,7 +4,7 @@ use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
 use alloc::vec;
 use lazy_static::lazy_static;
-use smoltcp::iface::{SocketHandle as SmoltcpHandle, SocketSet};
+use smoltcp::iface::{Interface, SocketHandle as SmoltcpHandle, SocketSet};
 use smoltcp::socket::{tcp, udp};
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
@@ -21,12 +21,15 @@ lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
     /// Map from fd to socket handle for syscall operations
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
+    /// Global network interface for socket operations
+    pub static ref GLOBAL_INTERFACE: SpinLock<Option<Interface>> = SpinLock::new(None);
 }
 
 use crate::uapi::fcntl::OpenFlags;
 
 pub struct SocketFile {
     handle: SocketHandle,
+    local_endpoint: SpinLock<Option<IpEndpoint>>,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
     shutdown_rd: SpinLock<bool>,
     shutdown_wr: SpinLock<bool>,
@@ -37,6 +40,7 @@ impl SocketFile {
     pub fn new(handle: SocketHandle) -> Self {
         Self {
             handle,
+            local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
@@ -47,6 +51,7 @@ impl SocketFile {
     pub fn new_with_flags(handle: SocketHandle, flags: OpenFlags) -> Self {
         Self {
             handle,
+            local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
@@ -56,6 +61,14 @@ impl SocketFile {
 
     pub fn handle(&self) -> SocketHandle {
         self.handle
+    }
+
+    pub fn set_local_endpoint(&self, endpoint: IpEndpoint) {
+        *self.local_endpoint.lock() = Some(endpoint);
+    }
+
+    pub fn get_local_endpoint(&self) -> Option<IpEndpoint> {
+        *self.local_endpoint.lock()
     }
 
     pub fn set_remote_endpoint(&self, endpoint: IpEndpoint) {
@@ -115,6 +128,27 @@ pub fn get_socket_handle(tid: usize, fd: usize) -> Option<SocketHandle> {
 /// Update socket handle for an existing fd (used in accept)
 pub fn update_socket_handle(tid: usize, fd: usize, handle: SocketHandle) {
     FD_SOCKET_MAP.lock().insert((tid, fd), handle);
+}
+
+/// Set local endpoint for a socket
+pub fn set_socket_local_endpoint(
+    file: &Arc<dyn crate::vfs::File>,
+    endpoint: IpEndpoint,
+) -> Result<(), ()> {
+    let any = file.as_any();
+    if let Some(socket_file) = any.downcast_ref::<SocketFile>() {
+        socket_file.set_local_endpoint(endpoint);
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+/// Get local endpoint from a socket
+pub fn get_socket_local_endpoint(file: &Arc<dyn crate::vfs::File>) -> Option<IpEndpoint> {
+    let any = file.as_any();
+    any.downcast_ref::<SocketFile>()
+        .and_then(|socket_file| socket_file.get_local_endpoint())
 }
 
 /// Set remote endpoint for a socket
@@ -205,7 +239,7 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        match self.handle {
+        let result = match self.handle {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get_mut::<tcp::Socket>(h);
                 socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)
@@ -217,7 +251,11 @@ impl File for SocketFile {
                     .map(|(n, _)| n)
                     .map_err(|_| FsError::WouldBlock)
             }
+        };
+        if result.is_ok() {
+            crate::kernel::syscall::io::wake_poll_waiters();
         }
+        result
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
@@ -226,7 +264,7 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        match self.handle {
+        let result = match self.handle {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get_mut::<tcp::Socket>(h);
                 socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
@@ -242,7 +280,11 @@ impl File for SocketFile {
                     .map_err(|_| FsError::WouldBlock)?;
                 Ok(buf.len())
             }
+        };
+        if result.is_ok() {
+            crate::kernel::syscall::io::wake_poll_waiters();
         }
+        result
     }
 
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
@@ -343,12 +385,12 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
     }
 
     unsafe {
-        let family = *(addr as *const u16);
+        let family = core::ptr::read_unaligned(addr as *const u16);
         if family != AF_INET {
             return Err(());
         }
 
-        let port = u16::from_be(*(addr.add(2) as *const u16));
+        let port = u16::from_be(core::ptr::read_unaligned(addr.add(2) as *const u16));
         let ip_bytes = core::slice::from_raw_parts(addr.add(4), 4);
         let ip = Ipv4Address::from_octets([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
 
@@ -407,4 +449,22 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
     }
 
     Ok(())
+}
+
+/// Initialize global interface (should be called during network setup)
+pub fn init_global_interface(iface: Interface) {
+    *GLOBAL_INTERFACE.lock() = Some(iface);
+}
+
+/// Perform TCP connect with Context
+pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
+    let mut iface_guard = GLOBAL_INTERFACE.lock();
+    let iface = iface_guard.as_mut().ok_or(())?;
+
+    let mut sockets = SOCKET_SET.lock();
+    let socket = sockets.get_mut::<tcp::Socket>(handle);
+
+    socket
+        .connect(iface.context(), remote, local)
+        .map_err(|_| ())
 }

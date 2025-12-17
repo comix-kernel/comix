@@ -6,7 +6,7 @@
 mod cred;
 mod fcntl;
 mod fs;
-mod io;
+pub mod io;
 mod ioctl;
 mod ipc;
 mod mm;
