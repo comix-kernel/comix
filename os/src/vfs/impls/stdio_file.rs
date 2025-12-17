@@ -193,9 +193,9 @@ impl File for StderrFile {
 
 /// 通用的 stdio ioctl 实现
 fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
+    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EINVAL, ENOTTY};
     use crate::uapi::ioctl::*;
-    use crate::arch::trap::SumGuard;
 
     match request {
         TCGETS => {
