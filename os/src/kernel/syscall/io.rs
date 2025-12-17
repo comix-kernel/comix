@@ -523,9 +523,6 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     loop {
         let mut ready_count = 0;
 
-        // Hold wait queue lock to prevent lost wakeup race
-        let mut wait_queue = POLL_WAIT_QUEUE.lock();
-
         {
             let _guard = SumGuard::new();
             let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
@@ -572,9 +569,9 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             drop(timer_q);
         }
 
-        // Sleep with wait queue lock held to prevent race
-        wait_queue.sleep(task.clone());
-        drop(wait_queue);
+        // Sleep atomically - WaitQueue::sleep() holds lock internally
+        // and marks task as blocked before releasing the lock
+        POLL_WAIT_QUEUE.lock().sleep(task.clone());
         crate::kernel::schedule();
 
         // Woken up - remove from timer queue if still there

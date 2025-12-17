@@ -254,7 +254,10 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     );
 
     // Also update the SocketFile's internal handle
-    let file = task.lock().fd_table.get(sockfd as usize).unwrap();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
     let _ = update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle));
 
     drop(sockets);
