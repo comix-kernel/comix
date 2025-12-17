@@ -502,7 +502,7 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
 
     // Parse timeout: null pointer means infinite, otherwise it's a timespec
-    let timeout_ms = if timeout == 0 {
+    let timeout_trigger = if timeout == 0 {
         None // Infinite timeout
     } else {
         let _guard = SumGuard::new();
@@ -511,15 +511,20 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             if (*timespec).tv_sec < 0 {
                 None // Negative means infinite
             } else {
-                Some(((*timespec).tv_sec as u64 * 1000) + ((*timespec).tv_nsec as u64 / 1_000_000))
+                use crate::arch::timer::{clock_freq, get_time};
+                let duration_ns =
+                    ((*timespec).tv_sec as u64 * 1_000_000_000) + (*timespec).tv_nsec as u64;
+                let duration_ticks = (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
+                Some(get_time() + duration_ticks)
             }
         }
     };
 
-    let start_time = crate::arch::timer::get_time_ms();
-
     loop {
         let mut ready_count = 0;
+
+        // Hold wait queue lock to prevent lost wakeup race
+        let mut wait_queue = POLL_WAIT_QUEUE.lock();
 
         {
             let _guard = SumGuard::new();
@@ -559,16 +564,31 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             return ready_count;
         }
 
-        // Check timeout
-        if let Some(timeout_ms) = timeout_ms {
-            let elapsed = crate::arch::timer::get_time_ms() - start_time;
-            if elapsed >= timeout_ms as usize {
+        // Register timeout timer if needed
+        if let Some(trigger) = timeout_trigger {
+            use crate::kernel::timer::TIMER_QUEUE;
+            let mut timer_q = TIMER_QUEUE.lock();
+            timer_q.push(trigger, task.clone());
+            drop(timer_q);
+        }
+
+        // Sleep with wait queue lock held to prevent race
+        wait_queue.sleep(task.clone());
+        drop(wait_queue);
+        crate::kernel::schedule();
+
+        // Woken up - remove from timer queue if still there
+        if timeout_trigger.is_some() {
+            use crate::kernel::timer::TIMER_QUEUE;
+            TIMER_QUEUE.lock().remove_task(&task);
+        }
+
+        // Check if woken by timeout
+        if let Some(trigger) = timeout_trigger {
+            use crate::arch::timer::get_time;
+            if get_time() >= trigger {
                 return 0; // Timeout
             }
         }
-
-        // Block on wait queue
-        POLL_WAIT_QUEUE.lock().sleep(task.clone());
-        crate::kernel::schedule();
     }
 }
