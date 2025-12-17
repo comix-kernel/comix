@@ -3,9 +3,9 @@
 use core::ffi::c_char;
 
 use alloc::{string::ToString, sync::Arc};
-use riscv::register::sstatus;
 
 use crate::{
+    arch::trap::SumGuard,
     kernel::{
         current_cpu, current_task,
         syscall::util::{
@@ -61,15 +61,13 @@ pub fn lseek(fd: usize, offset: isize, whence: usize) -> isize {
 /// openat - 相对于目录文件描述符打开文件
 pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
     // 解析路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 解析标志位
     let open_flags = match OpenFlags::from_bits(flags) {
@@ -144,15 +142,13 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 
 pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     // 解析路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 分割路径为目录和文件名
     let (dir_path, dirname) = match split_path(&path_str) {
@@ -177,15 +173,13 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
 
 pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     // 解析路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     let is_rmdir = (flags & AT_REMOVEDIR) != 0;
 
@@ -239,15 +233,13 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
 
 pub fn chdir(path: *const c_char) -> isize {
     // 解析路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(path) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 查找目标目录
     let dentry = match vfs_lookup(&path_str) {
@@ -287,11 +279,12 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
     }
 
     // 复制到用户态缓冲区
-    unsafe {
-        sstatus::set_sum();
-        core::ptr::copy_nonoverlapping(path_bytes.as_ptr(), buf, path_bytes.len());
-        *buf.add(path_bytes.len()) = 0; // null terminator
-        sstatus::clear_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::copy_nonoverlapping(path_bytes.as_ptr(), buf, path_bytes.len());
+            *buf.add(path_bytes.len()) = 0; // null terminator
+        }
     }
 
     buf as isize
@@ -320,10 +313,11 @@ pub fn fstat(fd: usize, statbuf: *mut Stat) -> isize {
     let stat = crate::vfs::Stat::from_metadata(&metadata);
 
     // 写回用户空间
-    unsafe {
-        sstatus::set_sum();
-        core::ptr::write(statbuf, stat);
-        sstatus::clear_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::write(statbuf, stat);
+        }
     }
 
     0
@@ -370,7 +364,7 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     let mut items_written = 0usize;
 
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
 
         for (_, entry) in entries.iter().skip(start_index).enumerate() {
             // 计算这个 dirent 需要的空间
@@ -409,8 +403,6 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
             written += dirent_len;
             items_written += 1;
         }
-
-        sstatus::clear_sum();
     }
 
     // 更新文件偏移量
@@ -438,15 +430,13 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     }
 
     // 解析路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(path) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 验证路径存在
     if vfs_lookup(&path_str).is_err() {
@@ -488,10 +478,11 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     };
 
     // 写回用户空间
-    unsafe {
-        sstatus::set_sum();
-        core::ptr::write(buf, statfs_buf);
-        sstatus::clear_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::write(buf, statfs_buf);
+        }
     }
 
     0
@@ -499,15 +490,13 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
 
 pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> isize {
     // 解析路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 解析标志
     let at_flags = match AtFlags::from_bits(flags) {
@@ -583,15 +572,13 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     }
 
     // 解析路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 查找符号链接（不跟随最后一级的符号链接）
     let dentry = match resolve_at_path_with_flags(dirfd, &path_str, false) {
@@ -619,10 +606,11 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     };
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
-    unsafe {
-        sstatus::set_sum();
-        core::ptr::copy_nonoverlapping(temp_buf.as_ptr(), buf, bytes_read);
-        sstatus::clear_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::copy_nonoverlapping(temp_buf.as_ptr(), buf, bytes_read);
+        }
     }
 
     bytes_read as isize
@@ -635,15 +623,13 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     }
 
     // 解析路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 解析标志
     let at_flags = match AtFlags::from_bits(flags) {
@@ -677,10 +663,11 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     let stat = Stat::from_metadata(&metadata);
 
     // 写回用户空间
-    unsafe {
-        sstatus::set_sum();
-        core::ptr::write(statbuf, stat);
-        sstatus::clear_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::write(statbuf, stat);
+        }
     }
 
     0
@@ -688,15 +675,13 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
 
 pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, flags: u32) -> isize {
     // 解析路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 解析标志
     let at_flags = match AtFlags::from_bits(flags) {
@@ -718,16 +703,14 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
         (Some(now), Some(now))
     } else {
         unsafe {
-            sstatus::set_sum();
+            let _guard = SumGuard::new();
             let user_times = core::slice::from_raw_parts(times, 2);
 
             // 验证时间结构
             if let Err(e) = user_times[0].validate() {
-                sstatus::clear_sum();
                 return -(e as isize);
             }
             if let Err(e) = user_times[1].validate() {
-                sstatus::clear_sum();
                 return -(e as isize);
             }
 
@@ -749,7 +732,6 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
                 Some(user_times[1])
             };
 
-            sstatus::clear_sum();
             (atime_opt, mtime_opt)
         }
     };
@@ -787,11 +769,10 @@ pub fn renameat2(
     }
 
     // 解析旧路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let old_path_str = match get_path_safe(oldpath) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
@@ -800,11 +781,9 @@ pub fn renameat2(
     let new_path_str = match get_path_safe(newpath) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 分割路径为 (父目录, 文件名)
     let (old_dir_path, old_name) = match split_path(&old_path_str) {
@@ -1119,13 +1098,12 @@ pub fn mount(
     use alloc::string::String;
 
     // 启用用户空间内存访问
-    unsafe { riscv::register::sstatus::set_sum() };
+    let _guard = SumGuard::new();
 
     // 解析目标路径
     let target_str = match get_path_safe(target) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { riscv::register::sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
@@ -1135,7 +1113,6 @@ pub fn mount(
         match get_path_safe(source) {
             Ok(s) => s.to_string(),
             Err(_) => {
-                unsafe { riscv::register::sstatus::clear_sum() };
                 return FsError::InvalidArgument.to_errno();
             }
         }
@@ -1148,15 +1125,12 @@ pub fn mount(
         match get_path_safe(filesystemtype) {
             Ok(s) => s.to_string(),
             Err(_) => {
-                unsafe { riscv::register::sstatus::clear_sum() };
                 return FsError::InvalidArgument.to_errno();
             }
         }
     } else {
         String::new()
     };
-
-    unsafe { riscv::register::sstatus::clear_sum() };
 
     crate::pr_info!(
         "[SYSCALL] mount: source='{}', target='{}', type='{}'",
@@ -1272,18 +1246,15 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
     use crate::vfs::MOUNT_TABLE;
 
     // 启用用户空间内存访问
-    unsafe { riscv::register::sstatus::set_sum() };
+    let _guard = SumGuard::new();
 
     // 解析目标路径
     let target_str = match get_path_safe(target) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { riscv::register::sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-
-    unsafe { riscv::register::sstatus::clear_sum() };
 
     crate::pr_info!("[SYSCALL] umount2: unmounting '{}'", target_str);
 
@@ -1360,15 +1331,13 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
     use crate::uapi::fs::AtFlags;
 
     // 解析路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 解析标志位
     let at_flags = AtFlags::from_bits_truncate(flags);
@@ -1431,15 +1400,13 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     use crate::uapi::fs::AtFlags;
 
     // 解析路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return -(EINVAL as isize);
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 解析标志位
     let at_flags = AtFlags::from_bits_truncate(flags);
@@ -1478,15 +1445,13 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
 /// * -errno - 失败
 pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isize {
     // 安全地读取路径字符串
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let path_str = match get_path_safe(pathname) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 分割路径为目录和文件名
     let (dir_path, filename) = match split_path(&path_str) {
@@ -1532,11 +1497,10 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
 /// target 参数不会被检查,即使目标不存在也能创建符号链接
 pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) -> isize {
     // 解析 target 路径
-    unsafe { sstatus::set_sum() };
+    let _guard = SumGuard::new();
     let target_str = match get_path_safe(target) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
@@ -1545,11 +1509,9 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
     let link_str = match get_path_safe(linkpath) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            unsafe { sstatus::clear_sum() };
             return FsError::InvalidArgument.to_errno();
         }
     };
-    unsafe { sstatus::clear_sum() };
 
     // 分割路径为目录和文件名
     let (dir_path, link_name) = match split_path(&link_str) {
