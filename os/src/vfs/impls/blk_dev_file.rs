@@ -199,4 +199,7 @@ impl File for BlockDeviceFile {
     fn dentry(&self) -> Result<Arc<Dentry>, FsError> {
         Ok(self.dentry.clone())
     }
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }

@@ -424,4 +424,8 @@ impl CharDeviceFile {
             Err(FsError::NotSupported)
         }
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
