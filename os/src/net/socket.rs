@@ -28,7 +28,7 @@ lazy_static! {
 use crate::uapi::fcntl::OpenFlags;
 
 pub struct SocketFile {
-    handle: SocketHandle,
+    handle: SpinLock<SocketHandle>,
     local_endpoint: SpinLock<Option<IpEndpoint>>,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
     shutdown_rd: SpinLock<bool>,
@@ -39,7 +39,7 @@ pub struct SocketFile {
 impl SocketFile {
     pub fn new(handle: SocketHandle) -> Self {
         Self {
-            handle,
+            handle: SpinLock::new(handle),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
@@ -50,7 +50,7 @@ impl SocketFile {
 
     pub fn new_with_flags(handle: SocketHandle, flags: OpenFlags) -> Self {
         Self {
-            handle,
+            handle: SpinLock::new(handle),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
@@ -60,7 +60,11 @@ impl SocketFile {
     }
 
     pub fn handle(&self) -> SocketHandle {
-        self.handle
+        *self.handle.lock()
+    }
+
+    pub fn set_handle(&self, new_handle: SocketHandle) {
+        *self.handle.lock() = new_handle;
     }
 
     pub fn set_local_endpoint(&self, endpoint: IpEndpoint) {
@@ -99,7 +103,7 @@ impl SocketFile {
 impl Drop for SocketFile {
     fn drop(&mut self) {
         let mut sockets = SOCKET_SET.lock();
-        match self.handle {
+        match *self.handle.lock() {
             SocketHandle::Tcp(h) => {
                 sockets.remove(h);
             }
@@ -186,6 +190,20 @@ pub fn socket_shutdown_write(file: &Arc<dyn crate::vfs::File>) {
     }
 }
 
+/// Update socket handle in SocketFile (used in accept)
+pub fn update_socket_file_handle(
+    file: &Arc<dyn crate::vfs::File>,
+    new_handle: SocketHandle,
+) -> Result<(), ()> {
+    let any = file.as_any();
+    if let Some(socket_file) = any.downcast_ref::<SocketFile>() {
+        socket_file.set_handle(new_handle);
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
 /// Send data to a specific endpoint (for sendto syscall)
 pub fn socket_sendto(
     handle: SocketHandle,
@@ -208,7 +226,7 @@ pub fn socket_sendto(
 impl File for SocketFile {
     fn readable(&self) -> bool {
         let sockets = SOCKET_SET.lock();
-        match self.handle {
+        match *self.handle.lock() {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get::<tcp::Socket>(h);
                 socket.can_recv()
@@ -221,7 +239,7 @@ impl File for SocketFile {
     }
     fn writable(&self) -> bool {
         let sockets = SOCKET_SET.lock();
-        match self.handle {
+        match *self.handle.lock() {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get::<tcp::Socket>(h);
                 socket.can_send()
@@ -239,7 +257,7 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        let result = match self.handle {
+        let result = match *self.handle.lock() {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get_mut::<tcp::Socket>(h);
                 socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)
@@ -264,7 +282,7 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        let result = match self.handle {
+        let result = match *self.handle.lock() {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get_mut::<tcp::Socket>(h);
                 socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
@@ -310,7 +328,7 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        match self.handle {
+        match *self.handle.lock() {
             SocketHandle::Tcp(h) => {
                 let socket = sockets.get_mut::<tcp::Socket>(h);
                 let n = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;

@@ -246,12 +246,16 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
     // The old listen_handle is now the established connection
     // Update the mapping to point to the new listening socket
-    use crate::net::socket::update_socket_handle;
+    use crate::net::socket::{update_socket_file_handle, update_socket_handle};
     update_socket_handle(
         tid as usize,
         sockfd as usize,
         SocketHandle::Tcp(new_listen_handle),
     );
+
+    // Also update the SocketFile's internal handle
+    let file = task.lock().fd_table.get(sockfd as usize).unwrap();
+    let _ = update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle));
 
     drop(sockets);
 
