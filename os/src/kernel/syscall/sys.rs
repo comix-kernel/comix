@@ -401,7 +401,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 total_written += bytes.len();
             }
 
-
             // 清空剩余的日志
             while read_log().is_some() {}
 
