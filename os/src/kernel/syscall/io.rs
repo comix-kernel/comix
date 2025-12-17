@@ -460,8 +460,132 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
     total_sent as isize
 }
 
+/// pollfd 结构体
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct PollFd {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
+}
+
+/// poll 事件标志
+pub const POLLIN: i16 = 0x0001;
+pub const POLLOUT: i16 = 0x0004;
+pub const POLLERR: i16 = 0x0008;
+pub const POLLHUP: i16 = 0x0010;
+pub const POLLNVAL: i16 = 0x0020;
+
+use crate::kernel::scheduler::WaitQueue;
+use crate::sync::SpinLock;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref POLL_WAIT_QUEUE: SpinLock<WaitQueue> = SpinLock::new(WaitQueue::new());
+}
+
+/// Wake up all tasks waiting in poll
+pub fn wake_poll_waiters() {
+    POLL_WAIT_QUEUE.lock().wake_up_all();
+}
+
 /// ppoll - poll 的变体，支持信号掩码
-pub fn ppoll(_fds: usize, _nfds: usize, _timeout: usize, _sigmask: usize) -> isize {
-    use crate::uapi::errno::ENOSYS;
-    -ENOSYS as isize
+pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
+    use crate::arch::trap::SumGuard;
+    use crate::kernel::current_cpu;
+    use crate::uapi::errno::EINVAL;
+
+    if nfds > 0 && fds == 0 {
+        return -(EINVAL as isize);
+    }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+
+    // Parse timeout: null pointer means infinite, otherwise it's a timespec
+    let timeout_trigger = if timeout == 0 {
+        None // Infinite timeout
+    } else {
+        let _guard = SumGuard::new();
+        unsafe {
+            let timespec = timeout as *const crate::uapi::time::TimeSpec;
+            if (*timespec).tv_sec < 0 {
+                None // Negative means infinite
+            } else {
+                use crate::arch::timer::{clock_freq, get_time};
+                let duration_ns =
+                    ((*timespec).tv_sec as u64 * 1_000_000_000) + (*timespec).tv_nsec as u64;
+                let duration_ticks = (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
+                Some(get_time() + duration_ticks)
+            }
+        }
+    };
+
+    loop {
+        let mut ready_count = 0;
+
+        {
+            let _guard = SumGuard::new();
+            let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
+
+            for pollfd in pollfds.iter_mut() {
+                pollfd.revents = 0;
+
+                if pollfd.fd < 0 {
+                    continue;
+                }
+
+                let file = match task.lock().fd_table.get(pollfd.fd as usize) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        pollfd.revents = POLLNVAL;
+                        ready_count += 1;
+                        continue;
+                    }
+                };
+
+                if (pollfd.events & POLLIN) != 0 && file.readable() {
+                    pollfd.revents |= POLLIN;
+                }
+
+                if (pollfd.events & POLLOUT) != 0 && file.writable() {
+                    pollfd.revents |= POLLOUT;
+                }
+
+                if pollfd.revents != 0 {
+                    ready_count += 1;
+                }
+            }
+        }
+
+        if ready_count > 0 {
+            return ready_count;
+        }
+
+        // Register timeout timer if needed
+        if let Some(trigger) = timeout_trigger {
+            use crate::kernel::timer::TIMER_QUEUE;
+            let mut timer_q = TIMER_QUEUE.lock();
+            timer_q.push(trigger, task.clone());
+            drop(timer_q);
+        }
+
+        // Sleep atomically - WaitQueue::sleep() holds lock internally
+        // and marks task as blocked before releasing the lock
+        POLL_WAIT_QUEUE.lock().sleep(task.clone());
+        crate::kernel::schedule();
+
+        // Woken up - remove from timer queue if still there
+        if timeout_trigger.is_some() {
+            use crate::kernel::timer::TIMER_QUEUE;
+            TIMER_QUEUE.lock().remove_task(&task);
+        }
+
+        // Check if woken by timeout
+        if let Some(trigger) = timeout_trigger {
+            use crate::arch::timer::get_time;
+            if get_time() >= trigger {
+                return 0; // Timeout
+            }
+        }
+    }
 }

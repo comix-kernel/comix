@@ -101,6 +101,11 @@ impl SmoltcpInterface {
     pub fn device_adapter_mut(&mut self) -> &mut NetDeviceAdapter {
         &mut self.device_adapter
     }
+
+    /// 消费包装器，返回内部的Interface
+    pub fn into_interface(self) -> Interface {
+        self.iface
+    }
 }
 
 /// 网络接口
@@ -351,7 +356,8 @@ impl crate::device::Driver for NetworkInterface {
                     size,
                     self.name()
                 );
-                // 这里可以添加数据包处理逻辑
+                // Wake up tasks waiting in ppoll
+                crate::kernel::syscall::io::wake_poll_waiters();
                 true
             }
             Err(e) => {

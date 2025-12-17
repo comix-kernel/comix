@@ -175,11 +175,21 @@ impl PipeFile {
 
 impl File for PipeFile {
     fn readable(&self) -> bool {
-        self.end_type == PipeEnd::Read
+        if self.end_type != PipeEnd::Read {
+            return false;
+        }
+        let buf = self.buffer.lock();
+        // Readable if buffer has data OR write end is closed (EOF)
+        !buf.buffer.is_empty() || buf.write_end_count == 0
     }
 
     fn writable(&self) -> bool {
-        self.end_type == PipeEnd::Write
+        if self.end_type != PipeEnd::Write {
+            return false;
+        }
+        let buf = self.buffer.lock();
+        // Writable if buffer has space AND read end is open
+        buf.read_end_count > 0 && buf.buffer.len() < buf.capacity
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
@@ -188,7 +198,14 @@ impl File for PipeFile {
         }
 
         let mut ring_buf = self.buffer.lock();
-        ring_buf.read(buf)
+        let result = ring_buf.read(buf);
+        // Only wake up writers if we actually freed buffer space
+        if let Ok(bytes_read) = result {
+            if bytes_read > 0 {
+                crate::kernel::syscall::io::wake_poll_waiters();
+            }
+        }
+        result
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
@@ -197,7 +214,14 @@ impl File for PipeFile {
         }
 
         let mut ring_buf = self.buffer.lock();
-        ring_buf.write(buf)
+        let result = ring_buf.write(buf);
+        // Only wake up readers if we actually wrote data
+        if let Ok(bytes_written) = result {
+            if bytes_written > 0 {
+                crate::kernel::syscall::io::wake_poll_waiters();
+            }
+        }
+        result
     }
 
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
@@ -244,6 +268,9 @@ impl File for PipeFile {
     }
 
     // lseek 使用默认实现 (返回 NotSupported)
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 impl Drop for PipeFile {

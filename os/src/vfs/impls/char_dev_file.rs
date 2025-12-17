@@ -345,4 +345,7 @@ impl File for CharDeviceFile {
             _ => Ok(-ENOTTY as isize),
         }
     }
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
