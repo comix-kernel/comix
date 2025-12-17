@@ -30,6 +30,10 @@ impl Driver for RtcGoldfish {
     fn get_id(&self) -> String {
         String::from("rtc_goldfish")
     }
+
+    fn as_rtc(&self) -> Option<&dyn RtcDriver> {
+        Some(self)
+    }
 }
 
 impl RtcDriver for RtcGoldfish {

@@ -240,11 +240,29 @@ impl File for CharDeviceFile {
         use crate::uapi::ioctl::*;
         use riscv::register::sstatus;
 
-        // 仅 TTY 设备（主设备号 5）支持终端 ioctl
         let maj = major(self.dev);
-        if maj != chrdev_major::CONSOLE {
-            return Err(FsError::NotSupported);
+
+        // 根据设备类型分发 ioctl
+        match maj {
+            chrdev_major::CONSOLE => {
+                // 终端 ioctl
+                self.console_ioctl(request, arg)
+            }
+            chrdev_major::MISC => {
+                // MISC 设备 ioctl (包括 RTC)
+                self.misc_ioctl(request, arg)
+            }
+            _ => Err(FsError::NotSupported),
         }
+    }
+}
+
+impl CharDeviceFile {
+    /// 控制台设备 ioctl 处理
+    fn console_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
+        use crate::uapi::errno::{EINVAL, ENOTTY};
+        use crate::uapi::ioctl::*;
+        use riscv::register::sstatus;
 
         match request {
             TCGETS => {
@@ -343,6 +361,67 @@ impl File for CharDeviceFile {
 
             // 其他 ioctl 命令不支持
             _ => Ok(-ENOTTY as isize),
+        }
+    }
+
+    /// MISC 设备 ioctl 处理
+    fn misc_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
+        use crate::uapi::errno::EINVAL;
+        use crate::uapi::ioctl::*;
+        use crate::vfs::dev::minor;
+        use riscv::register::sstatus;
+
+        let min = minor(self.dev);
+
+        // RTC 设备 (minor=135)
+        if min == 135 {
+            match request {
+                RTC_RD_TIME => {
+                    if arg == 0 {
+                        return Ok(-EINVAL as isize);
+                    }
+
+                    // 通过驱动获取时间
+                    if let Some(ref driver) = self.driver {
+                        if let Some(rtc) = driver.as_rtc() {
+                            let dt = rtc.read_datetime();
+
+                            unsafe {
+                                sstatus::set_sum();
+                                let rtc_time_ptr = arg as *mut RtcTime;
+                                if rtc_time_ptr.is_null() {
+                                    sstatus::clear_sum();
+                                    return Ok(-EINVAL as isize);
+                                }
+
+                                // 清零结构体
+                                core::ptr::write_bytes(rtc_time_ptr, 0, 1);
+
+                                // 填充时间结构体
+                                let rtc_time = RtcTime {
+                                    tm_sec: dt.second as i32,
+                                    tm_min: dt.minute as i32,
+                                    tm_hour: dt.hour as i32,
+                                    tm_mday: dt.day as i32,
+                                    tm_mon: (dt.month - 1) as i32, // Linux 月份是 0-based
+                                    tm_year: (dt.year - 1900) as i32,
+                                    tm_wday: 0, // 未计算
+                                    tm_yday: 0, // 未计算
+                                    tm_isdst: 0,
+                                };
+
+                                core::ptr::write_volatile(rtc_time_ptr, rtc_time);
+                                sstatus::clear_sum();
+                            }
+                            return Ok(0);
+                        }
+                    }
+                    Err(FsError::NoDevice)
+                }
+                _ => Err(FsError::NotSupported),
+            }
+        } else {
+            Err(FsError::NotSupported)
         }
     }
 }
