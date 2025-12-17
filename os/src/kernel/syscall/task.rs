@@ -6,12 +6,11 @@ use core::{
 };
 
 use alloc::{string::ToString, sync::Arc, vec::Vec};
-use riscv::register::sstatus;
 
 use crate::{
     arch::{
         timer::{clock_freq, get_time},
-        trap::restore,
+        trap::{SumGuard, restore},
     },
     ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{
@@ -260,25 +259,26 @@ pub fn execve(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    unsafe { sstatus::set_sum() };
-    let path_str = match get_path_safe(path) {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            unsafe { sstatus::clear_sum() };
-            return FsError::InvalidArgument.to_errno() as i32;
-        }
+    // 使用 SumGuard 来安全访问用户空间路径和参数
+    let (path_str, argv_strings, envp_strings) = unsafe {
+        let _guard = SumGuard::new();
+        let path_str = match get_path_safe(path) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                return FsError::InvalidArgument.to_errno() as i32;
+            }
+        };
+        let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
+        let envp_strings = get_args_safe(envp, "envp").unwrap_or_else(|_| Vec::new());
+        (path_str, argv_strings, envp_strings)
     };
+
     let data = match crate::vfs::vfs_load_elf(&path_str) {
         Ok(data) => data,
         Err(FsError::NotFound) => return -ENOENT,
         Err(FsError::IsDirectory) => return -EISDIR,
         Err(_) => return -EIO,
     };
-
-    let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
-    let envp_strings = get_args_safe(envp, "envp").unwrap_or_else(|_| Vec::new());
-
-    unsafe { sstatus::clear_sum() };
 
     let (data, argv_strings, envp_strings) =
         if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
@@ -1090,8 +1090,6 @@ fn do_execve_prepare(
     ),
     c_int,
 > {
-    unsafe { sstatus::clear_sum() };
-
     let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
         Ok(res) => res,
         Err(_) => return Err(-ENOEXEC),

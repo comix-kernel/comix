@@ -44,6 +44,7 @@ macro_rules! get_sockopt_int {
 }
 
 use crate::{
+    arch::trap::SumGuard,
     kernel::current_cpu,
     net::{
         config::NetworkConfigManager,
@@ -74,12 +75,11 @@ pub fn set_network_interface_config(
 ) -> isize {
     // 解析参数
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
 
         let ifname_str = match get_c_str_safe(ifname) {
             Some(s) => s,
             None => {
-                sstatus::clear_sum();
                 return -1;
             }
         };
@@ -87,7 +87,6 @@ pub fn set_network_interface_config(
         let ip_str = match get_c_str_safe(ip) {
             Some(s) => s,
             None => {
-                sstatus::clear_sum();
                 return -2;
             }
         };
@@ -95,7 +94,6 @@ pub fn set_network_interface_config(
         let gateway_str = match get_c_str_safe(gateway) {
             Some(s) => s,
             None => {
-                sstatus::clear_sum();
                 return -3;
             }
         };
@@ -103,12 +101,9 @@ pub fn set_network_interface_config(
         let mask_str = match get_c_str_safe(mask) {
             Some(s) => s,
             None => {
-                sstatus::clear_sum();
                 return -4;
             }
         };
-
-        sstatus::clear_sum();
 
         // 设置网络配置
         match NetworkConfigManager::set_interface_config(ifname_str, ip_str, gateway_str, mask_str)
@@ -156,9 +151,8 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
 /// 绑定套接字
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let endpoint = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(addr, addrlen);
-        sstatus::clear_sum();
         match ep {
             Ok(e) => e,
             Err(_) => return -22, // EINVAL
@@ -303,10 +297,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
     // Write address info if requested
     if !addr.is_null() && !addrlen.is_null() {
+        let _guard = SumGuard::new();
         unsafe {
-            sstatus::set_sum();
             let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
-            sstatus::clear_sum();
         }
     }
 
@@ -325,9 +318,8 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let endpoint = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(addr, addrlen);
-        sstatus::clear_sum();
         match ep {
             Ok(e) => e,
             Err(_) => return -22, // EINVAL
@@ -387,9 +379,8 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 /// 发送数据
 pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
     let data = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let slice = core::slice::from_raw_parts(buf, len);
-        sstatus::clear_sum();
         slice
     };
 
@@ -414,9 +405,8 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
     };
 
     let data = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let slice = core::slice::from_raw_parts_mut(buf, len);
-        sstatus::clear_sum();
         slice
     };
 
@@ -465,19 +455,17 @@ pub fn init_network_syscalls() {
 /// 获取网络接口地址列表 (Linux标准系统调用)
 pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
 
         // 获取所有网络接口
         let interfaces = NETWORK_INTERFACE_MANAGER.lock().get_interfaces().to_vec();
 
         if interfaces.is_empty() {
-            sstatus::clear_sum();
             return -1; // ENOENT
         }
 
         // 简化实现：返回成功，但不填充实际数据
         // 在实际实现中，需要分配内存并填充ifaddrs结构
-        sstatus::clear_sum();
         0 // 成功
     }
 }
@@ -485,12 +473,11 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
 // 释放获取网络接口列表分配的内存
 pub fn freeifaddrs(ifa: *mut u8) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
 
         // 简化实现：不执行任何操作
         // 在实际实现中，需要释放getifaddrs分配的内存
 
-        sstatus::clear_sum();
         0
     }
 }
@@ -624,17 +611,15 @@ pub fn getsockopt(
 // 接受连接（非阻塞）
 pub fn accept4(sockfd: i32, addr: *mut u8, addrlen: *mut u32, flags: i32) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
 
         // TODO: 实现接受连接逻辑
         // 检查套接字是否有效
         if sockfd < 0 {
-            sstatus::clear_sum();
             return -1; // EBADF
         }
 
         // 暂时返回一个虚拟的文件描述符
-        sstatus::clear_sum();
         4
     }
 }
@@ -654,9 +639,8 @@ pub fn sendto(
     }
 
     let endpoint = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(dest_addr, addrlen);
-        sstatus::clear_sum();
         match ep {
             Ok(e) => e,
             Err(_) => return -22, // EINVAL
@@ -664,9 +648,8 @@ pub fn sendto(
     };
 
     let data = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let slice = core::slice::from_raw_parts(buf, len);
-        sstatus::clear_sum();
         slice
     };
 
@@ -701,9 +684,8 @@ pub fn recvfrom(
     };
 
     let data = unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let slice = core::slice::from_raw_parts_mut(buf, len);
-        sstatus::clear_sum();
         slice
     };
 
@@ -711,11 +693,10 @@ pub fn recvfrom(
         Ok((n, Some(addr_buf))) => {
             if !src_addr.is_null() && !addrlen.is_null() {
                 unsafe {
-                    sstatus::set_sum();
+                    let _guard = SumGuard::new();
                     let len = (*addrlen as usize).min(addr_buf.len());
                     core::ptr::copy_nonoverlapping(addr_buf.as_ptr(), src_addr, len);
                     *addrlen = len as u32;
-                    sstatus::clear_sum();
                 }
             }
             n as isize
@@ -806,10 +787,11 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     drop(sockets);
 
     if let Some(ep) = local_endpoint {
-        unsafe {
-            sstatus::set_sum();
-            let _ = write_sockaddr_in(addr, addrlen, ep);
-            sstatus::clear_sum();
+        {
+            let _guard = SumGuard::new();
+            unsafe {
+                let _ = write_sockaddr_in(addr, addrlen, ep);
+            }
         }
         0
     } else {
@@ -846,10 +828,11 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     if let Some(ep) = remote_endpoint {
-        unsafe {
-            sstatus::set_sum();
-            let _ = write_sockaddr_in(addr, addrlen, ep);
-            sstatus::clear_sum();
+        {
+            let _guard = SumGuard::new();
+            unsafe {
+                let _ = write_sockaddr_in(addr, addrlen, ep);
+            }
         }
         0
     } else {

@@ -2,12 +2,12 @@
 //!
 //! ioctl (input/output control) 是一个多功能的系统调用，用于设备特定的控制操作。
 
+use crate::arch::trap::SumGuard;
 use crate::kernel::current_task;
 use crate::uapi::errno::{EBADF, EINVAL, ENOTTY, EOPNOTSUPP};
 use crate::uapi::ioctl::*;
 use crate::vfs::FsError;
 use crate::{earlyprintln, pr_debug, pr_err, pr_warn};
-use riscv::register::sstatus;
 
 /// ioctl - 设备特定的输入/输出控制
 ///
@@ -148,15 +148,13 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
 /// FIONBIO - 设置/清除非阻塞 I/O 标志
 fn handle_fionbio(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let value_ptr = arg as *const i32;
         if value_ptr.is_null() {
-            sstatus::clear_sum();
             return -EINVAL as isize;
         }
 
         let value = core::ptr::read_volatile(value_ptr);
-        sstatus::clear_sum();
 
         // 设置文件的 O_NONBLOCK 标志
         let mut flags = file.flags();
@@ -179,10 +177,9 @@ fn handle_fionbio(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> 
 /// FIONREAD - 获取可读字节数
 fn handle_fionread(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let value_ptr = arg as *mut i32;
         if value_ptr.is_null() {
-            sstatus::clear_sum();
             return -EINVAL as isize;
         }
 
@@ -204,7 +201,6 @@ fn handle_fionread(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) ->
         };
 
         core::ptr::write_volatile(value_ptr, available);
-        sstatus::clear_sum();
         0
     }
 }
@@ -212,15 +208,13 @@ fn handle_fionread(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) ->
 /// FIOASYNC - 设置/清除异步 I/O 通知
 fn handle_fioasync(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let value_ptr = arg as *const i32;
         if value_ptr.is_null() {
-            sstatus::clear_sum();
             return -EINVAL as isize;
         }
 
         let _value = core::ptr::read_volatile(value_ptr);
-        sstatus::clear_sum();
 
         // TODO: 实现异步 I/O 支持
         pr_warn!("ioctl: FIOASYNC not yet implemented");
@@ -256,15 +250,13 @@ fn handle_tiocspgrp(
     arg: usize,
 ) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let pid_ptr = arg as *const i32;
         if pid_ptr.is_null() {
-            sstatus::clear_sum();
             return -EINVAL as isize;
         }
 
         let pgid = core::ptr::read_volatile(pid_ptr);
-        sstatus::clear_sum();
 
         // 设置当前任务的进程组 ID
         task.lock().pgid = pgid as u32;
@@ -305,10 +297,9 @@ fn handle_vt_openqry(arg: usize) -> isize {
 /// SIOCGIFCONF - 获取网络接口列表
 fn handle_siocgifconf(arg: usize) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let ifconf_ptr = arg as *mut Ifconf;
         if ifconf_ptr.is_null() {
-            sstatus::clear_sum();
             return -EINVAL as isize;
         }
 
@@ -323,7 +314,6 @@ fn handle_siocgifconf(arg: usize) -> isize {
         let mut new_ifconf = ifconf;
         new_ifconf.ifc_len = 0;
         core::ptr::write_volatile(ifconf_ptr, new_ifconf);
-        sstatus::clear_sum();
 
         earlyprintln!("ioctl: SIOCGIFCONF returned 0 interfaces");
         0
@@ -333,15 +323,13 @@ fn handle_siocgifconf(arg: usize) -> isize {
 /// 处理网络接口请求（ifreq 结构）
 fn handle_ifreq(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, arg: usize) -> isize {
     unsafe {
-        sstatus::set_sum();
+        let _guard = SumGuard::new();
         let ifreq_ptr = arg as *mut Ifreq;
         if ifreq_ptr.is_null() {
-            sstatus::clear_sum();
             return -EINVAL as isize;
         }
 
         let _ifreq = core::ptr::read_volatile(ifreq_ptr);
-        sstatus::clear_sum();
 
         // TODO: 实现实际的网络接口操作
         match request {

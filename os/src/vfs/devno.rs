@@ -2,7 +2,7 @@
 //!
 //! 冷插拔系统的简化实现：所有设备号到驱动的映射都通过硬编码规则完成。
 
-use crate::device::{BLK_DRIVERS, Driver, SERIAL_DRIVERS};
+use crate::device::{BLK_DRIVERS, Driver, RTC_DRIVERS, SERIAL_DRIVERS};
 use crate::vfs::dev::{major, minor};
 use alloc::sync::Arc;
 
@@ -11,7 +11,13 @@ pub mod chrdev_major {
     pub const MEM: u32 = 1; // /dev/null, /dev/zero 等
     pub const TTY: u32 = 4; // /dev/tty*, /dev/ttyS*
     pub const CONSOLE: u32 = 5; // /dev/console
+    pub const MISC: u32 = 10; // /dev/misc/* (rtc=135)
     pub const INPUT: u32 = 13; // /dev/input/*
+}
+
+/// MISC 设备 minor 号
+pub mod misc_minor {
+    pub const RTC: u32 = 135;
 }
 
 /// 标准块设备 major 号
@@ -61,6 +67,18 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
                 .read()
                 .first()
                 .map(|d| d.clone() as Arc<dyn Driver>)
+        }
+        chrdev_major::MISC => {
+            // misc 设备
+            if min == misc_minor::RTC {
+                // RTC 设备 (/dev/misc/rtc)
+                RTC_DRIVERS
+                    .read()
+                    .first()
+                    .map(|d| d.clone() as Arc<dyn Driver>)
+            } else {
+                None
+            }
         }
         _ => None,
     }
