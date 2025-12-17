@@ -17,6 +17,7 @@ pub mod resource;
 pub mod sched;
 pub mod select;
 pub mod signal;
+pub mod socket;
 pub mod sysinfo;
 pub mod time;
 pub mod types;
