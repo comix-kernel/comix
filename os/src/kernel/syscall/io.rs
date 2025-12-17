@@ -670,19 +670,9 @@ pub fn select(
     // Helper to check fds
     let check_fds = || -> (isize, Option<FdSet>, Option<FdSet>, Option<FdSet>) {
         let mut ready_count = 0;
-        let mut read_set = input_read.clone();
-        let mut write_set = input_write.clone();
-        let mut except_set = input_except.clone();
-
-        if let Some(ref mut set) = read_set {
-            set.zero();
-        }
-        if let Some(ref mut set) = write_set {
-            set.zero();
-        }
-        if let Some(ref mut set) = except_set {
-            set.zero();
-        }
+        let mut read_set = input_read.as_ref().map(|_| FdSet::new());
+        let mut write_set = input_write.as_ref().map(|_| FdSet::new());
+        let mut except_set = input_except.as_ref().map(|_| FdSet::new());
 
         for fd in 0..nfds {
             let check_read = input_read.as_ref().map_or(false, |s| s.is_set(fd));
@@ -711,6 +701,8 @@ pub fn select(
                     fd_ready = true;
                 }
             }
+            // exceptfds: OOB data, errors (not implemented yet)
+            // Would need File::has_exception() method
             if fd_ready {
                 ready_count += 1;
             }
