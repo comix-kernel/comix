@@ -244,6 +244,9 @@ impl File for PipeFile {
     }
 
     // lseek 使用默认实现 (返回 NotSupported)
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 impl Drop for PipeFile {

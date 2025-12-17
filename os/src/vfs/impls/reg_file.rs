@@ -178,4 +178,8 @@ impl File for RegFile {
     fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
         self.inode.write_at(offset, buf)
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }

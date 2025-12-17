@@ -212,4 +212,7 @@ pub trait File: Send + Sync {
     fn ioctl(&self, _request: u32, _arg: usize) -> Result<isize, FsError> {
         Err(FsError::NotSupported)
     }
+
+    /// 获取 Any trait 引用，用于安全的类型转换
+    fn as_any(&self) -> &dyn core::any::Any;
 }

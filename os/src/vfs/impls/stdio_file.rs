@@ -84,6 +84,9 @@ impl File for StdinFile {
     }
 
     // lseek 使用默认实现 (返回 NotSupported)
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 /// 标准输出文件
@@ -132,6 +135,9 @@ impl File for StdoutFile {
     fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
         stdio_ioctl(request, arg)
     }
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 /// 标准错误输出文件
@@ -179,6 +185,9 @@ impl File for StderrFile {
 
     fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
         stdio_ioctl(request, arg)
+    }
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }
 
