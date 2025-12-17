@@ -236,9 +236,9 @@ impl File for CharDeviceFile {
     }
 
     fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
+        use crate::arch::trap::SumGuard;
         use crate::uapi::errno::{EINVAL, ENOTTY};
         use crate::uapi::ioctl::*;
-        use crate::arch::trap::SumGuard;
 
         let maj = major(self.dev);
 
@@ -263,9 +263,9 @@ impl File for CharDeviceFile {
 impl CharDeviceFile {
     /// 控制台设备 ioctl 处理
     fn console_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
+        use crate::arch::trap::SumGuard;
         use crate::uapi::errno::{EINVAL, ENOTTY};
         use crate::uapi::ioctl::*;
-        use crate::arch::trap::SumGuard;
 
         match request {
             TCGETS => {
@@ -299,16 +299,18 @@ impl CharDeviceFile {
                     return Ok(-EINVAL as isize);
                 }
 
-                unsafe {
+                {
                     let _guard = SumGuard::new();
                     let termios_ptr = arg as *const Termios;
                     if termios_ptr.is_null() {
                         return Ok(-EINVAL as isize);
                     }
 
-                    // 读取新的 termios 设置并保存
-                    let new_termios = core::ptr::read_volatile(termios_ptr);
-                    *self.termios.lock() = new_termios;
+                    unsafe {
+                        // 读取新的 termios 设置并保存
+                        let new_termios = core::ptr::read_volatile(termios_ptr);
+                        *self.termios.lock() = new_termios;
+                    }
                 }
                 Ok(0)
             }
@@ -344,16 +346,18 @@ impl CharDeviceFile {
                     return Ok(-EINVAL as isize);
                 }
 
-                unsafe {
+                {
                     let _guard = SumGuard::new();
                     let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
                     if winsize_ptr.is_null() {
                         return Ok(-EINVAL as isize);
                     }
 
-                    // 读取新的窗口大小并保存
-                    let new_winsize = core::ptr::read_volatile(winsize_ptr);
-                    *self.winsize.lock() = new_winsize;
+                    unsafe {
+                        // 读取新的窗口大小并保存
+                        let new_winsize = core::ptr::read_volatile(winsize_ptr);
+                        *self.winsize.lock() = new_winsize;
+                    }
                 }
                 Ok(0)
             }
@@ -365,10 +369,10 @@ impl CharDeviceFile {
 
     /// MISC 设备 ioctl 处理
     fn misc_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
+        use crate::arch::trap::SumGuard;
         use crate::uapi::errno::EINVAL;
         use crate::uapi::ioctl::*;
         use crate::vfs::dev::minor;
-        use crate::arch::trap::SumGuard;
 
         let min = minor(self.dev);
 
