@@ -104,6 +104,21 @@ impl WaitQueue {
         let _g = self.lock.lock();
         self.tasks.is_empty()
     }
+
+    /// 原子地检查条件并睡眠（用于防止 lost wakeup）
+    /// check_fn 在持有锁时被调用，如果返回 true 则不睡眠
+    pub fn sleep_if<F>(&mut self, task: SharedTask, check_fn: F) -> bool
+    where
+        F: FnOnce() -> bool,
+    {
+        let _g = self.lock.lock();
+        if check_fn() {
+            return false; // 条件满足，不睡眠
+        }
+        self.tasks.add_task(task.clone());
+        sleep_task_with_block(task, true);
+        true // 已睡眠
+    }
 }
 
 // SAFETY:
