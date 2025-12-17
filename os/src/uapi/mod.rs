@@ -15,6 +15,7 @@ pub mod mm;
 pub mod reboot;
 pub mod resource;
 pub mod sched;
+pub mod select;
 pub mod signal;
 pub mod sysinfo;
 pub mod time;

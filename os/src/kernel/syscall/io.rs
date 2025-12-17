@@ -589,3 +589,178 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
         }
     }
 }
+
+/// pselect6 - synchronous I/O multiplexing with signal mask
+/// Note: sigmask parameter is currently ignored
+pub fn pselect6(
+    nfds: usize,
+    readfds: usize,
+    writefds: usize,
+    exceptfds: usize,
+    timeout: usize,
+    _sigmask: usize,
+) -> isize {
+    select(nfds, readfds, writefds, exceptfds, timeout)
+}
+
+/// select - synchronous I/O multiplexing
+pub fn select(
+    nfds: usize,
+    readfds: usize,
+    writefds: usize,
+    exceptfds: usize,
+    timeout: usize,
+) -> isize {
+    use crate::arch::trap::SumGuard;
+    use crate::kernel::current_cpu;
+    use crate::uapi::errno::EINVAL;
+    use crate::uapi::select::FdSet;
+    use crate::uapi::time::timeval;
+
+    if nfds > crate::uapi::select::FD_SETSIZE {
+        return -(EINVAL as isize);
+    }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+
+    // Parse timeout
+    let timeout_trigger = if timeout == 0 {
+        None // Infinite timeout
+    } else {
+        let _guard = SumGuard::new();
+        unsafe {
+            let tv = &*(timeout as *const timeval);
+            if tv.tv_sec < 0 || tv.tv_usec < 0 {
+                return -(EINVAL as isize);
+            }
+            if tv.is_zero() {
+                Some(0) // Poll mode (no wait)
+            } else {
+                use crate::arch::timer::{clock_freq, get_time};
+                let duration_ticks = tv.into_freq(clock_freq());
+                Some(get_time() + duration_ticks)
+            }
+        }
+    };
+
+    loop {
+        let mut ready_count = 0;
+
+        {
+            let _guard = SumGuard::new();
+
+            // Copy fd_sets from user space
+            let mut read_set = if readfds != 0 {
+                Some(unsafe { *(readfds as *const FdSet) })
+            } else {
+                None
+            };
+            let mut write_set = if writefds != 0 {
+                Some(unsafe { *(writefds as *const FdSet) })
+            } else {
+                None
+            };
+            let mut except_set = if exceptfds != 0 {
+                Some(unsafe { *(exceptfds as *const FdSet) })
+            } else {
+                None
+            };
+
+            // Clear output sets
+            if let Some(ref mut set) = read_set {
+                set.zero();
+            }
+            if let Some(ref mut set) = write_set {
+                set.zero();
+            }
+            if let Some(ref mut set) = except_set {
+                set.zero();
+            }
+
+            // Check each fd
+            for fd in 0..nfds {
+                let check_read = readfds != 0 && unsafe { (*(readfds as *const FdSet)).is_set(fd) };
+                let check_write =
+                    writefds != 0 && unsafe { (*(writefds as *const FdSet)).is_set(fd) };
+                let check_except =
+                    exceptfds != 0 && unsafe { (*(exceptfds as *const FdSet)).is_set(fd) };
+
+                if !check_read && !check_write && !check_except {
+                    continue;
+                }
+
+                let file = match task.lock().fd_table.get(fd) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        // Bad fd - set in except set
+                        if let Some(ref mut set) = except_set {
+                            set.set(fd);
+                            ready_count += 1;
+                        }
+                        continue;
+                    }
+                };
+
+                if check_read && file.readable() {
+                    if let Some(ref mut set) = read_set {
+                        set.set(fd);
+                        ready_count += 1;
+                    }
+                }
+
+                if check_write && file.writable() {
+                    if let Some(ref mut set) = write_set {
+                        set.set(fd);
+                        ready_count += 1;
+                    }
+                }
+            }
+
+            // Write back results
+            if let Some(set) = read_set {
+                unsafe { *(readfds as *mut FdSet) = set };
+            }
+            if let Some(set) = write_set {
+                unsafe { *(writefds as *mut FdSet) = set };
+            }
+            if let Some(set) = except_set {
+                unsafe { *(exceptfds as *mut FdSet) = set };
+            }
+        }
+
+        if ready_count > 0 {
+            return ready_count;
+        }
+
+        // Poll mode - return immediately
+        if let Some(0) = timeout_trigger {
+            return 0;
+        }
+
+        // Register timeout timer if needed
+        if let Some(trigger) = timeout_trigger {
+            use crate::kernel::timer::TIMER_QUEUE;
+            let mut timer_q = TIMER_QUEUE.lock();
+            timer_q.push(trigger, task.clone());
+            drop(timer_q);
+        }
+
+        // Sleep atomically
+        POLL_WAIT_QUEUE.lock().sleep(task.clone());
+        crate::kernel::schedule();
+
+        // Woken up - remove from timer queue if still there
+        if timeout_trigger.is_some() {
+            use crate::kernel::timer::TIMER_QUEUE;
+            TIMER_QUEUE.lock().remove_task(&task);
+        }
+
+        // Check if woken by timeout
+        if let Some(trigger) = timeout_trigger {
+            use crate::arch::timer::get_time;
+            if get_time() >= trigger {
+                return 0; // Timeout
+            }
+        }
+    }
+}
