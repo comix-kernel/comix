@@ -286,6 +286,16 @@ fn create_devices() -> Result<(), FsError> {
     // /dev/ttyS0 (4, 64)
     dev_inode.mknod("ttyS0", char_mode, makedev(chrdev_major::TTY, 64))?;
 
+    // 创建 /dev/misc 目录
+    let dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o755);
+    dev_inode.mkdir("misc", dir_mode)?;
+
+    // /dev/misc/rtc (10, 135)
+    let misc_dentry = vfs_lookup("/dev/misc")?;
+    misc_dentry
+        .inode
+        .mknod("rtc", char_mode, makedev(chrdev_major::MISC, 135))?;
+
     // 块设备：0660 权限
     let block_mode = FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660);
 

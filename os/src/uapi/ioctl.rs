@@ -180,8 +180,35 @@ pub const SIOCGIFNAME_BY_INDEX: u32 = 0x8910;
 // ========== 设备特定 ioctl ==========
 
 /// RTC（实时时钟）设备
-pub const RTC_RD_TIME: u32 = _IOR(b'p' as u32, 0x09, 0);
-pub const RTC_SET_TIME: u32 = _IOW(b'p' as u32, 0x0A, 0);
+/// size = sizeof(struct rtc_time) = 9 * sizeof(int) = 36
+pub const RTC_RD_TIME: u32 = _IOR(b'p' as u32, 0x09, 36);
+pub const RTC_SET_TIME: u32 = _IOW(b'p' as u32, 0x0A, 36);
+
+/// RTC 时间结构体（对应 Linux struct rtc_time）
+///
+/// 参考：include/uapi/linux/rtc.h
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RtcTime {
+    /// 秒 (0-59)
+    pub tm_sec: i32,
+    /// 分 (0-59)
+    pub tm_min: i32,
+    /// 时 (0-23)
+    pub tm_hour: i32,
+    /// 日 (1-31)
+    pub tm_mday: i32,
+    /// 月 (0-11, 注意是 0-based)
+    pub tm_mon: i32,
+    /// 年份 - 1900
+    pub tm_year: i32,
+    /// 星期 (0-6, 0=Sunday)
+    pub tm_wday: i32,
+    /// 年内第几天 (0-365)
+    pub tm_yday: i32,
+    /// 夏令时标志
+    pub tm_isdst: i32,
+}
 
 /// 块设备
 pub const BLKGETSIZE: u32 = _IO(0x12, 96);
