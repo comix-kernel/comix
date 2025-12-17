@@ -5,9 +5,21 @@ use core::ffi::{CStr, c_char};
 use riscv::register::sstatus;
 
 use crate::{
-    net::{config::NetworkConfigManager, interface::NETWORK_INTERFACE_MANAGER},
+    kernel::current_cpu,
+    net::{
+        config::NetworkConfigManager,
+        interface::NETWORK_INTERFACE_MANAGER,
+        socket::{
+            SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket,
+            get_socket_handle, parse_sockaddr_in, register_socket_fd, unregister_socket_fd,
+            write_sockaddr_in,
+        },
+    },
     println,
 };
+use alloc::sync::Arc;
+use smoltcp::socket::{tcp, udp};
+use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
 /// 获取网络接口列表
 pub fn get_network_interfaces() -> isize {
@@ -72,59 +84,321 @@ pub fn set_network_interface_config(
 }
 
 /// 创建套接字
-pub fn socket(domain: i32, socket_type: i32, protocol: i32) -> isize {
-    // 目前只支持IPv4和TCP/UDP
-    if domain != 2 || (socket_type != 1 && socket_type != 2) {
-        return -1; // EAFNOSUPPORT 或 ESOCKTNOSUPPORT
-    }
+pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
+    if domain != 2 {
+        return -97;
+    } // EAFNOSUPPORT
 
-    // TODO: 实现套接字创建
-    // 暂时返回一个虚拟的文件描述符
-    3
+    let handle = match socket_type {
+        1 => match create_tcp_socket() {
+            Ok(h) => h,
+            Err(_) => return -12, // ENOMEM
+        },
+        2 => match create_udp_socket() {
+            Ok(h) => h,
+            Err(_) => return -12, // ENOMEM
+        },
+        _ => return -94, // ESOCKTNOSUPPORT
+    };
+
+    let socket_file = Arc::new(SocketFile::new(handle));
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+
+    let mut task_lock = task.lock();
+    match task_lock.fd_table.alloc(socket_file) {
+        Ok(fd) => {
+            register_socket_fd(task_lock.tid as usize, fd, handle);
+            fd as isize
+        }
+        Err(_) => -24, // EMFILE
+    }
 }
 
 /// 绑定套接字
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    // TODO: 实现绑定逻辑
+    let endpoint = unsafe {
+        sstatus::set_sum();
+        let ep = parse_sockaddr_in(addr, addrlen);
+        sstatus::clear_sum();
+        match ep {
+            Ok(e) => e,
+            Err(_) => return -22, // EINVAL
+        }
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
+
+    // For TCP: just save the endpoint, listen() will call smoltcp's listen()
+    // For UDP: bind immediately
+    match handle {
+        SocketHandle::Tcp(_) => {
+            use crate::net::socket::set_socket_local_endpoint;
+            if set_socket_local_endpoint(&file, endpoint).is_err() {
+                return -22; // EINVAL
+            }
+        }
+        SocketHandle::Udp(h) => {
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<udp::Socket>(h);
+            if socket.bind(endpoint).is_err() {
+                return -98; // EADDRINUSE
+            }
+        }
+    }
+
     0
 }
 
 /// 监听连接
 pub fn listen(sockfd: i32, backlog: i32) -> isize {
-    // TODO: 实现监听逻辑
-    0
+    if backlog < 0 {
+        return -22; // EINVAL
+    }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
+
+    match handle {
+        SocketHandle::Tcp(h) => {
+            use crate::net::socket::get_socket_local_endpoint;
+            let endpoint = match get_socket_local_endpoint(&file) {
+                Some(ep) => ep,
+                None => return -22, // EINVAL - must bind first
+            };
+
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            if socket.listen(endpoint).is_err() {
+                return -98; // EADDRINUSE
+            }
+            0
+        }
+        SocketHandle::Udp(_) => -95, // EOPNOTSUPP - UDP doesn't support listen
+    }
 }
 
 /// 接受连接
 pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    // TODO: 实现接受连接逻辑
-    // 暂时返回一个虚拟的文件描述符
-    4
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
+
+    let listen_handle = match get_socket_handle(tid as usize, sockfd as usize) {
+        Some(SocketHandle::Tcp(h)) => h,
+        Some(SocketHandle::Udp(_)) => return -95, // EOPNOTSUPP
+        None => return -88,                       // ENOTSOCK
+    };
+
+    let mut sockets = SOCKET_SET.lock();
+    let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
+
+    if !listen_socket.is_listening() {
+        return -22; // EINVAL - not in listening state
+    }
+
+    if !listen_socket.is_active() {
+        return -11; // EAGAIN - no pending connection
+    }
+
+    // Get remote endpoint and local endpoint
+    let remote_endpoint = match listen_socket.remote_endpoint() {
+        Some(ep) => ep,
+        None => return -11, // EAGAIN
+    };
+    let local_endpoint = listen_socket.local_endpoint().unwrap();
+
+    // Create new listening socket to replace the old one
+    let new_listen_handle = match create_tcp_socket() {
+        Ok(SocketHandle::Tcp(h)) => h,
+        _ => return -12, // ENOMEM
+    };
+
+    // Set new socket to listen on the same address
+    let new_listen_socket = sockets.get_mut::<tcp::Socket>(new_listen_handle);
+    if new_listen_socket.listen(local_endpoint).is_err() {
+        sockets.remove(new_listen_handle);
+        return -12; // ENOMEM or other error
+    }
+
+    // The old listen_handle is now the established connection
+    // Update the mapping to point to the new listening socket
+    use crate::net::socket::{update_socket_file_handle, update_socket_handle};
+    update_socket_handle(
+        tid as usize,
+        sockfd as usize,
+        SocketHandle::Tcp(new_listen_handle),
+    );
+
+    // Also update the SocketFile's internal handle
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
+
+    drop(sockets);
+
+    // Write address info if requested
+    if !addr.is_null() && !addrlen.is_null() {
+        unsafe {
+            sstatus::set_sum();
+            let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
+            sstatus::clear_sum();
+        }
+    }
+
+    // Return the established connection as a new fd
+    let conn_handle = SocketHandle::Tcp(listen_handle);
+    let socket_file = Arc::new(SocketFile::new(conn_handle));
+    match task.lock().fd_table.alloc(socket_file) {
+        Ok(fd) => {
+            register_socket_fd(tid as usize, fd, conn_handle);
+            fd as isize
+        }
+        Err(_) => -24, // EMFILE
+    }
 }
 
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    // TODO: 实现连接逻辑
+    let endpoint = unsafe {
+        sstatus::set_sum();
+        let ep = parse_sockaddr_in(addr, addrlen);
+        sstatus::clear_sum();
+        match ep {
+            Ok(e) => e,
+            Err(_) => return -22, // EINVAL
+        }
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
+
+    use crate::net::socket::set_socket_remote_endpoint;
+    set_socket_remote_endpoint(&file, endpoint).unwrap();
+
+    let is_nonblock = file
+        .flags()
+        .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
+
+    match handle {
+        SocketHandle::Tcp(h) => {
+            let sockets = SOCKET_SET.lock();
+            let socket = sockets.get::<tcp::Socket>(h);
+            if socket.is_open() {
+                return -106; // EISCONN
+            }
+            let local_endpoint = socket.local_endpoint().unwrap_or(IpEndpoint::new(
+                IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
+                0,
+            ));
+            drop(sockets);
+
+            use crate::net::socket::tcp_connect;
+            if let Err(_) = tcp_connect(h, endpoint, local_endpoint) {
+                return -22; // EINVAL or connection error
+            }
+
+            if is_nonblock {
+                return -115; // EINPROGRESS
+            }
+        }
+        SocketHandle::Udp(_) => {}
+    }
+
     0
 }
 
 /// 发送数据
-pub fn send(sockfd: i32, buf: *const u8, len: usize, flags: i32) -> isize {
-    // TODO: 实现发送逻辑
-    len as isize
+pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9,
+    };
+
+    match file.write(data) {
+        Ok(n) => n as isize,
+        Err(_) => -11, // EAGAIN
+    }
 }
 
 /// 接收数据
-pub fn recv(sockfd: i32, buf: *mut u8, len: usize, flags: i32) -> isize {
-    // TODO: 实现接收逻辑
-    // 暂时返回0，表示没有数据可读
-    0
+pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9,
+    };
+
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts_mut(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    match file.read(data) {
+        Ok(n) => n as isize,
+        Err(_) => -11, // EAGAIN
+    }
 }
 
 /// 关闭套接字
 pub fn close_sock(sockfd: i32) -> isize {
-    // TODO: 实现关闭逻辑
-    0
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let mut task_lock = task.lock();
+    let tid = task_lock.tid;
+
+    unregister_socket_fd(tid as usize, sockfd as usize);
+
+    match task_lock.fd_table.close(sockfd as usize) {
+        Ok(_) => 0,
+        Err(_) => -9,
+    }
 }
 
 /// 安全地获取C字符串
@@ -257,22 +531,44 @@ pub fn sendto(
     sockfd: i32,
     buf: *const u8,
     len: usize,
-    flags: i32,
+    _flags: i32,
     dest_addr: *const u8,
     addrlen: u32,
 ) -> isize {
-    unsafe {
+    // If dest_addr is null, behave like send()
+    if dest_addr.is_null() {
+        return send(sockfd, buf, len, 0);
+    }
+
+    let endpoint = unsafe {
         sstatus::set_sum();
-
-        // TODO: 实现发送逻辑
-        // 检查套接字、缓冲区和地址是否有效
-        if sockfd < 0 || buf.is_null() || dest_addr.is_null() {
-            sstatus::clear_sum();
-            return -1; // EBADF 或 EFAULT
-        }
-
+        let ep = parse_sockaddr_in(dest_addr, addrlen);
         sstatus::clear_sum();
-        len as isize // 假设所有数据都已发送
+        match ep {
+            Ok(e) => e,
+            Err(_) => return -22, // EINVAL
+        }
+    };
+
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    use crate::net::socket::socket_sendto;
+    match socket_sendto(handle, data, endpoint) {
+        Ok(n) => n as isize,
+        Err(e) => e.to_errno(),
     }
 }
 
@@ -281,91 +577,169 @@ pub fn recvfrom(
     sockfd: i32,
     buf: *mut u8,
     len: usize,
-    flags: i32,
+    _flags: i32,
     src_addr: *mut u8,
     addrlen: *mut u32,
 ) -> isize {
-    unsafe {
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+
+    let data = unsafe {
         sstatus::set_sum();
-
-        // TODO: 实现接收逻辑
-        // 检查套接字和缓冲区是否有效
-        if sockfd < 0 || buf.is_null() {
-            sstatus::clear_sum();
-            return -1; // EBADF 或 EFAULT
-        }
-
-        // 暂时返回0，表示没有数据可读
+        let slice = core::slice::from_raw_parts_mut(buf, len);
         sstatus::clear_sum();
-        0
+        slice
+    };
+
+    match file.recvfrom(data) {
+        Ok((n, Some(addr_buf))) => {
+            if !src_addr.is_null() && !addrlen.is_null() {
+                unsafe {
+                    sstatus::set_sum();
+                    let len = (*addrlen as usize).min(addr_buf.len());
+                    core::ptr::copy_nonoverlapping(addr_buf.as_ptr(), src_addr, len);
+                    *addrlen = len as u32;
+                    sstatus::clear_sum();
+                }
+            }
+            n as isize
+        }
+        Ok((n, None)) => n as isize,
+        Err(_) => -11, // EAGAIN
     }
 }
 
 // 关闭套接字
 pub fn shutdown(sockfd: i32, how: i32) -> isize {
-    unsafe {
-        sstatus::set_sum();
+    const SHUT_RD: i32 = 0;
+    const SHUT_WR: i32 = 1;
+    const SHUT_RDWR: i32 = 2;
 
-        // TODO: 实现关闭套接字逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
-        }
-
-        // 检查how参数是否有效
-        if how < 0 || how > 2 {
-            sstatus::clear_sum();
-            return -1; // EINVAL
-        }
-
-        sstatus::clear_sum();
-        0 // 成功
+    if how < 0 || how > 2 {
+        return -22; // EINVAL
     }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
+
+    use crate::net::socket::{socket_shutdown_read, socket_shutdown_write};
+
+    let should_close_tcp = match how {
+        SHUT_RD => {
+            socket_shutdown_read(&file);
+            false
+        }
+        SHUT_WR | SHUT_RDWR => {
+            if how == SHUT_RDWR {
+                socket_shutdown_read(&file);
+            }
+            socket_shutdown_write(&file);
+            true
+        }
+        _ => unreachable!(), // 这里是不可到达的到达即意味着有问题
+    };
+
+    if should_close_tcp {
+        if let SocketHandle::Tcp(h) = handle {
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            socket.close();
+        }
+    }
+
+    0
 }
 
 // 获取套接字地址
 pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    unsafe {
-        sstatus::set_sum();
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid as usize;
 
-        // TODO: 实现获取套接字名称逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let sockets = SOCKET_SET.lock();
+    let local_endpoint = match handle {
+        SocketHandle::Tcp(h) => {
+            let socket = sockets.get::<tcp::Socket>(h);
+            socket.local_endpoint()
         }
-
-        // 检查addr和addrlen是否有效
-        if addr.is_null() || addrlen.is_null() {
-            sstatus::clear_sum();
-            return -1; // EFAULT
+        SocketHandle::Udp(h) => {
+            let socket = sockets.get::<udp::Socket>(h);
+            let listen_ep = socket.endpoint();
+            listen_ep
+                .addr
+                .map(|addr| IpEndpoint::new(addr, listen_ep.port))
         }
+    };
 
-        sstatus::clear_sum();
-        0 // 成功
+    drop(sockets);
+
+    if let Some(ep) = local_endpoint {
+        unsafe {
+            sstatus::set_sum();
+            let _ = write_sockaddr_in(addr, addrlen, ep);
+            sstatus::clear_sum();
+        }
+        0
+    } else {
+        -22 // EINVAL
     }
 }
 
 // 获取对端套接字地址
 pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    unsafe {
-        sstatus::set_sum();
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid as usize;
 
-        // TODO: 实现获取对端套接字名称逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            sstatus::clear_sum();
-            return -1; // EBADF
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
+    };
+
+    let sockets = SOCKET_SET.lock();
+    let remote_endpoint = match handle {
+        SocketHandle::Tcp(h) => {
+            let socket = sockets.get::<tcp::Socket>(h);
+            socket.remote_endpoint()
         }
-
-        // 检查addr和addrlen是否有效
-        if addr.is_null() || addrlen.is_null() {
-            sstatus::clear_sum();
-            return -1; // EFAULT
+        SocketHandle::Udp(_) => {
+            // UDP doesn't have a peer, use stored endpoint
+            drop(sockets);
+            let file = match task.lock().fd_table.get(sockfd as usize) {
+                Ok(f) => f,
+                Err(_) => return -9, // EBADF
+            };
+            use crate::net::socket::get_socket_remote_endpoint;
+            get_socket_remote_endpoint(&file)
         }
+    };
 
-        sstatus::clear_sum();
-        0 // 成功
+    if let Some(ep) = remote_endpoint {
+        unsafe {
+            sstatus::set_sum();
+            let _ = write_sockaddr_in(addr, addrlen, ep);
+            sstatus::clear_sum();
+        }
+        0
+    } else {
+        -107 // ENOTCONN
     }
 }

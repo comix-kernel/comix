@@ -35,6 +35,9 @@ pub enum FsError {
     BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
     WouldBlock, // -EAGAIN(11): 非阻塞操作将阻塞
 
+    // 网络相关
+    NotConnected, // -ENOTCONN(107): 套接字未连接
+
     // 其他
     NotSupported, // -ENOTSUP(95): 操作不支持
     TooManyLinks, // -EMLINK(31): 硬链接过多
@@ -62,6 +65,7 @@ impl FsError {
             FsError::NameTooLong => -36,
             FsError::DirectoryNotEmpty => -39,
             FsError::NotSupported => -95,
+            FsError::NotConnected => -107,
         }
     }
 }
