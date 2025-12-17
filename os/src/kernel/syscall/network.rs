@@ -585,15 +585,27 @@ pub fn getsockopt(
 
             match level {
                 SOL_SOCKET => match optname {
-                    SO_REUSEADDR => get_sockopt_bool!(optval, available_len, opts.reuse_addr, written_len),
-                    SO_REUSEPORT => get_sockopt_bool!(optval, available_len, opts.reuse_port, written_len),
-                    SO_KEEPALIVE => get_sockopt_bool!(optval, available_len, opts.keepalive, written_len),
-                    SO_SNDBUF => get_sockopt_int!(optval, available_len, opts.send_buffer_size, written_len),
-                    SO_RCVBUF => get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len),
+                    SO_REUSEADDR => {
+                        get_sockopt_bool!(optval, available_len, opts.reuse_addr, written_len)
+                    }
+                    SO_REUSEPORT => {
+                        get_sockopt_bool!(optval, available_len, opts.reuse_port, written_len)
+                    }
+                    SO_KEEPALIVE => {
+                        get_sockopt_bool!(optval, available_len, opts.keepalive, written_len)
+                    }
+                    SO_SNDBUF => {
+                        get_sockopt_int!(optval, available_len, opts.send_buffer_size, written_len)
+                    }
+                    SO_RCVBUF => {
+                        get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len)
+                    }
                     _ => return -92, // ENOPROTOOPT
                 },
                 IPPROTO_TCP => match optname {
-                    TCP_NODELAY => get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len),
+                    TCP_NODELAY => {
+                        get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len)
+                    }
                     _ => return -92, // ENOPROTOOPT
                 },
                 _ => return -92, // ENOPROTOOPT
