@@ -2,7 +2,7 @@ use crate::device::Driver;
 use crate::sync::SpinLock;
 use crate::uapi::ioctl::Termios;
 use crate::vfs::dev::{major, minor};
-use crate::vfs::devno::{chrdev_major, get_chrdev_driver};
+use crate::vfs::devno::{chrdev_major, get_chrdev_driver, misc_minor};
 use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
@@ -255,6 +255,9 @@ impl File for CharDeviceFile {
             _ => Err(FsError::NotSupported),
         }
     }
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 impl CharDeviceFile {
@@ -279,7 +282,11 @@ impl CharDeviceFile {
                     }
 
                     // 清零结构体（包括 padding），避免泄露内核栈数据
-                    core::ptr::write_bytes(termios_ptr, 0, 1);
+                    core::ptr::write_bytes(
+                        termios_ptr as *mut u8,
+                        0,
+                        core::mem::size_of::<Termios>(),
+                    );
 
                     // 返回保存的 termios 设置
                     let termios = *self.termios.lock();
@@ -374,7 +381,7 @@ impl CharDeviceFile {
         let min = minor(self.dev);
 
         // RTC 设备 (minor=135)
-        if min == 135 {
+        if min == misc_minor::RTC {
             match request {
                 RTC_RD_TIME => {
                     if arg == 0 {
@@ -395,7 +402,11 @@ impl CharDeviceFile {
                                 }
 
                                 // 清零结构体
-                                core::ptr::write_bytes(rtc_time_ptr, 0, 1);
+                                core::ptr::write_bytes(
+                                    rtc_time_ptr as *mut u8,
+                                    0,
+                                    core::mem::size_of::<RtcTime>(),
+                                );
 
                                 // 填充时间结构体
                                 let rtc_time = RtcTime {
@@ -423,9 +434,5 @@ impl CharDeviceFile {
         } else {
             Err(FsError::NotSupported)
         }
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
     }
 }

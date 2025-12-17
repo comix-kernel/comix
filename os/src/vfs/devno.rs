@@ -15,6 +15,11 @@ pub mod chrdev_major {
     pub const INPUT: u32 = 13; // /dev/input/*
 }
 
+/// MISC 设备 minor 号
+pub mod misc_minor {
+    pub const RTC: u32 = 135;
+}
+
 /// 标准块设备 major 号
 pub mod blkdev_major {
     pub const LOOP: u32 = 7; // /dev/loop*
@@ -65,7 +70,7 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
         }
         chrdev_major::MISC => {
             // misc 设备
-            if min == 135 {
+            if min == misc_minor::RTC {
                 // RTC 设备 (/dev/misc/rtc)
                 RTC_DRIVERS
                     .read()
