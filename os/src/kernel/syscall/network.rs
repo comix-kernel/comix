@@ -4,6 +4,44 @@ use core::ffi::{CStr, c_char};
 
 use riscv::register::sstatus;
 
+macro_rules! set_sockopt_bool {
+    ($optval:expr, $optlen:expr, $field:expr) => {
+        if $optlen >= 4 {
+            let val = *($optval as *const i32);
+            $field = val != 0;
+        }
+    };
+}
+
+macro_rules! set_sockopt_int {
+    ($optval:expr, $optlen:expr, $field:expr) => {
+        if $optlen >= 4 {
+            let val = *($optval as *const i32);
+            if val > 0 {
+                $field = val as usize;
+            }
+        }
+    };
+}
+
+macro_rules! get_sockopt_bool {
+    ($optval:expr, $avail:expr, $field:expr, $written:expr) => {
+        if $avail >= 4 {
+            *($optval as *mut i32) = if $field { 1 } else { 0 };
+            $written = 4;
+        }
+    };
+}
+
+macro_rules! get_sockopt_int {
+    ($optval:expr, $avail:expr, $field:expr, $written:expr) => {
+        if $avail >= 4 {
+            *($optval as *mut i32) = $field as i32;
+            $written = 4;
+        }
+    };
+}
+
 use crate::{
     kernel::current_cpu,
     net::{
@@ -487,49 +525,15 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
         unsafe {
             match level {
                 SOL_SOCKET => match optname {
-                    SO_REUSEADDR => {
-                        if optlen >= 4 {
-                            let val = *(optval as *const i32);
-                            opts.reuse_addr = val != 0;
-                        }
-                    }
-                    SO_REUSEPORT => {
-                        if optlen >= 4 {
-                            let val = *(optval as *const i32);
-                            opts.reuse_port = val != 0;
-                        }
-                    }
-                    SO_KEEPALIVE => {
-                        if optlen >= 4 {
-                            let val = *(optval as *const i32);
-                            opts.keepalive = val != 0;
-                        }
-                    }
-                    SO_SNDBUF => {
-                        if optlen >= 4 {
-                            let val = *(optval as *const i32);
-                            if val > 0 {
-                                opts.send_buffer_size = val as usize;
-                            }
-                        }
-                    }
-                    SO_RCVBUF => {
-                        if optlen >= 4 {
-                            let val = *(optval as *const i32);
-                            if val > 0 {
-                                opts.recv_buffer_size = val as usize;
-                            }
-                        }
-                    }
+                    SO_REUSEADDR => set_sockopt_bool!(optval, optlen, opts.reuse_addr),
+                    SO_REUSEPORT => set_sockopt_bool!(optval, optlen, opts.reuse_port),
+                    SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
+                    SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
+                    SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
                     _ => return -92, // ENOPROTOOPT
                 },
                 IPPROTO_TCP => match optname {
-                    TCP_NODELAY => {
-                        if optlen >= 4 {
-                            let val = *(optval as *const i32);
-                            opts.tcp_nodelay = val != 0;
-                        }
-                    }
+                    TCP_NODELAY => set_sockopt_bool!(optval, optlen, opts.tcp_nodelay),
                     _ => return -92, // ENOPROTOOPT
                 },
                 _ => return -92, // ENOPROTOOPT
@@ -581,49 +585,15 @@ pub fn getsockopt(
 
             match level {
                 SOL_SOCKET => match optname {
-                    SO_REUSEADDR => {
-                        if available_len >= 4 {
-                            let val: i32 = if opts.reuse_addr { 1 } else { 0 };
-                            *(optval as *mut i32) = val;
-                            written_len = 4;
-                        }
-                    }
-                    SO_REUSEPORT => {
-                        if available_len >= 4 {
-                            let val: i32 = if opts.reuse_port { 1 } else { 0 };
-                            *(optval as *mut i32) = val;
-                            written_len = 4;
-                        }
-                    }
-                    SO_KEEPALIVE => {
-                        if available_len >= 4 {
-                            let val: i32 = if opts.keepalive { 1 } else { 0 };
-                            *(optval as *mut i32) = val;
-                            written_len = 4;
-                        }
-                    }
-                    SO_SNDBUF => {
-                        if available_len >= 4 {
-                            *(optval as *mut i32) = opts.send_buffer_size as i32;
-                            written_len = 4;
-                        }
-                    }
-                    SO_RCVBUF => {
-                        if available_len >= 4 {
-                            *(optval as *mut i32) = opts.recv_buffer_size as i32;
-                            written_len = 4;
-                        }
-                    }
+                    SO_REUSEADDR => get_sockopt_bool!(optval, available_len, opts.reuse_addr, written_len),
+                    SO_REUSEPORT => get_sockopt_bool!(optval, available_len, opts.reuse_port, written_len),
+                    SO_KEEPALIVE => get_sockopt_bool!(optval, available_len, opts.keepalive, written_len),
+                    SO_SNDBUF => get_sockopt_int!(optval, available_len, opts.send_buffer_size, written_len),
+                    SO_RCVBUF => get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len),
                     _ => return -92, // ENOPROTOOPT
                 },
                 IPPROTO_TCP => match optname {
-                    TCP_NODELAY => {
-                        if available_len >= 4 {
-                            let val: i32 = if opts.tcp_nodelay { 1 } else { 0 };
-                            *(optval as *mut i32) = val;
-                            written_len = 4;
-                        }
-                    }
+                    TCP_NODELAY => get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len),
                     _ => return -92, // ENOPROTOOPT
                 },
                 _ => return -92, // ENOPROTOOPT

@@ -694,27 +694,26 @@ pub fn select(
 
             let file = match task.lock().fd_table.get(fd) {
                 Ok(f) => f,
-                Err(_) => {
-                    if let Some(ref mut set) = except_set {
-                        set.set(fd);
-                        ready_count += 1;
-                    }
-                    continue;
-                }
+                Err(_) => return -9, // EBADF - invalid fd
             };
 
+            let mut fd_ready = false;
             if check_read && file.readable() {
                 if let Some(ref mut set) = read_set {
                     set.set(fd);
-                    ready_count += 1;
+                    fd_ready = true;
                 }
             }
 
             if check_write && file.writable() {
                 if let Some(ref mut set) = write_set {
                     set.set(fd);
-                    ready_count += 1;
+                    fd_ready = true;
                 }
+            }
+
+            if fd_ready {
+                ready_count += 1;
             }
         }
 
