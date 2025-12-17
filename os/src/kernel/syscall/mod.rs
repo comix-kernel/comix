@@ -93,6 +93,11 @@ impl_syscall!(sys_pwrite64, pwrite64, (usize, *const u8, usize, i64));
 impl_syscall!(sys_preadv, preadv, (usize, *const IoVec, usize, i64));
 impl_syscall!(sys_pwritev, pwritev, (usize, *const IoVec, usize, i64));
 impl_syscall!(sys_sendfile, sendfile, (usize, usize, *mut i64, usize));
+impl_syscall!(
+    sys_pselect6,
+    pselect6,
+    (usize, usize, usize, usize, usize, usize)
+);
 impl_syscall!(sys_ppoll, ppoll, (usize, usize, usize, usize));
 
 // 文件元数据与同步 (File Metadata and Synchronization)

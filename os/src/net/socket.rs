@@ -26,6 +26,7 @@ lazy_static! {
 }
 
 use crate::uapi::fcntl::OpenFlags;
+use crate::uapi::socket::SocketOptions;
 
 pub struct SocketFile {
     handle: SpinLock<SocketHandle>,
@@ -34,6 +35,7 @@ pub struct SocketFile {
     shutdown_rd: SpinLock<bool>,
     shutdown_wr: SpinLock<bool>,
     flags: SpinLock<OpenFlags>,
+    options: SpinLock<SocketOptions>,
 }
 
 impl SocketFile {
@@ -45,6 +47,7 @@ impl SocketFile {
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(OpenFlags::empty()),
+            options: SpinLock::new(SocketOptions::default()),
         }
     }
 
@@ -56,7 +59,16 @@ impl SocketFile {
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(flags),
+            options: SpinLock::new(SocketOptions::default()),
         }
+    }
+
+    pub fn get_socket_options(&self) -> SocketOptions {
+        *self.options.lock()
+    }
+
+    pub fn set_socket_options(&self, opts: SocketOptions) {
+        *self.options.lock() = opts;
     }
 
     pub fn handle(&self) -> SocketHandle {

@@ -2,6 +2,47 @@
 
 use core::ffi::{CStr, c_char};
 
+use riscv::register::sstatus;
+
+macro_rules! set_sockopt_bool {
+    ($optval:expr, $optlen:expr, $field:expr) => {
+        if $optlen >= 4 {
+            let val = *($optval as *const i32);
+            $field = val != 0;
+        }
+    };
+}
+
+macro_rules! set_sockopt_int {
+    ($optval:expr, $optlen:expr, $field:expr) => {
+        if $optlen >= 4 {
+            let val = *($optval as *const i32);
+            if val < 0 {
+                return -(EINVAL as isize);
+            }
+            $field = val as usize;
+        }
+    };
+}
+
+macro_rules! get_sockopt_bool {
+    ($optval:expr, $avail:expr, $field:expr, $written:expr) => {
+        if $avail >= 4 {
+            *($optval as *mut i32) = if $field { 1 } else { 0 };
+            $written = 4;
+        }
+    };
+}
+
+macro_rules! get_sockopt_int {
+    ($optval:expr, $avail:expr, $field:expr, $written:expr) => {
+        if $avail >= 4 {
+            *($optval as *mut i32) = $field as i32;
+            $written = 4;
+        }
+    };
+}
+
 use crate::{
     arch::trap::SumGuard,
     kernel::current_cpu,
@@ -443,22 +484,54 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
 
 // 设置网络接口配置
 pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optlen: u32) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
+    use crate::arch::trap::SumGuard;
+    use crate::kernel::current_cpu;
+    use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
+    use crate::uapi::socket::*;
 
-        // TODO: 实现设置套接字选项逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            return -1; // EBADF
-        }
-
-        // 检查optval是否有效
-        if optval.is_null() {
-            return -1; // EFAULT
-        }
-
-        0 // 成功
+    if sockfd < 0 || optval.is_null() {
+        return -(EINVAL as isize);
     }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -(EBADF as isize),
+    };
+
+    let socket_file = match file
+        .as_any()
+        .downcast_ref::<crate::net::socket::SocketFile>()
+    {
+        Some(sf) => sf,
+        None => return -(ENOTSOCK as isize),
+    };
+
+    let mut opts = socket_file.get_socket_options();
+
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            match level {
+                SOL_SOCKET => match optname {
+                    SO_REUSEADDR => set_sockopt_bool!(optval, optlen, opts.reuse_addr),
+                    SO_REUSEPORT => set_sockopt_bool!(optval, optlen, opts.reuse_port),
+                    SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
+                    SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
+                    SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                IPPROTO_TCP => match optname {
+                    TCP_NODELAY => set_sockopt_bool!(optval, optlen, opts.tcp_nodelay),
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                _ => return -(ENOPROTOOPT as isize),
+            }
+        }
+    }
+
+    socket_file.set_socket_options(opts);
+    0
 }
 
 // 获取网络接口配置
@@ -469,22 +542,70 @@ pub fn getsockopt(
     optval: *mut u8,
     optlen: *mut u32,
 ) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
+    use crate::arch::trap::SumGuard;
+    use crate::kernel::current_cpu;
+    use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
+    use crate::uapi::socket::*;
 
-        // TODO: 实现获取套接字选项逻辑
-        // 检查套接字是否有效
-        if sockfd < 0 {
-            return -1; // EBADF
-        }
-
-        // 检查optval和optlen是否有效
-        if optval.is_null() || optlen.is_null() {
-            return -1; // EFAULT
-        }
-
-        0 // 成功
+    if sockfd < 0 || optval.is_null() || optlen.is_null() {
+        return -(EINVAL as isize);
     }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -(EBADF as isize),
+    };
+
+    let socket_file = match file
+        .as_any()
+        .downcast_ref::<crate::net::socket::SocketFile>()
+    {
+        Some(sf) => sf,
+        None => return -(ENOTSOCK as isize),
+    };
+
+    let opts = socket_file.get_socket_options();
+
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            let available_len = *optlen as usize;
+            let mut written_len = 0usize;
+
+            match level {
+                SOL_SOCKET => match optname {
+                    SO_REUSEADDR => {
+                        get_sockopt_bool!(optval, available_len, opts.reuse_addr, written_len)
+                    }
+                    SO_REUSEPORT => {
+                        get_sockopt_bool!(optval, available_len, opts.reuse_port, written_len)
+                    }
+                    SO_KEEPALIVE => {
+                        get_sockopt_bool!(optval, available_len, opts.keepalive, written_len)
+                    }
+                    SO_SNDBUF => {
+                        get_sockopt_int!(optval, available_len, opts.send_buffer_size, written_len)
+                    }
+                    SO_RCVBUF => {
+                        get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len)
+                    }
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                IPPROTO_TCP => match optname {
+                    TCP_NODELAY => {
+                        get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len)
+                    }
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                _ => return -(ENOPROTOOPT as isize),
+            }
+
+            *optlen = written_len as u32;
+        }
+    }
+
+    0
 }
 
 // 接受连接（非阻塞）
