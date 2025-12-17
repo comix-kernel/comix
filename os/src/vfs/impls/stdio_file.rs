@@ -195,7 +195,7 @@ impl File for StderrFile {
 fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
     use crate::uapi::errno::{EINVAL, ENOTTY};
     use crate::uapi::ioctl::*;
-    use riscv::register::sstatus;
+    use crate::arch::trap::SumGuard;
 
     match request {
         TCGETS => {
@@ -204,10 +204,9 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             unsafe {
-                sstatus::set_sum();
+                let _guard = SumGuard::new();
                 let termios_ptr = arg as *mut Termios;
                 if termios_ptr.is_null() {
-                    sstatus::clear_sum();
                     return Ok(-EINVAL as isize);
                 }
 
@@ -217,7 +216,6 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 // 返回保存的 termios 设置
                 let termios = *STDIO_TERMIOS.lock();
                 core::ptr::write_volatile(termios_ptr, termios);
-                sstatus::clear_sum();
 
                 // 调试：打印返回的termios内容
                 use crate::earlyprintln;
@@ -240,10 +238,9 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             unsafe {
-                sstatus::set_sum();
+                let _guard = SumGuard::new();
                 let termios_ptr = arg as *const Termios;
                 if termios_ptr.is_null() {
-                    sstatus::clear_sum();
                     return Ok(-EINVAL as isize);
                 }
 
@@ -263,7 +260,6 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 );
 
                 *STDIO_TERMIOS.lock() = new_termios;
-                sstatus::clear_sum();
             }
             Ok(0)
         }
@@ -274,10 +270,9 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             unsafe {
-                sstatus::set_sum();
+                let _guard = SumGuard::new();
                 let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
                 if winsize_ptr.is_null() {
-                    sstatus::clear_sum();
                     return Ok(-EINVAL as isize);
                 }
 
@@ -291,7 +286,6 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 // 返回保存的窗口大小
                 let winsize = *STDIO_WINSIZE.lock();
                 core::ptr::write_volatile(winsize_ptr, winsize);
-                sstatus::clear_sum();
 
                 use crate::earlyprintln;
                 earlyprintln!(
@@ -311,17 +305,15 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             unsafe {
-                sstatus::set_sum();
+                let _guard = SumGuard::new();
                 let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
                 if winsize_ptr.is_null() {
-                    sstatus::clear_sum();
                     return Ok(-EINVAL as isize);
                 }
 
                 // 读取新的窗口大小并保存
                 let new_winsize = core::ptr::read_volatile(winsize_ptr);
                 *STDIO_WINSIZE.lock() = new_winsize;
-                sstatus::clear_sum();
 
                 use crate::earlyprintln;
                 earlyprintln!(

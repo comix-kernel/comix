@@ -238,7 +238,7 @@ impl File for CharDeviceFile {
     fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
         use crate::uapi::errno::{EINVAL, ENOTTY};
         use crate::uapi::ioctl::*;
-        use riscv::register::sstatus;
+        use crate::arch::trap::SumGuard;
 
         let maj = major(self.dev);
 
@@ -265,7 +265,7 @@ impl CharDeviceFile {
     fn console_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
         use crate::uapi::errno::{EINVAL, ENOTTY};
         use crate::uapi::ioctl::*;
-        use riscv::register::sstatus;
+        use crate::arch::trap::SumGuard;
 
         match request {
             TCGETS => {
@@ -274,10 +274,9 @@ impl CharDeviceFile {
                 }
 
                 unsafe {
-                    sstatus::set_sum();
+                    let _guard = SumGuard::new();
                     let termios_ptr = arg as *mut Termios;
                     if termios_ptr.is_null() {
-                        sstatus::clear_sum();
                         return Ok(-EINVAL as isize);
                     }
 
@@ -291,7 +290,6 @@ impl CharDeviceFile {
                     // 返回保存的 termios 设置
                     let termios = *self.termios.lock();
                     core::ptr::write_volatile(termios_ptr, termios);
-                    sstatus::clear_sum();
                 }
                 Ok(0)
             }
@@ -302,17 +300,15 @@ impl CharDeviceFile {
                 }
 
                 unsafe {
-                    sstatus::set_sum();
+                    let _guard = SumGuard::new();
                     let termios_ptr = arg as *const Termios;
                     if termios_ptr.is_null() {
-                        sstatus::clear_sum();
                         return Ok(-EINVAL as isize);
                     }
 
                     // 读取新的 termios 设置并保存
                     let new_termios = core::ptr::read_volatile(termios_ptr);
                     *self.termios.lock() = new_termios;
-                    sstatus::clear_sum();
                 }
                 Ok(0)
             }
@@ -323,10 +319,9 @@ impl CharDeviceFile {
                 }
 
                 unsafe {
-                    sstatus::set_sum();
+                    let _guard = SumGuard::new();
                     let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
                     if winsize_ptr.is_null() {
-                        sstatus::clear_sum();
                         return Ok(-EINVAL as isize);
                     }
 
@@ -340,7 +335,6 @@ impl CharDeviceFile {
                     // 返回保存的窗口大小
                     let winsize = *self.winsize.lock();
                     core::ptr::write_volatile(winsize_ptr, winsize);
-                    sstatus::clear_sum();
                 }
                 Ok(0)
             }
@@ -351,17 +345,15 @@ impl CharDeviceFile {
                 }
 
                 unsafe {
-                    sstatus::set_sum();
+                    let _guard = SumGuard::new();
                     let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
                     if winsize_ptr.is_null() {
-                        sstatus::clear_sum();
                         return Ok(-EINVAL as isize);
                     }
 
                     // 读取新的窗口大小并保存
                     let new_winsize = core::ptr::read_volatile(winsize_ptr);
                     *self.winsize.lock() = new_winsize;
-                    sstatus::clear_sum();
                 }
                 Ok(0)
             }
@@ -376,7 +368,7 @@ impl CharDeviceFile {
         use crate::uapi::errno::EINVAL;
         use crate::uapi::ioctl::*;
         use crate::vfs::dev::minor;
-        use riscv::register::sstatus;
+        use crate::arch::trap::SumGuard;
 
         let min = minor(self.dev);
 
@@ -394,10 +386,9 @@ impl CharDeviceFile {
                             let dt = rtc.read_datetime();
 
                             unsafe {
-                                sstatus::set_sum();
+                                let _guard = SumGuard::new();
                                 let rtc_time_ptr = arg as *mut RtcTime;
                                 if rtc_time_ptr.is_null() {
-                                    sstatus::clear_sum();
                                     return Ok(-EINVAL as isize);
                                 }
 
@@ -422,7 +413,6 @@ impl CharDeviceFile {
                                 };
 
                                 core::ptr::write_volatile(rtc_time_ptr, rtc_time);
-                                sstatus::clear_sum();
                             }
                             return Ok(0);
                         }

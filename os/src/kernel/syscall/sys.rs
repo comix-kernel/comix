@@ -4,12 +4,12 @@ use core::{
     ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     sync::atomic::Ordering,
 };
-use riscv::register::sstatus;
 
 use crate::{
     arch::{
         lib::sbi::shutdown,
         timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
+        trap::SumGuard,
     },
     kernel::{
         current_task,
@@ -258,7 +258,7 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
             let mut total_written = 0;
 
             // 开启用户空间访问
-            unsafe { sstatus::set_sum() };
+            let _guard = SumGuard::new();
 
             while total_written < buf_len {
                 // TODO: 暂时移除，等待信号系统实现
@@ -267,7 +267,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 if has_pending_signal() {
                     if total_written == 0 {
                         // 未读取任何数据，返回 EINTR
-                        unsafe { sstatus::clear_sum() };
                         return -(EINTR as isize);
                     } else {
                         // 已读取部分数据，返回已读字节数
@@ -307,7 +306,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
             }
 
             // 关闭用户空间访问
-            unsafe { sstatus::clear_sum() };
 
             total_written as isize
         }
@@ -325,7 +323,7 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
             let end_index = log_writer_index();
 
             // 开启用户空间访问
-            unsafe { sstatus::set_sum() };
+            let _guard = SumGuard::new();
 
             // 遍历所有可用的日志条目
             let mut current_index = start_index;
@@ -335,7 +333,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 // 检查信号中断
                 if has_pending_signal() {
                     if total_written == 0 {
-                        unsafe { sstatus::clear_sum() };
                         return -(EINTR as isize);
                     } else {
                         break;
@@ -369,7 +366,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
             }
 
             // 关闭用户空间访问
-            unsafe { sstatus::clear_sum() };
 
             total_written as isize
         }
@@ -379,7 +375,7 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
             let buf_len = len as usize;
             let mut total_written = 0;
 
-            unsafe { sstatus::set_sum() };
+            let _guard = SumGuard::new();
 
             while total_written < buf_len {
                 let entry = match read_log() {
@@ -405,7 +401,6 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 total_written += bytes.len();
             }
 
-            unsafe { sstatus::clear_sum() };
 
             // 清空剩余的日志
             while read_log().is_some() {}
