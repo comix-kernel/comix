@@ -17,9 +17,10 @@ macro_rules! set_sockopt_int {
     ($optval:expr, $optlen:expr, $field:expr) => {
         if $optlen >= 4 {
             let val = *($optval as *const i32);
-            if val >= 0 {
-                $field = val as usize;
+            if val < 0 {
+                return -(EINVAL as isize);
             }
+            $field = val as usize;
         }
     };
 }
