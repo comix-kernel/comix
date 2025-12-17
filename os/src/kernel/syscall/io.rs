@@ -591,7 +591,7 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
 }
 
 /// pselect6 - synchronous I/O multiplexing with signal mask
-/// Note: sigmask parameter is currently ignored
+/// Note: sigmask handling requires signal subsystem refactoring, currently ignored
 pub fn pselect6(
     nfds: usize,
     readfds: usize,
@@ -600,6 +600,8 @@ pub fn pselect6(
     timeout: usize,
     _sigmask: usize,
 ) -> isize {
+    // TODO: Implement signal mask handling when signal subsystem is refactored
+    // Requires exposing signal field in Task or adding helper methods
     select(nfds, readfds, writefds, exceptfds, timeout)
 }
 
@@ -613,7 +615,7 @@ pub fn select(
 ) -> isize {
     use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
-    use crate::uapi::errno::EINVAL;
+    use crate::uapi::errno::{EBADF, EINVAL};
     use crate::uapi::select::FdSet;
     use crate::uapi::time::timeval;
 
@@ -694,7 +696,7 @@ pub fn select(
 
             let file = match task.lock().fd_table.get(fd) {
                 Ok(f) => f,
-                Err(_) => return -9, // EBADF - invalid fd
+                Err(_) => return -(EBADF as isize),
             };
 
             let mut fd_ready = false;
@@ -710,6 +712,11 @@ pub fn select(
                     set.set(fd);
                     fd_ready = true;
                 }
+            }
+
+            if check_except {
+                // Exception conditions: out-of-band data, errors
+                // For now, never set (no OOB support)
             }
 
             if fd_ready {

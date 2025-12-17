@@ -498,16 +498,17 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
 pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optlen: u32) -> isize {
     use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
+    use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
     use crate::uapi::socket::*;
 
     if sockfd < 0 || optval.is_null() {
-        return -22; // EINVAL
+        return -(EINVAL as isize);
     }
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
-        Err(_) => return -9, // EBADF
+        Err(_) => return -(EBADF as isize),
     };
 
     let socket_file = match file
@@ -515,7 +516,7 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
         .downcast_ref::<crate::net::socket::SocketFile>()
     {
         Some(sf) => sf,
-        None => return -88, // ENOTSOCK
+        None => return -(ENOTSOCK as isize),
     };
 
     let mut opts = socket_file.get_socket_options();
@@ -530,13 +531,13 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
                     SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
                     SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
                     SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
-                    _ => return -92, // ENOPROTOOPT
+                    _ => return -(ENOPROTOOPT as isize),
                 },
                 IPPROTO_TCP => match optname {
                     TCP_NODELAY => set_sockopt_bool!(optval, optlen, opts.tcp_nodelay),
-                    _ => return -92, // ENOPROTOOPT
+                    _ => return -(ENOPROTOOPT as isize),
                 },
-                _ => return -92, // ENOPROTOOPT
+                _ => return -(ENOPROTOOPT as isize),
             }
         }
     }
@@ -555,16 +556,17 @@ pub fn getsockopt(
 ) -> isize {
     use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
+    use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
     use crate::uapi::socket::*;
 
     if sockfd < 0 || optval.is_null() || optlen.is_null() {
-        return -22; // EINVAL
+        return -(EINVAL as isize);
     }
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
-        Err(_) => return -9, // EBADF
+        Err(_) => return -(EBADF as isize),
     };
 
     let socket_file = match file
@@ -572,7 +574,7 @@ pub fn getsockopt(
         .downcast_ref::<crate::net::socket::SocketFile>()
     {
         Some(sf) => sf,
-        None => return -88, // ENOTSOCK
+        None => return -(ENOTSOCK as isize),
     };
 
     let opts = socket_file.get_socket_options();
@@ -600,15 +602,15 @@ pub fn getsockopt(
                     SO_RCVBUF => {
                         get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len)
                     }
-                    _ => return -92, // ENOPROTOOPT
+                    _ => return -(ENOPROTOOPT as isize),
                 },
                 IPPROTO_TCP => match optname {
                     TCP_NODELAY => {
                         get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len)
                     }
-                    _ => return -92, // ENOPROTOOPT
+                    _ => return -(ENOPROTOOPT as isize),
                 },
-                _ => return -92, // ENOPROTOOPT
+                _ => return -(ENOPROTOOPT as isize),
             }
 
             *optlen = written_len as u32;
