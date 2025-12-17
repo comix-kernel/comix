@@ -674,6 +674,7 @@ pub fn select(
         let mut write_set = input_write.as_ref().map(|_| FdSet::new());
         let mut except_set = input_except.as_ref().map(|_| FdSet::new());
 
+        let task_lock = task.lock();
         for fd in 0..nfds {
             let check_read = input_read.as_ref().map_or(false, |s| s.is_set(fd));
             let check_write = input_write.as_ref().map_or(false, |s| s.is_set(fd));
@@ -683,7 +684,7 @@ pub fn select(
                 continue;
             }
 
-            let file = match task.lock().fd_table.get(fd) {
+            let file = match task_lock.fd_table.get(fd) {
                 Ok(f) => f,
                 Err(_) => return (-(EBADF as isize), None, None, None),
             };
@@ -702,7 +703,6 @@ pub fn select(
                 }
             }
             // exceptfds: OOB data, errors (not implemented yet)
-            // Would need File::has_exception() method
             if fd_ready {
                 ready_count += 1;
             }
