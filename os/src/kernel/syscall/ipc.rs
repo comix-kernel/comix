@@ -1,9 +1,9 @@
 //! IPC 相关的系统调用实现
 
 use alloc::sync::Arc;
-use riscv::register::sstatus;
 
 use crate::{
+    arch::trap::SumGuard,
     kernel::{current_cpu, current_task},
     vfs::{FdFlags, File, FsError, OpenFlags, PipeFile},
 };
@@ -70,11 +70,12 @@ pub fn pipe2(pipefd: *mut i32, flags: u32) -> isize {
     };
 
     // 将 FD 写回用户空间
-    unsafe {
-        sstatus::set_sum();
-        core::ptr::write(pipefd.offset(0), read_fd as i32);
-        core::ptr::write(pipefd.offset(1), write_fd as i32);
-        sstatus::clear_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::write(pipefd.offset(0), read_fd as i32);
+            core::ptr::write(pipefd.offset(1), write_fd as i32);
+        }
     }
 
     0
