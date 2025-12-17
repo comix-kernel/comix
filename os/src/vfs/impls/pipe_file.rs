@@ -188,7 +188,12 @@ impl File for PipeFile {
         }
 
         let mut ring_buf = self.buffer.lock();
-        ring_buf.read(buf)
+        let result = ring_buf.read(buf);
+        if result.is_ok() {
+            // Wake up tasks waiting to write to this pipe
+            crate::kernel::syscall::io::wake_poll_waiters();
+        }
+        result
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
@@ -197,7 +202,12 @@ impl File for PipeFile {
         }
 
         let mut ring_buf = self.buffer.lock();
-        ring_buf.write(buf)
+        let result = ring_buf.write(buf);
+        if result.is_ok() {
+            // Wake up tasks waiting to read from this pipe
+            crate::kernel::syscall::io::wake_poll_waiters();
+        }
+        result
     }
 
     fn metadata(&self) -> Result<InodeMetadata, FsError> {

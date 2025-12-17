@@ -127,22 +127,31 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     };
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let tid = task.lock().tid as usize;
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
 
-    let mut sockets = SOCKET_SET.lock();
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
+
+    // For TCP: just save the endpoint, listen() will call smoltcp's listen()
+    // For UDP: bind immediately
     match handle {
-        SocketHandle::Tcp(h) => {
-            let socket = sockets.get_mut::<tcp::Socket>(h);
-            if socket.listen(endpoint).is_err() {
-                return -98; // EADDRINUSE
+        SocketHandle::Tcp(_) => {
+            use crate::net::socket::set_socket_local_endpoint;
+            if set_socket_local_endpoint(&file, endpoint).is_err() {
+                return -22; // EINVAL
             }
         }
         SocketHandle::Udp(h) => {
+            let mut sockets = SOCKET_SET.lock();
             let socket = sockets.get_mut::<udp::Socket>(h);
             if socket.bind(endpoint).is_err() {
                 return -98; // EADDRINUSE
@@ -160,17 +169,33 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
     }
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let tid = task.lock().tid as usize;
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
 
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
+
     match handle {
-        SocketHandle::Tcp(_) => {
-            // smoltcp doesn't support backlog parameter, but we validate it
-            // In a full implementation, we would limit pending connections to backlog
+        SocketHandle::Tcp(h) => {
+            use crate::net::socket::get_socket_local_endpoint;
+            let endpoint = match get_socket_local_endpoint(&file) {
+                Some(ep) => ep,
+                None => return -22, // EINVAL - must bind first
+            };
+
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            if socket.listen(endpoint).is_err() {
+                return -98; // EADDRINUSE
+            }
             0
         }
         SocketHandle::Udp(_) => -95, // EOPNOTSUPP - UDP doesn't support listen
@@ -287,13 +312,22 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 
     match handle {
         SocketHandle::Tcp(h) => {
-            let mut sockets = SOCKET_SET.lock();
-            let socket = sockets.get_mut::<tcp::Socket>(h);
+            let sockets = SOCKET_SET.lock();
+            let socket = sockets.get::<tcp::Socket>(h);
             if socket.is_open() {
                 return -106; // EISCONN
             }
-            // TODO: Call socket.connect(cx, endpoint, local) with proper Context
-            // For non-blocking sockets, return EINPROGRESS
+            let local_endpoint = socket.local_endpoint().unwrap_or(IpEndpoint::new(
+                IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
+                0,
+            ));
+            drop(sockets);
+
+            use crate::net::socket::tcp_connect;
+            if let Err(_) = tcp_connect(h, endpoint, local_endpoint) {
+                return -22; // EINVAL or connection error
+            }
+
             if is_nonblock {
                 return -115; // EINPROGRESS
             }

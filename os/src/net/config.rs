@@ -107,6 +107,12 @@ impl NetworkConfigManager {
             interface.set_ipv4_gateway(Some(gateway));
             earlyprintln!("Set default gateway: 192.168.1.1");
 
+            // Initialize global interface for socket operations
+            let smoltcp_iface = interface.create_smoltcp_interface();
+            use crate::net::socket::init_global_interface;
+            init_global_interface(smoltcp_iface.into_interface());
+            earlyprintln!("Initialized global network interface");
+
             Ok(())
         } else {
             earlyprintln!("No network interfaces found to configure");
