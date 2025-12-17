@@ -61,6 +61,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_PREADV => sys_preadv(frame),
         syscall_number::SYS_PWRITEV => sys_pwritev(frame),
         syscall_number::SYS_SENDFILE => sys_sendfile(frame),
+        syscall_number::SYS_PSELECT6 => sys_pselect6(frame),
         syscall_number::SYS_PPOLL => sys_ppoll(frame),
 
         // 文件元数据与同步 (File Metadata and Synchronization)
