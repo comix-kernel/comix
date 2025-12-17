@@ -215,4 +215,12 @@ pub trait File: Send + Sync {
 
     /// 获取 Any trait 引用，用于安全的类型转换
     fn as_any(&self) -> &dyn core::any::Any;
+
+    /// 从socket接收数据并获取源地址（可选方法，用于recvfrom）
+    ///
+    /// 返回(读取字节数, 源地址)
+    /// 默认返回NotSupported，仅socket实现
+    fn recvfrom(&self, _buf: &mut [u8]) -> Result<(usize, Option<alloc::vec::Vec<u8>>), FsError> {
+        Err(FsError::NotSupported)
+    }
 }

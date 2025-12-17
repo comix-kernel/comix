@@ -104,9 +104,10 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     let socket_file = Arc::new(SocketFile::new(handle));
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
 
-    match task.lock().fd_table.alloc(socket_file) {
+    let mut task_lock = task.lock();
+    match task_lock.fd_table.alloc(socket_file) {
         Ok(fd) => {
-            register_socket_fd(task.lock().tid as usize, fd, handle);
+            register_socket_fd(task_lock.tid as usize, fd, handle);
             fd as isize
         }
         Err(_) => -24, // EMFILE
@@ -263,20 +264,26 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     };
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let tid = task.lock().tid as usize;
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
 
-    let file = match task.lock().fd_table.get(sockfd as usize) {
+    let file = match task_lock.fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
+    drop(task_lock);
 
     use crate::net::socket::set_socket_remote_endpoint;
     let _ = set_socket_remote_endpoint(&file, endpoint);
+
+    let is_nonblock = file
+        .flags()
+        .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
 
     match handle {
         SocketHandle::Tcp(h) => {
@@ -286,7 +293,10 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 return -106; // EISCONN
             }
             // TODO: Call socket.connect(cx, endpoint, local) with proper Context
-            // For now, just store endpoint and return success
+            // For non-blocking sockets, return EINPROGRESS
+            if is_nonblock {
+                return -115; // EINPROGRESS
+            }
         }
         SocketHandle::Udp(_) => {}
     }
@@ -339,11 +349,12 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
 /// 关闭套接字
 pub fn close_sock(sockfd: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let tid = task.lock().tid;
+    let mut task_lock = task.lock();
+    let tid = task_lock.tid;
 
     unregister_socket_fd(tid as usize, sockfd as usize);
 
-    match task.lock().fd_table.close(sockfd as usize) {
+    match task_lock.fd_table.close(sockfd as usize) {
         Ok(_) => 0,
         Err(_) => -9,
     }
@@ -526,10 +537,38 @@ pub fn recvfrom(
     buf: *mut u8,
     len: usize,
     _flags: i32,
-    _src_addr: *mut u8,
-    _addrlen: *mut u32,
+    src_addr: *mut u8,
+    addrlen: *mut u32,
 ) -> isize {
-    recv(sockfd, buf, len, 0)
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+
+    let data = unsafe {
+        sstatus::set_sum();
+        let slice = core::slice::from_raw_parts_mut(buf, len);
+        sstatus::clear_sum();
+        slice
+    };
+
+    match file.recvfrom(data) {
+        Ok((n, Some(addr_buf))) => {
+            if !src_addr.is_null() && !addrlen.is_null() {
+                unsafe {
+                    sstatus::set_sum();
+                    let len = (*addrlen as usize).min(addr_buf.len());
+                    core::ptr::copy_nonoverlapping(addr_buf.as_ptr(), src_addr, len);
+                    *addrlen = len as u32;
+                    sstatus::clear_sum();
+                }
+            }
+            n as isize
+        }
+        Ok((n, None)) => n as isize,
+        Err(_) => -11, // EAGAIN
+    }
 }
 
 // 关闭套接字
@@ -543,43 +582,43 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
     }
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let tid = task.lock().tid as usize;
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
 
-    let file = match task.lock().fd_table.get(sockfd as usize) {
+    let file = match task_lock.fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
+    drop(task_lock);
 
     use crate::net::socket::{socket_shutdown_read, socket_shutdown_write};
 
-    match how {
+    let should_close_tcp = match how {
         SHUT_RD => {
             socket_shutdown_read(&file);
+            false
         }
-        SHUT_WR => {
-            socket_shutdown_write(&file);
-            // For TCP, also initiate graceful close
-            if let SocketHandle::Tcp(h) = handle {
-                let mut sockets = SOCKET_SET.lock();
-                let socket = sockets.get_mut::<tcp::Socket>(h);
-                socket.close();
+        SHUT_WR | SHUT_RDWR => {
+            if how == SHUT_RDWR {
+                socket_shutdown_read(&file);
             }
-        }
-        SHUT_RDWR => {
-            socket_shutdown_read(&file);
             socket_shutdown_write(&file);
-            if let SocketHandle::Tcp(h) = handle {
-                let mut sockets = SOCKET_SET.lock();
-                let socket = sockets.get_mut::<tcp::Socket>(h);
-                socket.close();
-            }
+            true
         }
         _ => return -22, // EINVAL
+    };
+
+    if should_close_tcp {
+        if let SocketHandle::Tcp(h) = handle {
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<tcp::Socket>(h);
+            socket.close();
+        }
     }
 
     0

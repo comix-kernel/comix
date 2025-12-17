@@ -476,10 +476,23 @@ pub const POLLERR: i16 = 0x0008;
 pub const POLLHUP: i16 = 0x0010;
 pub const POLLNVAL: i16 = 0x0020;
 
+use crate::kernel::scheduler::WaitQueue;
+use crate::sync::SpinLock;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref POLL_WAIT_QUEUE: SpinLock<WaitQueue> = SpinLock::new(WaitQueue::new());
+}
+
+/// Wake up all tasks waiting in poll
+pub fn wake_poll_waiters() {
+    POLL_WAIT_QUEUE.lock().wake_up_all();
+}
+
 /// ppoll - poll 的变体，支持信号掩码
 pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::kernel::{current_cpu, yield_task};
+    use crate::kernel::current_cpu;
     use crate::uapi::errno::EINVAL;
 
     if fds == 0 || nfds == 0 {
@@ -554,12 +567,8 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             }
         }
 
-        // Yield with small delay to reduce CPU usage
-        // TODO: Implement proper wait queue mechanism where tasks block
-        // until file becomes readable/writable
-        for _ in 0..100 {
-            core::hint::spin_loop();
-        }
-        yield_task();
+        // Block on wait queue
+        POLL_WAIT_QUEUE.lock().sleep(task.clone());
+        crate::kernel::schedule();
     }
 }

@@ -23,11 +23,14 @@ lazy_static! {
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
 }
 
+use crate::uapi::fcntl::OpenFlags;
+
 pub struct SocketFile {
     handle: SocketHandle,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
     shutdown_rd: SpinLock<bool>,
     shutdown_wr: SpinLock<bool>,
+    flags: SpinLock<OpenFlags>,
 }
 
 impl SocketFile {
@@ -37,6 +40,17 @@ impl SocketFile {
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
+            flags: SpinLock::new(OpenFlags::empty()),
+        }
+    }
+
+    pub fn new_with_flags(handle: SocketHandle, flags: OpenFlags) -> Self {
+        Self {
+            handle,
+            remote_endpoint: SpinLock::new(None),
+            shutdown_rd: SpinLock::new(false),
+            shutdown_wr: SpinLock::new(false),
+            flags: SpinLock::new(flags),
         }
     }
 
@@ -238,6 +252,42 @@ impl File for SocketFile {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
+
+    fn flags(&self) -> OpenFlags {
+        *self.flags.lock()
+    }
+
+    fn set_status_flags(&self, new_flags: OpenFlags) -> Result<(), FsError> {
+        *self.flags.lock() = new_flags;
+        Ok(())
+    }
+
+    fn recvfrom(&self, buf: &mut [u8]) -> Result<(usize, Option<alloc::vec::Vec<u8>>), FsError> {
+        if self.is_shutdown_read() {
+            return Ok((0, None));
+        }
+
+        let mut sockets = SOCKET_SET.lock();
+        match self.handle {
+            SocketHandle::Tcp(h) => {
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                let n = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;
+                let remote = socket.remote_endpoint().map(|ep| {
+                    let mut addr_buf = alloc::vec![0u8; 16];
+                    let _ = write_sockaddr_in_to_buf(&mut addr_buf, ep);
+                    addr_buf
+                });
+                Ok((n, remote))
+            }
+            SocketHandle::Udp(h) => {
+                let socket = sockets.get_mut::<udp::Socket>(h);
+                let (n, metadata) = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;
+                let mut addr_buf = alloc::vec![0u8; 16];
+                let _ = write_sockaddr_in_to_buf(&mut addr_buf, metadata.endpoint);
+                Ok((n, Some(addr_buf)))
+            }
+        }
+    }
 }
 
 pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
@@ -306,6 +356,38 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
     }
 }
 
+/// Write sockaddr_in to buffer
+fn write_sockaddr_in_to_buf(buf: &mut [u8], endpoint: IpEndpoint) -> Result<(), ()> {
+    if buf.len() < SOCKADDR_IN_SIZE {
+        return Err(());
+    }
+
+    // family
+    buf[0..2].copy_from_slice(&AF_INET.to_ne_bytes());
+
+    // port
+    buf[2..4].copy_from_slice(&endpoint.port.to_be_bytes());
+
+    // ip
+    match endpoint.addr {
+        IpAddress::Ipv4(ipv4) => {
+            buf[4..8].copy_from_slice(&ipv4.octets());
+        }
+        #[cfg(feature = "proto-ipv6")]
+        IpAddress::Ipv6(_) => {
+            return Err(()); // IPv6 not supported in AF_INET
+        }
+        _ => {
+            return Err(()); // Unknown address type
+        }
+    }
+
+    // zero padding
+    buf[8..16].fill(0);
+
+    Ok(())
+}
+
 /// Write sockaddr_in structure
 pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint) -> Result<(), ()> {
     if addr.is_null() || addrlen.is_null() {
@@ -318,20 +400,8 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
             return Err(());
         }
 
-        // family
-        *(addr as *mut u16) = AF_INET;
-
-        // port
-        *(addr.add(2) as *mut u16) = endpoint.port.to_be();
-
-        // ip
-        if let IpAddress::Ipv4(ipv4) = endpoint.addr {
-            let octets = ipv4.octets();
-            core::ptr::copy_nonoverlapping(octets.as_ptr(), addr.add(4), 4);
-        }
-
-        // zero padding
-        core::ptr::write_bytes(addr.add(8), 0, 8);
+        let buf = core::slice::from_raw_parts_mut(addr, SOCKADDR_IN_SIZE);
+        write_sockaddr_in_to_buf(buf, endpoint)?;
 
         *addrlen = SOCKADDR_IN_SIZE as u32;
     }
