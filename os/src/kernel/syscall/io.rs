@@ -495,7 +495,7 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     use crate::kernel::current_cpu;
     use crate::uapi::errno::EINVAL;
 
-    if fds == 0 || nfds == 0 {
+    if nfds > 0 && fds == 0 {
         return -(EINVAL as isize);
     }
 
