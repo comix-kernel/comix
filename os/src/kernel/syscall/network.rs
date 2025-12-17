@@ -458,9 +458,9 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
 
 // 设置网络接口配置
 pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optlen: u32) -> isize {
+    use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
     use crate::uapi::socket::*;
-    use riscv::register::sstatus;
 
     if sockfd < 0 || optval.is_null() {
         return -22; // EINVAL
@@ -482,69 +482,59 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
 
     let mut opts = socket_file.get_socket_options();
 
-    unsafe {
-        sstatus::set_sum();
-
-        match level {
-            SOL_SOCKET => match optname {
-                SO_REUSEADDR => {
-                    if optlen >= 4 {
-                        let val = *(optval as *const i32);
-                        opts.reuse_addr = val != 0;
-                    }
-                }
-                SO_REUSEPORT => {
-                    if optlen >= 4 {
-                        let val = *(optval as *const i32);
-                        opts.reuse_port = val != 0;
-                    }
-                }
-                SO_KEEPALIVE => {
-                    if optlen >= 4 {
-                        let val = *(optval as *const i32);
-                        opts.keepalive = val != 0;
-                    }
-                }
-                SO_SNDBUF => {
-                    if optlen >= 4 {
-                        let val = *(optval as *const i32);
-                        if val > 0 {
-                            opts.send_buffer_size = val as usize;
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            match level {
+                SOL_SOCKET => match optname {
+                    SO_REUSEADDR => {
+                        if optlen >= 4 {
+                            let val = *(optval as *const i32);
+                            opts.reuse_addr = val != 0;
                         }
                     }
-                }
-                SO_RCVBUF => {
-                    if optlen >= 4 {
-                        let val = *(optval as *const i32);
-                        if val > 0 {
-                            opts.recv_buffer_size = val as usize;
+                    SO_REUSEPORT => {
+                        if optlen >= 4 {
+                            let val = *(optval as *const i32);
+                            opts.reuse_port = val != 0;
                         }
                     }
-                }
-                _ => {
-                    sstatus::clear_sum();
-                    return -92; // ENOPROTOOPT
-                }
-            },
-            IPPROTO_TCP => match optname {
-                TCP_NODELAY => {
-                    if optlen >= 4 {
-                        let val = *(optval as *const i32);
-                        opts.tcp_nodelay = val != 0;
+                    SO_KEEPALIVE => {
+                        if optlen >= 4 {
+                            let val = *(optval as *const i32);
+                            opts.keepalive = val != 0;
+                        }
                     }
-                }
-                _ => {
-                    sstatus::clear_sum();
-                    return -92; // ENOPROTOOPT
-                }
-            },
-            _ => {
-                sstatus::clear_sum();
-                return -92; // ENOPROTOOPT
+                    SO_SNDBUF => {
+                        if optlen >= 4 {
+                            let val = *(optval as *const i32);
+                            if val > 0 {
+                                opts.send_buffer_size = val as usize;
+                            }
+                        }
+                    }
+                    SO_RCVBUF => {
+                        if optlen >= 4 {
+                            let val = *(optval as *const i32);
+                            if val > 0 {
+                                opts.recv_buffer_size = val as usize;
+                            }
+                        }
+                    }
+                    _ => return -92, // ENOPROTOOPT
+                },
+                IPPROTO_TCP => match optname {
+                    TCP_NODELAY => {
+                        if optlen >= 4 {
+                            let val = *(optval as *const i32);
+                            opts.tcp_nodelay = val != 0;
+                        }
+                    }
+                    _ => return -92, // ENOPROTOOPT
+                },
+                _ => return -92, // ENOPROTOOPT
             }
         }
-
-        sstatus::clear_sum();
     }
 
     socket_file.set_socket_options(opts);
@@ -559,9 +549,9 @@ pub fn getsockopt(
     optval: *mut u8,
     optlen: *mut u32,
 ) -> isize {
+    use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
     use crate::uapi::socket::*;
-    use riscv::register::sstatus;
 
     if sockfd < 0 || optval.is_null() || optlen.is_null() {
         return -22; // EINVAL
@@ -583,73 +573,64 @@ pub fn getsockopt(
 
     let opts = socket_file.get_socket_options();
 
-    unsafe {
-        sstatus::set_sum();
+    {
+        let _guard = SumGuard::new();
+        unsafe {
+            let available_len = *optlen as usize;
+            let mut written_len = 0usize;
 
-        let available_len = *optlen as usize;
-        let mut written_len = 0usize;
-
-        match level {
-            SOL_SOCKET => match optname {
-                SO_REUSEADDR => {
-                    if available_len >= 4 {
-                        let val: i32 = if opts.reuse_addr { 1 } else { 0 };
-                        *(optval as *mut i32) = val;
-                        written_len = 4;
+            match level {
+                SOL_SOCKET => match optname {
+                    SO_REUSEADDR => {
+                        if available_len >= 4 {
+                            let val: i32 = if opts.reuse_addr { 1 } else { 0 };
+                            *(optval as *mut i32) = val;
+                            written_len = 4;
+                        }
                     }
-                }
-                SO_REUSEPORT => {
-                    if available_len >= 4 {
-                        let val: i32 = if opts.reuse_port { 1 } else { 0 };
-                        *(optval as *mut i32) = val;
-                        written_len = 4;
+                    SO_REUSEPORT => {
+                        if available_len >= 4 {
+                            let val: i32 = if opts.reuse_port { 1 } else { 0 };
+                            *(optval as *mut i32) = val;
+                            written_len = 4;
+                        }
                     }
-                }
-                SO_KEEPALIVE => {
-                    if available_len >= 4 {
-                        let val: i32 = if opts.keepalive { 1 } else { 0 };
-                        *(optval as *mut i32) = val;
-                        written_len = 4;
+                    SO_KEEPALIVE => {
+                        if available_len >= 4 {
+                            let val: i32 = if opts.keepalive { 1 } else { 0 };
+                            *(optval as *mut i32) = val;
+                            written_len = 4;
+                        }
                     }
-                }
-                SO_SNDBUF => {
-                    if available_len >= 4 {
-                        *(optval as *mut i32) = opts.send_buffer_size as i32;
-                        written_len = 4;
+                    SO_SNDBUF => {
+                        if available_len >= 4 {
+                            *(optval as *mut i32) = opts.send_buffer_size as i32;
+                            written_len = 4;
+                        }
                     }
-                }
-                SO_RCVBUF => {
-                    if available_len >= 4 {
-                        *(optval as *mut i32) = opts.recv_buffer_size as i32;
-                        written_len = 4;
+                    SO_RCVBUF => {
+                        if available_len >= 4 {
+                            *(optval as *mut i32) = opts.recv_buffer_size as i32;
+                            written_len = 4;
+                        }
                     }
-                }
-                _ => {
-                    sstatus::clear_sum();
-                    return -92; // ENOPROTOOPT
-                }
-            },
-            IPPROTO_TCP => match optname {
-                TCP_NODELAY => {
-                    if available_len >= 4 {
-                        let val: i32 = if opts.tcp_nodelay { 1 } else { 0 };
-                        *(optval as *mut i32) = val;
-                        written_len = 4;
+                    _ => return -92, // ENOPROTOOPT
+                },
+                IPPROTO_TCP => match optname {
+                    TCP_NODELAY => {
+                        if available_len >= 4 {
+                            let val: i32 = if opts.tcp_nodelay { 1 } else { 0 };
+                            *(optval as *mut i32) = val;
+                            written_len = 4;
+                        }
                     }
-                }
-                _ => {
-                    sstatus::clear_sum();
-                    return -92; // ENOPROTOOPT
-                }
-            },
-            _ => {
-                sstatus::clear_sum();
-                return -92; // ENOPROTOOPT
+                    _ => return -92, // ENOPROTOOPT
+                },
+                _ => return -92, // ENOPROTOOPT
             }
-        }
 
-        *optlen = written_len as u32;
-        sstatus::clear_sum();
+            *optlen = written_len as u32;
+        }
     }
 
     0

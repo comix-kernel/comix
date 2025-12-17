@@ -643,80 +643,84 @@ pub fn select(
         }
     };
 
-    loop {
-        let mut ready_count = 0;
-
-        {
-            let _guard = SumGuard::new();
-
-            // Copy fd_sets from user space
-            let mut read_set = if readfds != 0 {
+    // Copy input fd_sets once before loop
+    let (input_read, input_write, input_except) = {
+        let _guard = SumGuard::new();
+        (
+            if readfds != 0 {
                 Some(unsafe { *(readfds as *const FdSet) })
             } else {
                 None
-            };
-            let mut write_set = if writefds != 0 {
+            },
+            if writefds != 0 {
                 Some(unsafe { *(writefds as *const FdSet) })
             } else {
                 None
-            };
-            let mut except_set = if exceptfds != 0 {
+            },
+            if exceptfds != 0 {
                 Some(unsafe { *(exceptfds as *const FdSet) })
             } else {
                 None
-            };
+            },
+        )
+    };
 
-            // Clear output sets
-            if let Some(ref mut set) = read_set {
-                set.zero();
-            }
-            if let Some(ref mut set) = write_set {
-                set.zero();
-            }
-            if let Some(ref mut set) = except_set {
-                set.zero();
+    loop {
+        let mut ready_count = 0;
+        let mut read_set = input_read.clone();
+        let mut write_set = input_write.clone();
+        let mut except_set = input_except.clone();
+
+        // Clear output sets
+        if let Some(ref mut set) = read_set {
+            set.zero();
+        }
+        if let Some(ref mut set) = write_set {
+            set.zero();
+        }
+        if let Some(ref mut set) = except_set {
+            set.zero();
+        }
+
+        // Check each fd
+        for fd in 0..nfds {
+            let check_read = input_read.as_ref().map_or(false, |s| s.is_set(fd));
+            let check_write = input_write.as_ref().map_or(false, |s| s.is_set(fd));
+            let check_except = input_except.as_ref().map_or(false, |s| s.is_set(fd));
+
+            if !check_read && !check_write && !check_except {
+                continue;
             }
 
-            // Check each fd
-            for fd in 0..nfds {
-                let check_read = readfds != 0 && unsafe { (*(readfds as *const FdSet)).is_set(fd) };
-                let check_write =
-                    writefds != 0 && unsafe { (*(writefds as *const FdSet)).is_set(fd) };
-                let check_except =
-                    exceptfds != 0 && unsafe { (*(exceptfds as *const FdSet)).is_set(fd) };
-
-                if !check_read && !check_write && !check_except {
+            let file = match task.lock().fd_table.get(fd) {
+                Ok(f) => f,
+                Err(_) => {
+                    if let Some(ref mut set) = except_set {
+                        set.set(fd);
+                        ready_count += 1;
+                    }
                     continue;
                 }
+            };
 
-                let file = match task.lock().fd_table.get(fd) {
-                    Ok(f) => f,
-                    Err(_) => {
-                        // Bad fd - set in except set
-                        if let Some(ref mut set) = except_set {
-                            set.set(fd);
-                            ready_count += 1;
-                        }
-                        continue;
-                    }
-                };
-
-                if check_read && file.readable() {
-                    if let Some(ref mut set) = read_set {
-                        set.set(fd);
-                        ready_count += 1;
-                    }
-                }
-
-                if check_write && file.writable() {
-                    if let Some(ref mut set) = write_set {
-                        set.set(fd);
-                        ready_count += 1;
-                    }
+            if check_read && file.readable() {
+                if let Some(ref mut set) = read_set {
+                    set.set(fd);
+                    ready_count += 1;
                 }
             }
 
-            // Write back results
+            if check_write && file.writable() {
+                if let Some(ref mut set) = write_set {
+                    set.set(fd);
+                    ready_count += 1;
+                }
+            }
+        }
+
+        // Write back results
+        {
+            let _guard = SumGuard::new();
             if let Some(set) = read_set {
                 unsafe { *(readfds as *mut FdSet) = set };
             }
