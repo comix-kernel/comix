@@ -667,13 +667,13 @@ pub fn select(
         )
     };
 
-    loop {
+    // Helper to check fds
+    let check_fds = || -> (isize, Option<FdSet>, Option<FdSet>, Option<FdSet>) {
         let mut ready_count = 0;
         let mut read_set = input_read.clone();
         let mut write_set = input_write.clone();
         let mut except_set = input_except.clone();
 
-        // Clear output sets
         if let Some(ref mut set) = read_set {
             set.zero();
         }
@@ -684,7 +684,6 @@ pub fn select(
             set.zero();
         }
 
-        // Check each fd
         for fd in 0..nfds {
             let check_read = input_read.as_ref().map_or(false, |s| s.is_set(fd));
             let check_write = input_write.as_ref().map_or(false, |s| s.is_set(fd));
@@ -696,7 +695,7 @@ pub fn select(
 
             let file = match task.lock().fd_table.get(fd) {
                 Ok(f) => f,
-                Err(_) => return -(EBADF as isize),
+                Err(_) => return (-(EBADF as isize), None, None, None),
             };
 
             let mut fd_ready = false;
@@ -706,26 +705,26 @@ pub fn select(
                     fd_ready = true;
                 }
             }
-
             if check_write && file.writable() {
                 if let Some(ref mut set) = write_set {
                     set.set(fd);
                     fd_ready = true;
                 }
             }
-
-            if check_except {
-                // Exception conditions: out-of-band data, errors
-                // For now, never set (no OOB support)
-            }
-
             if fd_ready {
                 ready_count += 1;
             }
         }
+        (ready_count, read_set, write_set, except_set)
+    };
 
-        // Write back results
-        {
+    loop {
+        let (ready_count, read_set, write_set, except_set) = check_fds();
+        if ready_count < 0 {
+            return ready_count;
+        } // EBADF
+
+        if ready_count > 0 {
             let _guard = SumGuard::new();
             if let Some(set) = read_set {
                 unsafe { *(readfds as *mut FdSet) = set };
@@ -736,40 +735,40 @@ pub fn select(
             if let Some(set) = except_set {
                 unsafe { *(exceptfds as *mut FdSet) = set };
             }
-        }
-
-        if ready_count > 0 {
             return ready_count;
         }
 
-        // Poll mode - return immediately
         if let Some(0) = timeout_trigger {
             return 0;
         }
 
-        // Register timeout timer if needed
         if let Some(trigger) = timeout_trigger {
             use crate::kernel::timer::TIMER_QUEUE;
-            let mut timer_q = TIMER_QUEUE.lock();
-            timer_q.push(trigger, task.clone());
-            drop(timer_q);
+            TIMER_QUEUE.lock().push(trigger, task.clone());
         }
 
-        // Sleep atomically
-        POLL_WAIT_QUEUE.lock().sleep(task.clone());
-        crate::kernel::schedule();
+        // Atomic check-and-sleep to prevent lost wakeup
+        let slept = {
+            let mut wq = POLL_WAIT_QUEUE.lock();
+            wq.sleep_if(task.clone(), || {
+                let (ready, _, _, _) = check_fds();
+                ready > 0
+            })
+        };
 
-        // Woken up - remove from timer queue if still there
-        if timeout_trigger.is_some() {
-            use crate::kernel::timer::TIMER_QUEUE;
-            TIMER_QUEUE.lock().remove_task(&task);
-        }
+        if slept {
+            crate::kernel::schedule();
 
-        // Check if woken by timeout
-        if let Some(trigger) = timeout_trigger {
-            use crate::arch::timer::get_time;
-            if get_time() >= trigger {
-                return 0; // Timeout
+            if timeout_trigger.is_some() {
+                use crate::kernel::timer::TIMER_QUEUE;
+                TIMER_QUEUE.lock().remove_task(&task);
+            }
+
+            if let Some(trigger) = timeout_trigger {
+                use crate::arch::timer::get_time;
+                if get_time() >= trigger {
+                    return 0;
+                }
             }
         }
     }
