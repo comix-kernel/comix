@@ -64,7 +64,6 @@ pub fn set_network_interface_config(
             }
         };
 
-
         // 设置网络配置
         match NetworkConfigManager::set_interface_config(ifname_str, ip_str, gateway_str, mask_str)
         {
@@ -257,8 +256,8 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
     // Write address info if requested
     if !addr.is_null() && !addrlen.is_null() {
+        let _guard = SumGuard::new();
         unsafe {
-            let _guard = SumGuard::new();
             let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
         }
     }
@@ -667,9 +666,11 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     drop(sockets);
 
     if let Some(ep) = local_endpoint {
-        unsafe {
+        {
             let _guard = SumGuard::new();
-            let _ = write_sockaddr_in(addr, addrlen, ep);
+            unsafe {
+                let _ = write_sockaddr_in(addr, addrlen, ep);
+            }
         }
         0
     } else {
@@ -706,9 +707,11 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     if let Some(ep) = remote_endpoint {
-        unsafe {
+        {
             let _guard = SumGuard::new();
-            let _ = write_sockaddr_in(addr, addrlen, ep);
+            unsafe {
+                let _ = write_sockaddr_in(addr, addrlen, ep);
+            }
         }
         0
     } else {

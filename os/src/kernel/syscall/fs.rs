@@ -313,9 +313,11 @@ pub fn fstat(fd: usize, statbuf: *mut Stat) -> isize {
     let stat = crate::vfs::Stat::from_metadata(&metadata);
 
     // 写回用户空间
-    unsafe {
+    {
         let _guard = SumGuard::new();
-        core::ptr::write(statbuf, stat);
+        unsafe {
+            core::ptr::write(statbuf, stat);
+        }
     }
 
     0
@@ -401,7 +403,6 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
             written += dirent_len;
             items_written += 1;
         }
-
     }
 
     // 更新文件偏移量
@@ -477,9 +478,11 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     };
 
     // 写回用户空间
-    unsafe {
+    {
         let _guard = SumGuard::new();
-        core::ptr::write(buf, statfs_buf);
+        unsafe {
+            core::ptr::write(buf, statfs_buf);
+        }
     }
 
     0
@@ -603,9 +606,11 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     };
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
-    unsafe {
+    {
         let _guard = SumGuard::new();
-        core::ptr::copy_nonoverlapping(temp_buf.as_ptr(), buf, bytes_read);
+        unsafe {
+            core::ptr::copy_nonoverlapping(temp_buf.as_ptr(), buf, bytes_read);
+        }
     }
 
     bytes_read as isize
@@ -658,9 +663,11 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     let stat = Stat::from_metadata(&metadata);
 
     // 写回用户空间
-    unsafe {
+    {
         let _guard = SumGuard::new();
-        core::ptr::write(statbuf, stat);
+        unsafe {
+            core::ptr::write(statbuf, stat);
+        }
     }
 
     0
@@ -1125,7 +1132,6 @@ pub fn mount(
         String::new()
     };
 
-
     crate::pr_info!(
         "[SYSCALL] mount: source='{}', target='{}', type='{}'",
         source_str,
@@ -1249,7 +1255,6 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
             return FsError::InvalidArgument.to_errno();
         }
     };
-
 
     crate::pr_info!("[SYSCALL] umount2: unmounting '{}'", target_str);
 

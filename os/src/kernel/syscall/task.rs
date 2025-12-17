@@ -260,7 +260,7 @@ pub fn execve(
     envp: *const *const c_char,
 ) -> c_int {
     // 使用 SumGuard 来安全访问用户空间路径和参数
-    let (path_str, argv_strings, envp_strings) = {
+    let (path_str, argv_strings, envp_strings) = unsafe {
         let _guard = SumGuard::new();
         let path_str = match get_path_safe(path) {
             Ok(s) => s.to_string(),
