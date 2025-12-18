@@ -99,6 +99,7 @@ impl_syscall!(
     (usize, usize, usize, usize, usize, usize)
 );
 impl_syscall!(sys_ppoll, ppoll, (usize, usize, usize, usize));
+impl_syscall!(sys_poll, poll, (usize, usize, i32));
 
 // 文件元数据与同步 (File Metadata and Synchronization)
 impl_syscall!(
