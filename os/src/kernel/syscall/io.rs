@@ -765,3 +765,25 @@ pub fn select(
         }
     }
 }
+
+/// poll - I/O 多路复用系统调用
+/// # 参数
+/// - `fds`: pollfd 数组指针
+/// - `nfds`: 数组长度
+/// - `timeout`: 超时时间（毫秒），-1 表示无限等待，0 表示立即返回
+pub fn poll(fds: usize, nfds: usize, timeout: i32) -> isize {
+    use crate::uapi::time::TimeSpec;
+
+    let timeout_ptr = if timeout < 0 {
+        0 // 无限等待
+    } else {
+        // 转换毫秒到 timespec
+        let ts = TimeSpec {
+            tv_sec: (timeout / 1000) as i64,
+            tv_nsec: ((timeout % 1000) * 1_000_000) as i64,
+        };
+        &ts as *const TimeSpec as usize
+    };
+
+    ppoll(fds, nfds, timeout_ptr, 0)
+}
