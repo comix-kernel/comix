@@ -30,3 +30,6 @@ user/bin/**
 
 .ignore/**
 !.ignore/README.md
+
+# Test suites
+testsuits-for-oskernel/
