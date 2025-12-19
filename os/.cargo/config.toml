@@ -12,6 +12,14 @@ rustflags = [
 
 runner = "./qemu-run.sh"
 
+[target.loongarch64-unknown-none]
+rustflags = [
+    "-Clink-arg=-Tsrc/loongarch_linker.ld", "-Cforce-frame-pointers=yes"
+]
+
+runner = "./qemu-loongarch-run.sh"
+
+
 [source.crates-io]
 replace-with = 'ustc' 
 
