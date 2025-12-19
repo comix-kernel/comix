@@ -3,7 +3,6 @@
 
 KERNEL=$1
 MODE=${2:-run}
-MEM=128M
 SMP=1
 
 # 简单的文件系统镜像（如果存在）
@@ -17,7 +16,6 @@ fi
 
 QEMU_ARGS=(
     -machine virt
-    -m "$MEM"
     -smp "$SMP"
     -nographic
     -kernel "$KERNEL"
@@ -33,11 +31,11 @@ if [ -f "$FS_IMG" ]; then
     )
 fi
 
-# 添加网络设备
-QEMU_ARGS+=(
-    -device virtio-net-pci,netdev=net0
-    -netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
-)
+# 添加网络设备 (暂时禁用，避免端口冲突)
+# QEMU_ARGS+=(
+#     -device virtio-net-pci,netdev=net0
+#     -netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
+# )
 
 case $MODE in
     run)

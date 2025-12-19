@@ -4,7 +4,12 @@
 
 use core::fmt::{self, Write};
 
-use super::super::constant::UART_BASE;
+/// QEMU virt 平台 UART 物理基地址
+const UART_PHYS_BASE: usize = 0x1fe001e0;
+
+/// 通过 DMW0 映射的 UART 虚拟地址
+/// DMW0: 0x8000_xxxx_xxxx_xxxx -> 物理地址 (uncached, 用于 MMIO)
+const UART_BASE: usize = UART_PHYS_BASE | 0x8000_0000_0000_0000;
 
 /// 标准输出
 pub struct Stdout;

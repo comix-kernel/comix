@@ -6,8 +6,10 @@ ARCH ?= riscv
 # 根据架构设置 target 和运行命令
 ifeq ($(ARCH),loongarch)
     TARGET := loongarch64-unknown-none
-    RUN_SCRIPT := ./qemu-loongarch-run.sh run
-    GDB_SCRIPT := ./qemu-loongarch-run.sh gdb
+    TARGET_DIR := target/loongarch64-unknown-none/debug
+    PROJECT_DIR := $(TARGET_DIR)/os
+    RUN_SCRIPT := cargo build --target $(TARGET) && ./qemu-loongarch-run.sh $(PROJECT_DIR) run
+    GDB_SCRIPT := cargo build --target $(TARGET) && ./qemu-loongarch-run.sh $(PROJECT_DIR) gdb
 else
     TARGET := riscv64gc-unknown-none-elf
     RUN_SCRIPT := cargo run
