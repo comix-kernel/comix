@@ -2,8 +2,17 @@
     .globl _start
 
 # LoongArch64 内核入口点
-# 此时 MMU 关闭，使用物理地址
 _start:
+    # 配置 DMW0: VSEG = 0x8, PLV0, Strongly ordered uncached (用于 MMIO/UART)
+    # DMW0 使虚拟地址 0x8000_xxxx_xxxx_xxxx 映射到物理地址 0x0000_xxxx_xxxx_xxxx
+    li.d        $t0, (0x8000000000000000 | 1)
+    csrwr       $t0, 0x180      # CSR_DMW0
+
+    # 配置 DMW1: VSEG = 0x9, PLV0, Coherent cached (用于内存访问)
+    # DMW1 使虚拟地址 0x9000_xxxx_xxxx_xxxx 映射到物理地址 0x0000_xxxx_xxxx_xxxx
+    li.d        $t0, (0x9000000000000000 | 1 | (1 << 4))
+    csrwr       $t0, 0x181      # CSR_DMW1
+
     # 保存设备树地址 (QEMU 通过 a0 传递)
     la.global   $t0, DTP
     st.d        $a0, $t0, 0
