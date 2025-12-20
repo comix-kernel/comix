@@ -68,6 +68,10 @@
   - [Ext4 - Linux文件系统](fs/ext4.md)
   - [SimpleFS - 测试文件系统](fs/simple_fs.md)
 
+# 设备与驱动
+
+- [设备与驱动概览](devices/README.md)
+
 # 进程间通信
 - [进程间通信概述](ipc/README.md)
   - [管道](ipc/pipe.md)
