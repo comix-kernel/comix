@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sbi-rt = { version = "0.0.2", features = ["legacy"] }
-riscv = "0.15.0"
 talc = { version = "4" }
 lock_api = "0.4"
 bitflags = { version = "2.10.0" }
@@ -24,6 +22,11 @@ smoltcp = { version = "0.12.0", default-features = false, features = ["alloc", "
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 uart_16550 = "0.4.0"
 hashbrown = "0.16.1"
+
+# RISC-V 架构特定依赖
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+sbi-rt = { version = "0.0.2", features = ["legacy"] }
+riscv = "0.15.0"
 
 [lints.rustdoc]
 broken_intra_doc_links = "deny"

@@ -229,7 +229,7 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
 pub fn rt_sigreturn() -> ! {
     let tfp = current_task().lock().trap_frame_ptr.load(Ordering::SeqCst);
     let tf = unsafe { &mut *tfp };
-    let ucontext_addr = tf.x2_sp;
+    let ucontext_addr = tf.get_sp();
     let ucontext: UContextT = unsafe { read_from_user(ucontext_addr as *const UContextT) };
     tf.restore_from_mcontext(&ucontext.uc_mcontext);
     unsafe { restore(tf) }

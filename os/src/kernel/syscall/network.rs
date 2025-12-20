@@ -2,8 +2,6 @@
 
 use core::ffi::{CStr, c_char};
 
-use riscv::register::sstatus;
-
 macro_rules! set_sockopt_bool {
     ($optval:expr, $optlen:expr, $field:expr) => {
         if $optlen >= 4 {

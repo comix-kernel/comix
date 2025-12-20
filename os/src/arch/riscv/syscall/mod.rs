@@ -201,6 +201,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
 /// 1. 从TrapFrame中提取参数
 /// 2. 调用对应的系统调用处理函数
 /// 3. 将返回值写回TrapFrame
+#[cfg(target_arch = "riscv64")]
 #[macro_export]
 macro_rules! impl_syscall {
     // noreturn, 6 args

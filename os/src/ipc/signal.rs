@@ -197,7 +197,7 @@ fn install_user_signal_trap_frame(
         // 1. 备用栈已分配和启用
         // 2. 信号处理动作明确要求使用备用栈
         // 3. 当前线程不在备用栈上 (防止递归溢出)
-        let mut current_sp = tf.x2_sp;
+        let mut current_sp = tf.get_sp();
 
         current_sp = align_down(current_sp, align_of::<SigInfoT>());
         let sig_info_addr = current_sp - size_of::<SigInfoT>();
@@ -230,9 +230,9 @@ fn install_user_signal_trap_frame(
         }
 
         // 设置用户处理器入口
-        tf.sepc = entry as usize;
-        tf.x10_a0 = sig_num;
-        tf.x2_sp = final_sp;
+        tf.set_sepc(entry as usize);
+        tf.set_a0(sig_num);
+        tf.set_sp(final_sp);
     }
 }
 
