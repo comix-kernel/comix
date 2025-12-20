@@ -33,9 +33,9 @@ pub const SUPERVISOR_EXTERNAL: usize = usize::MAX / 2 + 1 + 2; // 外部中断
 /// CSR 寄存器相关常量
 /// CRMD (当前模式信息)
 pub const CSR_CRMD_PLV_MASK: usize = 0b11; // 特权级掩码
-pub const CSR_CRMD_IE: usize = 1 << 2;     // 全局中断使能
-pub const CSR_CRMD_DA: usize = 1 << 3;     // 直接地址翻译模式
-pub const CSR_CRMD_PG: usize = 1 << 4;     // 分页使能
+pub const CSR_CRMD_IE: usize = 1 << 2; // 全局中断使能
+pub const CSR_CRMD_DA: usize = 1 << 3; // 直接地址翻译模式
+pub const CSR_CRMD_PG: usize = 1 << 4; // 分页使能
 
 /// ECFG (异常配置)
 pub const CSR_ECFG_LIE_MASK: usize = 0x1fff; // 局部中断使能掩码
@@ -47,4 +47,3 @@ pub const CSR_ESTAT_IS_MASK: usize = 0x1fff; // 中断状态掩码
 pub const SSTATUS_SIE: usize = CSR_CRMD_IE;
 pub const SSTATUS_SPIE: usize = 1 << 3;
 pub const SSTATUS_SPP: usize = 1 << 8;
-

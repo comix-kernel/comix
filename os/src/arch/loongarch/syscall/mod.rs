@@ -10,7 +10,7 @@ use crate::arch::trap::TrapFrame;
 pub fn dispatch_syscall(frame: &mut TrapFrame) -> isize {
     let _syscall_id = frame.syscall_id();
     let _args = frame.syscall_args();
-    
+
     // TODO: 实现系统调用分发
     -1 // ENOSYS
 }
@@ -35,7 +35,7 @@ macro_rules! impl_syscall {
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty)) => {
         #[allow(non_snake_case)]
         pub fn $sys_name(frame: &mut $crate::arch::trap::TrapFrame) -> ! {
-            let a0 = frame.regs[4] as $t0;  // LoongArch a0 = $r4
+            let a0 = frame.regs[4] as $t0; // LoongArch a0 = $r4
             $kernel(a0)
         }
     };
@@ -48,7 +48,7 @@ macro_rules! impl_syscall {
             $kernel(a0, a1)
         }
     };
-    
+
     // returning, 0 args
     ($sys_name:ident, $kernel:path, ()) => {
         #[allow(non_snake_case)]

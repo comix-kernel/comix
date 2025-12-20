@@ -4,11 +4,7 @@ use super::context::TaskContext;
 use crate::mm::frame_allocator::FrameTracker;
 
 /// 初始化内核任务上下文
-pub fn init_kernel_task_context(
-    context: &mut TaskContext,
-    entry: usize,
-    kstack: usize,
-) {
+pub fn init_kernel_task_context(context: &mut TaskContext, entry: usize, kstack: usize) {
     context.ra = entry;
     context.sp = kstack;
 }

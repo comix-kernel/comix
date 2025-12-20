@@ -40,7 +40,7 @@ pub fn mmio_of(device: VirtDevice) -> Option<(usize, usize)> {
         VirtDevice::Network => Some((0x10009000, 0x1000)),
         VirtDevice::Gpu => Some((0x1000a000, 0x1000)),
         VirtDevice::Input => Some((0x1000b000, 0x1000)),
-        VirtDevice::VirtPcieMmio => Some((0x20000000, 0x10000000)),  // TODO: 验证 LoongArch 地址
-        VirtDevice::VirtPcieEcam => Some((0x30000000, 0x10000000)),  // TODO: 验证 LoongArch 地址
+        VirtDevice::VirtPcieMmio => Some((0x20000000, 0x10000000)), // TODO: 验证 LoongArch 地址
+        VirtDevice::VirtPcieEcam => Some((0x30000000, 0x10000000)), // TODO: 验证 LoongArch 地址
     }
 }
