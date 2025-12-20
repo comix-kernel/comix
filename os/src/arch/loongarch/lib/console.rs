@@ -21,7 +21,9 @@ impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.bytes() {
             unsafe {
-                // 直接写入 UART 数据寄存器
+                // 等待 UART 发送缓冲区空闲 (LSR bit 5, THRE)
+                while ((UART_BASE + 5) as *const u8).read_volatile() & (1 << 5) == 0 {}
+                // 写入 UART 数据寄存器
                 (UART_BASE as *mut u8).write_volatile(c);
             }
         }
@@ -33,6 +35,8 @@ impl Stdin {
     /// 从串口读取一个字符
     pub fn read_char(&mut self) -> char {
         unsafe {
+            // 等待 UART 接收缓冲区有数据 (LSR bit 0, DR)
+            while ((UART_BASE + 5) as *const u8).read_volatile() & 1 == 0 {}
             // 从 UART 数据寄存器读取
             (UART_BASE as *const u8).read_volatile() as char
         }
