@@ -12,12 +12,14 @@ ifeq ($(ARCH),loongarch)
     PROJECT_DIR := $(TARGET_DIR)/os
     QEMU_RUNNER := ./qemu-loongarch-run.sh
     GDB_BIN := loongarch64-unknown-linux-gnu-gdb
+    GDB_ARCH_SETUP :=
 else
     TARGET := riscv64gc-unknown-none-elf
     TARGET_DIR := target/riscv64gc-unknown-none-elf/debug
     PROJECT_DIR := $(TARGET_DIR)/os
     QEMU_RUNNER := ./qemu-run.sh
     GDB_BIN := riscv64-unknown-elf-gdb
+    GDB_ARCH_SETUP := -ex "set arch riscv:rv64"
 endif
 
 # ===============================================
@@ -118,6 +120,7 @@ test-gdb:
 	$(GDB_BIN) \
 		-ex "file $$TEST_ELF" \
 		-ex "target remote :1234" \
+		$(GDB_ARCH_SETUP) \
 		-ex "b *0x80200000" \
 		-ex "c"
 

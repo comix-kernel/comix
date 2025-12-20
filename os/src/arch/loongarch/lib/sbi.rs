@@ -2,19 +2,32 @@
 //!
 //! LoongArch 不使用 SBI，此模块仅用于兼容 RISC-V 代码
 
+use super::super::platform::virt::UART_BASE;
+
+/// 通过 DMW0 映射的 UART 虚拟地址
+/// DMW0: 0x8000_xxxx_xxxx_xxxx -> 物理地址 (uncached, 用于 MMIO)
+const UART_VADDR: usize = UART_BASE | 0x8000_0000_0000_0000;
+
 /// 输出字符到控制台
 pub fn console_putchar(c: usize) {
     unsafe {
-        let uart_base = 0x1fe001e0usize;
-        (uart_base as *mut u8).write_volatile(c as u8);
+        // 等待 UART 发送缓冲区空闲 (LSR bit 5)
+        let ptr = UART_VADDR as *mut u8;
+        while ptr.add(5).read_volatile() & (1 << 5) == 0 {}
+        ptr.write_volatile(c as u8);
     }
 }
 
 /// 从控制台读取字符
 pub fn console_getchar() -> usize {
     unsafe {
-        let uart_base = 0x1fe001e0usize;
-        (uart_base as *const u8).read_volatile() as usize
+        let ptr = UART_VADDR as *mut u8;
+        // 检查接收缓冲区是否有数据 (LSR bit 0)
+        if ptr.add(5).read_volatile() & 1 == 0 {
+            usize::MAX // 无数据
+        } else {
+            ptr.read_volatile() as usize
+        }
     }
 }
 
