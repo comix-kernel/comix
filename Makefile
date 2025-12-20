@@ -8,8 +8,8 @@ ifeq ($(ARCH),loongarch)
     TARGET := loongarch64-unknown-none
     TARGET_DIR := target/loongarch64-unknown-none/debug
     PROJECT_DIR := $(TARGET_DIR)/os
-    RUN_SCRIPT := cargo build --target $(TARGET) && ./qemu-loongarch-run.sh $(PROJECT_DIR) run
-    GDB_SCRIPT := cargo build --target $(TARGET) && ./qemu-loongarch-run.sh $(PROJECT_DIR) gdb
+    RUN_SCRIPT := cargo run --target $(TARGET)
+    GDB_SCRIPT := cargo run --target $(TARGET) -- gdb
 else
     TARGET := riscv64gc-unknown-none-elf
     RUN_SCRIPT := cargo run
