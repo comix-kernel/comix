@@ -6,37 +6,54 @@ use crate::mm::page_table::{UniversalConvertableFlag, UniversalPTEFlag};
 
 bitflags::bitflags! {
     /// LoongArch 页表项标志位
+    /// 参考《LoongArch 64-bit ISA Reference Manual》第2卷
+    ///
+    /// PTE 格式 (bits 0-11):
+    /// - bit 0: V (Valid)
+    /// - bit 1: D (Dirty) - 脏页，也用于控制写权限
+    /// - bit 2-3: PLV (Privilege Level) - 0=内核，3=用户
+    /// - bit 4-5: MAT (Memory Access Type)
+    /// - bit 6: G (Global)
+    /// - bit 7: P (Present/Huge)
+    /// - bit 8: W (Writable) - 可写位
+    /// - bit 9-10: 保留
+    /// - bit 11: NX (Non-eXecutable) - 0表示可执行，1表示不可执行
+    /// - bit 12+: PPN (Physical Page Number)
     pub struct LAPTEFlags: usize {
-        /// 有效位
+        /// 有效位 (bit 0)
         const VALID = 1 << 0;
-        /// 脏位
+        /// 脏位 (bit 1)
         const DIRTY = 1 << 1;
-        /// 特权级 0
+        /// 特权级 0 - 内核态 (PLV bits 2-3)
         const PLV0 = 0 << 2;
-        /// 特权级 3 (用户态)
+        /// 特权级 3 - 用户态 (PLV bits 2-3)
         const PLV3 = 3 << 2;
-        /// 内存访问类型
-        const MAT = 1 << 4;
-        /// 可写
-        const WRITE = 1 << 8;
-        /// 可执行
-        const EXECUTE = 1 << 11;
-        /// 全局位
+        /// 内存访问类型 - Coherent Cached (MAT bits 4-5)
+        const MAT_CC = 1 << 4;
+        /// 全局位 (bit 6)
         const GLOBAL = 1 << 6;
+        /// 存在位/巨页标记 (bit 7)
+        const PRESENT = 1 << 7;
+        /// 可写位 (bit 8)
+        const WRITE = 1 << 8;
+        /// 不可执行位 (bit 11) - 注意：0 = 可执行，1 = 不可执行
+        const NX = 1 << 11;
     }
 }
 
 impl UniversalConvertableFlag for LAPTEFlags {
     fn from_universal(flag: UniversalPTEFlag) -> Self {
         let mut result = LAPTEFlags::empty();
+
         if flag.contains(UniversalPTEFlag::VALID) {
-            result |= LAPTEFlags::VALID;
+            result |= LAPTEFlags::VALID | LAPTEFlags::PRESENT | LAPTEFlags::MAT_CC;
         }
         if flag.contains(UniversalPTEFlag::WRITEABLE) {
-            result |= LAPTEFlags::WRITE;
+            result |= LAPTEFlags::WRITE | LAPTEFlags::DIRTY;
         }
-        if flag.contains(UniversalPTEFlag::EXECUTABLE) {
-            result |= LAPTEFlags::EXECUTE;
+        // 可执行：不设置 NX 位（NX=0 表示可执行）
+        if !flag.contains(UniversalPTEFlag::EXECUTABLE) {
+            result |= LAPTEFlags::NX;
         }
         if flag.contains(UniversalPTEFlag::USER_ACCESSIBLE) {
             result |= LAPTEFlags::PLV3;
@@ -52,16 +69,18 @@ impl UniversalConvertableFlag for LAPTEFlags {
 
     fn to_universal(&self) -> UniversalPTEFlag {
         let mut result = UniversalPTEFlag::empty();
+
         if self.contains(LAPTEFlags::VALID) {
             result |= UniversalPTEFlag::VALID;
         }
         if self.contains(LAPTEFlags::WRITE) {
             result |= UniversalPTEFlag::WRITEABLE;
         }
-        if self.contains(LAPTEFlags::EXECUTE) {
+        // NX=0 表示可执行
+        if !self.contains(LAPTEFlags::NX) {
             result |= UniversalPTEFlag::EXECUTABLE;
         }
-        if self.contains(LAPTEFlags::PLV3) {
+        if (self.bits() & (3 << 2)) == (3 << 2) {
             result |= UniversalPTEFlag::USER_ACCESSIBLE;
         }
         if self.contains(LAPTEFlags::DIRTY) {
@@ -122,7 +141,8 @@ impl PageTableEntryTrait for PageTableEntry {
     }
 
     fn flags(&self) -> UniversalPTEFlag {
-        let la_flags = LAPTEFlags::from_bits(self.0 as usize & 0xfff).unwrap_or(LAPTEFlags::empty());
+        let la_flags =
+            LAPTEFlags::from_bits(self.0 as usize & 0xfff).unwrap_or(LAPTEFlags::empty());
         la_flags.to_universal()
     }
 

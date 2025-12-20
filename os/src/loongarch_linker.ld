@@ -2,8 +2,8 @@ OUTPUT_ARCH(loongarch)
 ENTRY(_start)
 
 /* LoongArch QEMU virt 平台内存布局 */
-/* 物理 RAM 起始于 0x0，内核加载到 0x9000000 */
-PHYSICAL_BASE = 0x9000000;
+/* 物理 RAM 起始于 0x0，内核加载到 0x90000000 */
+PHYSICAL_BASE = 0x90000000;
 
 SECTIONS
 {
