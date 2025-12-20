@@ -47,12 +47,12 @@ impl TrapFrame {
     /// 获取系统调用参数
     pub fn syscall_args(&self) -> [usize; 6] {
         [
-            self.regs[4],  // a0
-            self.regs[5],  // a1
-            self.regs[6],  // a2
-            self.regs[7],  // a3
-            self.regs[8],  // a4
-            self.regs[9],  // a5
+            self.regs[4], // a0
+            self.regs[5], // a1
+            self.regs[6], // a2
+            self.regs[7], // a3
+            self.regs[8], // a4
+            self.regs[9], // a5
         ]
     }
 
@@ -76,7 +76,7 @@ impl TrapFrame {
     /// 获取栈指针
     #[inline]
     pub fn get_sp(&self) -> usize {
-        self.regs[3]  // $sp = $r3
+        self.regs[3] // $sp = $r3
     }
 
     /// 设置栈指针
@@ -88,7 +88,7 @@ impl TrapFrame {
     /// 获取第一个参数寄存器 (a0)
     #[inline]
     pub fn get_a0(&self) -> usize {
-        self.regs[4]  // $a0 = $r4
+        self.regs[4] // $a0 = $r4
     }
 
     /// 设置第一个参数寄存器 (a0)
@@ -106,7 +106,7 @@ impl TrapFrame {
     /// 设置内核态陷阱帧
     pub fn set_kernel_trap_frame(&mut self, entry: usize, _terminal: usize, kernel_sp: usize) {
         self.era = entry;
-        self.regs[3] = kernel_sp;   // sp
+        self.regs[3] = kernel_sp; // sp
         self.kernel_sp = kernel_sp;
     }
 
@@ -122,10 +122,10 @@ impl TrapFrame {
     ) {
         *self = Self::zero_init();
         self.era = entry;
-        self.regs[3] = user_sp;   // sp
-        self.regs[4] = argc;       // a0
-        self.regs[5] = argv;       // a1
-        self.regs[6] = envp;       // a2
+        self.regs[3] = user_sp; // sp
+        self.regs[4] = argc; // a0
+        self.regs[5] = argv; // a1
+        self.regs[6] = envp; // a2
         self.kernel_sp = kernel_sp;
         // TODO: 设置 PRMD 为用户态
     }
