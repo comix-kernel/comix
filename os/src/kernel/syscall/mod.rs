@@ -249,7 +249,7 @@ impl_syscall!(
 impl_syscall!(
     sys_execve,
     execve,
-    (*const u8, *const *const u8, *const *const u8)
+    (*const c_char, *const *const c_char, *const *const c_char)
 );
 
 // 网络/I/O (续)

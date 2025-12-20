@@ -85,8 +85,45 @@ impl TrapFrame {
             sstatus: 0,
             kernel_sp: 0,
             // kernel_satp: 0,
-            // kernel_hartid: 0,
         }
+    }
+
+    // ===== 跨架构兼容的访问方法 =====
+
+    /// 获取栈指针
+    #[inline]
+    pub fn get_sp(&self) -> usize {
+        self.x2_sp
+    }
+
+    /// 设置栈指针
+    #[inline]
+    pub fn set_sp(&mut self, val: usize) {
+        self.x2_sp = val;
+    }
+
+    /// 获取第一个参数寄存器 (a0)
+    #[inline]
+    pub fn get_a0(&self) -> usize {
+        self.x10_a0
+    }
+
+    /// 设置第一个参数寄存器 (a0)
+    #[inline]
+    pub fn set_a0(&mut self, val: usize) {
+        self.x10_a0 = val;
+    }
+
+    /// 设置程序计数器
+    #[inline]
+    pub fn set_sepc(&mut self, pc: usize) {
+        self.sepc = pc;
+    }
+
+    /// 获取程序计数器
+    #[inline]
+    pub fn get_sepc(&self) -> usize {
+        self.sepc
     }
 
     /// 设置内核线程的初始陷阱帧
