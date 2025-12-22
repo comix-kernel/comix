@@ -133,7 +133,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         Self {
             root_ppn: ppn,
             frames: Vec::new(),
-            is_user: true,
+            is_user: false, // from_ppn 通常用于包装现有页表（如内核页表）
         }
     }
 
