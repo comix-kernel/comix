@@ -186,11 +186,10 @@ impl UniversalConvertableFlag for LAPTEFlags {
             result |= UniversalPTEFlag::READABLE;
         }
 
-        // D 位表示可写（LoongArch 中 D 位是写权限位）
-        // 注意：这里只转换为 WRITEABLE，不设置 DIRTY
-        // DIRTY 标志应由硬件在实际写入时设置
+        // D 位表示可写（同时也是脏位）
+        // 为支持脏页跟踪，同时设置 WRITEABLE 和 DIRTY
         if self.contains(LAPTEFlags::DIRTY) {
-            result |= UniversalPTEFlag::WRITEABLE;
+            result |= UniversalPTEFlag::WRITEABLE | UniversalPTEFlag::DIRTY;
         }
 
         // NX=0 表示可执行

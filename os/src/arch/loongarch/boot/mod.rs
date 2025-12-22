@@ -8,11 +8,7 @@
 
 use core::arch::global_asm;
 
-use crate::{
-    arch::mm::{paddr_to_vaddr, vaddr_to_paddr},
-    earlyprintln,
-    test::run_early_tests,
-};
+use crate::{earlyprintln, test::run_early_tests};
 
 global_asm!(include_str!("entry.S"));
 
@@ -57,14 +53,11 @@ fn clear_bss() {
         fn ebss();
     }
 
-    // sbss 和 ebss 已经是虚拟地址（链接器脚本设置）
-    // 转换为物理地址用于清零
-    let sbss_paddr = unsafe { vaddr_to_paddr(sbss as usize) };
-    let ebss_paddr = unsafe { vaddr_to_paddr(ebss as usize) };
-
-    (sbss_paddr..ebss_paddr).for_each(|a| unsafe {
-        // 访问物理地址需要通过 paddr_to_vaddr 转换
-        let va = paddr_to_vaddr(a);
-        (va as *mut u8).write_volatile(0)
-    });
+    // sbss 和 ebss 已经是虚拟地址，DMW 映射后可直接访问
+    unsafe {
+        let start = sbss as *mut u8;
+        let end = ebss as *mut u8;
+        let len = end.offset_from(start) as usize;
+        core::slice::from_raw_parts_mut(start, len).fill(0);
+    }
 }

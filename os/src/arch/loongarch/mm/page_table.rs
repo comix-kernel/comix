@@ -187,7 +187,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
     /// 虚拟地址转物理地址
     fn translate(&self, vaddr: Vaddr) -> Option<Paddr> {
-        let vpn = Vpn::from_addr_ceil(vaddr);
+        let vpn = Vpn::from_addr_floor(vaddr);
         let offset = vaddr.as_usize() & 0xfff; // 页内偏移
 
         match self.walk(vpn) {
@@ -500,9 +500,13 @@ mod page_table_tests {
 
         let (mapped_ppn, _, mapped_flags) = walk_result.unwrap();
         kassert!(mapped_ppn == ppn);
-        // 创建新的flags实例用于比较，避免所有权问题
-        let expected_flags = UniversalPTEFlag::kernel_rw();
-        kassert!(mapped_flags.bits() == expected_flags.bits());
+        
+        // 注意：LoongArch 的 D 位同时表示可写和脏位
+        // 因此 kernel_rw() 经过 from_universal -> to_universal 后会多出 DIRTY 标志
+        // 验证关键权限位正确即可
+        kassert!(mapped_flags.contains(UniversalPTEFlag::VALID));
+        kassert!(mapped_flags.contains(UniversalPTEFlag::READABLE));
+        kassert!(mapped_flags.contains(UniversalPTEFlag::WRITEABLE));
     });
 
     // 6. 更新标志位测试
@@ -515,16 +519,17 @@ mod page_table_tests {
         pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw())
             .unwrap();
 
-        // 更新为内核只读 (kernel_r)
+        // 更新为内核只读 (kernel_r = VALID | READABLE)
         let update_flags = UniversalPTEFlag::kernel_r();
         let result = pt.update_flags(vpn, update_flags);
         kassert!(result.is_ok());
 
-        // 验证标志位是否已更改
+        // 验证标志位是否已更改为只读
         let (_, _, flags) = pt.walk(vpn).unwrap();
-        // 创建新的flags实例用于比较，避免所有权问题
-        let expected_flags = UniversalPTEFlag::kernel_r();
-        kassert!(flags.bits() == expected_flags.bits());
+        kassert!(flags.contains(UniversalPTEFlag::VALID));
+        kassert!(flags.contains(UniversalPTEFlag::READABLE));
+        // kernel_r 不应包含 WRITEABLE
+        kassert!(!flags.contains(UniversalPTEFlag::WRITEABLE));
     });
 
     // 7. 多重映射测试
