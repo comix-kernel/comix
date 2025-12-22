@@ -22,7 +22,8 @@ pub mod switch {
 /// 直接操作栈和寄存器
 #[inline(always)]
 pub unsafe fn switch(old: *mut Context, new: *const Context) {
-    switch::__switch(old, new)
+    // SAFETY: 调用者负责确保上下文指针有效
+    unsafe { switch::__switch(old, new) }
 }
 
 /// CPU 相关
