@@ -1221,58 +1221,59 @@ mod memory_space_tests {
         });
     });
 
-    // 6. 测试 MMIO 地址翻译 - 修改为手动映射后测试
+    // 6. 测试 MMIO 地址翻译 - 使用独立的 MemorySpace 实例
     test_case!(test_mmio_translation, {
         use crate::arch::mm::paddr_to_vaddr;
-        use crate::mm::memory_space::memory_space::with_kernel_space;
 
-        with_kernel_space(|space| {
-            // 获取第一个 MMIO 配置
-            if let Some(&(_, mmio_paddr, mmio_size)) = crate::config::MMIO.first() {
-                println!(
-                    "Testing MMIO translation at PA=0x{:x}, size=0x{:x}",
-                    mmio_paddr, mmio_size
-                );
+        // 使用独立的 MemorySpace 实例，避免与其他测试或全局状态冲突
+        let mut ms = MemorySpace::new();
 
-                // 手动映射 MMIO 区域
-                let paddr = Paddr::from_usize(mmio_paddr);
-                let result = space.map_mmio(paddr, mmio_size);
-                kassert!(result.is_ok());
+        // 使用一个不太可能被占用的测试地址
+        const TEST_MMIO_PADDR: usize = 0xE000_0000;
+        const TEST_MMIO_SIZE: usize = 0x1000;
 
-                let vaddr = result.unwrap();
-                let mmio_vaddr = vaddr.as_usize();
-                let vpn = Vpn::from_addr_floor(vaddr);
+        println!(
+            "Testing MMIO translation at PA=0x{:x}, size=0x{:x}",
+            TEST_MMIO_PADDR, TEST_MMIO_SIZE
+        );
 
-                println!("  Mapped to VA=0x{:x}", mmio_vaddr);
+        // 手动映射 MMIO 区域
+        let paddr = Paddr::from_usize(TEST_MMIO_PADDR);
+        let result = ms.map_mmio(paddr, TEST_MMIO_SIZE);
+        kassert!(result.is_ok());
 
-                // 查找包含该地址的区域
-                let area = space.find_area(vpn);
-                kassert!(area.is_some());
+        let vaddr = result.unwrap();
+        let mmio_vaddr = vaddr.as_usize();
+        let vpn = Vpn::from_addr_floor(vaddr);
 
-                if let Some(area) = area {
-                    kassert!(area.area_type() == AreaType::KernelMmio);
-                    kassert!(area.map_type() == MapType::Direct);
-                }
+        println!("  Mapped to VA=0x{:x}", mmio_vaddr);
 
-                // 测试页表翻译
-                let translated_paddr = space.page_table().translate(Vaddr::from_usize(mmio_vaddr));
-                kassert!(translated_paddr.is_some());
+        // 查找包含该地址的区域
+        let area = ms.find_area(vpn);
+        kassert!(area.is_some());
 
-                if let Some(paddr) = translated_paddr {
-                    println!(
-                        "  Translation successful: VA 0x{:x} -> PA 0x{:x}",
-                        mmio_vaddr,
-                        paddr.as_usize()
-                    );
-                    // 验证翻译结果（允许页偏移误差）
-                    let expected_paddr = mmio_paddr & !0xfff; // 清除页内偏移
-                    let actual_paddr = paddr.as_usize() & !0xfff;
-                    kassert!(actual_paddr == expected_paddr);
-                }
-            } else {
-                println!("Warning: No MMIO regions configured in platform");
-            }
-        });
+        if let Some(area) = area {
+            kassert!(area.area_type() == AreaType::KernelMmio);
+            kassert!(area.map_type() == MapType::Direct);
+        }
+
+        // 测试页表翻译
+        let translated_paddr = ms.page_table().translate(Vaddr::from_usize(mmio_vaddr));
+        kassert!(translated_paddr.is_some());
+
+        if let Some(paddr) = translated_paddr {
+            println!(
+                "  Translation successful: VA 0x{:x} -> PA 0x{:x}",
+                mmio_vaddr,
+                paddr.as_usize()
+            );
+            // 验证翻译结果（允许页偏移误差）
+            let expected_paddr = TEST_MMIO_PADDR & !0xfff; // 清除页内偏移
+            let actual_paddr = paddr.as_usize() & !0xfff;
+            kassert!(actual_paddr == expected_paddr);
+        }
+
+        println!("  MMIO translation test passed");
     });
 
     // // 7. 测试 MMIO 内存访问（读写测试）- 修改为手动映射后访问
