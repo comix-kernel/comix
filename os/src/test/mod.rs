@@ -29,7 +29,7 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
         tests.len() - failed,
         failed
     );
-    
+
     if failed > 0 {
         earlyprintln!("\x1b[91mSome tests failed!\x1b[0m");
         shutdown(true);
