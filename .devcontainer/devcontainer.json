@@ -32,15 +32,4 @@
       }
     }
   },
-  "remoteEnv": {
-    "HTTP_PROXY": "http://127.0.0.1:7890",
-    "HTTPS_PROXY": "http://127.0.0.1:7890",
-    "http_proxy": "http://127.0.0.1:7890",
-    "https_proxy": "http://127.0.0.1:7890",
-    "NO_PROXY": "${localEnv:NO_PROXY}",
-    "no_proxy": "${localEnv:no_proxy}"
-  },
-  "runArgs": [
-    "--network=host"
-  ]
 }
