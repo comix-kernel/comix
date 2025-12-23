@@ -35,10 +35,6 @@ ENV CARGO_HOME=/home/vscode/.cargo
 ENV RUSTUP_HOME=/home/vscode/.rustup
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
-# 配置 Rust 使用中科大镜像源
-ENV RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
-ENV RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
-
 # 先安装 rustup
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain none
 
@@ -52,16 +48,11 @@ RUN rustup toolchain install nightly-2025-10-28 && \
         loongarch64-unknown-linux-gnu \
         loongarch64-unknown-none \
         x86_64-unknown-linux-gnu
-
-# 配置 cargo 中科大镜像
+        
+# 配置 cargo 使用 sparse index
 RUN mkdir -p ${CARGO_HOME} && \
     echo '[source.crates-io]' > ${CARGO_HOME}/config.toml && \
-    echo 'registry = "https://github.com/rust-lang/crates.io-index"' >> ${CARGO_HOME}/config.toml && \
-    echo 'replace-with = "ustc"' >> ${CARGO_HOME}/config.toml && \
-    echo '' >> ${CARGO_HOME}/config.toml && \
-    echo '[source.ustc]' >> ${CARGO_HOME}/config.toml && \
-    echo 'registry = "git://mirrors.ustc.edu.cn/crates.io-index"' >> ${CARGO_HOME}/config.toml
-
+    echo 'registry = "sparse+https://index.crates.io/"' >> ${CARGO_HOME}/config.toml
 
 # 配置 cargo binutils
 RUN cargo install cargo-binutils 
