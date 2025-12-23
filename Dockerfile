@@ -48,13 +48,11 @@ RUN rustup toolchain install nightly-2025-10-28 && \
         loongarch64-unknown-linux-gnu \
         loongarch64-unknown-none \
         x86_64-unknown-linux-gnu
-
+        
+# 配置 cargo 使用 sparse index
 RUN mkdir -p ${CARGO_HOME} && \
-    cat > ${CARGO_HOME}/config.toml << 'EOF'
-[source.crates-io]
-registry = "sparse+https://index.crates.io/"
-EOF
-
+    echo '[source.crates-io]' > ${CARGO_HOME}/config.toml && \
+    echo 'registry = "sparse+https://index.crates.io/"' >> ${CARGO_HOME}/config.toml
 
 # 配置 cargo binutils
 RUN cargo install cargo-binutils 
