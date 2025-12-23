@@ -44,12 +44,12 @@ pub enum VirtDevice {
 pub const MMIO: &[(VirtDevice, usize, usize)] = &[
     // LoongArch QEMU virt 平台 MMIO 布局
     // RTC 放在第一位，用于测试（不容易冲突）
-    (VirtDevice::Rtc, 0x10081000, 0x1000),          // RTC (Goldfish)
-    (VirtDevice::Block, 0x10008000, 0x1000),        // VirtIO Block
-    (VirtDevice::Network, 0x10009000, 0x1000),      // VirtIO Network
-    (VirtDevice::Gpu, 0x1000a000, 0x1000),          // VirtIO GPU
-    (VirtDevice::Input, 0x1000b000, 0x1000),        // VirtIO Input
-    (VirtDevice::Uart, 0x1fe001e0, 0x100),          // UART (放在后面，避免测试冲突)
+    (VirtDevice::Rtc, 0x10081000, 0x1000),     // RTC (Goldfish)
+    (VirtDevice::Block, 0x10008000, 0x1000),   // VirtIO Block
+    (VirtDevice::Network, 0x10009000, 0x1000), // VirtIO Network
+    (VirtDevice::Gpu, 0x1000a000, 0x1000),     // VirtIO GPU
+    (VirtDevice::Input, 0x1000b000, 0x1000),   // VirtIO Input
+    (VirtDevice::Uart, 0x1fe001e0, 0x100),     // UART (放在后面，避免测试冲突)
     (VirtDevice::VirtPcieMmio, 0x20000000, 0x10000000), // PCIe MMIO
     (VirtDevice::VirtPcieEcam, 0x30000000, 0x10000000), // PCIe ECAM
 ];

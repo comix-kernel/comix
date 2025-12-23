@@ -500,7 +500,7 @@ mod page_table_tests {
 
         let (mapped_ppn, _, mapped_flags) = walk_result.unwrap();
         kassert!(mapped_ppn == ppn);
-        
+
         // 注意：LoongArch 的 D 位同时表示可写和脏位
         // 因此 kernel_rw() 经过 from_universal -> to_universal 后会多出 DIRTY 标志
         // 验证关键权限位正确即可
