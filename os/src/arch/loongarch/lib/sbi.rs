@@ -28,9 +28,9 @@ const ACPI_GED_REG_RESET: usize = 0x02;
 /// ACPI 睡眠控制寄存器位定义 (ACPI 5.0 Chapter 4.8.3.7)
 /// SLP_TYPx: bits [4:2] - 睡眠类型
 /// SLP_EN:   bit 5      - 睡眠使能
-const ACPI_GED_SLP_TYP_POS: u8 = 2;     // SLP_TYP 位偏移
-const ACPI_GED_SLP_TYP_S5: u8 = 0x05;   // S5 = 关机状态
-const ACPI_GED_SLP_EN: u8 = 0x20;       // 睡眠使能位
+const ACPI_GED_SLP_TYP_POS: u8 = 2; // SLP_TYP 位偏移
+const ACPI_GED_SLP_TYP_S5: u8 = 0x05; // S5 = 关机状态
+const ACPI_GED_SLP_EN: u8 = 0x20; // 睡眠使能位
 
 /// 复位寄存器值
 const ACPI_GED_RESET_VALUE: u8 = 0x42;
@@ -70,10 +70,10 @@ pub fn set_timer(_timer: usize) {
 pub fn shutdown(_failure: bool) -> ! {
     // 计算 SLEEP_CTL 寄存器的虚拟地址（通过 DMW0 映射）
     let sleep_ctl_addr = (VIRT_GED_REG_ADDR + ACPI_GED_REG_SLEEP_CTL) | 0x8000_0000_0000_0000;
-    
+
     // 构造 SLEEP_CTL 寄存器值: SLP_TYP=5 (S5), SLP_EN=1
     let sleep_value: u8 = (ACPI_GED_SLP_TYP_S5 << ACPI_GED_SLP_TYP_POS) | ACPI_GED_SLP_EN;
-    
+
     unsafe {
         let sleep_ctl = sleep_ctl_addr as *mut u8;
         sleep_ctl.write_volatile(sleep_value);
@@ -88,7 +88,7 @@ pub fn shutdown(_failure: bool) -> ! {
 
     // 如果以上都失败，无限循环
     loop {
-        unsafe { 
+        unsafe {
             core::arch::asm!("idle 0");
         }
     }
