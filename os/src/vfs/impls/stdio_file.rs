@@ -39,6 +39,11 @@ impl File for StdinFile {
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
         use crate::arch::lib::sbi::console_getchar;
 
+        let termios = STDIO_TERMIOS.lock();
+        let is_canonical = (termios.c_lflag & 0x0002) != 0; // ICANON
+        let echo_enabled = (termios.c_lflag & 0x0008) != 0; // ECHO
+        drop(termios);
+
         let mut count = 0;
         for byte in buf.iter_mut() {
             let ch = console_getchar();
@@ -47,10 +52,36 @@ impl File for StdinFile {
                 break;
             }
 
-            *byte = ch as u8;
+            let ch_byte = ch as u8;
+
+            // 在canonical mode下处理特殊字符
+            if is_canonical {
+                // 退格/删除处理
+                if ch_byte == 127 || ch_byte == 8 {
+                    if count > 0 {
+                        count -= 1;
+                        if echo_enabled {
+                            use crate::arch::lib::sbi::console_putchar;
+                            console_putchar(8); // BS
+                            console_putchar(b' ' as usize); // 空格
+                            console_putchar(8); // BS
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            *byte = ch_byte;
             count += 1;
 
-            if ch == b'\n' as usize {
+            // 回显
+            if echo_enabled {
+                use crate::arch::lib::sbi::console_putchar;
+                console_putchar(ch);
+            }
+
+            // 在canonical mode下遇到换行符停止
+            if is_canonical && ch_byte == b'\n' {
                 break;
             }
         }
