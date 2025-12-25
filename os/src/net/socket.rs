@@ -8,7 +8,7 @@ use smoltcp::iface::{Interface, SocketHandle as SmoltcpHandle, SocketSet};
 use smoltcp::socket::{tcp, udp};
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum SocketHandle {
     Tcp(SmoltcpHandle),
     Udp(SmoltcpHandle),
@@ -17,49 +17,97 @@ pub enum SocketHandle {
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 
+pub struct NetIfaceWrapper {
+    device: SpinLock<crate::net::interface::NetDeviceAdapter>,
+    interface: SpinLock<Interface>,
+}
+
+impl NetIfaceWrapper {
+    pub fn poll(&self, sockets: &SpinLock<SocketSet>) {
+        let timestamp = smoltcp::time::Instant::from_millis(
+            crate::arch::timer::get_time_ms() as i64
+        );
+        let mut dev = self.device.lock();
+
+        // 检查队列长度
+        let queue_len = dev.loopback_queue_len();
+        if queue_len > 0 {
+            crate::pr_debug!("poll: loopback queue has {} packets", queue_len);
+        }
+
+        let mut iface = self.interface.lock();
+        let mut sockets = sockets.lock();
+
+        crate::pr_debug!("poll: before iface.poll");
+        let result = iface.poll(timestamp, &mut *dev, &mut *sockets);
+        crate::pr_debug!("poll: result={:?}", result);
+    }
+
+    pub fn loopback_queue_len(&self) -> usize {
+        self.device.lock().loopback_queue_len()
+    }
+
+    pub fn with_context<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut smoltcp::iface::Context) -> R,
+    {
+        let mut iface = self.interface.lock();
+        f(iface.context())
+    }
+}
+
 lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
-    /// Map from fd to socket handle for syscall operations
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
-    /// Global network interface for socket operations
-    pub static ref GLOBAL_INTERFACE: SpinLock<Option<Interface>> = SpinLock::new(None);
+    pub static ref NET_IFACE: SpinLock<Option<NetIfaceWrapper>> = SpinLock::new(None);
 }
+
 
 use crate::uapi::fcntl::OpenFlags;
 use crate::uapi::socket::SocketOptions;
 
 pub struct SocketFile {
-    handle: SpinLock<SocketHandle>,
+    handle: SpinLock<Option<SocketHandle>>,
+    listen_sockets: SpinLock<alloc::vec::Vec<SocketHandle>>,
     local_endpoint: SpinLock<Option<IpEndpoint>>,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
     shutdown_rd: SpinLock<bool>,
     shutdown_wr: SpinLock<bool>,
     flags: SpinLock<OpenFlags>,
     options: SpinLock<SocketOptions>,
+    is_listener: SpinLock<bool>,
 }
 
 impl SocketFile {
     pub fn new(handle: SocketHandle) -> Self {
         Self {
-            handle: SpinLock::new(handle),
+            handle: SpinLock::new(Some(handle)),
+            listen_sockets: SpinLock::new(alloc::vec::Vec::new()),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(OpenFlags::empty()),
             options: SpinLock::new(SocketOptions::default()),
+            is_listener: SpinLock::new(false),
         }
+    }
+
+    pub fn set_listener(&self, is_listener: bool) {
+        *self.is_listener.lock() = is_listener;
     }
 
     pub fn new_with_flags(handle: SocketHandle, flags: OpenFlags) -> Self {
         Self {
-            handle: SpinLock::new(handle),
+            handle: SpinLock::new(Some(handle)),
+            listen_sockets: SpinLock::new(alloc::vec::Vec::new()),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(flags),
             options: SpinLock::new(SocketOptions::default()),
+            is_listener: SpinLock::new(false),
         }
     }
 
@@ -72,11 +120,19 @@ impl SocketFile {
     }
 
     pub fn handle(&self) -> SocketHandle {
-        *self.handle.lock()
+        self.handle.lock().expect("SocketFile has no handle")
+    }
+
+    pub fn add_listen_socket(&self, handle: SocketHandle) {
+        self.listen_sockets.lock().push(handle);
+    }
+
+    pub fn get_listen_sockets(&self) -> alloc::vec::Vec<SocketHandle> {
+        self.listen_sockets.lock().clone()
     }
 
     pub fn set_handle(&self, new_handle: SocketHandle) {
-        *self.handle.lock() = new_handle;
+        *self.handle.lock() = Some(new_handle);
     }
 
     pub fn set_local_endpoint(&self, endpoint: IpEndpoint) {
@@ -110,17 +166,49 @@ impl SocketFile {
     pub fn is_shutdown_write(&self) -> bool {
         *self.shutdown_wr.lock()
     }
+
+    pub fn is_closed(&self) -> bool {
+        let sockets = SOCKET_SET.lock();
+        match self.handle.lock().as_ref() {
+            Some(SocketHandle::Tcp(h)) => {
+                let socket = sockets.get::<tcp::Socket>(*h);
+                socket.state() == tcp::State::Closed
+            }
+            _ => false,
+        }
+    }
 }
 
 impl Drop for SocketFile {
     fn drop(&mut self) {
         let mut sockets = SOCKET_SET.lock();
-        match *self.handle.lock() {
-            SocketHandle::Tcp(h) => {
-                sockets.remove(h);
+        if let Some(handle) = *self.handle.lock() {
+            match handle {
+                SocketHandle::Tcp(h) => {
+                    let socket = sockets.get_mut::<tcp::Socket>(h);
+                    let state = socket.state();
+                    crate::pr_debug!("[Socket] Drop: handle={:?}, state={:?}", h, state);
+                    // Check if we need to close the socket
+                    match socket.state() {
+                        tcp::State::Closed | tcp::State::Closing | tcp::State::TimeWait
+                        | tcp::State::FinWait1 | tcp::State::FinWait2 | tcp::State::LastAck => {
+                            // Already closed or closing, just remove
+                        }
+                        _ => {
+                            // Active connection, close it
+                            crate::pr_debug!("[Socket] Drop: closing socket handle={:?}", h);
+                            socket.close();
+                        }
+                    }
+                    sockets.remove(h);
+                },
+                SocketHandle::Udp(h) => { sockets.remove(h); },
             }
-            SocketHandle::Udp(h) => {
-                sockets.remove(h);
+        }
+        for handle in self.listen_sockets.lock().iter() {
+            match handle {
+                SocketHandle::Tcp(h) => { sockets.remove(*h); },
+                SocketHandle::Udp(h) => { sockets.remove(*h); },
             }
         }
     }
@@ -237,30 +325,44 @@ pub fn socket_sendto(
 
 impl File for SocketFile {
     fn readable(&self) -> bool {
-        let sockets = SOCKET_SET.lock();
-        match *self.handle.lock() {
-            SocketHandle::Tcp(h) => {
-                let socket = sockets.get::<tcp::Socket>(h);
-                socket.can_recv()
-            }
-            SocketHandle::Udp(h) => {
-                let socket = sockets.get::<udp::Socket>(h);
-                socket.can_recv()
-            }
+        if *self.is_listener.lock() {
+            return true;
         }
+        let sockets = SOCKET_SET.lock();
+        let result = match self.handle.lock().as_ref() {
+            Some(SocketHandle::Tcp(h)) => {
+                let socket = sockets.get::<tcp::Socket>(*h);
+                let can_recv = socket.can_recv();
+                let state = socket.state();
+                crate::pr_debug!("[Socket] readable: handle={:?}, state={:?}, can_recv={}", h, state, can_recv);
+                // Closed sockets are readable (EOF)
+                can_recv || state == tcp::State::Closed
+            }
+            Some(SocketHandle::Udp(h)) => {
+                let socket = sockets.get::<udp::Socket>(*h);
+                socket.can_recv()
+            }
+            None => false,
+        };
+        result
     }
     fn writable(&self) -> bool {
         let sockets = SOCKET_SET.lock();
-        match *self.handle.lock() {
-            SocketHandle::Tcp(h) => {
-                let socket = sockets.get::<tcp::Socket>(h);
+        let result = match self.handle.lock().as_ref() {
+            Some(SocketHandle::Tcp(h)) => {
+                let socket = sockets.get::<tcp::Socket>(*h);
+                let can_send = socket.can_send();
+                let state = socket.state();
+                crate::pr_debug!("[Socket] writable: handle={:?}, state={:?}, can_send={}", h, state, can_send);
+                can_send
+            }
+            Some(SocketHandle::Udp(h)) => {
+                let socket = sockets.get::<udp::Socket>(*h);
                 socket.can_send()
             }
-            SocketHandle::Udp(h) => {
-                let socket = sockets.get::<udp::Socket>(h);
-                socket.can_send()
-            }
-        }
+            None => false,
+        };
+        result
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
@@ -269,18 +371,52 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        let result = match *self.handle.lock() {
-            SocketHandle::Tcp(h) => {
-                let socket = sockets.get_mut::<tcp::Socket>(h);
-                socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)
+        let result = match self.handle.lock().as_ref() {
+            Some(SocketHandle::Tcp(h)) => {
+                let socket = sockets.get_mut::<tcp::Socket>(*h);
+                let state = socket.state();
+                let recv_queue = socket.recv_queue();
+                crate::pr_debug!("[Socket] read: handle={:?}, state={:?}, recv_queue={}, buf.len()={}",
+                    h, state, recv_queue, buf.len());
+
+                // Closed socket returns EOF (0 bytes)
+                if socket.state() == tcp::State::Closed {
+                    return Ok(0);
+                }
+
+                let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
+
+                // CRITICAL FIX: smoltcp's recv_slice() returns Ok(0) when no data is available
+                // but the socket is still connected. We need to distinguish between:
+                // 1. No data available (should return EAGAIN for non-blocking, or block for blocking)
+                // 2. Connection closed (should return 0 = EOF)
+                if let Ok(0) = result {
+                    // recv_slice returned 0 bytes - check if this is EOF or just no data
+                    if socket.may_recv() {
+                        // Socket can still receive data, so this is not EOF
+                        // Return EAGAIN to indicate no data available
+                        crate::pr_debug!("[Socket] read: recv_slice returned 0 but may_recv=true, returning EAGAIN");
+                        Err(FsError::WouldBlock)
+                    } else {
+                        // Socket cannot receive anymore, this is EOF
+                        crate::pr_debug!("[Socket] read: recv_slice returned 0 and may_recv=false, returning EOF");
+                        Ok(0)
+                    }
+                } else {
+                    if let Ok(n) = result {
+                        crate::pr_debug!("[Socket] read: received {} bytes", n);
+                    }
+                    result
+                }
             }
-            SocketHandle::Udp(h) => {
-                let socket = sockets.get_mut::<udp::Socket>(h);
+            Some(SocketHandle::Udp(h)) => {
+                let socket = sockets.get_mut::<udp::Socket>(*h);
                 socket
                     .recv_slice(buf)
                     .map(|(n, _)| n)
                     .map_err(|_| FsError::WouldBlock)
             }
+            None => Err(FsError::InvalidArgument),
         };
         if result.is_ok() {
             crate::kernel::syscall::io::wake_poll_waiters();
@@ -294,22 +430,23 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        let result = match *self.handle.lock() {
-            SocketHandle::Tcp(h) => {
-                let socket = sockets.get_mut::<tcp::Socket>(h);
+        let result = match self.handle.lock().as_ref() {
+            Some(SocketHandle::Tcp(h)) => {
+                let socket = sockets.get_mut::<tcp::Socket>(*h);
                 socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
             }
-            SocketHandle::Udp(h) => {
+            Some(SocketHandle::Udp(h)) => {
                 let endpoint = match self.get_remote_endpoint() {
                     Some(ep) => ep,
                     None => return Err(FsError::NotConnected),
                 };
-                let socket = sockets.get_mut::<udp::Socket>(h);
+                let socket = sockets.get_mut::<udp::Socket>(*h);
                 socket
                     .send_slice(buf, endpoint)
                     .map_err(|_| FsError::WouldBlock)?;
                 Ok(buf.len())
             }
+            None => Err(FsError::InvalidArgument),
         };
         if result.is_ok() {
             crate::kernel::syscall::io::wake_poll_waiters();
@@ -340,9 +477,13 @@ impl File for SocketFile {
         }
 
         let mut sockets = SOCKET_SET.lock();
-        match *self.handle.lock() {
-            SocketHandle::Tcp(h) => {
-                let socket = sockets.get_mut::<tcp::Socket>(h);
+        match self.handle.lock().as_ref() {
+            Some(SocketHandle::Tcp(h)) => {
+                let socket = sockets.get_mut::<tcp::Socket>(*h);
+                // Closed socket returns EOF (0 bytes)
+                if socket.state() == tcp::State::Closed {
+                    return Ok((0, None));
+                }
                 let n = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;
                 let remote = socket.remote_endpoint().map(|ep| {
                     let mut addr_buf = alloc::vec![0u8; 16];
@@ -351,19 +492,19 @@ impl File for SocketFile {
                 });
                 Ok((n, remote))
             }
-            SocketHandle::Udp(h) => {
-                let socket = sockets.get_mut::<udp::Socket>(h);
+            Some(SocketHandle::Udp(h)) => {
+                let socket = sockets.get_mut::<udp::Socket>(*h);
                 let (n, metadata) = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;
                 let mut addr_buf = alloc::vec![0u8; 16];
                 let _ = write_sockaddr_in_to_buf(&mut addr_buf, metadata.endpoint);
                 Ok((n, Some(addr_buf)))
             }
+            None => Err(FsError::InvalidArgument),
         }
     }
 }
 
 pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
-    // Allocate buffers with fallible allocation
     let mut rx_vec = alloc::vec::Vec::new();
     rx_vec.try_reserve(4096).map_err(|_| ())?;
     rx_vec.resize(4096, 0);
@@ -375,6 +516,7 @@ pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
     let rx_buffer = tcp::SocketBuffer::new(rx_vec);
     let tx_buffer = tcp::SocketBuffer::new(tx_vec);
     let socket = tcp::Socket::new(rx_buffer, tx_buffer);
+
     let handle = SOCKET_SET.lock().add(socket);
     Ok(SocketHandle::Tcp(handle))
 }
@@ -423,6 +565,9 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
         let port = u16::from_be(core::ptr::read_unaligned(addr.add(2) as *const u16));
         let ip_bytes = core::slice::from_raw_parts(addr.add(4), 4);
         let ip = Ipv4Address::from_octets([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
+
+        // Note: Loopback addresses (127.0.0.1) are handled by smoltcp internally
+        // No need to map to external IP
 
         Ok(IpEndpoint::new(IpAddress::Ipv4(ip), port))
     }
@@ -481,20 +626,67 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
     Ok(())
 }
 
-/// Initialize global interface (should be called during network setup)
-pub fn init_global_interface(iface: Interface) {
-    *GLOBAL_INTERFACE.lock() = Some(iface);
+/// Initialize network interface (should be called during network setup)
+pub fn init_network(mut smoltcp_iface: crate::net::interface::SmoltcpInterface) {
+    let wrapper = NetIfaceWrapper {
+        device: SpinLock::new(smoltcp_iface.device_adapter_mut().clone()),
+        interface: SpinLock::new(smoltcp_iface.into_interface()),
+    };
+    *NET_IFACE.lock() = Some(wrapper);
 }
+
 
 /// Perform TCP connect with Context
 pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
-    let mut iface_guard = GLOBAL_INTERFACE.lock();
-    let iface = iface_guard.as_mut().ok_or(())?;
+    crate::pr_debug!("tcp_connect: start, handle={:?}", handle);
 
-    let mut sockets = SOCKET_SET.lock();
-    let socket = sockets.get_mut::<tcp::Socket>(handle);
+    let iface_guard = NET_IFACE.lock();
+    crate::pr_debug!("tcp_connect: got NET_IFACE lock");
 
-    socket
-        .connect(iface.context(), remote, local)
-        .map_err(|_| ())
+    let wrapper = iface_guard.as_ref().ok_or(())?;
+
+    let result = wrapper.with_context(|context| {
+        crate::pr_debug!("tcp_connect: in with_context");
+        let mut sockets = SOCKET_SET.lock();
+        crate::pr_debug!("tcp_connect: got SOCKET_SET lock");
+        let socket = sockets.get_mut::<tcp::Socket>(handle);
+        crate::pr_debug!("tcp_connect: calling socket.connect");
+        let r = socket.connect(context, remote, local).map_err(|e| {
+            crate::pr_debug!("tcp_connect error: {:?}", e);
+            ()
+        });
+        crate::pr_debug!("tcp_connect: socket.connect returned {:?}", r);
+        r
+    });
+
+    // Poll immediately after connect to trigger SYN packet
+    if result.is_ok() {
+        crate::pr_debug!("tcp_connect: polling to send SYN");
+        wrapper.poll(&SOCKET_SET);
+    }
+
+    drop(iface_guard);
+    crate::pr_debug!("tcp_connect: done, result={:?}", result);
+    result
+}
+
+/// Poll network interfaces to process packets
+pub fn poll_network_interfaces() {
+    if let Some(ref wrapper) = *NET_IFACE.lock() {
+        crate::pr_debug!("poll_network_interfaces: calling poll");
+        wrapper.poll(&SOCKET_SET);
+    }
+}
+
+/// Poll until loopback queue is empty
+pub fn poll_until_empty() {
+    if let Some(ref wrapper) = *NET_IFACE.lock() {
+        // Always poll at least once to process socket state changes
+        wrapper.poll(&SOCKET_SET);
+
+        // Then drain loopback queue if it has packets
+        while wrapper.loopback_queue_len() > 0 {
+            wrapper.poll(&SOCKET_SET);
+        }
+    }
 }

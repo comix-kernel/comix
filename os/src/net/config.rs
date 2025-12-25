@@ -102,6 +102,11 @@ impl NetworkConfigManager {
             interface.add_ip_address(ip_cidr);
             earlyprintln!("Set IP address: 192.168.1.100/24");
 
+            // 添加loopback地址到同一接口
+            let loopback_cidr = IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8);
+            interface.add_ip_address(loopback_cidr);
+            earlyprintln!("Set loopback address: 127.0.0.1/8");
+
             // 设置默认网关
             let gateway = Ipv4Address::new(192, 168, 1, 1);
             interface.set_ipv4_gateway(Some(gateway));
@@ -109,8 +114,8 @@ impl NetworkConfigManager {
 
             // Initialize global interface for socket operations
             let smoltcp_iface = interface.create_smoltcp_interface();
-            use crate::net::socket::init_global_interface;
-            init_global_interface(smoltcp_iface.into_interface());
+            use crate::net::socket::init_network;
+            init_network(smoltcp_iface);
             earlyprintln!("Initialized global network interface");
 
             Ok(())
