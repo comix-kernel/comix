@@ -65,6 +65,8 @@ pub fn exit(code: c_int) -> c_int {
     // TODO: 处理 tid_addr 和 robust_list
     // TODO: clear_child_tid 的处理
     let task = current_task();
+    let (pid, tid) = { let t = task.lock(); (t.pid, t.tid) };
+    crate::pr_info!("[Task] exit: tid={}, code={}", tid, code);
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
     } else {
@@ -244,7 +246,11 @@ pub fn clone(
         .push(child_task.clone());
 
     TASK_MANAGER.lock().add_task(child_task.clone());
-    SCHEDULER.lock().add_task(child_task);
+    SCHEDULER.lock().add_task(child_task.clone());
+    
+    let parent_tid = current_task().lock().tid;
+    crate::pr_info!("[Task] clone: parent_tid={} -> child_tid={}, flags={:#x}",
+            parent_tid, tid, flags);
     tid as c_int
 }
 
@@ -322,6 +328,13 @@ pub fn execve(
     );
     drop(data);
 
+    // Log before dropping
+    let tid = current_task().lock().tid;
+    if tid != 17 {
+        crate::pr_info!("[Task] execve: tid={}, path={}, argc={}",
+            tid, path_str, argv_strings.len());
+    }
+
     // Explicitly drop other stack resources
     drop(path_str);
 
@@ -335,7 +348,9 @@ pub fn execve(
         phdr_addr,
         phnum,
         phent,
-    )
+    );
+
+    0
 }
 
 /// 等待子进程状态变化（wait4）
@@ -408,12 +423,17 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         {
             let mut t = cur_task.lock();
             if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
-                crate::pr_debug!("wait4: found child pid={}", res.lock().pid);
+                let child_lock = res.lock();
+                crate::pr_info!("[Task] wait4: parent_tid={}, found child_tid={}={:?}",
+                                t.tid, child_lock.tid, child_lock.state);
+                drop(child_lock);
                 break res;
             } else {
                 if opt.contains(WaitFlags::NOHANG) {
+                    crate::pr_debug!("wait4: NOHANG, no child ready");
                     return 0;
                 }
+                crate::pr_debug!("wait4: no child ready, sleeping...");
             }
             {
                 let mut wc = t.wait_child.lock();
@@ -431,24 +451,45 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         let t = task.lock();
         (t.tid, t.state, t.exit_code)
     };
+    crate::pr_debug!("wait4: extracted tid={}, state={:?}, exit_code={:?}", tid, state, exit_code);
 
     let status = match state {
         TaskState::Zombie => {
             // TODO: 处理信号退出的情况
-            WaitStatus::exit_code(exit_code.expect("Zombie must set exit code.") as u8, 0)
+            let code = exit_code.expect("Zombie must set exit code.");
+            crate::pr_debug!("wait4: creating exit status for code={}", code);
+            WaitStatus::exit_code(code as u8, 0)
         }
         TaskState::Stopped => {
+            crate::pr_debug!("wait4: creating stop status");
             WaitStatus::stop_code(0) // TODO: 停止信号
         }
-        TaskState::Running => WaitStatus::continued_code(),
+        TaskState::Running => {
+            crate::pr_debug!("wait4: creating continued status");
+            WaitStatus::continued_code()
+        }
         _ => {
             unreachable!("wait4: unexpected task state.")
         }
     };
+    crate::pr_debug!("wait4: status created, raw={:#x}", status.raw());
 
-    unsafe {
-        write_to_user(wstatus, status.raw());
+    if !wstatus.is_null() {
+        use crate::util::user_buffer::validate_user_ptr_mut;
+        if !validate_user_ptr_mut(wstatus) {
+            crate::pr_err!("wait4: invalid wstatus pointer {:#x}", wstatus as usize);
+            return -EFAULT;
+        }
+        crate::pr_debug!("wait4: wstatus pointer validated");
+        unsafe {
+            write_to_user(wstatus, status.raw());
+        }
+        crate::pr_debug!("wait4: wrote status to user");
+    } else {
+        crate::pr_debug!("wait4: wstatus is null, skipping write");
     }
+
+    crate::pr_debug!("wait4: returning tid={}, status={:#x}", tid, status.raw());
 
     // 如果子任务是 Zombie 状态，从 TASK_MANAGER 中释放它
     // 这样 Task 结构体和其拥有的资源（kstack, trap_frame）才会被释放
@@ -1033,11 +1074,13 @@ pub fn set_robust_list(head: *const RobustListHead, size: SizeT) -> c_int {
 pub fn setsid() -> c_int {
     let task = current_task();
     let mut t = task.lock();
+    crate::pr_debug!("setsid: pid={}, old_pgid={}", t.pid, t.pgid);
     if t.pid == t.pgid {
         return -EPERM;
     }
     let new_pgid = t.pid;
     t.pgid = new_pgid;
+    crate::pr_debug!("setsid: new_pgid={}", new_pgid);
     new_pgid as c_int
 }
 
@@ -1152,4 +1195,54 @@ fn do_execve_switch(
         restore(&*tfp);
     }
     -1
+}
+
+/// getrusage - get resource usage
+pub fn getrusage(who: c_int, usage: *mut Rusage) -> c_int {
+    const RUSAGE_SELF: c_int = 0;
+    const RUSAGE_CHILDREN: c_int = -1;
+    const RUSAGE_THREAD: c_int = 1;
+
+    crate::pr_debug!("getrusage: who={}, usage={:p}", who, usage);
+
+    if usage.is_null() {
+        crate::pr_debug!("getrusage: usage is null, returning -EFAULT");
+        return -EFAULT;
+    }
+
+    let rusage = match who {
+        RUSAGE_SELF | RUSAGE_THREAD | RUSAGE_CHILDREN => {
+            crate::pr_debug!("getrusage: creating rusage struct");
+            Rusage {
+                ru_utime: crate::uapi::time::timeval { tv_sec: 0, tv_usec: 0 },
+                ru_stime: crate::uapi::time::timeval { tv_sec: 0, tv_usec: 0 },
+                ru_maxrss: 0,
+                ru_ixrss: 0,
+                ru_idrss: 0,
+                ru_isrss: 0,
+                ru_minflt: 0,
+                ru_majflt: 0,
+                ru_nswap: 0,
+                ru_inblock: 0,
+                ru_oublock: 0,
+                ru_msgsnd: 0,
+                ru_msgrcv: 0,
+                ru_nsignals: 0,
+                ru_nvcsw: 0,
+                ru_nivcsw: 0,
+            }
+        },
+        _ => {
+            crate::pr_debug!("getrusage: invalid who={}, returning -EINVAL", who);
+            return -EINVAL;
+        }
+    };
+
+    crate::pr_debug!("getrusage: writing rusage to user space");
+    let _guard = SumGuard::new();
+    let slice = unsafe { core::slice::from_raw_parts_mut(usage as *mut u8, core::mem::size_of::<Rusage>()) };
+    let rusage_bytes = unsafe { core::slice::from_raw_parts(&rusage as *const Rusage as *const u8, core::mem::size_of::<Rusage>()) };
+    slice.copy_from_slice(rusage_bytes);
+    crate::pr_debug!("getrusage: success, returning 0");
+    0
 }

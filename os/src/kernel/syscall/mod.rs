@@ -168,7 +168,7 @@ impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
 impl_syscall!(
     sys_rt_sigaction,
     rt_sigaction,
-    (c_int, *const SignalAction, *mut SignalAction)
+    (c_int, *const SignalAction, *mut SignalAction, c_uint)
 );
 impl_syscall!(
     sys_rt_sigprocmask,
@@ -199,6 +199,7 @@ impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
 impl_syscall!(sys_sethostname, set_hostname, (*const c_char, usize));
 impl_syscall!(sys_getrlimit, getrlimit, (c_int, *mut Rlimit));
 impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
+impl_syscall!(sys_getrusage, getrusage, (c_int, *mut Rusage));
 impl_syscall!(sys_umask, umask, (u32));
 impl_syscall!(sys_getpid, get_pid, ());
 impl_syscall!(sys_getppid, get_ppid, ());

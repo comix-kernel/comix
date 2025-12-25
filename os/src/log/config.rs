@@ -21,10 +21,10 @@ pub const MAX_LOG_MESSAGE_LENGTH: usize = 256;
 ///
 /// 处于此级别或更高优先级的日志将被记录到缓冲区中。
 /// 默认值为 `Info`，意味着 Debug 日志默认会被过滤掉。
-pub const DEFAULT_LOG_LEVEL: super::level::LogLevel = super::level::LogLevel::Info;
+pub const DEFAULT_LOG_LEVEL: super::level::LogLevel = super::level::LogLevel::Debug;
 
 /// 默认控制台输出级别
 ///
 /// 处于此级别或更高优先级的日志将**立即打印到控制台**。
 /// 默认值为 `Warning`，意味着默认情况下只有警告和错误才会出现在控制台上。
-pub const DEFAULT_CONSOLE_LEVEL: super::level::LogLevel = super::level::LogLevel::Info;
+pub const DEFAULT_CONSOLE_LEVEL: super::level::LogLevel = super::level::LogLevel::Debug;

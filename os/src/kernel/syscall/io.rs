@@ -39,24 +39,43 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 /// - `buf`: 存储读取数据的缓冲区
 /// - `count`: 要读取的字节数
 pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
-    // 1. 获取文件对象
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
-    let file = match task.lock().fd_table.get(fd) {
-        Ok(f) => f,
-        Err(e) => return e.to_errno(),
-    };
+    loop {
+        // 1. 获取文件对象
+        let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+        let file = match task.lock().fd_table.get(fd) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
 
-    // 2. 访问用户态缓冲区并调用 File::read
-    let result = {
-        let _guard = SumGuard::new();
-        let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-        match file.read(buffer) {
-            Ok(n) => n as isize,
-            Err(e) => e.to_errno(),
+        // 2. 访问用户态缓冲区并调用 File::read
+        let result = {
+            let _guard = SumGuard::new();
+            let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
+            match file.read(buffer) {
+                Ok(n) => n as isize,
+                Err(e) => e.to_errno(),
+            }
+        };
+
+        // If WouldBlock and socket is blocking, retry
+        if result == -11 {
+            // Check if this is a socket and if it's non-blocking
+            use crate::net::socket::SocketFile;
+            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                if !socket_file.flags().contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK) {
+                    // Drop file reference before yield
+                    drop(file);
+                    drop(task);
+                    // Blocking socket, poll and retry
+                    crate::net::socket::poll_until_empty();
+                    crate::kernel::yield_task();
+                    continue;
+                }
+            }
         }
-    };
 
-    result
+        return result;
+    }
 }
 
 /// 向量化读取：从文件描述符读取数据到多个缓冲区
@@ -479,6 +498,8 @@ pub const POLLNVAL: i16 = 0x0020;
 use crate::kernel::scheduler::WaitQueue;
 use crate::sync::SpinLock;
 use lazy_static::lazy_static;
+use crate::pr_debug;
+use crate::vfs::File;
 
 lazy_static! {
     static ref POLL_WAIT_QUEUE: SpinLock<WaitQueue> = SpinLock::new(WaitQueue::new());
@@ -495,11 +516,13 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     use crate::kernel::current_cpu;
     use crate::uapi::errno::EINVAL;
 
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
+    pr_debug!("ppoll: tid={}, nfds={}, timeout={:#x}", tid, nfds, timeout);
+
     if nfds > 0 && fds == 0 {
         return -(EINVAL as isize);
     }
-
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
 
     // Parse timeout: null pointer means infinite, otherwise it's a timespec
     let timeout_trigger = if timeout == 0 {
@@ -521,6 +544,9 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     };
 
     loop {
+        // Poll until loopback queue is empty
+        crate::net::socket::poll_until_empty();
+
         let mut ready_count = 0;
 
         {
@@ -539,27 +565,53 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
                     Err(_) => {
                         pollfd.revents = POLLNVAL;
                         ready_count += 1;
+                        pr_debug!("ppoll: fd={} -> POLLNVAL", pollfd.fd);
                         continue;
                     }
                 };
 
-                if (pollfd.events & POLLIN) != 0 && file.readable() {
+                let readable = file.readable();
+                let writable = file.writable();
+
+                // Check if socket is closed (for TCP sockets)
+                use crate::net::socket::SocketFile;
+                let is_closed = if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                    let closed = socket_file.is_closed();
+                    pr_debug!("ppoll: fd={} is SocketFile, is_closed={}", pollfd.fd, closed);
+                    closed
+                } else {
+                    pr_debug!("ppoll: fd={} is not SocketFile", pollfd.fd);
+                    false
+                };
+
+                if (pollfd.events & POLLIN) != 0 && readable {
                     pollfd.revents |= POLLIN;
                 }
 
-                if (pollfd.events & POLLOUT) != 0 && file.writable() {
+                if (pollfd.events & POLLOUT) != 0 && writable {
                     pollfd.revents |= POLLOUT;
+                }
+
+                // Set POLLHUP if socket is closed
+                if is_closed {
+                    pollfd.revents |= POLLHUP;
+                    pr_debug!("ppoll: fd={} is closed, setting POLLHUP, revents={:#x}", pollfd.fd, pollfd.revents);
                 }
 
                 if pollfd.revents != 0 {
                     ready_count += 1;
+                    pr_debug!("ppoll: fd={}, events={:#x}, revents={:#x} (readable={}, writable={})",
+                             pollfd.fd, pollfd.events, pollfd.revents, readable, writable);
                 }
             }
         }
 
         if ready_count > 0 {
+            pr_debug!("ppoll: returning ready_count={}", ready_count);
             return ready_count;
         }
+
+        pr_debug!("ppoll: no ready fds, sleeping...");
 
         // Register timeout timer if needed
         if let Some(trigger) = timeout_trigger {
@@ -624,6 +676,7 @@ pub fn select(
     }
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
 
     // Parse timeout
     let timeout_trigger = if timeout == 0 {
@@ -689,8 +742,17 @@ pub fn select(
                 Err(_) => return (-(EBADF as isize), None, None, None),
             };
 
+            // Check if socket is closed (for TCP sockets)
+            use crate::net::socket::SocketFile;
+            let is_closed = if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                socket_file.is_closed()
+            } else {
+                false
+            };
+
             let mut fd_ready = false;
-            if check_read && file.readable() {
+            // Closed sockets are readable (EOF)
+            if check_read && (file.readable() || is_closed) {
                 if let Some(ref mut set) = read_set {
                     set.set(fd);
                     fd_ready = true;
@@ -710,7 +772,11 @@ pub fn select(
         (ready_count, read_set, write_set, except_set)
     };
 
+    let tid = task.lock().tid;
     loop {
+        // Poll until all loopback packets are processed
+        crate::net::socket::poll_until_empty();
+
         let (ready_count, read_set, write_set, except_set) = check_fds();
         if ready_count < 0 {
             return ready_count;
@@ -740,6 +806,7 @@ pub fn select(
         }
 
         // Atomic check-and-sleep to prevent lost wakeup
+        // crate::pr_debug!("select: calling sleep_if");
         let slept = {
             let mut wq = POLL_WAIT_QUEUE.lock();
             wq.sleep_if(task.clone(), || {
@@ -747,9 +814,12 @@ pub fn select(
                 ready > 0
             })
         };
+        // crate::pr_debug!("select: sleep_if returned slept={}", slept);
 
         if slept {
+            // crate::pr_debug!("select: calling schedule");
             crate::kernel::schedule();
+            // crate::pr_debug!("select: woke up from schedule");
 
             if timeout_trigger.is_some() {
                 use crate::kernel::timer::TIMER_QUEUE;
@@ -759,9 +829,15 @@ pub fn select(
             if let Some(trigger) = timeout_trigger {
                 use crate::arch::timer::get_time;
                 if get_time() >= trigger {
+                    // crate::pr_debug!("select: timeout expired");
                     return 0;
                 }
             }
+            // Continue loop to recheck fds
+        } else {
+            // crate::pr_debug!("select: didn't sleep, yielding");
+            // If we didn't sleep, yield CPU to prevent busy loop
+            crate::kernel::yield_task();
         }
     }
 }

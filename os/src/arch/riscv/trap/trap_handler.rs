@@ -34,17 +34,46 @@ use crate::kernel::{
 ///   避免长时间占用 CPU，影响系统的响应性。
 #[unsafe(no_mangle)]
 pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
+    // 检查进入trap_handler时的中断状态
+    let sie_on_entry = sstatus::read().sie();
+    if sie_on_entry {
+        crate::earlyprintln!("[WARN] trap_handler: SIE=1 on entry! Interrupts should be disabled!");
+    }
+
     // 保存进入中断时的状态
     let sstatus_old = sstatus::read();
     let sepc_old = sepc::read();
     let scause = scause::read();
 
-    match sstatus_old.spp() {
-        SPP::User => user_trap(scause, sepc_old, sstatus_old, trap_frame),
-        SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old),
+    // 验证trap_frame的sepc与CSR一致
+    if trap_frame.sepc != sepc_old {
+        crate::earlyprintln!("[WARN] trap_frame.sepc={:#x} != sepc_old={:#x}", trap_frame.sepc, sepc_old);
     }
 
-    check_signal();
+    match sstatus_old.spp() {
+        SPP::User => {
+            user_trap(scause, sepc_old, sstatus_old, trap_frame);
+
+            // 检查sepc是否被破坏
+            if trap_frame.sepc == 0 {
+                crate::earlyprintln!("[ERROR] trap_frame.sepc corrupted to 0 after user_trap!");
+                crate::earlyprintln!("  scause={:?}, sepc_old={:#x}", scause.cause(), sepc_old);
+            }
+
+            check_signal();
+
+            // 最终检查
+            if trap_frame.sepc == 0 {
+                let tid = crate::kernel::current_cpu().lock().current_task.as_ref().map(|t| t.lock().tid).unwrap_or(0);
+                let tp = crate::kernel::current_cpu().lock().current_task.as_ref()
+                    .map(|t| t.lock().trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst)).unwrap_or(core::ptr::null_mut());
+                crate::earlyprintln!("[ERROR] trap_frame.sepc corrupted to 0 after check_signal!");
+                crate::earlyprintln!("  tid={}, trap_frame={:p}, trap_frame_ptr={:p}", tid, trap_frame, tp);
+                panic!("sepc corrupted to 0 before restore");
+            }
+        }
+        SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old),
+    }
     // Safe:
     // restore 是一个汇编函数，它恢复寄存器并执行 sret。
     //
@@ -53,6 +82,27 @@ pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
     // 2. **关键前提：在 match 中调用的 `user_trap` 必须保证如果它修改了 `trap_frame`，
     //    则其中的所有寄存器值（尤其是 sepc 和栈指针）都是有效的、合法的上下文状态。**
     // 3. `restore` 的汇编实现本身是正确的。
+
+    // 最终验证
+    if sstatus_old.spp() == SPP::User && trap_frame.sepc == 0 {
+        crate::earlyprintln!("[FATAL] About to restore with sepc=0!");
+        crate::earlyprintln!("  trap_frame addr: {:p}", trap_frame);
+        crate::earlyprintln!("  sepc_old was: {:#x}", sepc_old);
+        panic!("Refusing to restore with sepc=0");
+    }
+
+    // 在restore前再次验证trap_frame内容
+    if sstatus_old.spp() == SPP::User {
+        let sepc_value = unsafe { core::ptr::read_volatile(&trap_frame.sepc) };
+        let a0_value = unsafe { core::ptr::read_volatile(&trap_frame.x10_a0) };
+        if sepc_value == 0 {
+            crate::earlyprintln!("[FATAL] trap_frame.sepc is 0 right before restore!");
+            crate::earlyprintln!("  trap_frame addr: {:p}", trap_frame);
+            crate::earlyprintln!("  a0={:#x}", a0_value);
+            panic!("trap_frame corrupted before restore");
+        }
+    }
+
     unsafe { restore(trap_frame) };
 }
 
@@ -63,18 +113,93 @@ pub fn user_trap(
     sstatus_old: sstatus::Sstatus,
     trap_frame: &mut super::TrapFrame,
 ) {
-    crate::pr_debug!("[user_trap] scause: {:?}", scause.cause());
+    // 检查sepc是否异常
+    if sepc_old == 0 || sepc_old < 0x1000 {
+        let tid = crate::kernel::current_cpu().lock().current_task.as_ref().map(|t| t.lock().tid).unwrap_or(0);
+        let task = crate::kernel::current_cpu().lock().current_task.clone();
+
+        crate::earlyprintln!("[ERROR] user_trap: tid={}, sepc_old={:#x} is invalid!", tid, sepc_old);
+        crate::earlyprintln!("  scause={:?}", scause.cause());
+        crate::earlyprintln!("  ra={:#x}, sp={:#x}", trap_frame.x1_ra, trap_frame.x2_sp);
+        crate::earlyprintln!("  a0={:#x}, a7={:#x}", trap_frame.x10_a0, trap_frame.x17_a7);
+
+        // Check stack
+        if let Some(t) = task {
+            let task_lock = t.lock();
+            let kstack_bottom = task_lock.kstack_base;
+            let kstack_size = 8 * 4096; // Assume 8 pages
+            let kstack_top = kstack_bottom + kstack_size;
+            let current_sp = trap_frame.x2_sp;
+
+            crate::earlyprintln!("  [Stack] kstack: {:#x}..{:#x} (size={})",
+                kstack_bottom, kstack_top, kstack_size);
+            crate::earlyprintln!("  [Stack] current sp={:#x}", current_sp);
+
+            if current_sp < 0x1000 || current_sp >= 0xffffffc000000000 {
+                crate::earlyprintln!("  [Stack] ERROR: sp in kernel space!");
+            } else if current_sp < kstack_bottom || current_sp >= kstack_top {
+                crate::earlyprintln!("  [Stack] WARNING: sp outside kstack range");
+            }
+        }
+    }
+
+    // crate::pr_debug!("[user_trap] scause: {:?}", scause.cause());
     match scause.cause() {
         Trap::Exception(8) => {
             // 设置返回地址为下一个指令
             trap_frame.sepc = sepc_old.wrapping_add(4);
             // 处理系统调用
             dispatch_syscall(trap_frame);
+
+            // 验证sepc没有被破坏
+            if trap_frame.sepc == 0 || trap_frame.sepc < 0x1000 {
+                crate::earlyprintln!("[FATAL] syscall corrupted sepc to {:#x}!", trap_frame.sepc);
+                crate::earlyprintln!("  sepc_old was: {:#x}", sepc_old);
+                panic!("sepc corrupted after syscall");
+            }
+
+            // Log syscall return for debugging
+            if trap_frame.x17_a7 == 63 {  // read syscall
+                let task = crate::kernel::current_cpu().lock().current_task.clone();
+                if let Some(t) = task {
+                    let task_lock = t.lock();
+                    let kstack_bottom = task_lock.kstack_base;
+                    let kstack_size = 8 * 4096;
+                    let kstack_top = kstack_bottom + kstack_size;
+                    let tf_addr = trap_frame as *const _ as usize;
+
+                    crate::pr_debug!("[syscall] read() returning, sepc={:#x}, ra={:#x}, a0={}",
+                        trap_frame.sepc, trap_frame.x1_ra, trap_frame.x10_a0 as isize);
+                    crate::pr_debug!("  kstack: {:#x}..{:#x}, trap_frame at {:#x}",
+                        kstack_bottom, kstack_top, tf_addr);
+
+                    if tf_addr < kstack_bottom || tf_addr >= kstack_top {
+                        crate::pr_debug!("  [WARN] trap_frame outside kstack!");
+                    }
+                }
+            }
         }
         Trap::Interrupt(5) => {
-            // 处理时钟中断
+            // 处理时钟中断 - 中断不改变PC
+            trap_frame.sepc = sepc_old;
             crate::arch::timer::set_next_trigger();
+
+            // 检查调用check_timer前的中断状态
+            let sie_before = sstatus::read().sie();
+            crate::pr_debug!("[Timer] Before check_timer: SIE={}", sie_before);
+
             check_timer();
+
+            // 检查调用check_timer后的中断状态
+            let sie_after = sstatus::read().sie();
+            if sie_after != sie_before {
+                crate::earlyprintln!("[ERROR] check_timer changed SIE: {} -> {}", sie_before, sie_after);
+            }
+        }
+        Trap::Interrupt(9) => {
+            // 处理外部中断（设备中断） - 中断不改变PC
+            trap_frame.sepc = sepc_old;
+            check_device();
         }
         _ => {
             // 立即读取相关寄存器的当前值
@@ -235,6 +360,10 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
             crate::arch::timer::set_next_trigger();
             check_timer();
         }
+        Trap::Interrupt(9) => {
+            // 处理外部中断（设备中断）
+            check_device();
+        }
         // 中断处理时发生异常一般是致命的
         Trap::Exception(e) => {
             // 立即读取 sscratch 和 stval 寄存器的当前值
@@ -268,6 +397,7 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_with_block(task);
     }
@@ -279,10 +409,19 @@ pub fn check_timer() {
         }
     }
     if SCHEDULER.lock().update_time_slice() {
+        let sie_before_schedule = riscv::register::sstatus::read().sie();
+        crate::pr_debug!("[Timer] Before schedule: SIE={}", sie_before_schedule);
+
         schedule();
+
+        let sie_after_schedule = riscv::register::sstatus::read().sie();
+        if sie_after_schedule != sie_before_schedule {
+            crate::earlyprintln!("[ERROR] schedule changed SIE: {} -> {}", sie_before_schedule, sie_after_schedule);
+        }
     }
 }
 
-#[allow(dead_code)]
-/// TODO: 处理设备中断
-pub fn check_device() {}
+/// 处理设备中断
+pub fn check_device() {
+    crate::device::IRQ_MANAGER.read().try_handle_interrupt(None);
+}

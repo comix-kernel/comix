@@ -31,6 +31,14 @@ pub const O_CLOEXEC: u32 = 0o2000000;
 
 pub fn close(fd: usize) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
+
+    // Log socket close operations
+    use crate::net::socket::get_socket_handle;
+    if let Some(handle) = get_socket_handle(tid as usize, fd) {
+        crate::pr_debug!("close: tid={}, fd={}, handle={:?}", tid, fd, handle);
+    }
+
     match task.lock().fd_table.close(fd) {
         Ok(()) => 0,
         Err(e) => e.to_errno(),
@@ -1301,7 +1309,10 @@ pub fn syncfs(fd: usize) -> isize {
 /// # 实现说明
 /// 在写直达架构下,等同于 syncfs
 pub fn fsync(fd: usize) -> isize {
-    syncfs(fd)
+    crate::pr_debug!("fsync: fd={}", fd);
+    let result = syncfs(fd);
+    crate::pr_debug!("fsync: fd={}, result={}", fd, result);
+    result
 }
 
 /// fdatasync - 同步文件数据(元数据可选)

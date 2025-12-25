@@ -41,23 +41,19 @@ macro_rules! get_sockopt_int {
     };
 }
 
-use crate::{
-    arch::trap::SumGuard,
-    kernel::current_cpu,
-    net::{
-        config::NetworkConfigManager,
-        interface::NETWORK_INTERFACE_MANAGER,
-        socket::{
-            SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket,
-            get_socket_handle, parse_sockaddr_in, register_socket_fd, unregister_socket_fd,
-            write_sockaddr_in,
-        },
+use crate::{arch::trap::SumGuard, kernel::current_cpu, net::{
+    config::NetworkConfigManager,
+    interface::NETWORK_INTERFACE_MANAGER,
+    socket::{
+        SOCKET_SET, SocketFile, SocketHandle,
+        create_tcp_socket, create_udp_socket, get_socket_handle, parse_sockaddr_in,
+        register_socket_fd, unregister_socket_fd, write_sockaddr_in,
     },
-    println,
-};
+}, pr_debug, pr_info, println};
 use alloc::sync::Arc;
 use smoltcp::socket::{tcp, udp};
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
+use crate::vfs::File;
 
 /// 获取网络接口列表
 pub fn get_network_interfaces() -> isize {
@@ -140,6 +136,11 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     match task_lock.fd_table.alloc(socket_file) {
         Ok(fd) => {
             register_socket_fd(task_lock.tid as usize, fd, handle);
+            let handle_type = match handle {
+                SocketHandle::Tcp(_) => "TCP",
+                SocketHandle::Udp(_) => "UDP",
+            };
+            pr_debug!("socket: domain={}, type={} -> fd={}, handle={}", domain, socket_type, fd, handle_type);
             fd as isize
         }
         Err(_) => -24, // EMFILE
@@ -160,6 +161,8 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
+
+    pr_debug!("bind: tid={}, sockfd={}, endpoint={}", tid, sockfd, endpoint);
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
@@ -222,14 +225,45 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                 None => return -22, // EINVAL - must bind first
             };
 
+            pr_debug!("listen: tid={}, sockfd={}, endpoint={}", tid, sockfd, endpoint);
+
+            use crate::net::socket::SocketFile;
+            let socket_file = match file.as_any().downcast_ref::<SocketFile>() {
+                Some(sf) => sf,
+                None => return -88, // ENOTSOCK
+            };
+
+            // Convert endpoint to listen endpoint
+            // If bound to 0.0.0.0 or ::, listen on all addresses (addr = None)
+            use smoltcp::wire::{IpAddress, IpListenEndpoint};
+            let listen_endpoint = match endpoint.addr {
+                IpAddress::Ipv4(addr) if addr.is_unspecified() => {
+                    IpListenEndpoint { addr: None, port: endpoint.port }
+                }
+                IpAddress::Ipv6(addr) if addr.is_unspecified() => {
+                    IpListenEndpoint { addr: None, port: endpoint.port }
+                }
+                _ => {
+                    IpListenEndpoint { addr: Some(endpoint.addr), port: endpoint.port }
+                }
+            };
+
+            pr_debug!("listen: converted endpoint={} to listen_endpoint addr={:?} port={}",
+                endpoint, listen_endpoint.addr, listen_endpoint.port);
+
             let mut sockets = SOCKET_SET.lock();
             let socket = sockets.get_mut::<tcp::Socket>(h);
-            if socket.listen(endpoint).is_err() {
+            if socket.listen(listen_endpoint).is_err() {
                 return -98; // EADDRINUSE
             }
+            drop(sockets);
+
+            socket_file.set_listener(true);
             0
         }
-        SocketHandle::Udp(_) => -95, // EOPNOTSUPP - UDP doesn't support listen
+        SocketHandle::Udp(_) => {
+            -95 // EOPNOTSUPP - UDP doesn't support listen
+        }
     }
 }
 
@@ -238,6 +272,18 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let tid = task.lock().tid;
 
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+
+    use crate::net::socket::SocketFile;
+    let socket_file = match file.as_any().downcast_ref::<SocketFile>() {
+        Some(sf) => sf,
+        None => return -88, // ENOTSOCK
+    };
+
+    // Get the socket handle
     let listen_handle = match get_socket_handle(tid as usize, sockfd as usize) {
         Some(SocketHandle::Tcp(h)) => h,
         Some(SocketHandle::Udp(_)) => return -95, // EOPNOTSUPP
@@ -251,16 +297,49 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         return -22; // EINVAL - not in listening state
     }
 
-    if !listen_socket.is_active() {
-        return -11; // EAGAIN - no pending connection
+    // Check if socket is non-blocking
+    let is_nonblock = socket_file.flags().contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
+
+    // Block until connection is available (for blocking sockets)
+    drop(sockets);
+    loop {
+        // Poll until all loopback packets are processed
+        crate::net::socket::poll_until_empty();
+
+        let mut sockets = SOCKET_SET.lock();
+
+        let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
+        let state = listen_socket.state();
+        let has_remote = listen_socket.remote_endpoint().is_some();
+
+        // Socket transitions from Listen to SynReceived/Established when connection arrives
+        let connection_ready = state != smoltcp::socket::tcp::State::Listen && has_remote;
+
+        if connection_ready {
+            break;
+        }
+
+        drop(sockets);
+
+        if is_nonblock {
+            return -11; // EAGAIN
+        }
+
+        crate::kernel::yield_task();
     }
 
-    // Get remote endpoint and local endpoint
+    let mut sockets = SOCKET_SET.lock();
+    let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
+
+    // Get remote endpoint and listen endpoint
     let remote_endpoint = match listen_socket.remote_endpoint() {
         Some(ep) => ep,
         None => return -11, // EAGAIN
     };
-    let local_endpoint = listen_socket.local_endpoint().unwrap();
+    let listen_endpoint = listen_socket.listen_endpoint();
+
+    // Drop sockets lock before creating new socket (create_tcp_socket needs the lock)
+    drop(sockets);
 
     // Create new listening socket to replace the old one
     let new_listen_handle = match create_tcp_socket() {
@@ -269,8 +348,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     // Set new socket to listen on the same address
+    let mut sockets = SOCKET_SET.lock();
     let new_listen_socket = sockets.get_mut::<tcp::Socket>(new_listen_handle);
-    if new_listen_socket.listen(local_endpoint).is_err() {
+    if new_listen_socket.listen(listen_endpoint).is_err() {
         sockets.remove(new_listen_handle);
         return -12; // ENOMEM or other error
     }
@@ -292,7 +372,6 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
 
     drop(sockets);
-
     // Write address info if requested
     if !addr.is_null() && !addrlen.is_null() {
         let _guard = SumGuard::new();
@@ -304,9 +383,34 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     // Return the established connection as a new fd
     let conn_handle = SocketHandle::Tcp(listen_handle);
     let socket_file = Arc::new(SocketFile::new(conn_handle));
+
+    // Set endpoint information for the accepted connection
+    let sockets = SOCKET_SET.lock();
+    let conn_socket = sockets.get::<tcp::Socket>(listen_handle);
+
+    // Verify socket is in a valid state for data transfer
+    let state = conn_socket.state();
+    let recv_queue = conn_socket.recv_queue();
+    pr_debug!("accept: tid={}, listen_handle={:?}, state={:?}, recv_queue={}",
+        tid, listen_handle, state, recv_queue);
+
+    if state != smoltcp::socket::tcp::State::Established {
+        pr_debug!("accept: socket state={:?}, not Established, returning error", state);
+        drop(sockets);
+        return -11; // EAGAIN
+    }
+
+    if let Some(local_ep) = conn_socket.local_endpoint() {
+        socket_file.set_local_endpoint(local_ep);
+    }
+    socket_file.set_remote_endpoint(remote_endpoint);
+    drop(sockets);
+
     match task.lock().fd_table.alloc(socket_file) {
         Ok(fd) => {
             register_socket_fd(tid as usize, fd, conn_handle);
+            pr_debug!("accept: tid={}, returning fd={}, handle={:?}, remote={}",
+                tid, fd, listen_handle, remote_endpoint);
             fd as isize
         }
         Err(_) => -24, // EMFILE
@@ -319,7 +423,10 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(addr, addrlen);
         match ep {
-            Ok(e) => e,
+            Ok(e) => {
+                pr_debug!("connect: sockfd={}, endpoint={}", sockfd, e);
+                e
+            }
             Err(_) => return -22, // EINVAL
         }
     };
@@ -350,27 +457,89 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         SocketHandle::Tcp(h) => {
             let sockets = SOCKET_SET.lock();
             let socket = sockets.get::<tcp::Socket>(h);
+            pr_debug!("connect: socket state={:?}, is_open={}", socket.state(), socket.is_open());
             if socket.is_open() {
                 return -106; // EISCONN
             }
-            let local_endpoint = socket.local_endpoint().unwrap_or(IpEndpoint::new(
-                IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
-                0,
-            ));
+
+            // Get local endpoint - match address family with remote
+            let is_loopback = match endpoint.addr {
+                IpAddress::Ipv4(addr) => addr.octets()[0] == 127,
+                _ => false,
+            };
+
+            let mut local_endpoint = socket.local_endpoint().unwrap_or_else(|| {
+                // Choose local address based on remote address
+                use smoltcp::wire::IpAddress;
+                let local_addr = if is_loopback {
+                    IpAddress::Ipv4(Ipv4Address::LOCALHOST)
+                } else {
+                    IpAddress::Ipv4(Ipv4Address::new(192, 168, 1, 100))
+                };
+                IpEndpoint::new(local_addr, 0)
+            });
+
+            // Allocate ephemeral port if needed
+            if local_endpoint.port == 0 {
+                // Simple ephemeral port allocation (49152-65535)
+                use core::sync::atomic::{AtomicU16, Ordering};
+                static NEXT_PORT: AtomicU16 = AtomicU16::new(49152);
+                let port = NEXT_PORT.fetch_add(1, Ordering::Relaxed);
+                let port = if port >= 65535 { 49152 } else { port };
+                local_endpoint.port = port;
+            }
+
+            pr_debug!("connect: local_endpoint={}", local_endpoint);
             drop(sockets);
 
             use crate::net::socket::tcp_connect;
-            if let Err(_) = tcp_connect(h, endpoint, local_endpoint) {
+            if let Err(e) = tcp_connect(h, endpoint, local_endpoint) {
+                pr_debug!("connect: tcp_connect failed: {:?}", e);
                 return -22; // EINVAL or connection error
             }
+
+            // For blocking sockets, wait until connection is established
+            if !is_nonblock {
+                use crate::net::socket::SOCKET_SET;
+                pr_debug!("connect: handle={:?}, entering wait loop", h);
+                loop {
+                    // Poll until all loopback packets are processed
+                    if is_loopback {
+                        crate::net::socket::poll_until_empty();
+                    }
+
+                    let sockets = SOCKET_SET.lock();
+                    let socket = sockets.get::<smoltcp::socket::tcp::Socket>(h);
+                    let state = socket.state();
+                    pr_debug!("connect: loop, handle={:?}, state={:?}", h, state);
+                    drop(sockets);
+
+                    if state == smoltcp::socket::tcp::State::Established {
+                        pr_debug!("connect: established");
+                        break;
+                    }
+                    if state == smoltcp::socket::tcp::State::Closed {
+                        pr_debug!("connect: socket closed, returning ECONNREFUSED");
+                        return -111; // ECONNREFUSED
+                    }
+
+                    crate::kernel::yield_task();
+                }
+            }
+
+            pr_debug!("connect: tcp_connect success, nonblock={}", is_nonblock);
+            crate::pr_info!("[TCP] Connection established: {} -> {}", local_endpoint, endpoint);
 
             if is_nonblock {
                 return -115; // EINPROGRESS
             }
         }
-        SocketHandle::Udp(_) => {}
+        SocketHandle::Udp(_) => {
+            pr_debug!("connect: sockfd={} UDP -> success", sockfd);
+        }
     }
 
+    pr_debug!("connect: sockfd={} -> success", sockfd);
     0
 }
 
@@ -385,12 +554,21 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
-        Err(_) => return -9,
+        Err(_) => {
+            pr_debug!("send: sockfd={} -> EBADF", sockfd);
+            return -9;
+        }
     };
 
     match file.write(data) {
-        Ok(n) => n as isize,
-        Err(_) => -11, // EAGAIN
+        Ok(n) => {
+            pr_debug!("send: sockfd={}, len={} -> sent={}", sockfd, len, n);
+            n as isize
+        }
+        Err(e) => {
+            pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+            -11 // EAGAIN
+        }
     }
 }
 
@@ -399,7 +577,10 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
-        Err(_) => return -9,
+        Err(_) => {
+            pr_debug!("recv: sockfd={} -> EBADF", sockfd);
+            return -9;
+        }
     };
 
     let data = unsafe {
@@ -409,8 +590,14 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
     };
 
     match file.read(data) {
-        Ok(n) => n as isize,
-        Err(_) => -11, // EAGAIN
+        Ok(n) => {
+            pr_debug!("recv: sockfd={}, len={} -> received={}", sockfd, len, n);
+            n as isize
+        }
+        Err(e) => {
+            pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+            -11 // EAGAIN
+        }
     }
 }
 
@@ -631,6 +818,7 @@ pub fn sendto(
     dest_addr: *const u8,
     addrlen: u32,
 ) -> isize {
+    pr_debug!("sendto: sockfd={}, len={}", sockfd, len);
     // If dest_addr is null, behave like send()
     if dest_addr.is_null() {
         return send(sockfd, buf, len, 0);
@@ -661,8 +849,14 @@ pub fn sendto(
 
     use crate::net::socket::socket_sendto;
     match socket_sendto(handle, data, endpoint) {
-        Ok(n) => n as isize,
-        Err(e) => e.to_errno(),
+        Ok(n) => {
+            pr_debug!("sendto: sockfd={}, len={}, endpoint={} -> sent={}", sockfd, len, endpoint, n);
+            n as isize
+        }
+        Err(e) => {
+            pr_debug!("sendto: sockfd={}, len={}, endpoint={} -> error={:?}", sockfd, len, endpoint, e);
+            e.to_errno()
+        }
     }
 }
 
@@ -675,6 +869,7 @@ pub fn recvfrom(
     src_addr: *mut u8,
     addrlen: *mut u32,
 ) -> isize {
+    pr_debug!("recvfrom: sockfd={}, len={}", sockfd, len);
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
@@ -697,10 +892,17 @@ pub fn recvfrom(
                     *addrlen = len as u32;
                 }
             }
+            pr_debug!("recvfrom: sockfd={}, len={} -> received={} (with addr)", sockfd, len, n);
             n as isize
         }
-        Ok((n, None)) => n as isize,
-        Err(_) => -11, // EAGAIN
+        Ok((n, None)) => {
+            pr_debug!("recvfrom: sockfd={}, len={} -> received={} (no addr)", sockfd, len, n);
+            n as isize
+        }
+        Err(e) => {
+            pr_debug!("recvfrom: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+            -11 // EAGAIN
+        }
     }
 }
 

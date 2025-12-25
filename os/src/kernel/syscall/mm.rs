@@ -255,6 +255,15 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
         pte_flags |= UniversalPTEFlag::EXECUTABLE;
     }
 
+    // PROT_NONE: 页面不可访问，但预留地址空间
+    // RISC-V 要求至少有一个 R/W/X 权限，所以 PROT_NONE 的页面暂时不映射
+    if prot_flags.is_empty() {
+        // 只预留地址空间，不实际映射物理页
+        // TODO: 实现延迟映射机制
+        pr_warn!("mmap: PROT_NONE not fully supported, returning success without mapping");
+        return start_addr as isize;
+    }
+
     // 创建映射
     let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start_addr));
     let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start_addr + len));
