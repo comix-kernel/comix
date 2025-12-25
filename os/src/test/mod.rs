@@ -29,7 +29,14 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
         tests.len() - failed,
         failed
     );
-    shutdown(false);
+
+    if failed > 0 {
+        earlyprintln!("\x1b[91mSome tests failed!\x1b[0m");
+        shutdown(true);
+    } else {
+        earlyprintln!("\x1b[32mAll tests passed!\x1b[0m");
+        shutdown(false);
+    }
 }
 
 pub fn run_early_tests() {
