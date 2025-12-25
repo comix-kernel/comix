@@ -11,6 +11,8 @@ pub struct Context {
     pub sp: usize,
     /// 保存s0-s11寄存器
     pub s: [usize; 12],
+    /// sscratch寄存器 - 指向trap_frame
+    pub sscratch: usize,
 }
 
 impl Context {
@@ -20,6 +22,7 @@ impl Context {
             ra: 0,
             sp: 0,
             s: [0; 12],
+            sscratch: 0,
         }
     }
 

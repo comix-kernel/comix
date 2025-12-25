@@ -22,6 +22,8 @@ switch:
         sd s9, 88(a0)
         sd s10, 96(a0)
         sd s11, 104(a0)
+        csrr t0, sscratch
+        sd t0, 112(a0)
 
         ld ra, 0(a1)
         ld sp, 8(a1)
@@ -37,5 +39,7 @@ switch:
         ld s9, 88(a1)
         ld s10, 96(a1)
         ld s11, 104(a1)
-        
+        ld t0, 112(a1)
+        csrw sscratch, t0
+
         ret
