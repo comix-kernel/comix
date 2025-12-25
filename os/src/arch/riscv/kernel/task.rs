@@ -98,16 +98,16 @@ pub fn setup_stack_layout(
     ];
 
     // Debug print auxv
-    for (i, (k, v)) in auxv.iter().enumerate() {
-        crate::pr_debug!("auxv[{}]: type={}, val={:#x}", i, k, v);
-    }
-    crate::pr_debug!(
-        "setup_stack_layout: sp={:#x}, random_ptr={:#x}, phdr_addr={:#x}, entry={:#x}",
-        sp,
-        random_ptr,
-        phdr_addr,
-        entry_point
-    );
+    // for (i, (k, v)) in auxv.iter().enumerate() {
+    //     crate::pr_debug!("auxv[{}]: type={}, val={:#x}", i, k, v);
+    // }
+    // crate::pr_debug!(
+    //     "setup_stack_layout: sp={:#x}, random_ptr={:#x}, phdr_addr={:#x}, entry={:#x}",
+    //     sp,
+    //     random_ptr,
+    //     phdr_addr,
+    //     entry_point
+    // );
 
     // Calculate total size of the pointer block to ensure final sp is 16-byte aligned
     // Block includes: auxv[], padding, envp NULL, envp[], argv NULL, argv[], argc

@@ -78,6 +78,11 @@ pub trait Scheduler {
 
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
+    let sscratch_before: usize;
+    unsafe {
+        core::arch::asm!("csrr {}, sscratch", out(reg) sscratch_before);
+    }
+
     let plan = {
         let mut sched = SCHEDULER.lock();
         // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
@@ -85,9 +90,15 @@ pub fn schedule() {
     };
 
     if let Some(plan) = plan {
-        pr_debug!("Switched to task {}", current_task().lock().tid);
+        pr_debug!("Switched to task {}, sscratch_before={:#x}", current_task().lock().tid, sscratch_before);
         // SAFETY: prepare_switch 生成的切换计划中的指针均合法
         unsafe { switch(plan.old, plan.new) };
+
+        let sscratch_after: usize;
+        unsafe {
+            core::arch::asm!("csrr {}, sscratch", out(reg) sscratch_after);
+        }
+        pr_debug!("Returned from switch, sscratch_after={:#x}", sscratch_after);
         // 通常不会立即返回；返回时再继续当前上下文后续逻辑
     }
 }

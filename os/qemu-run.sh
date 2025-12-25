@@ -52,4 +52,9 @@ else
     echo "Starting QEMU in normal run mode."
 fi
 
-qemu-system-riscv64 $QEMU_ARGS
+# 创建日志文件
+LOG_FILE="/home/littlesand/Code/comix-fork/kernel.log"
+echo "Logging to $LOG_FILE"
+
+# 运行QEMU并同时输出到终端和日志文件
+qemu-system-riscv64 $QEMU_ARGS 2>&1 | tee "$LOG_FILE"

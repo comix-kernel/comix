@@ -99,9 +99,15 @@ impl Scheduler for RRScheduler {
     }
 
     fn add_task(&mut self, task: SharedTask) {
-        let state = { task.lock().state };
+        let (state, tid) = {
+            let t = task.lock();
+            (t.state, t.tid)
+        };
         match state {
             TaskState::Running => {
+                if tid != 17 {
+                    crate::pr_info!("[Scheduler] add_task: tid={}, state=Running", tid);
+                }
                 self.run_queue.add_task(task);
             }
             _ => {

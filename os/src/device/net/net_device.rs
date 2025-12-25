@@ -56,8 +56,11 @@ impl<T: Transport + Send + Sync> VirtioNetDevice<T> {
     /// * `transport` - VirtIO 设备传输层
     /// * `device_id` - 设备标识符
     pub fn new(transport: T, device_id: usize) -> Result<Arc<Self>, NetDeviceError> {
-        let virtio_net = VirtIONet::<VirtIOHal, T, 256>::new(transport, 0)
-            .map_err(|_| NetDeviceError::DeviceNotReady)?;
+        let virtio_net = VirtIONet::<VirtIOHal, T, 256>::new(transport, 2048)
+            .map_err(|e| {
+                crate::pr_warn!("VirtIONet::new failed: {:?}", e);
+                NetDeviceError::DeviceNotReady
+            })?;
 
         // 从 VirtIONet 中获取 MAC 地址和 MTU
         let mac = virtio_net.mac_address();

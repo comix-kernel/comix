@@ -53,6 +53,16 @@ pub fn init(transport: MmioTransport<'static>) {
                 "[Device] Network interface {} initialized successfully",
                 network_interface.name()
             );
+
+            // Initialize global interface for TCP connect
+            if device_id == 0 {
+                use crate::net::config::NetworkConfigManager;
+                if let Err(e) = NetworkConfigManager::init_default_interface() {
+                    pr_warn!("[Device] Failed to init global interface: {:?}", e);
+                } else {
+                    pr_info!("[Device] Global interface initialized");
+                }
+            }
         }
         Err(e) => {
             pr_warn!("[Device] Failed to initialize VirtioNetDevice: {:?}", e);
