@@ -1,4 +1,6 @@
 //! LoongArch64 QEMU virt 平台定义
+//!
+//! 参考 QEMU LoongArch virt 机器定义
 
 /// UART 基地址
 pub const UART_BASE: usize = 0x1fe001e0;
@@ -30,17 +32,32 @@ pub enum VirtDevice {
     VirtPcieMmio,
     /// VirtIO PCIe ECAM
     VirtPcieEcam,
+    /// UART
+    Uart,
+    /// RTC
+    Rtc,
 }
+
+/// MMIO 设备映射表
+/// 格式: (设备类型, 基地址, 大小)
+/// 注意：第一个条目会被测试用例使用，避免使用 UART（可能与 console 冲突）
+pub const MMIO: &[(VirtDevice, usize, usize)] = &[
+    // LoongArch QEMU virt 平台 MMIO 布局
+    // RTC 放在第一位，用于测试（不容易冲突）
+    (VirtDevice::Rtc, 0x10081000, 0x1000),     // RTC (Goldfish)
+    (VirtDevice::Block, 0x10008000, 0x1000),   // VirtIO Block
+    (VirtDevice::Network, 0x10009000, 0x1000), // VirtIO Network
+    (VirtDevice::Gpu, 0x1000a000, 0x1000),     // VirtIO GPU
+    (VirtDevice::Input, 0x1000b000, 0x1000),   // VirtIO Input
+    (VirtDevice::Uart, 0x1fe001e0, 0x100),     // UART (放在后面，避免测试冲突)
+    (VirtDevice::VirtPcieMmio, 0x20000000, 0x10000000), // PCIe MMIO
+    (VirtDevice::VirtPcieEcam, 0x30000000, 0x10000000), // PCIe ECAM
+];
 
 /// 获取 VirtIO 设备的 MMIO 地址和大小
 /// 返回 (base_address, size)
 pub fn mmio_of(device: VirtDevice) -> Option<(usize, usize)> {
-    match device {
-        VirtDevice::Block => Some((0x10008000, 0x1000)),
-        VirtDevice::Network => Some((0x10009000, 0x1000)),
-        VirtDevice::Gpu => Some((0x1000a000, 0x1000)),
-        VirtDevice::Input => Some((0x1000b000, 0x1000)),
-        VirtDevice::VirtPcieMmio => Some((0x20000000, 0x10000000)), // TODO: 验证 LoongArch 地址
-        VirtDevice::VirtPcieEcam => Some((0x30000000, 0x10000000)), // TODO: 验证 LoongArch 地址
-    }
+    MMIO.iter()
+        .find(|(d, _, _)| *d == device)
+        .map(|(_, b, s)| (*b, *s))
 }
