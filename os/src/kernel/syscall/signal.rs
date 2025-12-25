@@ -42,6 +42,7 @@ pub fn rt_sigprocmask(
     sigsetsize: c_uint,
 ) -> c_int {
     if sigsetsize as usize != SIGSET_SIZE {
+        crate::pr_err!("rt_sigprocmask: sigsetsize={}, expected={}", sigsetsize, SIGSET_SIZE);
         return -EINVAL;
     }
     let task = crate::kernel::current_task();
@@ -100,10 +101,15 @@ pub fn rt_sigpending(uset: *mut SigSetT, sigsetsize: c_uint) -> c_int {
 /// * `signum` - 信号编号
 /// * `act` - 指向新的 SignalAction 结构体的指针（如果不为 NULL）
 /// * `oldact` - 指向用于存放旧的 SignalAction 结构体的指针（如果不为 NULL）
+/// * `sigsetsize` - 信号集合的大小
 /// # 返回值：
 /// * 成功时返回 0
 /// * 失败时返回负的错误码
-pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut SignalAction) -> c_int {
+pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut SignalAction, sigsetsize: c_uint) -> c_int {
+    if sigsetsize as usize != SIGSET_SIZE {
+        crate::pr_err!("rt_sigaction: sigsetsize={}, expected={}", sigsetsize, SIGSET_SIZE);
+        return -EINVAL;
+    }
     if signum <= 0 || signum as usize > NSIG {
         return -EINVAL;
     }

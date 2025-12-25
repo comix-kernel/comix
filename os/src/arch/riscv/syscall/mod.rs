@@ -122,6 +122,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_SETHOSTNAME => sys_sethostname(frame),
         syscall_number::SYS_GETRLIMIT => sys_getrlimit(frame),
         syscall_number::SYS_SETRLIMIT => sys_setrlimit(frame),
+        syscall_number::SYS_GETRUSAGE => sys_getrusage(frame),
         syscall_number::SYS_UMASK => sys_umask(frame),
         syscall_number::SYS_GETPID => sys_getpid(frame),
         syscall_number::SYS_GETPPID => sys_getppid(frame),
@@ -193,6 +194,13 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         }
     }
     crate::pr_debug!("syscall exit, return: {}", frame.x10_a0 as isize);
+
+    // 验证sepc
+    if frame.sepc == 0 {
+        crate::earlyprintln!("[FATAL] dispatch_syscall: sepc is 0 after syscall!");
+        crate::earlyprintln!("  syscall number: {}", frame.x17_a7);
+        panic!("sepc corrupted in dispatch_syscall");
+    }
 }
 
 /// 宏：实现系统调用函数的自动包装器

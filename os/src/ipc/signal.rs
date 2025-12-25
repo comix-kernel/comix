@@ -181,6 +181,7 @@ fn install_user_signal_trap_frame(
 ) {
     let mut t = task.lock();
     let tp = t.trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst);
+    crate::pr_debug!("[signal] install_user_signal_trap_frame: trap_frame_ptr={:p}", tp);
     unsafe {
         let tf = &mut *tp;
         let siginfo = create_siginfo_for_signal(SignalFlags::from_signal_num(sig_num).unwrap());
