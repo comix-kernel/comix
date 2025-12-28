@@ -1,6 +1,6 @@
 //! RISC-V 架构相关的启动代码
 
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use alloc::sync::Arc;
 use riscv::register::sscratch;
@@ -12,7 +12,7 @@ use crate::{
     kernel::{
         FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
         current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
-        sleep_task_with_block, time, yield_task,
+        sleep_task_with_block, time, yield_task, NUM_CPU,
     },
     mm::{
         self,
@@ -28,6 +28,18 @@ use crate::{
     },
     vfs::{create_stdio_files, fd_table, get_root_dentry},
 };
+
+/// 已上线 CPU 位掩码
+///
+/// 每个位代表一个 CPU，位 i 为 1 表示 CPU i 已上线。
+/// 使用原子操作确保多核环境下的线程安全。
+static CPU_ONLINE_MASK: AtomicUsize = AtomicUsize::new(0);
+
+/// 从核启动标志（对应 entry.S 中的 secondary_boot_flag）
+///
+/// 主核设置此标志为 1 后，所有从核将从 WFI 中唤醒并开始启动。
+#[unsafe(no_mangle)]
+static mut secondary_boot_flag: u64 = 0;
 
 /// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
@@ -194,10 +206,16 @@ pub fn main(hartid: usize) {
 
     // 初始化工作
     trap::init_boot_trap();
-    platform::init();
+    platform::init();  // 这里会设置 NUM_CPU
     time::init();
     timer::init();
     unsafe { intr::enable_interrupts() };
+
+    // 启动从核
+    let num_cpus = unsafe { NUM_CPU };
+    if num_cpus > 1 {
+        boot_secondary_cpus(num_cpus);
+    }
 
     rest_init();
 }
@@ -262,3 +280,86 @@ fn clear_bss() {
 //     // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
 //     // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
 // }
+
+/// 从核入口函数
+///
+/// 由 entry.S 调用，hartid 通过 a0 寄存器传递。
+///
+/// # 参数
+/// - hartid: 硬件线程 ID
+///
+/// # 初始化流程
+/// 1. 验证 CPU ID
+/// 2. 初始化 trap 处理
+/// 3. 标记 CPU 上线
+/// 4. 进入空闲循环（不启用中断，等待调度器实现）
+#[unsafe(no_mangle)]
+pub extern "C" fn secondary_start(hartid: usize) -> ! {
+    // 验证 CPU ID
+    let cpu = crate::arch::kernel::cpu::cpu_id();
+    if cpu != hartid {
+        panic!("CPU ID mismatch! tp={}, hartid={}", cpu, hartid);
+    }
+
+    pr_info!("[SMP] Secondary hart {} starting...", hartid);
+
+    // 初始化 trap 处理
+    trap::init();
+
+    // 标记当前 CPU 上线
+    CPU_ONLINE_MASK.fetch_or(1 << hartid, Ordering::Release);
+
+    pr_info!("[SMP] CPU {} is online", hartid);
+
+    // 进入空闲循环（等待调度器实现）
+    // 注意：不启用定时器和中断，因为还没有任务上下文
+    loop {
+        unsafe {
+            core::arch::asm!("wfi");
+        }
+    }
+}
+
+/// 启动从核（由主核调用）
+///
+/// # 参数
+/// - num_cpus: 总 CPU 数量（包括主核）
+///
+/// # Panics
+/// - 如果从核启动超时
+pub fn boot_secondary_cpus(num_cpus: usize) {
+    if num_cpus <= 1 {
+        pr_info!("[SMP] Single CPU mode, skipping secondary boot");
+        return;
+    }
+
+    pr_info!("[SMP] Booting {} secondary CPUs...", num_cpus - 1);
+
+    // 主核标记上线
+    CPU_ONLINE_MASK.fetch_or(1, Ordering::Release);
+
+    // 设置从核启动标志
+    unsafe {
+        let ptr = core::ptr::addr_of_mut!(secondary_boot_flag);
+        core::ptr::write_volatile(ptr, 1);
+        core::sync::atomic::fence(Ordering::Release);
+    }
+
+    // 等待所有核心上线（带超时）
+    let expected_mask = (1 << num_cpus) - 1;
+    let mut timeout = 10_000_000;
+
+    while CPU_ONLINE_MASK.load(Ordering::Acquire) != expected_mask {
+        if timeout == 0 {
+            let current_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
+            panic!(
+                "[SMP] Timeout waiting for secondary CPUs! Expected: {:#b}, got: {:#b}",
+                expected_mask, current_mask
+            );
+        }
+        timeout -= 1;
+        core::hint::spin_loop();
+    }
+
+    pr_info!("[SMP] All {} CPUs are online!", num_cpus);
+}

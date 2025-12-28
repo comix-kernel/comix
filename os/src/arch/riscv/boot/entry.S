@@ -4,8 +4,13 @@ _start:
     # 将a1的值存储到DTP位置
     # a1: 指向设备树的物理地址,由引导加载程序传递
     la t0, DTP
-    sd a1, 0(t0) 
+    sd a1, 0(t0)
 
+    # 检查 hartid (a0)，主核继续，从核等待
+    bnez a0, .secondary_hart_wait
+
+    # ========== 主核路径（hartid == 0）==========
+.primary_hart:
     # 1. 设置早期页表（恒等映射 + 高地址映射）
     la t0, boot_pagetable
     srli t0, t0, 12          # 转换为 PPN
@@ -32,8 +37,71 @@ _start_high:
     li t0, -1
     slli t0, t0, 38          # t0 = 0xffffffc0_00000000
     or sp, sp, t0            # 将栈地址转换为虚拟地址
+
+    # 4. 设置主核 CPU ID（使用 tp 寄存器）
+    li tp, 0
+
+    # 5. 跳转到 Rust 主入口
     call rust_main
 
+    # 不应该返回
+.loop_forever:
+    wfi
+    j .loop_forever
+
+    # ========== 从核等待路径 ==========
+.secondary_hart_wait:
+    mv s0, a0               # 保存 hartid 到 s0（callee-saved）
+
+.wait_loop:
+    wfi                     # 低功耗等待
+    la t0, secondary_boot_flag
+    ld t1, 0(t0)
+    beqz t1, .wait_loop     # 如果标志为 0，继续等待
+
+    # 标志已设置，开始启动从核
+
+    # 1. 设置页表（使用主核已设置的页表）
+    la t0, boot_pagetable
+    srli t0, t0, 12
+    li t1, 8 << 60
+    or t0, t0, t1
+    csrw satp, t0
+    sfence.vma
+
+    # 2. 跳转到高地址
+    la t0, .secondary_start_high
+    li t1, -1
+    slli t1, t1, 38
+    or t0, t0, t1
+    jr t0
+
+.secondary_start_high:
+    # 3. 计算从核栈地址
+    # 栈地址 = secondary_stacks_top - hartid × 栈大小
+    la sp, secondary_stacks_top
+    li t1, -1
+    slli t1, t1, 38
+    or sp, sp, t1            # 转换为虚拟地址
+
+    # 计算 hartid × 64KB，使用移位代替乘法
+    # 64KB = 2^16，所以 hartid × 64KB = hartid << 16
+    slli t1, s0, 16          # t1 = hartid << 16 = hartid × 65536
+    sub sp, sp, t1           # sp = 栈顶 - 偏移
+
+    # 4. 设置从核 CPU ID（使用 tp 寄存器）
+    mv tp, s0
+
+    # 5. 跳转到从核 Rust 入口
+    mv a0, s0                # 传递 hartid 参数
+    call secondary_start
+
+    # 不应该返回
+.secondary_loop_forever:
+    wfi
+    j .secondary_loop_forever
+
+    # ========== 数据段 ==========
     .section .data
     .align 12
 boot_pagetable:
@@ -66,3 +134,11 @@ boot_stack_lower_bound:
     .space 4096 * 48
     .globl boot_stack_top
 boot_stack_top:
+
+    # ========== 从核栈空间 ==========
+    .section .bss.secondary_stack
+    .align 12
+secondary_stacks_bottom:
+    .space 65536 * 8        # 8 核 × 64KB
+    .globl secondary_stacks_top
+secondary_stacks_top:

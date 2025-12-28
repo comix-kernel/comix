@@ -18,6 +18,12 @@ trap_entry:
         sd sp, 16(a0)
         sd gp, 24(a0)
         sd tp, 32(a0)
+
+        # 重新设置 tp 为内核 CPU ID
+        # 从 TrapFrame 的 kernel_hartid 字段读取（假设在偏移 280）
+        # 或者使用简单的方法：从 sscratch 推导
+        # 暂时先保存，后面在 Rust 代码中处理
+
         sd t0, 40(a0)
         sd t1, 48(a0)
         sd t2, 56(a0)
@@ -92,7 +98,8 @@ __restore:
         ld ra, 8(a0)
         ld sp, 16(a0)
         ld gp, 24(a0)
-        ld tp, 32(a0)
+        # 不恢复 tp (x4)，保持内核设置的 CPU ID
+        # ld tp, 32(a0)
         ld t0, 40(a0)
         ld t1, 48(a0)
         ld t2, 56(a0)
