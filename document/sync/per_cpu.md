@@ -102,6 +102,15 @@ pub fn get_mut(&self) -> &mut T
 2. 访问期间抢占必须已禁用
 3. 没有其他引用指向同一数据
 
+**设计说明**：
+
+此方法从 `&self` 返回 `&mut T`，这是 Per-CPU 变量的标准实现模式：
+- Per-CPU 变量通常作为全局 `static` 使用，只能通过 `&self` 访问
+- 每个 CPU 访问不同的数据副本，通过抢占控制保证独占访问
+- 使用 `UnsafeCell` 提供内部可变性，类似于 `RefCell` 或 `Mutex`
+
+这种设计允许 Per-CPU 变量作为静态全局变量使用，同时保持无锁的高性能特性。
+
 **示例**：
 ```rust
 use sync::{PerCpu, preempt_disable, preempt_enable};
@@ -114,7 +123,7 @@ let value = counter.get_mut();
 preempt_enable();
 ```
 
-**源码位置**：`os/src/sync/per_cpu.rs:57`
+**源码位置**：`os/src/sync/per_cpu.rs:65`
 
 ### 获取指定 CPU 的数据（只读）
 
