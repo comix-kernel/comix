@@ -1,6 +1,10 @@
 //! 平台无关的常量
 #![allow(unused)]
 
+// about CPU and SMP
+/// 最大支持的 CPU 核心数
+pub const MAX_CPU_COUNT: usize = 8;
+
 // about memory management
 pub const PAGE_SIZE: usize = 4096;
 pub const KERNEL_HEAP_SIZE: usize = 32 * 1024 * 1024; // 32MB(临时扩容, 原16MB)

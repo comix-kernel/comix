@@ -4,19 +4,21 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::config::MAX_CPU_COUNT;
+
+/// 创建 Per-CPU 抢占计数器数组的辅助宏
+macro_rules! create_preempt_count_array {
+    ($size:expr) => {{
+        const SIZE: usize = $size;
+        const INIT: AtomicUsize = AtomicUsize::new(0);
+        [INIT; SIZE]
+    }};
+}
+
 /// Per-CPU 抢占计数器
 ///
 /// 每个 CPU 维护一个计数器，> 0 表示抢占已禁用。
-static PREEMPT_COUNT: [AtomicUsize; 8] = [
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-];
+static PREEMPT_COUNT: [AtomicUsize; MAX_CPU_COUNT] = create_preempt_count_array!(MAX_CPU_COUNT);
 
 /// 禁用抢占
 ///
