@@ -35,11 +35,18 @@ use crate::{
 /// 使用原子操作确保多核环境下的线程安全。
 static CPU_ONLINE_MASK: AtomicUsize = AtomicUsize::new(0);
 
-/// 从核启动标志（对应 entry.S 中的 secondary_boot_flag）
+/// 从核启动标志（在 entry.S 中定义）
 ///
 /// 主核设置此标志为 1 后，所有从核将从 WFI 中唤醒并开始启动。
+unsafe extern "C" {
+    static mut secondary_boot_flag: u64;
+}
+
+/// 从核调试入口（在启用分页后立即调用）
 #[unsafe(no_mangle)]
-static mut secondary_boot_flag: u64 = 0;
+pub extern "C" fn secondary_debug_entry(hartid: usize) {
+    crate::earlyprintln!("[DEBUG] Hart {} reached secondary_wait_high", hartid);
+}
 
 /// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
@@ -124,6 +131,9 @@ pub fn rest_init() {
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
     super::trap::init();
+
+    // 启用中断（在设置好 trap 处理和 sscratch 之后）
+    unsafe { intr::enable_interrupts() };
 
     create_kthreadd();
 
@@ -214,7 +224,25 @@ pub fn main(hartid: usize) {
     earlyprintln!("[Boot] Hello, world!");
     earlyprintln!("[Boot] RISC-V Hart {} is up!", hartid);
 
-    mm::init();
+    let kernel_space = mm::init();
+
+    // 初始化 CPUS 并设置 tp 指向 CPU 0
+    // 必须在任何可能调用 cpu_id() 的代码之前完成
+    {
+        use crate::kernel::CPUS;
+        let cpu_ptr = &*CPUS.get_of(0) as *const _ as usize;
+        unsafe {
+            core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
+        }
+        earlyprintln!("[Boot] Initialized CPUS, tp = 0x{:x}", cpu_ptr);
+    }
+
+    // 激活内核地址空间并设置 current_memory_space
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(kernel_space);
+        earlyprintln!("[Boot] Activated kernel address space");
+    }
 
     #[cfg(test)]
     crate::test_main();
@@ -224,14 +252,14 @@ pub fn main(hartid: usize) {
     platform::init();  // 完整的平台初始化 (包括 device_tree::init())
     time::init();
     timer::init();
-    unsafe { intr::enable_interrupts() };
 
-    // 启动从核
+    // 启动从核（在启用中断之前）
     let num_cpus = unsafe { NUM_CPU };
     if num_cpus > 1 {
         boot_secondary_cpus(num_cpus);
     }
 
+    // 注意：中断在 init() 函数中启用，在设置好 sscratch 之后
     rest_init();
 }
 
@@ -298,41 +326,41 @@ fn clear_bss() {
 
 /// 从核入口函数
 ///
-/// 由 entry.S 调用，hartid 通过 a0 寄存器传递。
-///
-/// # 参数
-/// - hartid: 硬件线程 ID
+/// 由 SBI HSM 调用启动，hartid 通过 a0 寄存器传递。
 ///
 /// # 初始化流程
-/// 1. 验证 CPU ID
-/// 2. 初始化 trap 处理
-/// 3. 标记 CPU 上线
-/// 4. 进入空闲循环（不启用中断，等待调度器实现）
+/// 1. 设置 tp 指向对应的 Cpu 结构体
+/// 2. 标记 CPU 上线
+/// 3. 进入 WFI 循环等待多核调度器实现
+///
+/// 注意：从核不初始化 trap 处理，继续使用 boot_trap_entry
 #[unsafe(no_mangle)]
 pub extern "C" fn secondary_start(hartid: usize) -> ! {
-    // 验证 CPU ID
-    let cpu = crate::arch::kernel::cpu::cpu_id();
-    if cpu != hartid {
-        panic!("CPU ID mismatch! tp={}, hartid={}", cpu, hartid);
+    // 设置 tp 指向对应的 Cpu 结构体
+    {
+        use crate::kernel::CPUS;
+        let cpu_ptr = &*CPUS.get_of(hartid) as *const _ as usize;
+        unsafe {
+            core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
+        }
     }
-
-    pr_info!("[SMP] Secondary hart {} starting...", hartid);
-
-    // 初始化 trap 处理
-    trap::init();
 
     // 标记当前 CPU 上线
     CPU_ONLINE_MASK.fetch_or(1 << hartid, Ordering::Release);
 
     pr_info!("[SMP] CPU {} is online", hartid);
 
-    // 进入空闲循环（等待调度器实现）
-    // 注意：不启用定时器和中断，因为还没有任务上下文
+    // 进入 WFI 循环，等待多核调度器实现
     loop {
         unsafe {
             core::arch::asm!("wfi");
         }
     }
+}
+
+/// SBI HSM 从核入口（在 entry.S 中定义）
+unsafe extern "C" {
+    fn secondary_sbi_entry();
 }
 
 /// 启动从核（由主核调用）
@@ -353,11 +381,24 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
     // 主核标记上线
     CPU_ONLINE_MASK.fetch_or(1, Ordering::Release);
 
-    // 设置从核启动标志
-    unsafe {
-        let ptr = core::ptr::addr_of_mut!(secondary_boot_flag);
-        core::ptr::write_volatile(ptr, 1);
-        core::sync::atomic::fence(Ordering::Release);
+    // 使用 SBI HSM 调用启动每个从核
+    for hartid in 1..num_cpus {
+        let start_vaddr = secondary_sbi_entry as usize;
+        let start_paddr = unsafe { crate::arch::mm::vaddr_to_paddr(start_vaddr) };
+        pr_info!(
+            "[SMP] Starting hart {} at vaddr=0x{:x}, paddr=0x{:x}",
+            hartid, start_vaddr, start_paddr
+        );
+
+        let ret = crate::arch::sbi::hart_start(hartid, start_paddr, hartid);
+        if ret.error != 0 {
+            pr_err!(
+                "[SMP] Failed to start hart {}: SBI error {}",
+                hartid, ret.error
+            );
+        } else {
+            pr_info!("[SMP] Hart {} SBI call succeeded", hartid);
+        }
     }
 
     // 等待所有核心上线（带超时）

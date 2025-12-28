@@ -61,7 +61,8 @@ pub fn init() {
         FDT.root().model()
     );
 
-    // NUM_CPU 和 CLOCK_FREQ 已在 early_init() 中设置
+    // 设置 NUM_CPU 和 CLOCK_FREQ
+    early_init();
     pr_info!("[Device] now has {} CPU(s)", unsafe { NUM_CPU });
     pr_info!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
 
