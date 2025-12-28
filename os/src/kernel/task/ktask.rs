@@ -40,7 +40,8 @@ use crate::{
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let (pid, ppid, signal_handlers, blocked, signal, uts, rlimit, fd_table, fs) = {
-        let cur_cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cur_cpu = current_cpu();
         let cur_task = cur_cpu.current_task.as_ref().unwrap();
         let cur_task = cur_task.lock();
         (
@@ -84,6 +85,12 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
             super::terminate_task as usize,
             task.kstack_base,
         );
+        // 设置 cpu_ptr 指向当前 CPU
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
+        (*tf).cpu_ptr = cpu_ptr;
     }
     let tid = task.tid;
     let task = task.into_shared();
@@ -153,10 +160,14 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // 3. 包装内存空间
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    current_cpu().lock().switch_space(space.clone());
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(space.clone());
+    }
 
     let task = {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         cpu.current_task.as_ref().unwrap().clone()
     };
     // 在restore之前不可发生中断
@@ -202,7 +213,10 @@ mod tests {
 
     // 测试 kthread_spawn：应分配 tid 并放入任务管理器
     test_case!(test_kthread_spawn_basic, {
-        current_cpu().lock().current_task = Some(mk_task(1));
+        {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu().current_task = Some(mk_task(1));
+        }
         let tid = kthread_spawn(dummy_thread);
         kassert!(tid != 0);
         let task_opt = TASK_MANAGER.lock().get_task(tid);

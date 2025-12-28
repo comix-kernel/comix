@@ -77,7 +77,10 @@ pub fn init() {
             root_ppn.as_usize()
         );
 
-        current_cpu().lock().switch_space(space);
+        {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu().switch_space(space);
+        }
 
         // 记录切换后的 satp 值
         let new_satp: usize;

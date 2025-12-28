@@ -6,19 +6,25 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::config::MAX_CPU_COUNT;
 
-/// 创建 Per-CPU 抢占计数器数组的辅助宏
-macro_rules! create_preempt_count_array {
-    ($size:expr) => {{
-        const SIZE: usize = $size;
-        const INIT: AtomicUsize = AtomicUsize::new(0);
-        [INIT; SIZE]
-    }};
+/// 缓存行对齐的原子计数器
+///
+/// 确保每个 CPU 的抢占计数器独占一个缓存行，避免伪共享。
+#[repr(align(64))]
+struct CacheAlignedAtomic(AtomicUsize);
+
+impl CacheAlignedAtomic {
+    const fn new() -> Self {
+        CacheAlignedAtomic(AtomicUsize::new(0))
+    }
 }
 
 /// Per-CPU 抢占计数器
 ///
 /// 每个 CPU 维护一个计数器，> 0 表示抢占已禁用。
-static PREEMPT_COUNT: [AtomicUsize; MAX_CPU_COUNT] = create_preempt_count_array!(MAX_CPU_COUNT);
+static PREEMPT_COUNT: [CacheAlignedAtomic; MAX_CPU_COUNT] = {
+    const INIT: CacheAlignedAtomic = CacheAlignedAtomic::new();
+    [INIT; MAX_CPU_COUNT]
+};
 
 /// 禁用抢占
 ///
@@ -26,7 +32,7 @@ static PREEMPT_COUNT: [AtomicUsize; MAX_CPU_COUNT] = create_preempt_count_array!
 #[inline]
 pub fn preempt_disable() {
     let cpu_id = crate::arch::kernel::cpu::cpu_id();
-    PREEMPT_COUNT[cpu_id].fetch_add(1, Ordering::Relaxed);
+    PREEMPT_COUNT[cpu_id].0.fetch_add(1, Ordering::Relaxed);
     // Acquire 屏障，确保后续访问不会被重排到此之前
     core::sync::atomic::fence(Ordering::Acquire);
 }
@@ -39,14 +45,14 @@ pub fn preempt_enable() {
     // Release 屏障，确保之前的访问不会被重排到此之后
     core::sync::atomic::fence(Ordering::Release);
     let cpu_id = crate::arch::kernel::cpu::cpu_id();
-    PREEMPT_COUNT[cpu_id].fetch_sub(1, Ordering::Relaxed);
+    PREEMPT_COUNT[cpu_id].0.fetch_sub(1, Ordering::Relaxed);
 }
 
 /// 检查抢占是否已禁用
 #[inline]
 pub fn preempt_disabled() -> bool {
     let cpu_id = crate::arch::kernel::cpu::cpu_id();
-    PREEMPT_COUNT[cpu_id].load(Ordering::Relaxed) > 0
+    PREEMPT_COUNT[cpu_id].0.load(Ordering::Relaxed) > 0
 }
 
 /// 抢占保护 RAII 守卫

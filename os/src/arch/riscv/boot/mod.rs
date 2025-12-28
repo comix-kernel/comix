@@ -18,7 +18,7 @@ use crate::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
     },
-    pr_err, pr_info, println,
+    pr_err, pr_info,
     sync::SpinLock,
     test::run_early_tests,
     uapi::{
@@ -81,6 +81,12 @@ pub fn rest_init() {
     // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
         (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base);
+        // 设置 cpu_ptr 指向当前 CPU
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu() as *const _ as usize
+        };
+        (*tf).cpu_ptr = cpu_ptr;
     }
 
     let ra = task.context.ra;
@@ -93,7 +99,10 @@ pub fn rest_init() {
         sscratch::write(ptr as usize);
     }
     TASK_MANAGER.lock().add_task(task.clone());
-    current_cpu().lock().switch_task(task);
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_task(task);
+    }
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
     // SAFETY: 在 Task 创建时已正确初始化 ra 和 sp
@@ -185,6 +194,12 @@ fn create_kthreadd() {
     // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
         (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
+        // 设置 cpu_ptr 指向当前 CPU
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu() as *const _ as usize
+        };
+        (*tf).cpu_ptr = cpu_ptr;
     }
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
@@ -206,7 +221,7 @@ pub fn main(hartid: usize) {
 
     // 初始化工作
     trap::init_boot_trap();
-    platform::init();  // 这里会设置 NUM_CPU
+    platform::init();  // 完整的平台初始化 (包括 device_tree::init())
     time::init();
     timer::init();
     unsafe { intr::enable_interrupts() };

@@ -53,15 +53,17 @@ impl Scheduler for RRScheduler {
     }
 
     fn next_task(&mut self) -> Option<SwitchPlan> {
+        let _guard = crate::sync::PreemptGuard::new();
+
         // 取出当前任务，避免在下面赋值时被 Drop 掉
-        let prev_task_opt = current_cpu().lock().current_task.take();
+        let prev_task_opt = current_cpu().current_task.take();
 
         // 选择下一个可运行任务（或返回/转 idle）
         let next_task = match self.run_queue.pop_task() {
             Some(t) => t,
             None => {
                 // 没有可运行任务：恢复 current 并返回
-                current_cpu().lock().current_task = prev_task_opt;
+                current_cpu().current_task = prev_task_opt;
                 return None;
             }
         };
@@ -89,7 +91,7 @@ impl Scheduler for RRScheduler {
         }
 
         // 在切换前，更新当前任务与时间片
-        current_cpu().lock().switch_task(next_task);
+        current_cpu().switch_task(next_task);
         self.current_slice = self.time_slice;
 
         Some(SwitchPlan {
@@ -227,7 +229,10 @@ mod tests {
     // sleep / wake：sleep 后应不在队列且状态更新；wake 后回到队列且为 Running
     test_case!(test_rr_sleep_and_wakeup, {
         // 需要一个当前任务以便 prepare_switch 不报错；本测试不调用 prepare_switch，但保持一致设定
-        current_cpu().lock().current_task = Some(mk_task(30));
+        {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu().current_task = Some(mk_task(30));
+        }
 
         let mut rr = RRScheduler::new();
         let t = mk_task(31);
@@ -252,7 +257,10 @@ mod tests {
 
     // 任务退出：应设置状态为 Zombie，并从队列移除
     test_case!(test_rr_exit_task, {
-        current_cpu().lock().current_task = Some(mk_task(40));
+        {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu().current_task = Some(mk_task(40));
+        }
 
         let mut rr = RRScheduler::new();
         let t = mk_task(41);

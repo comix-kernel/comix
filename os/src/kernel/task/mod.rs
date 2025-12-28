@@ -43,7 +43,8 @@ use crate::{
 pub(crate) fn forkret() {
     let fp: *mut TrapFrame;
     {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         let task = cpu.current_task.as_ref().unwrap();
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
@@ -58,7 +59,8 @@ pub(crate) fn forkret() {
 /// * `code`: 任务的退出码
 pub(crate) fn terminate_task(code: usize) -> ! {
     let task = {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         cpu.current_task.as_ref().unwrap().clone()
     };
 
@@ -76,8 +78,8 @@ pub(crate) fn terminate_task(code: usize) -> ! {
 /// 获取当前task
 /// # 返回值：当前任务的SharedTask
 pub fn current_task() -> SharedTask {
+    let _guard = crate::sync::PreemptGuard::new();
     current_cpu()
-        .lock()
         .current_task
         .as_ref()
         .expect("current_task: CPU has no current task")
@@ -87,8 +89,8 @@ pub fn current_task() -> SharedTask {
 /// 获取当前任务的内存空间
 /// # 返回值：当前任务的内存空间
 pub fn current_memory_space() -> Arc<SpinLock<MemorySpace>> {
+    let _guard = crate::sync::PreemptGuard::new();
     current_cpu()
-        .lock()
         .current_memory_space
         .as_ref()
         .expect("current_memory_space: current task has no memory space")

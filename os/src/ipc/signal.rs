@@ -264,13 +264,7 @@ fn sig_dump(sig_num: usize) {
 
 /// 默认行为：停止进程
 fn sig_stop(sig_num: usize) {
-    let pid = current_cpu()
-        .lock()
-        .current_task
-        .clone()
-        .unwrap()
-        .lock()
-        .pid;
+    let pid = current_task().lock().pid;
     let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
     for task in tasks {
         {
@@ -289,13 +283,7 @@ fn sig_stop(sig_num: usize) {
 
 /// 默认行为：继续进程
 fn sig_continue(sig_num: usize) {
-    let pid = current_cpu()
-        .lock()
-        .current_task
-        .clone()
-        .unwrap()
-        .lock()
-        .pid;
+    let pid = current_task().lock().pid;
     let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
     for task in tasks {
         let mut resume = false;
