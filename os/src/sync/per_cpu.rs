@@ -53,7 +53,15 @@ impl<T> PerCpu<T> {
     /// 1. 当前 CPU ID 有效
     /// 2. 访问期间抢占已禁用
     /// 3. 没有其他引用指向同一数据
+    ///
+    /// # 设计说明
+    ///
+    /// 此方法从 `&self` 返回 `&mut T`，这是 Per-CPU 变量的标准实现模式：
+    /// - Per-CPU 变量通常作为全局 `static` 使用，只能通过 `&self` 访问
+    /// - 每个 CPU 访问不同的数据副本，通过抢占控制保证独占访问
+    /// - 使用 `UnsafeCell` 提供内部可变性，类似于 `RefCell` 或 `Mutex`
     #[inline]
+    #[allow(clippy::mut_from_ref)]
     pub fn get_mut(&self) -> &mut T {
         let cpu_id = crate::arch::kernel::cpu::cpu_id();
         // SAFETY: 调用者保证独占访问

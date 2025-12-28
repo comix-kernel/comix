@@ -13,7 +13,7 @@ mod spin_lock;
 pub use intr_guard::*;
 pub use mutex::*;
 pub use per_cpu::PerCpu;
-pub use preempt::{preempt_disable, preempt_enable, PreemptGuard};
+pub use preempt::{PreemptGuard, preempt_disable, preempt_enable};
 pub use raw_spin_lock::*;
 pub use raw_spin_lock_without_guard::*;
 pub use spin_lock::*;
