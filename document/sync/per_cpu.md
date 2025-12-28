@@ -63,7 +63,7 @@ use core::sync::atomic::AtomicUsize;
 let counter = PerCpu::new(|| AtomicUsize::new(0));
 ```
 
-**源码位置**：`os/src/sync/per_cpu.rs:23`
+**源码位置**：`os/src/sync/per_cpu.rs:44`
 
 ### 获取当前 CPU 的数据（只读）
 
@@ -89,7 +89,7 @@ println!("Current CPU counter: {}", value);
 preempt_enable();
 ```
 
-**源码位置**：`os/src/sync/per_cpu.rs:42`
+**源码位置**：`os/src/sync/per_cpu.rs:63`
 
 ### 获取当前 CPU 的数据（可变）
 
@@ -125,7 +125,7 @@ let value = counter.get_mut();
 preempt_enable();
 ```
 
-**源码位置**：`os/src/sync/per_cpu.rs:65`
+**源码位置**：`os/src/sync/per_cpu.rs:86`
 
 ### 获取指定 CPU 的数据（只读）
 
@@ -152,7 +152,7 @@ let value = counter.get_of(0);
 println!("CPU 0 counter: {}", value);
 ```
 
-**源码位置**：`os/src/sync/per_cpu.rs:67`
+**源码位置**：`os/src/sync/per_cpu.rs:96`
 
 ## 使用场景
 
@@ -173,8 +173,9 @@ fn handle_interrupt() {
 }
 
 fn get_total_interrupts() -> usize {
+    let num_cpu = unsafe { crate::kernel::NUM_CPU };
     let mut total = 0;
-    for cpu_id in 0..NUM_CPU {
+    for cpu_id in 0..num_cpu {
         total += INTERRUPT_COUNT.get_of(cpu_id).load(Ordering::Relaxed);
     }
     total
@@ -357,4 +358,3 @@ cd os && make test
 1. **NUMA 感知**：在 NUMA 架构中，优化数据副本的内存分配位置
 2. **动态核心数**：支持运行时动态调整核心数量
 3. **统计聚合优化**：提供高效的聚合接口，减少遍历开销
-4. **对齐优化**：确保每个副本位于独立的缓存行，避免伪共享
