@@ -6,8 +6,7 @@ use alloc::vec::Vec;
 
 use crate::mm::activate;
 use crate::{
-    config::MAX_CPU_COUNT, kernel::task::SharedTask, mm::memory_space::MemorySpace,
-    sync::SpinLock,
+    config::MAX_CPU_COUNT, kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::SpinLock,
 };
 use lazy_static::lazy_static;
 
