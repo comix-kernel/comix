@@ -5,7 +5,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::mm::activate;
-use crate::{kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::SpinLock};
+use crate::{
+    config::MAX_CPU_COUNT, kernel::task::SharedTask, mm::memory_space::MemorySpace,
+    sync::SpinLock,
+};
 use lazy_static::lazy_static;
 
 pub static mut NUM_CPU: usize = 1;
@@ -14,6 +17,12 @@ pub static mut CLOCK_FREQ: usize = 12_500_000;
 lazy_static! {
     pub static ref CPUS: Vec<SpinLock<Cpu>> = {
         let num_cpu = unsafe { NUM_CPU };
+        assert!(
+            num_cpu > 0 && num_cpu <= MAX_CPU_COUNT,
+            "NUM_CPU ({}) must be between 1 and MAX_CPU_COUNT ({})",
+            num_cpu,
+            MAX_CPU_COUNT
+        );
         let mut cpus = Vec::with_capacity(num_cpu);
         for _ in 0..num_cpu {
             cpus.push(SpinLock::new(Cpu::new()));

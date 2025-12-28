@@ -50,19 +50,23 @@ preempt_enable();   // 计数器: 1 -> 0，抢占启用
 ### 抢占计数器数组
 
 ```rust
-static PREEMPT_COUNT: [AtomicUsize; 8] = [
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-    AtomicUsize::new(0),
-];
+use crate::config::MAX_CPU_COUNT;
+
+/// 创建 Per-CPU 抢占计数器数组的辅助宏
+macro_rules! create_preempt_count_array {
+    ($size:expr) => {{
+        const SIZE: usize = $size;
+        const INIT: AtomicUsize = AtomicUsize::new(0);
+        [INIT; SIZE]
+    }};
+}
+
+static PREEMPT_COUNT: [AtomicUsize; MAX_CPU_COUNT] = create_preempt_count_array!(MAX_CPU_COUNT);
 ```
 
-使用静态数组为每个 CPU 维护独立的抢占计数器。数组大小固定为 8，支持最多 8 个 CPU 核心。
+使用静态数组为每个 CPU 维护独立的抢占计数器。数组大小由 `MAX_CPU_COUNT` 配置常量决定（默认为 8），可在 `config.rs` 中修改以支持更多 CPU 核心。
+
+**实现说明**：使用宏来生成数组初始化代码，确保数组元素数量与 `MAX_CPU_COUNT` 一致。由于 `AtomicUsize::new(0)` 是 `const fn`，可以在编译期完成所有初始化。
 
 **源码位置**：`os/src/sync/preempt.rs:10`
 
@@ -314,9 +318,21 @@ PREEMPT_COUNT[cpu_id].fetch_add(1, Ordering::Relaxed);
 - 每个 CPU 只访问自己的计数器，不存在跨核竞争
 - 内存顺序由显式的 `fence()` 保证
 
-### 数组大小限制
+### 数组大小配置
 
-当前实现使用固定大小的数组（8 个元素），限制了最大 CPU 核心数。未来可以改进为动态分配或使用更大的数组。
+抢占计数器使用固定大小的数组，大小由 `config::MAX_CPU_COUNT` 常量决定（默认为 8）。
+
+**配置方法**：在 `os/src/config.rs` 中修改 `MAX_CPU_COUNT` 常量：
+
+```rust
+// 支持最多 16 个 CPU 核心
+pub const MAX_CPU_COUNT: usize = 16;
+```
+
+**设计权衡**：
+- 使用固定数组而非动态分配（`Vec`）是为了性能考虑
+- 抢占控制是极高频访问的底层机制，固定数组提供零开销访问
+- 如需支持更多核心，只需修改配置常量并重新编译
 
 ## 与调度器的集成
 
