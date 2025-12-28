@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main  # 在代码合并到 main 分支后，仍然运行一次完整的 CI
+      - epic/smp  # 在 epic/smp 分支上运行 CI
   pull_request:
     branches:
       - main  # 在针对 main 分支的 PR 提出/更新时运行 CI
+      - epic/smp  # 在针对 epic/smp 分支的 PR 提出/更新时运行 CI
 
 env:
   CARGO_TERM_COLOR: always
