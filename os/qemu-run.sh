@@ -5,7 +5,7 @@ BIN_FILE="${ELF_FILE%.*}.bin"
 # 参数定义
 os_file="$BIN_FILE"
 mem="4G"
-smp="1"
+smp="${SMP:-1}"  # 从环境变量读取，默认为 1
 fs="fs.img"
 disk="disk.img"
 
