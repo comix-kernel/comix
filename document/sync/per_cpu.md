@@ -28,13 +28,15 @@ Per-CPU 变量的核心思想是**数据隔离**：
 
 ```rust
 pub struct PerCpu<T> {
-    data: Vec<UnsafeCell<T>>,
+    data: Vec<CacheAligned<T>>,
 }
 ```
 
-`PerCpu<T>` 是 Per-CPU 变量的容器，内部维护一个 `Vec`，每个元素对应一个 CPU 核心的数据副本。使用 `UnsafeCell` 允许内部可变性，因为我们通过抢占控制来保证安全性。
+`PerCpu<T>` 是 Per-CPU 变量的容器，内部维护一个 `Vec`，每个元素对应一个 CPU 核心的数据副本。
 
-**源码位置**：`os/src/sync/per_cpu.rs:11`
+**缓存行对齐优化**：每个数据副本使用 `CacheAligned<T>` 包装，确保独占一个缓存行（64 字节）。这避免了伪共享（False Sharing）问题——当多个 CPU 核心修改位于同一缓存行内的不同数据时，会导致缓存行频繁失效和同步，严重影响性能。通过缓存行对齐，每个核心的数据副本互不干扰，充分发挥 Per-CPU 变量的性能优势。
+
+**源码位置**：`os/src/sync/per_cpu.rs:32`
 
 ## API 接口
 
@@ -317,10 +319,13 @@ let cpu_id = crate::arch::kernel::cpu::cpu_id();
 
 ### 内存布局
 
-`PerCpu<T>` 使用 `Vec<UnsafeCell<T>>` 存储数据副本：
+`PerCpu<T>` 使用 `Vec<CacheAligned<T>>` 存储数据副本：
 - 每个元素对应一个 CPU 核心
 - 索引即为 CPU ID
-- 使用 `UnsafeCell` 提供内部可变性
+- 使用 `CacheAligned<T>` 包装，确保每个数据副本独占一个缓存行（64 字节对齐）
+- 内部使用 `UnsafeCell` 提供内部可变性
+
+**缓存行对齐的重要性**：在多核系统中，如果多个 CPU 的数据位于同一缓存行，即使访问不同的数据，也会因为缓存一致性协议导致性能下降。通过确保每个 Per-CPU 数据独占一个缓存行，可以完全避免这种伪共享问题。
 
 ### 初始化时机
 

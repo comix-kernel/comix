@@ -53,7 +53,12 @@ preempt_enable();   // 计数器: 1 -> 0，抢占启用
 static PREEMPT_COUNT: [AtomicUsize; 8] = [
     AtomicUsize::new(0),
     AtomicUsize::new(0),
-    // ... 每个 CPU 一个计数器
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
 ];
 ```
 

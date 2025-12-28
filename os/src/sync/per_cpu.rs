@@ -5,11 +5,32 @@
 use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 
+/// RISC-V 架构的缓存行大小（通常为 64 字节）
+const CACHE_LINE_SIZE: usize = 64;
+
+/// 缓存行对齐的包装结构
+///
+/// 确保每个 Per-CPU 数据副本独占一个缓存行，避免伪共享（False Sharing）问题。
+/// 当多个 CPU 核心修改位于同一缓存行内的不同数据时，会导致缓存行频繁失效，
+/// 严重影响性能。通过缓存行对齐，每个核心的数据副本互不干扰。
+#[repr(align(64))]
+struct CacheAligned<T>(UnsafeCell<T>);
+
+impl<T> CacheAligned<T> {
+    fn new(value: T) -> Self {
+        CacheAligned(UnsafeCell::new(value))
+    }
+
+    fn get(&self) -> *mut T {
+        self.0.get()
+    }
+}
+
 /// Per-CPU 变量容器
 ///
 /// 为每个 CPU 维护一个独立的 T 类型数据副本。
 pub struct PerCpu<T> {
-    data: Vec<UnsafeCell<T>>,
+    data: Vec<CacheAligned<T>>,
 }
 
 impl<T> PerCpu<T> {
@@ -26,7 +47,7 @@ impl<T> PerCpu<T> {
 
         let mut data = Vec::with_capacity(num_cpu);
         for _ in 0..num_cpu {
-            data.push(UnsafeCell::new(init()));
+            data.push(CacheAligned::new(init()));
         }
         PerCpu { data }
     }
