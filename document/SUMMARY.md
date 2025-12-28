@@ -28,6 +28,8 @@
   - [自旋锁](sync/spin_lock.md)
   - [睡眠锁](sync/sleep_lock.md)
   - [中断保护](sync/intr_guard.md)
+  - [Per-CPU 变量](sync/per_cpu.md)
+  - [抢占控制](sync/preempt.md)
   - [SMP 与中断](sync/smp_interrupts.md)
   - [死锁检测](sync/deadlock.md)
 
