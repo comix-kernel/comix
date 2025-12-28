@@ -296,6 +296,12 @@ impl Task {
                 argv_vec_ptr,
                 envp_vec_ptr,
             );
+            // 设置 cpu_ptr 指向当前 CPU
+            let cpu_ptr = {
+                let _guard = crate::sync::PreemptGuard::new();
+                crate::kernel::current_cpu() as *const _ as usize
+            };
+            (*tf_ptr).cpu_ptr = cpu_ptr;
         }
     }
 

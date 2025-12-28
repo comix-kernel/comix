@@ -8,21 +8,21 @@
 trap_entry:
         # 保存上下文到 trap_frame 结构体中
         # 约束: sscratch 指向 trap_frame 结构体
-        # 似乎有优化可以减少几条指令，但是为了清晰起见，这里不做优化。
 
         # 交换 sscratch 和 a0
         csrrw a0, sscratch, a0
+
+        # 保存用户 tp (此时 tp 还是用户值)
+        sd tp, 32(a0)
+
+        # 从 TrapFrame 读取 cpu_ptr,设置到 tp
+        ld tp, 272(a0)
 
         # 保存所有通用寄存器
         sd ra, 8(a0)
         sd sp, 16(a0)
         sd gp, 24(a0)
-        sd tp, 32(a0)
-
-        # 重新设置 tp 为内核 CPU ID
-        # 从 TrapFrame 的 kernel_hartid 字段读取（假设在偏移 280）
-        # 或者使用简单的方法：从 sscratch 推导
-        # 暂时先保存，后面在 Rust 代码中处理
+        # 注意: tp 已经在前面保存了
 
         sd t0, 40(a0)
         sd t1, 48(a0)
@@ -98,8 +98,8 @@ __restore:
         ld ra, 8(a0)
         ld sp, 16(a0)
         ld gp, 24(a0)
-        # 不恢复 tp (x4)，保持内核设置的 CPU ID
-        # ld tp, 32(a0)
+        # 恢复用户 tp
+        ld tp, 32(a0)
         ld t0, 40(a0)
         ld t1, 48(a0)
         ld t2, 56(a0)

@@ -42,8 +42,9 @@ pub struct TrapFrame {
     pub x31_t6: usize,  // 248(sp)
     pub sstatus: usize, // 256(sp)
     pub kernel_sp: usize, // 264(sp)
-                        // pub kernel_satp: usize, // 272(sp)
-                        // pub kernel_hartid: usize, // 280(sp)
+    /// 指向当前 CPU 结构体的指针
+    /// 用于在 trap entry 时快速获取 CPU 信息并设置 tp
+    pub cpu_ptr: usize, // 272(sp)
 }
 
 impl TrapFrame {
@@ -84,7 +85,7 @@ impl TrapFrame {
             x31_t6: 0,
             sstatus: 0,
             kernel_sp: 0,
-            // kernel_satp: 0,
+            cpu_ptr: 0,
         }
     }
 

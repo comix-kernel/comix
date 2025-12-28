@@ -2,31 +2,24 @@
 
 /// 获取当前 CPU 的 ID
 ///
-/// 使用 tp (x4) 寄存器存储 CPU ID。
-/// 在启动时，entry.S 会将 hartid 写入 tp 寄存器。
+/// 从 tp 寄存器指向的 Cpu 结构体中读取 CPU ID。
+/// 在内核态，tp 指向 Cpu 结构体；在用户态，tp 是 TLS 指针。
 ///
 /// # 返回值
 /// - 当前 CPU 的 ID（0 到 NUM_CPU-1）
 ///
 /// # Safety
-/// 此函数假设 tp 寄存器已在启动时正确设置，且不会被意外修改。
-///
-/// # 注意
-/// 由于用户程序可能修改 tp 寄存器，此函数会进行边界检查。
-/// 如果 tp 值超出有效范围，返回 0（主核）。
+/// 此函数假设在内核态调用，tp 寄存器指向有效的 Cpu 结构体。
+/// trap_entry 会在进入内核时设置 tp 指向 Cpu 结构体。
 #[inline]
 pub fn cpu_id() -> usize {
     let id: usize;
-    // SAFETY: 读取 tp 寄存器是安全的
+    // SAFETY: 在内核态，tp 指向 Cpu 结构体，第一个字段是 cpu_id
     unsafe {
-        core::arch::asm!("mv {}, tp", out(reg) id);
+        core::arch::asm!(
+            "ld {}, 0(tp)",  // 读取 Cpu.cpu_id (偏移 0)
+            out(reg) id
+        );
     }
-
-    // 边界检查：如果 tp 值无效（被用户程序修改），返回 0
-    let num_cpu = unsafe { crate::kernel::NUM_CPU };
-    if id >= num_cpu {
-        0  // 默认返回主核 ID
-    } else {
-        id
-    }
+    id
 }
