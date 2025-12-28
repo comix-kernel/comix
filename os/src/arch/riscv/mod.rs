@@ -6,6 +6,7 @@ pub mod kernel;
 pub mod lib;
 pub mod mm;
 pub mod platform;
+pub mod sbi;
 pub mod syscall;
 pub mod timer;
 pub mod trap;

@@ -53,16 +53,16 @@ _start_high:
 .secondary_hart_wait:
     mv s0, a0               # 保存 hartid 到 s0（callee-saved）
 
-.wait_loop:
-    wfi                     # 低功耗等待
-    la t0, secondary_boot_flag
-    ld t1, 0(t0)
-    beqz t1, .wait_loop     # 如果标志为 0，继续等待
-
-    # 标志已设置，开始启动从核
-
-    # 1. 设置页表（使用主核已设置的页表）
+    # 1. 先启用分页（使用主核已设置的页表）
+    # 注意：此时还在物理地址模式，la 加载的是链接地址（虚拟地址）
+    # 需要手动计算物理地址
     la t0, boot_pagetable
+    # boot_pagetable 在 .data 段，链接地址是虚拟地址
+    # 需要减去虚拟地址偏移得到物理地址
+    # 虚拟地址偏移 = 0xffffffc000000000
+    # 物理地址 = 虚拟地址 & 0x3FFFFFFFFF (清除高位)
+    li t1, 0x3FFFFFFFFF
+    and t0, t0, t1          # 转换为物理地址
     srli t0, t0, 12
     li t1, 8 << 60
     or t0, t0, t1
@@ -70,11 +70,37 @@ _start_high:
     sfence.vma
 
     # 2. 跳转到高地址
-    la t0, .secondary_start_high
+    la t0, .secondary_wait_high
     li t1, -1
     slli t1, t1, 38
     or t0, t0, t1
     jr t0
+
+.secondary_wait_high:
+    # 3. 现在在高地址，可以访问虚拟地址的 secondary_boot_flag
+    # 调试：设置栈并调用 Rust 函数输出调试信息
+    la sp, secondary_stacks_top
+    li t1, -1
+    slli t1, t1, 38
+    or sp, sp, t1
+    slli t1, s0, 16
+    sub sp, sp, t1
+
+    # 调用 Rust 调试函数
+    mv a0, s0
+    call secondary_debug_entry
+
+.wait_loop:
+    wfi                     # 低功耗等待
+    la t0, secondary_boot_flag
+    li t1, -1
+    slli t1, t1, 38
+    or t0, t0, t1           # 转换为虚拟地址
+    ld t1, 0(t0)
+    beqz t1, .wait_loop     # 如果标志为 0，继续等待
+
+    # 标志已设置，开始启动从核
+    # 页表已经启用，直接跳转到 secondary_start_high
 
 .secondary_start_high:
     # 3. 计算从核栈地址
@@ -89,8 +115,8 @@ _start_high:
     slli t1, s0, 16          # t1 = hartid << 16 = hartid × 65536
     sub sp, sp, t1           # sp = 栈顶 - 偏移
 
-    # 4. 设置从核 CPU ID（使用 tp 寄存器）
-    mv tp, s0
+    # 4. 不设置 tp，让 secondary_start() 第一时间设置
+    # tp 需要指向 Cpu 结构体，不能是简单的 hartid
 
     # 5. 跳转到从核 Rust 入口
     mv a0, s0                # 传递 hartid 参数
@@ -128,12 +154,61 @@ boot_pagetable:
     # PTE[260-511]: 填充剩余项
     .zero 8 * (512 - 0x100 - 4)    # 填充从索引260到511
 
+    # 从核启动标志
+    .globl secondary_boot_flag
+    .align 3
+secondary_boot_flag:
+    .8byte 0
+
     .section .bss.stack
     .globl boot_stack_lower_bound
 boot_stack_lower_bound:
     .space 4096 * 48
     .globl boot_stack_top
 boot_stack_top:
+
+    # ========== SBI HSM 从核入口 ==========
+    # 当使用 SBI HSM 启动从核时，OpenSBI 会将从核跳转到这里（物理地址）
+    # 此时 MMU 关闭，a0 = hartid, a1 = opaque
+    .section .text.entry
+    .globl secondary_sbi_entry
+secondary_sbi_entry:
+    mv s0, a0               # 保存 hartid 到 s0
+
+    # 1. 启用分页（使用主核已设置的页表）
+    la t0, boot_pagetable
+    li t1, 0x3FFFFFFFFF
+    and t0, t0, t1          # 转换为物理地址
+    srli t0, t0, 12
+    li t1, 8 << 60
+    or t0, t0, t1
+    csrw satp, t0
+    sfence.vma
+
+    # 2. 跳转到高地址
+    la t0, .secondary_sbi_high
+    li t1, -1
+    slli t1, t1, 38
+    or t0, t0, t1
+    jr t0
+
+.secondary_sbi_high:
+    # 3. 设置栈（虚拟地址）
+    la sp, secondary_stacks_top
+    li t1, -1
+    slli t1, t1, 38
+    or sp, sp, t1            # 转换为虚拟地址
+    slli t1, s0, 16          # hartid × 64KB
+    sub sp, sp, t1
+
+    # 4. 跳转到 Rust 入口
+    mv a0, s0
+    call secondary_start
+
+    # 不应该返回
+.secondary_sbi_loop:
+    wfi
+    j .secondary_sbi_loop
 
     # ========== 从核栈空间 ==========
     .section .bss.secondary_stack

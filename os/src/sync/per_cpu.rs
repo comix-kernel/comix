@@ -70,6 +70,22 @@ impl<T> PerCpu<T> {
         PerCpu { data }
     }
 
+    /// 创建 Per-CPU 变量 (指定数量和 CPU ID)
+    ///
+    /// - count: CPU 数量
+    /// - init: 初始化函数，接收 CPU ID 作为参数，为每个 CPU 创建一个数据副本
+    ///
+    /// 用于在 NUM_CPU 设置之前创建 PerCpu 实例（例如 CPUS 的 lazy_static 初始化）
+    pub fn new_with_id_and_count<F: Fn(usize) -> T>(count: usize, init: F) -> Self {
+        assert!(count > 0, "CPU count must be greater than 0");
+
+        let mut data = Vec::with_capacity(count);
+        for i in 0..count {
+            data.push(CacheAligned::new(init(i)));
+        }
+        PerCpu { data }
+    }
+
     /// 获取当前 CPU 的数据（只读）
     ///
     /// # Safety

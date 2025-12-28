@@ -35,8 +35,11 @@ unsafe extern "C" {
 /// 此函数执行所有内存管理组件的初始化工作：
 /// 1. 初始化物理帧分配器。
 /// 2. 初始化内核堆分配器。
-/// 3. 创建并激活内核地址空间。
-pub fn init() {
+/// 3. 创建内核地址空间（不激活，由调用者在合适时机激活）。
+///
+/// # 返回值
+/// 返回创建的内核地址空间，调用者需要在合适时机激活它。
+pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpace>> {
     // 1. 初始化物理帧分配器
 
     // ekernel 是一个虚拟地址，需要转换为物理地址，以确定可分配物理内存的起始点。
@@ -54,44 +57,28 @@ pub fn init() {
     // 2. 初始化堆分配器
     init_heap();
 
-    // 3. 创建并激活内核地址空间 (内核地址空间通过 lazy_static 自动初始化)
+    // 3. 创建内核地址空间（不激活，由调用者在合适时机激活）
     #[cfg(target_arch = "riscv64")]
     {
         use alloc::sync::Arc;
 
-        use crate::{
-            earlyprintln, kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock,
-        };
-
-        // 记录切换前的 satp 值
-        let old_satp: usize;
-        unsafe {
-            core::arch::asm!("csrr {0}, satp", out(reg) old_satp);
-        }
-        earlyprintln!("[MM] Before space switch - satp: 0x{:x}", old_satp);
+        use crate::{earlyprintln, mm::memory_space::MemorySpace, sync::SpinLock};
 
         let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
         let root_ppn = space.lock().root_ppn();
         earlyprintln!(
-            "[MM] New kernel space root PPN: 0x{:x}",
+            "[MM] Created kernel space, root PPN: 0x{:x}",
             root_ppn.as_usize()
         );
 
-        {
-            let _guard = crate::sync::PreemptGuard::new();
-            current_cpu().switch_space(space);
-        }
+        return space;
+    }
 
-        // 记录切换后的 satp 值
-        let new_satp: usize;
-        unsafe {
-            core::arch::asm!("csrr {0}, satp", out(reg) new_satp);
-        }
-        earlyprintln!("[MM] After space switch - satp: 0x{:x}", new_satp);
-        earlyprintln!(
-            "[MM] Expected satp: 0x{:x}",
-            (root_ppn.as_usize() | (8 << 60))
-        );
+    #[cfg(not(target_arch = "riscv64"))]
+    {
+        use alloc::sync::Arc;
+        use crate::{mm::memory_space::MemorySpace, sync::SpinLock};
+        Arc::new(SpinLock::new(MemorySpace::new_kernel()))
     }
 }
 

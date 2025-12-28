@@ -9,7 +9,7 @@ use crate::{
 };
 use lazy_static::lazy_static;
 
-pub static mut NUM_CPU: usize = crate::config::MAX_CPU_COUNT;
+pub static mut NUM_CPU: usize = 1;
 pub static mut CLOCK_FREQ: usize = 12_500_000;
 
 lazy_static! {
@@ -17,8 +17,11 @@ lazy_static! {
     ///
     /// 使用 PerCpu 容器自动实现缓存行对齐，避免伪共享。
     /// 每个 CPU 只访问自己的 Cpu 实例，不需要锁保护。
+    ///
+    /// 注意：使用 MAX_CPU_COUNT 而不是 NUM_CPU，避免 lazy_static 初始化时机问题
     pub static ref CPUS: PerCpu<Cpu> = {
-        PerCpu::new_with_id(|cpu_id| Cpu::new_with_id(cpu_id))
+        use crate::config::MAX_CPU_COUNT;
+        PerCpu::new_with_id_and_count(MAX_CPU_COUNT, |cpu_id| Cpu::new_with_id(cpu_id))
     };
 }
 
