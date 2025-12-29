@@ -92,6 +92,7 @@
 
 - [RISC-V寄存器](arch/riscv/riscv_register.md)
 - [用户栈布局](arch/riscv/stack_layout.md)
+- [多核启动](arch/riscv/smp_boot.md)
 
 
 ---
