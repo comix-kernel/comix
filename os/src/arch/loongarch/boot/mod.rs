@@ -1,11 +1,18 @@
 //! LoongArch64 架构相关的启动代码
 
-use core::{arch::{asm, global_asm}, sync::atomic::Ordering};
+use core::{
+    arch::{asm, global_asm},
+    sync::atomic::Ordering,
+};
 
 use alloc::sync::Arc;
 
 use crate::{
-    arch::{intr, mm::{paddr_to_vaddr, vaddr_to_paddr}, platform, timer, trap},
+    arch::{
+        intr,
+        mm::{paddr_to_vaddr, vaddr_to_paddr},
+        platform, timer, trap,
+    },
     earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{

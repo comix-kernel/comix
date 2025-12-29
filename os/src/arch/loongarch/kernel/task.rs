@@ -82,7 +82,7 @@ pub fn setup_stack_layout(
     // 16 字节对齐（auxv 要求）
     sp &= !(size_of::<usize>() * 2 - 1);
 
-    let execfn = if !arg_ptrs.is_empty() { arg_ptrs[0] } else { 0 };
+    let execfn = arg_ptrs.last().copied().unwrap_or(0);
 
     let auxv = [
         (3, phdr_addr),     // AT_PHDR
