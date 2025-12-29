@@ -10,9 +10,9 @@ use crate::{
     earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
-        sleep_task_with_block, time, yield_task, NUM_CPU,
+        FsStruct, NUM_CPU, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct,
+        current_cpu, current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
+        sleep_task_with_block, time, yield_task,
     },
     mm::{
         self,
@@ -253,7 +253,7 @@ pub fn main(hartid: usize) {
 
     // 初始化工作
     trap::init_boot_trap();
-    platform::init();  // 完整的平台初始化 (包括 device_tree::init())
+    platform::init(); // 完整的平台初始化 (包括 device_tree::init())
     time::init();
 
     // 启动从核（在启用定时器中断之前）
@@ -372,7 +372,10 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
         crate::arch::intr::disable_interrupts();
     }
 
-    pr_info!("[SMP] CPU {} entering WFI loop with interrupts disabled", hartid);
+    pr_info!(
+        "[SMP] CPU {} entering WFI loop with interrupts disabled",
+        hartid
+    );
 
     // 进入 WFI 循环，等待多核调度器实现
     loop {
@@ -411,14 +414,17 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
         let start_paddr = unsafe { crate::arch::mm::vaddr_to_paddr(start_vaddr) };
         pr_info!(
             "[SMP] Starting hart {} at vaddr=0x{:x}, paddr=0x{:x}",
-            hartid, start_vaddr, start_paddr
+            hartid,
+            start_vaddr,
+            start_paddr
         );
 
         let ret = crate::arch::sbi::hart_start(hartid, start_paddr, hartid);
         if ret.error != 0 {
             pr_err!(
                 "[SMP] Failed to start hart {}: SBI error {}",
-                hartid, ret.error
+                hartid,
+                ret.error
             );
         } else {
             pr_info!("[SMP] Hart {} SBI call succeeded", hartid);

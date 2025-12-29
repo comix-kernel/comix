@@ -76,8 +76,8 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
 
     #[cfg(not(target_arch = "riscv64"))]
     {
-        use alloc::sync::Arc;
         use crate::{mm::memory_space::MemorySpace, sync::SpinLock};
+        use alloc::sync::Arc;
         Arc::new(SpinLock::new(MemorySpace::new_kernel()))
     }
 }
