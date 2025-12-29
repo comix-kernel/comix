@@ -419,7 +419,7 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
             start_paddr
         );
 
-        let ret = crate::arch::sbi::hart_start(hartid, start_paddr, hartid);
+        let ret = crate::arch::lib::sbi::hart_start(hartid, start_paddr, hartid);
         if ret.error != 0 {
             pr_err!(
                 "[SMP] Failed to start hart {}: SBI error {}",
