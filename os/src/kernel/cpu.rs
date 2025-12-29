@@ -99,3 +99,98 @@ pub fn current_cpu() -> &'static mut Cpu {
 pub fn cpu_of(cpu_id: usize) -> &'static Cpu {
     CPUS.get_of(cpu_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{kassert, test_case};
+
+    /// 测试 CPUS 初始化
+    test_case!(test_cpus_initialization, {
+        let num_cpu = unsafe { NUM_CPU };
+        for cpu_id in 0..num_cpu {
+            let cpu = CPUS.get_of(cpu_id);
+            kassert!(cpu.cpu_id == cpu_id);
+        }
+    });
+
+    /// 测试 cpu_id() 函数
+    test_case!(test_cpu_id, {
+        use crate::arch::kernel::cpu::cpu_id;
+        use crate::sync::PreemptGuard;
+
+        let _guard = PreemptGuard::new();
+        let id = cpu_id();
+        kassert!(id < unsafe { NUM_CPU });
+    });
+
+    /// 测试 current_cpu() 函数
+    test_case!(test_current_cpu, {
+        use crate::sync::PreemptGuard;
+
+        let _guard = PreemptGuard::new();
+        let cpu = current_cpu();
+        kassert!(cpu.cpu_id < unsafe { NUM_CPU });
+    });
+
+    /// 测试 cpu_of() 函数
+    test_case!(test_cpu_of, {
+        let cpu0 = cpu_of(0);
+        kassert!(cpu0.cpu_id == 0);
+
+        let num_cpu = unsafe { NUM_CPU };
+        if num_cpu > 1 {
+            let cpu1 = cpu_of(1);
+            kassert!(cpu1.cpu_id == 1);
+        }
+    });
+
+    /// 测试 PerCpu 数据独立性（多核场景）
+    test_case!(test_per_cpu_independence, {
+        use crate::sync::{PerCpu, PreemptGuard};
+        use core::sync::atomic::{AtomicUsize, Ordering};
+
+        let per_cpu = PerCpu::new(|| AtomicUsize::new(0));
+
+        // 在当前 CPU 上修改值
+        {
+            let _guard = PreemptGuard::new();
+            let counter = per_cpu.get();
+            counter.store(100, Ordering::Relaxed);
+        }
+
+        // 验证当前 CPU 的值
+        {
+            let _guard = PreemptGuard::new();
+            let counter = per_cpu.get();
+            kassert!(counter.load(Ordering::Relaxed) == 100);
+        }
+
+        // 验证其他 CPU 的值仍然是初始值
+        let num_cpu = unsafe { NUM_CPU };
+        let current_id = {
+            let _guard = PreemptGuard::new();
+            crate::arch::kernel::cpu::cpu_id()
+        };
+
+        for cpu_id in 0..num_cpu {
+            if cpu_id != current_id {
+                let counter = per_cpu.get_of(cpu_id);
+                kassert!(counter.load(Ordering::Relaxed) == 0);
+            }
+        }
+    });
+
+    /// 测试 PerCpu 的 new_with_id 初始化
+    test_case!(test_per_cpu_with_id, {
+        use crate::sync::PerCpu;
+
+        let per_cpu = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
+
+        let num_cpu = unsafe { NUM_CPU };
+        for cpu_id in 0..num_cpu {
+            let value = per_cpu.get_of(cpu_id);
+            kassert!(*value == cpu_id * 10);
+        }
+    });
+}
