@@ -40,6 +40,14 @@ pub const CSR_CRMD_PG: usize = 1 << 4; // 分页使能
 /// ECFG (异常配置)
 pub const CSR_ECFG_LIE_MASK: usize = 0x1fff; // 局部中断使能掩码
 
+/// EENTRY (异常入口地址)
+pub const CSR_EENTRY: u32 = 0xc;
+
+/// BADV (错误地址寄存器)
+pub const CSR_BADV: u32 = 0x7;
+/// BADI (错误指令寄存器)
+pub const CSR_BADI: u32 = 0x8;
+
 /// ESTAT (异常状态)
 pub const CSR_ESTAT_IS_MASK: usize = 0x1fff; // 中断状态掩码
 
