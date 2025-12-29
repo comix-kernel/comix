@@ -2,7 +2,7 @@
 
 use core::sync::atomic::Ordering;
 
-use crate::arch::constant::{CSR_CRMD_PLV_MASK, CSR_ESTAT_IS_MASK};
+use crate::arch::constant::{CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK};
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::{
     TIMER_TICKS, ack_timer_interrupt, clock_freq, get_time, set_next_trigger,
@@ -38,7 +38,7 @@ pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     if (prmd & CSR_CRMD_PLV_MASK) != 0 {
         user_trap(estat, era, trap_frame);
     } else {
-        kernel_trap(estat, era);
+        kernel_trap(estat, era, trap_frame);
     }
 
     check_signal();
@@ -67,8 +67,13 @@ fn install_trap_entry() {
 
         // KScratch0 <- TrapFrame 指针
         core::arch::asm!("csrwr {0}, 0x48", in(reg) (&raw mut BOOT_TRAP_FRAME as *mut TrapFrame as usize), options(nostack, preserves_flags));
-        // EENTRY <- trap_entry
-        core::arch::asm!("csrwr {0}, 0x4", in(reg) trap_entry as usize, options(nostack, preserves_flags));
+        // EENTRY <- trap_entry（注意 CSR 编号为 0xc）
+        core::arch::asm!(
+            "csrwr {val}, {csr}",
+            val = in(reg) trap_entry as usize,
+            csr = const CSR_EENTRY,
+            options(nostack, preserves_flags)
+        );
     }
 }
 
@@ -88,16 +93,30 @@ fn user_trap(estat: usize, era: usize, trap_frame: &mut TrapFrame) {
     }
 }
 
-fn kernel_trap(estat: usize, era: usize) {
+fn kernel_trap(estat: usize, era: usize, tf: &TrapFrame) {
     if estat & CSR_ESTAT_IS_MASK != 0 {
         handle_interrupt(estat);
         return;
     }
 
     let ecode = (estat >> 16) & 0x3f;
+    let badv: usize;
+    let badi: usize;
+    unsafe {
+        core::arch::asm!("csrrd {0}, {csr}", out(reg) badv, csr = const CSR_BADV, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, {csr}", out(reg) badi, csr = const CSR_BADI, options(nostack, preserves_flags));
+    }
     panic!(
-        "Unexpected trap in kernel: ecode={:#x}, estat={:#x}, era={:#x}",
-        ecode, estat, era
+        "Unexpected trap in kernel: ecode={:#x}, estat={:#x}, era={:#x}, badv={:#x}, badi={:#x}, crmd={:#x}, prmd={:#x}, a0={:#x}, a1={:#x}",
+        ecode,
+        estat,
+        era,
+        badv,
+        badi,
+        tf.crmd,
+        tf.prmd,
+        tf.regs[4], // a0
+        tf.regs[5], // a1
     );
 }
 
@@ -111,15 +130,23 @@ fn handle_interrupt(estat: usize) {
 }
 
 fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
+    let badv: usize;
+    let badi: usize;
+    unsafe {
+        core::arch::asm!("csrrd {0}, {csr}", out(reg) badv, csr = const CSR_BADV, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, {csr}", out(reg) badi, csr = const CSR_BADI, options(nostack, preserves_flags));
+    }
     earlyprintln!("\n===============================================");
     earlyprintln!("   UNEXPECTED TRAP IN USER MODE (PLV>0)");
     earlyprintln!("===============================================");
     earlyprintln!("estat: {:#x}", estat);
     earlyprintln!("era  : {:#x}", era);
+    earlyprintln!("badv : {:#x}", badv);
+    earlyprintln!("badi : {:#x}", badi);
     earlyprintln!("regs : {:#x?}", trap_frame.regs);
     panic!(
-        "Unexpected trap in user mode: estat={:#x}, era={:#x}",
-        estat, era
+        "Unexpected trap in user mode: estat={:#x}, era={:#x}, badv={:#x}, badi={:#x}",
+        estat, era, badv, badi
     );
 }
 
