@@ -1,7 +1,7 @@
 //! fcntl 系统调用实现
 
 use crate::arch::trap::SumGuard;
-use crate::kernel::current_cpu;
+use crate::kernel::{current_cpu, current_task};
 use crate::uapi::errno::EINVAL;
 use crate::uapi::fcntl::{FcntlCmd, FdFlags, FileStatusFlags, Flock, LockType};
 use crate::vfs::{FsError, OpenFlags, file_lock_manager};
@@ -23,7 +23,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
         None => return -(EINVAL as isize),
     };
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     match cmd {
         FcntlCmd::GetFd => {

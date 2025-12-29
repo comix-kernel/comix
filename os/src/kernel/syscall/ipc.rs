@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub fn dup(oldfd: usize) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     match task.lock().fd_table.dup(oldfd) {
         Ok(newfd) => newfd as isize,
         Err(e) => e.to_errno(),
@@ -17,7 +17,7 @@ pub fn dup(oldfd: usize) -> isize {
 }
 
 pub fn dup3(oldfd: usize, newfd: usize, flags: u32) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     let open_flags = match OpenFlags::from_bits(flags) {
         Some(f) => f,

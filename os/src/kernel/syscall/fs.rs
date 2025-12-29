@@ -30,7 +30,7 @@ pub const AT_REMOVEDIR: u32 = 0x200;
 pub const O_CLOEXEC: u32 = 0o2000000;
 
 pub fn close(fd: usize) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     match task.lock().fd_table.close(fd) {
         Ok(()) => 0,
         Err(e) => e.to_errno(),
@@ -39,7 +39,7 @@ pub fn close(fd: usize) -> isize {
 
 pub fn lseek(fd: usize, offset: isize, whence: usize) -> isize {
     // 获取文件对象
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -133,7 +133,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     };
 
     // 分配文件描述符
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     match task.lock().fd_table.alloc(file) {
         Ok(fd) => fd as isize,
         Err(e) => e.to_errno(),
@@ -297,7 +297,7 @@ pub fn fstat(fd: usize, statbuf: *mut Stat) -> isize {
     }
 
     // 获取当前任务和文件对象
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -332,7 +332,7 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     }
 
     // 获取当前任务和文件对象
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),

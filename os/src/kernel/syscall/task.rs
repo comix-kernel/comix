@@ -138,7 +138,8 @@ pub fn clone(
         uts,
         rlimit,
     ) = {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
             task.pid,
@@ -362,7 +363,7 @@ pub fn execve(
 /// 3. 错误处理
 pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusage) -> c_int {
     // 阻塞当前任务,直到指定的子任务结束
-    let cur_task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let cur_task = current_task();
     let opt = if let Some(opt) = WaitFlags::from_bits(options as usize) {
         opt
     } else {
@@ -1116,7 +1117,10 @@ fn do_execve_switch(
     task.lock().fd_table.close_exec();
 
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    current_cpu().lock().switch_space(space.clone());
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(space.clone());
+    }
 
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     // 注意：space 被 clone 进了 execve，所以这里的 space 变量仍然有效
