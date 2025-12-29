@@ -26,7 +26,7 @@ echo "Using existing fs.img (1GB Ext4 filesystem)"
 QEMU_ARGS="-machine virt \
             -kernel $os_file \
             -display none \
-            -smp $smp \
+            -smp cpus=$smp,maxcpus=$smp \
             -bios default \
             -no-reboot"
 

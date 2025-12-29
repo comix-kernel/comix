@@ -49,7 +49,16 @@ pub struct TrapFrame {
 
 impl TrapFrame {
     /// 创建一个全零初始化的陷阱帧
+    ///
+    /// 注意：cpu_ptr 会自动初始化为当前 CPU 的指针
     pub fn zero_init() -> Self {
+        // 获取当前 CPU 的指针
+        let cpu_ptr = {
+            use crate::sync::PreemptGuard;
+            let _guard = PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
+
         TrapFrame {
             sepc: 0,
             x1_ra: 0,
@@ -85,7 +94,7 @@ impl TrapFrame {
             x31_t6: 0,
             sstatus: 0,
             kernel_sp: 0,
-            cpu_ptr: 0,
+            cpu_ptr,
         }
     }
 
@@ -149,6 +158,12 @@ impl TrapFrame {
         self.kernel_sp = kernel_sp;
         self.x1_ra = terminal;
         self.x2_sp = kernel_sp;
+        // 设置 tp 指向当前 CPU 结构体
+        self.x4_tp = {
+            use crate::sync::PreemptGuard;
+            let _guard = PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
         // self.kernel_satp = kernel_satp;
         // self.kernel_hartid = kernel_hartid;
     }

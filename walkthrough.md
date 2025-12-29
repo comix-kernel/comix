@@ -1032,3 +1032,221 @@ TLS 支持的设计存在根本性问题：
 3. 测试单核和多核模式是否正常工作
 4. 如果正常，提交多核启动的 PR
 5. 在新的 PR 中重新设计和实现 TLS 支持
+
+---
+
+## 2024-12-28: 从核禁用中断修复
+
+### 问题
+
+从核在 WFI 循环中等待多核调度器实现，但没有完整的 trap 处理上下文：
+- 从核没有调用 trap 初始化函数
+- 从核没有 TrapFrame 和有效的 sscratch
+- 如果从核收到中断，会尝试使用 boot_trap_entry 处理
+- 可能因为 trap 处理不完整而崩溃（Load Page Fault）
+
+### 解决方案
+
+在从核进入 WFI 循环之前禁用中断：
+- 调用 `disable_interrupts()` 清除 sstatus.SIE 位
+- 从核不会响应任何中断，保持在 WFI 状态
+- 等待多核调度器实现后再启用中断
+
+### 修改内容
+
+**文件**: `os/src/arch/riscv/boot/mod.rs`
+
+在 `secondary_start()` 函数中添加：
+```rust
+// 禁用中断，避免在 WFI 循环中响应中断
+// 等待多核调度器实现后再启用
+unsafe {
+    crate::arch::intr::disable_interrupts();
+}
+
+pr_info!("[SMP] CPU {} entering WFI loop with interrupts disabled", hartid);
+```
+
+更新文档注释：
+```rust
+/// # 注意事项
+/// - 从核不初始化 trap 处理，继续使用 boot_trap_entry
+/// - 从核禁用中断，避免在没有完整 trap 上下文时响应中断
+/// - 等待多核调度器实现后，从核将被唤醒并启用中断
+```
+
+### 测试结果
+
+```bash
+SMP=4 make run
+
+# 预期输出
+[SMP] Booting 3 secondary CPUs...
+[INFO] [CPU1/T  0] [SMP] CPU 1 is online
+[INFO] [CPU1/T  0] [SMP] CPU 1 entering WFI loop with interrupts disabled
+[INFO] [CPU2/T  0] [SMP] CPU 2 is online
+[INFO] [CPU2/T  0] [SMP] CPU 2 entering WFI loop with interrupts disabled
+[INFO] [CPU3/T  0] [SMP] CPU 3 is online
+[INFO] [CPU3/T  0] [SMP] CPU 3 entering WFI loop with interrupts disabled
+[INFO] [CPU0/T  0] [SMP] All 4 CPUs are online!
+```
+
+### 后续工作
+
+- 实现多核调度器（Issue #210）
+- 从核启用中断并开始调度任务
+- 实现 IPI 核间中断支持（Issue #211）
+
+---
+
+## 2024-12-29: 修复 TLS 初始化问题
+
+### 问题
+
+TLS 支持的实现导致主核 Load Page Fault：
+- trap_entry.S 从 TrapFrame.cpu_ptr 加载到 tp
+- TrapFrame::zero_init() 将 cpu_ptr 默认初始化为 0
+- 如果某处使用 zero_init() 创建 TrapFrame 但没有显式设置 cpu_ptr
+- cpu_id() 尝试从地址 0 读取，导致 Load Page Fault
+
+**错误分析**（通过 rust-objdump）：
+```
+ffffffc0802274d2: ld a3, 0(tp)  # cpu_id() 从 tp 读取 CPU ID
+```
+
+错误发生在 cpu_id() 函数，因为 tp 寄存器的值为 0（从未初始化的 cpu_ptr 加载）。
+
+### 解决方案
+
+修复 TrapFrame::zero_init() 函数，自动初始化 cpu_ptr：
+- zero_init() 调用 current_cpu() 获取当前 CPU 的指针
+- 所有通过 zero_init() 创建的 TrapFrame 都会自动有正确的 cpu_ptr
+- 保留 TLS 支持的所有代码，无需回滚
+
+### 修改内容
+
+**文件**: `os/src/arch/riscv/trap/trap_frame.rs`
+
+修改 zero_init() 函数：
+```rust
+pub fn zero_init() -> Self {
+    // 获取当前 CPU 的指针
+    let cpu_ptr = {
+        use crate::sync::PreemptGuard;
+        let _guard = PreemptGuard::new();
+        crate::kernel::current_cpu() as *const _ as usize
+    };
+
+    TrapFrame {
+        // ... 其他字段 ...
+        cpu_ptr,  // 自动初始化
+    }
+}
+```
+
+### 优点
+
+- 保留 TLS 支持，性能更好
+- 自动初始化，不会遗漏
+- 代码改动最小
+- 向后兼容，不影响已有的显式初始化代码
+
+### 测试结果
+
+待测试...
+
+
+---
+
+## 2024-12-29: TLS 回滚实验及根本原因分析
+
+### 背景
+
+在尝试修复 TLS 初始化问题后，多核启动仍然失败。用户要求尝试回滚 TLS 实现，重新评估如何正确实现 TLS。
+
+### 回滚方案
+
+将 tp 寄存器从"指向 Cpu 结构体的指针"改为"直接存储 CPU ID 值"：
+
+1. **移除 TrapFrame.cpu_ptr 字段**
+   - 删除 `trap_frame.rs` 中的 cpu_ptr 字段
+   - 简化 zero_init() 函数
+
+2. **修改 trap_entry.S**
+   - 删除从 TrapFrame 加载 cpu_ptr 到 tp 的代码
+   - tp 寄存器不再在 trap entry 时被修改
+
+3. **修改 cpu_id() 实现**
+   ```rust
+   #[inline]
+   pub fn cpu_id() -> usize {
+       let id: usize;
+       unsafe {
+           core::arch::asm!(
+               "mv {}, tp",  // 直接读取 tp 寄存器的值
+               out(reg) id
+           );
+       }
+       id
+   }
+   ```
+
+4. **修改启动代码**
+   - 主核：`li tp, 0` (设置 tp 为 CPU ID 0)
+   - 从核：`mv tp, {hartid}` (设置 tp 为对应的 hartid)
+
+### 测试结果
+
+回滚后的代码能够成功编译并启动，但在执行用户程序时崩溃：
+
+```
+Panicked at src/sync/preempt.rs:35 index out of bounds: the len is 8 but the index is 1187136
+```
+
+### 根本原因分析
+
+**问题**：tp 寄存器无法同时服务于内核和用户态
+
+1. **内核态需求**：tp 需要存储 CPU ID，用于 cpu_id() 函数
+2. **用户态需求**：tp 是 RISC-V ABI 规定的 Thread Local Storage 指针
+
+**崩溃原因**：
+- 当内核执行 `__restore` 返回用户态时，恢复了用户的 tp 值（用户的 TLS 指针）
+- 用户程序运行时，tp 包含用户的 TLS 地址（例如 0x121d00 = 1187136）
+- 当用户程序触发系统调用或中断，trap 回内核时，tp 仍然是用户的值
+- 内核代码调用 cpu_id() 时，直接读取 tp，得到错误的值 1187136
+- 使用这个值作为 CPUS 数组的索引，导致 index out of bounds panic
+
+**关键洞察**：
+- RISC-V ABI 规定 tp 寄存器用于 TLS，用户程序会使用它
+- 内核不能假设 tp 在 trap 时保持内核设置的值
+- 简单的"tp 存储 CPU ID"方案与用户态 TLS 冲突
+
+### 结论
+
+回滚实验证明了原始 TLS 实现方向是正确的：
+
+1. **必须在 trap entry 时设置 tp**
+   - 不能依赖启动时设置的 tp 值
+   - 必须在每次进入内核时重新设置 tp
+
+2. **TrapFrame.cpu_ptr 字段是必要的**
+   - 需要一个地方存储 CPU 指针
+   - trap_entry.S 从 TrapFrame 加载 cpu_ptr 到 tp
+
+3. **原始实现的问题不是设计，而是初始化**
+   - 设计是正确的：trap entry 时从 TrapFrame 加载 cpu_ptr
+   - 问题是某些 TrapFrame 的 cpu_ptr 未正确初始化
+
+### 下一步
+
+需要重新实现 TLS 支持，确保：
+1. 恢复 TrapFrame.cpu_ptr 字段
+2. 恢复 trap_entry.S 中的 tp 加载逻辑
+3. 彻底排查所有创建 TrapFrame 的位置，确保 cpu_ptr 正确初始化
+4. 特别关注：
+   - TaskStruct 创建时
+   - fork/clone 时
+   - exec 时
+   - 内核线程创建时
+

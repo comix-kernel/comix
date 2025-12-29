@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use riscv::register::sscratch;
 
 use crate::{
-    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap},
+    arch::{intr, mm::vaddr_to_paddr, platform, timer, trap, trap::TrapFrame},
     earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
@@ -87,6 +87,8 @@ pub fn rest_init() {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
+        // 先初始化 TrapFrame 为全 0
+        core::ptr::write(tf, TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base);
         // 设置 cpu_ptr 指向当前 CPU
         let cpu_ptr = {
@@ -203,6 +205,8 @@ fn create_kthreadd() {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
+        // 先初始化 TrapFrame 为全 0
+        core::ptr::write(tf, TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
         // 设置 cpu_ptr 指向当前 CPU
         let cpu_ptr = {
@@ -251,13 +255,15 @@ pub fn main(hartid: usize) {
     trap::init_boot_trap();
     platform::init();  // 完整的平台初始化 (包括 device_tree::init())
     time::init();
-    timer::init();
 
-    // 启动从核（在启用中断之前）
+    // 启动从核（在启用定时器中断之前）
     let num_cpus = unsafe { NUM_CPU };
     if num_cpus > 1 {
         boot_secondary_cpus(num_cpus);
     }
+
+    // 在从核启动完成后再初始化定时器，避免主核在等待时收到中断
+    timer::init();
 
     // 注意：中断在 init() 函数中启用，在设置好 sscratch 之后
     rest_init();
@@ -329,13 +335,22 @@ fn clear_bss() {
 /// 由 SBI HSM 调用启动，hartid 通过 a0 寄存器传递。
 ///
 /// # 初始化流程
-/// 1. 设置 tp 指向对应的 Cpu 结构体
-/// 2. 标记 CPU 上线
-/// 3. 进入 WFI 循环等待多核调度器实现
+/// 1. 初始化 boot trap 处理（设置 stvec）
+/// 2. 设置 tp 指向对应的 Cpu 结构体
+/// 3. 标记 CPU 上线
+/// 4. 禁用中断（避免 trap 处理问题）
+/// 5. 进入 WFI 循环等待多核调度器实现
 ///
-/// 注意：从核不初始化 trap 处理，继续使用 boot_trap_entry
+/// # 注意事项
+/// - 从核使用 boot_trap_entry（不需要 sscratch）
+/// - 从核禁用中断，避免在没有完整 trap 上下文时响应中断
+/// - 等待多核调度器实现后，从核将被唤醒并启用中断
 #[unsafe(no_mangle)]
 pub extern "C" fn secondary_start(hartid: usize) -> ! {
+    // 初始化 boot trap 处理，确保 stvec 指向 boot_trap_entry
+    // boot_trap_entry 不需要 sscratch，使用栈保存上下文
+    trap::init_boot_trap();
+
     // 设置 tp 指向对应的 Cpu 结构体
     {
         use crate::kernel::CPUS;
@@ -349,6 +364,14 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     CPU_ONLINE_MASK.fetch_or(1 << hartid, Ordering::Release);
 
     pr_info!("[SMP] CPU {} is online", hartid);
+
+    // 禁用中断，避免在 WFI 循环中响应中断
+    // 等待多核调度器实现后再启用
+    unsafe {
+        crate::arch::intr::disable_interrupts();
+    }
+
+    pr_info!("[SMP] CPU {} entering WFI loop with interrupts disabled", hartid);
 
     // 进入 WFI 循环，等待多核调度器实现
     loop {
