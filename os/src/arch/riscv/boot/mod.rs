@@ -90,12 +90,6 @@ pub fn rest_init() {
         // 先初始化 TrapFrame 为全 0
         core::ptr::write(tf, TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base);
-        // 设置 cpu_ptr 指向当前 CPU
-        let cpu_ptr = {
-            let _guard = crate::sync::PreemptGuard::new();
-            current_cpu() as *const _ as usize
-        };
-        (*tf).cpu_ptr = cpu_ptr;
     }
 
     let ra = task.context.ra;
@@ -208,12 +202,6 @@ fn create_kthreadd() {
         // 先初始化 TrapFrame 为全 0
         core::ptr::write(tf, TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
-        // 设置 cpu_ptr 指向当前 CPU
-        let cpu_ptr = {
-            let _guard = crate::sync::PreemptGuard::new();
-            current_cpu() as *const _ as usize
-        };
-        (*tf).cpu_ptr = cpu_ptr;
     }
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());

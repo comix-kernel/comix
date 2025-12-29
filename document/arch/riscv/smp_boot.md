@@ -48,36 +48,44 @@ boot/mod.rs (main)
 启动第一个任务 (rest_init)
 ```
 
-关键代码位于 [`os/src/arch/riscv/boot/mod.rs`](/os/src/arch/riscv/boot/mod.rs) 的 `main()` 函数（第 223-270 行）：
+关键代码位于 [`os/src/arch/riscv/boot/mod.rs`](/os/src/arch/riscv/boot/mod.rs) 的 `main()` 函数（第 211-258 行）：
 
 ```rust
-pub fn main(hartid: usize, device_tree_paddr: usize) -> ! {
+pub fn main(hartid: usize) {
     // 1. 清空 BSS
     clear_bss();
 
     // 2. 初始化内存管理
-    mm_init(device_tree_paddr);
+    let kernel_space = mm::init();
 
-    // 3. 初始化 CPUS 并设置 tp
-    crate::kernel::init_cpus();
-    unsafe {
-        let cpu0_ptr = crate::kernel::cpu_of(0) as *const _ as usize;
-        core::arch::asm!("mv tp, {}", in(reg) cpu0_ptr);
+    // 3. 初始化 CPUS 并设置 tp 指向 CPU 0
+    {
+        use crate::kernel::CPUS;
+        let cpu_ptr = &*CPUS.get_of(0) as *const _ as usize;
+        unsafe {
+            core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
+        }
     }
 
-    // 4. 激活内核地址空间
-    activate_kernel_space();
+    // 4. 激活内核地址空间并设置 current_memory_space
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(kernel_space);
+    }
 
     // 5. 初始化 trap、平台、时间
-    trap_init();
-    platform_init(device_tree_paddr);
-    time_init();
+    trap::init_boot_trap();
+    platform::init();
+    time::init();
 
-    // 6. 启动从核心
-    boot_secondary_cpus(hartid);
+    // 6. 启动从核心（在启用定时器中断之前）
+    let num_cpus = unsafe { NUM_CPU };
+    if num_cpus > 1 {
+        boot_secondary_cpus(num_cpus);
+    }
 
     // 7. 初始化定时器（在从核心启动后）
-    timer_init();
+    timer::init();
 
     // 8. 启动第一个任务
     rest_init();
@@ -110,71 +118,73 @@ secondary_start() [从核心]
 
 #### 2.2.1 主核心侧：启动从核心
 
-`boot_secondary_cpus()` 函数（第 397-445 行）负责启动所有从核心：
+`boot_secondary_cpus()` 函数（第 388-439 行）负责启动所有从核心：
 
 ```rust
-fn boot_secondary_cpus(boot_hartid: usize) {
-    let num_cpus = NUM_CPU.load(Ordering::Relaxed);
+pub fn boot_secondary_cpus(num_cpus: usize) {
+    if num_cpus <= 1 {
+        pr_info!("[SMP] Single CPU mode, skipping secondary boot");
+        return;
+    }
 
-    for hartid in 0..num_cpus {
-        if hartid == boot_hartid {
-            continue; // 跳过主核心
-        }
+    pr_info!("[SMP] Booting {} secondary CPUs...", num_cpus - 1);
 
-        // 获取从核心的物理栈地址
-        let stack_top = get_secondary_stack_top(hartid);
+    // 主核标记上线
+    CPU_ONLINE_MASK.fetch_or(1, Ordering::Release);
 
-        // 通过 SBI HSM 启动从核心
-        let ret = sbi_hart_start(
-            hartid,
-            secondary_sbi_entry as usize, // 入口地址（物理地址）
-            stack_top,                     // 栈顶地址
-        );
+    // 使用 SBI HSM 调用启动每个从核
+    for hartid in 1..num_cpus {
+        let start_vaddr = secondary_sbi_entry as usize;
+        let start_paddr = unsafe { crate::arch::mm::vaddr_to_paddr(start_vaddr) };
 
-        if ret != 0 {
-            pr_err!("[SMP] Failed to start CPU {}: error {}", hartid, ret);
+        let ret = crate::arch::lib::sbi::hart_start(hartid, start_paddr, hartid);
+        if ret.error != 0 {
+            pr_err!("[SMP] Failed to start hart {}: SBI error {}", hartid, ret.error);
         }
     }
 
-    // 等待所有核心上线（超时 10M 周期）
-    let timeout = 10_000_000;
+    // 等待所有核心上线（带超时）
     let expected_mask = (1 << num_cpus) - 1;
+    let mut timeout = 10_000_000;
 
-    for _ in 0..timeout {
-        if CPU_ONLINE_MASK.load(Ordering::Acquire) == expected_mask {
-            pr_info!("[SMP] All {} CPUs are online", num_cpus);
-            return;
+    while CPU_ONLINE_MASK.load(Ordering::Acquire) != expected_mask {
+        if timeout == 0 {
+            let current_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
+            panic!(
+                "[SMP] Timeout waiting for secondary CPUs! Expected: {:#b}, got: {:#b}",
+                expected_mask, current_mask
+            );
         }
+        timeout -= 1;
+        core::hint::spin_loop();
     }
 
-    pr_warn!("[SMP] Timeout waiting for all CPUs to come online");
+    pr_info!("[SMP] All {} CPUs are online!", num_cpus);
 }
 ```
 
 #### 2.2.2 从核心侧：初始化和空挂
 
-从核心从 `entry.S` 的 `secondary_sbi_entry` 开始执行，经过页表和栈设置后，调用 `secondary_start()` 函数（第 350-383 行）：
+从核心从 `entry.S` 的 `secondary_sbi_entry` 开始执行，经过页表和栈设置后，调用 `secondary_start()` 函数（第 333-374 行）：
 
 ```rust
 pub extern "C" fn secondary_start(hartid: usize) -> ! {
     // 1. 初始化 boot trap 处理
-    unsafe {
-        core::arch::asm!(
-            "la t0, boot_trap_entry",
-            "csrw stvec, t0",
-        );
-    }
+    trap::init_boot_trap();
 
     // 2. 设置 tp 指向当前 CPU 的 Cpu 结构
-    unsafe {
-        let cpu_ptr = crate::kernel::cpu_of(hartid) as *const _ as usize;
-        core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
+    {
+        use crate::kernel::CPUS;
+        let cpu_ptr = &*CPUS.get_of(hartid) as *const _ as usize;
+        unsafe {
+            core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
+        }
     }
 
     // 3. 标记 CPU 在线
     CPU_ONLINE_MASK.fetch_or(1 << hartid, Ordering::Release);
 
-    pr_info!("[SMP] CPU {} started successfully", hartid);
+    pr_info!("[SMP] CPU {} is online", hartid);
 
     // 4. 禁用中断
     unsafe {
@@ -186,7 +196,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     // 5. 进入 WFI 循环
     loop {
         unsafe {
-            core::arch::asm!("wfi"); // Wait For Interrupt
+            core::arch::asm!("wfi");
         }
     }
 }
