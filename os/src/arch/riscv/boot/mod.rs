@@ -288,47 +288,48 @@ fn clear_bss() {
     });
 }
 
-// 由于最近的更新使得create_kthreadd内部会调用current_task等函数
-// 该单元测试已无法在不完整的测试环境下运行
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{kassert, test_case};
 
-//     use core::sync::atomic::Ordering;
+    /// 测试 NUM_CPU 设置正确
+    test_case!(test_num_cpu, {
+        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        kassert!(num_cpu >= 1);
+        kassert!(num_cpu <= crate::config::MAX_CPU_COUNT);
+    });
 
-//     // 测试 create_kthreadd：应创建一个任务并加入 TASK_MANAGER
-//     use crate::{
-//         arch::boot::{create_kthreadd, kthreadd},
-//         kassert,
-//         kernel::{TASK_MANAGER, TaskManagerTrait},
-//         test_case,
-//     };
+    /// 测试 CPU 上线掩码（多核环境）
+    test_case!(test_cpu_online_mask, {
+        use core::sync::atomic::Ordering;
 
-//     test_case!(test_create_kthreadd, {
-//         // 记录当前已有任务数量
-//         let before_count = {
-//             let mgr = TASK_MANAGER.lock();
-//             mgr.task_count()
-//         };
-//         create_kthreadd();
-//         // 找到新增的任务（PID=tid，入口=kthreadd）
-//         let after_count = {
-//             let mgr = TASK_MANAGER.lock();
-//             mgr.task_count()
-//         };
-//         kassert!(after_count == before_count + 1);
-//         // 查找新 tid
-//         let new_tid = after_count as u32; // 简单假设 tid 连续分配
-//         let task = TASK_MANAGER.lock().get_task(new_tid).expect("task missing");
-//         let g = task.lock();
-//         let tf = g.trap_frame_ptr.load(Ordering::SeqCst);
-//         kassert!(g.tid == new_tid);
-//         kassert!(g.pid == new_tid); // kthreadd 设 pid=tid
-//         kassert!(unsafe { (*tf).sepc } as usize == kthreadd as usize);
-//     });
+        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        let actual_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
 
-//     // 由于 kernel_execve / rest_init / init / kthreadd 涉及不可返回的流控与实际陷入/页表切换，
-//     // 在单元测试环境下不执行它们（需要集成测试或仿真环境）。
-// }
+        // 在测试模式下，如果 CPU_ONLINE_MASK 为 0，说明 boot_secondary_cpus 未被调用
+        // 这是正常的，因为测试框架跳过了正常的启动流程
+        if actual_mask == 0 {
+            // 跳过此测试
+            return;
+        }
+
+        let expected_mask = (1 << num_cpu) - 1;
+
+        // 验证所有 CPU 都已上线
+        kassert!(actual_mask == expected_mask);
+
+        // 验证主核已上线
+        kassert!((actual_mask & 1) != 0);
+
+        // 如果是多核，验证从核也已上线
+        if num_cpu > 1 {
+            for hartid in 1..num_cpu {
+                kassert!((actual_mask & (1 << hartid)) != 0);
+            }
+        }
+    });
+}
 
 /// 从核入口函数
 ///
