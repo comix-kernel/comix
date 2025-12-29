@@ -52,6 +52,40 @@ impl<T> PerCpu<T> {
         PerCpu { data }
     }
 
+    /// 创建 Per-CPU 变量 (带 CPU ID)
+    ///
+    /// - init: 初始化函数，接收 CPU ID 作为参数，为每个 CPU 创建一个数据副本
+    ///
+    /// # Panics
+    ///
+    /// 如果 NUM_CPU 未设置或为 0，会 panic
+    pub fn new_with_id<F: Fn(usize) -> T>(init: F) -> Self {
+        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        assert!(num_cpu > 0, "NUM_CPU must be set before creating PerCpu");
+
+        let mut data = Vec::with_capacity(num_cpu);
+        for i in 0..num_cpu {
+            data.push(CacheAligned::new(init(i)));
+        }
+        PerCpu { data }
+    }
+
+    /// 创建 Per-CPU 变量 (指定数量和 CPU ID)
+    ///
+    /// - count: CPU 数量
+    /// - init: 初始化函数，接收 CPU ID 作为参数，为每个 CPU 创建一个数据副本
+    ///
+    /// 用于在 NUM_CPU 设置之前创建 PerCpu 实例（例如 CPUS 的 lazy_static 初始化）
+    pub fn new_with_id_and_count<F: Fn(usize) -> T>(count: usize, init: F) -> Self {
+        assert!(count > 0, "CPU count must be greater than 0");
+
+        let mut data = Vec::with_capacity(count);
+        for i in 0..count {
+            data.push(CacheAligned::new(init(i)));
+        }
+        PerCpu { data }
+    }
+
     /// 获取当前 CPU 的数据（只读）
     ///
     /// # Safety

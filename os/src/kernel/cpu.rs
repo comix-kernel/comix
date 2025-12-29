@@ -2,11 +2,12 @@
 //!
 //! 包含 CPU 结构体及其相关操作
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use crate::mm::activate;
 use crate::{
-    config::MAX_CPU_COUNT, kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::SpinLock,
+    kernel::task::SharedTask,
+    mm::memory_space::MemorySpace,
+    sync::{PerCpu, SpinLock},
 };
 use lazy_static::lazy_static;
 
@@ -14,26 +15,23 @@ pub static mut NUM_CPU: usize = 1;
 pub static mut CLOCK_FREQ: usize = 12_500_000;
 
 lazy_static! {
-    pub static ref CPUS: Vec<SpinLock<Cpu>> = {
-        let num_cpu = unsafe { NUM_CPU };
-        assert!(
-            num_cpu > 0 && num_cpu <= MAX_CPU_COUNT,
-            "NUM_CPU ({}) must be between 1 and MAX_CPU_COUNT ({})",
-            num_cpu,
-            MAX_CPU_COUNT
-        );
-        let mut cpus = Vec::with_capacity(num_cpu);
-        for _ in 0..num_cpu {
-            cpus.push(SpinLock::new(Cpu::new()));
-        }
-        cpus
+    /// Per-CPU 数据: 每个 CPU 的状态
+    ///
+    /// 使用 PerCpu 容器自动实现缓存行对齐，避免伪共享。
+    /// 每个 CPU 只访问自己的 Cpu 实例，不需要锁保护。
+    ///
+    /// 注意：使用 MAX_CPU_COUNT 而不是 NUM_CPU，避免 lazy_static 初始化时机问题
+    pub static ref CPUS: PerCpu<Cpu> = {
+        use crate::config::MAX_CPU_COUNT;
+        PerCpu::new_with_id_and_count(MAX_CPU_COUNT, |cpu_id| Cpu::new_with_id(cpu_id))
     };
 }
 
 /// CPU 结构体
+#[repr(C)]
 pub struct Cpu {
-    /// 任务上下文
-    /// 用于在调度器中保存和恢复 CPU 寄存器状态
+    /// CPU ID (必须是第一个字段,用于快速访问)
+    pub cpu_id: usize,
     /// 当前运行的任务
     pub current_task: Option<SharedTask>,
     /// 当前使用的内存空间
@@ -45,6 +43,16 @@ impl Cpu {
     /// 创建一个新的 CPU 实例
     pub fn new() -> Self {
         Cpu {
+            cpu_id: 0,
+            current_task: None,
+            current_memory_space: None,
+        }
+    }
+
+    /// 创建一个新的 CPU 实例 (指定 CPU ID)
+    pub fn new_with_id(cpu_id: usize) -> Self {
+        Cpu {
+            cpu_id,
             current_task: None,
             current_memory_space: None,
         }
@@ -76,8 +84,115 @@ impl Cpu {
     }
 }
 
-/// 获取当前 CPU 的引用
-pub fn current_cpu() -> &'static SpinLock<Cpu> {
-    let cpu_id = crate::arch::kernel::cpu::cpu_id();
-    &CPUS[cpu_id]
+/// 获取当前 CPU 的引用 (可变)
+///
+/// # Safety
+///
+/// 调用者必须确保在访问期间禁用抢占 (防止任务迁移到其他 CPU)。
+#[inline]
+pub fn current_cpu() -> &'static mut Cpu {
+    CPUS.get_mut()
+}
+
+/// 获取指定 CPU 的引用 (只读)
+///
+/// 用于跨核访问，例如负载均衡时查看其他 CPU 的任务。
+#[inline]
+pub fn cpu_of(cpu_id: usize) -> &'static Cpu {
+    CPUS.get_of(cpu_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{kassert, test_case};
+
+    /// 测试 CPUS 初始化
+    test_case!(test_cpus_initialization, {
+        let num_cpu = unsafe { NUM_CPU };
+        for cpu_id in 0..num_cpu {
+            let cpu = CPUS.get_of(cpu_id);
+            kassert!(cpu.cpu_id == cpu_id);
+        }
+    });
+
+    /// 测试 cpu_id() 函数
+    test_case!(test_cpu_id, {
+        use crate::arch::kernel::cpu::cpu_id;
+        use crate::sync::PreemptGuard;
+
+        let _guard = PreemptGuard::new();
+        let id = cpu_id();
+        kassert!(id < unsafe { NUM_CPU });
+    });
+
+    /// 测试 current_cpu() 函数
+    test_case!(test_current_cpu, {
+        use crate::sync::PreemptGuard;
+
+        let _guard = PreemptGuard::new();
+        let cpu = current_cpu();
+        kassert!(cpu.cpu_id < unsafe { NUM_CPU });
+    });
+
+    /// 测试 cpu_of() 函数
+    test_case!(test_cpu_of, {
+        let cpu0 = cpu_of(0);
+        kassert!(cpu0.cpu_id == 0);
+
+        let num_cpu = unsafe { NUM_CPU };
+        if num_cpu > 1 {
+            let cpu1 = cpu_of(1);
+            kassert!(cpu1.cpu_id == 1);
+        }
+    });
+
+    /// 测试 PerCpu 数据独立性（多核场景）
+    test_case!(test_per_cpu_independence, {
+        use crate::sync::{PerCpu, PreemptGuard};
+        use core::sync::atomic::{AtomicUsize, Ordering};
+
+        let per_cpu = PerCpu::new(|| AtomicUsize::new(0));
+
+        // 在当前 CPU 上修改值
+        {
+            let _guard = PreemptGuard::new();
+            let counter = per_cpu.get();
+            counter.store(100, Ordering::Relaxed);
+        }
+
+        // 验证当前 CPU 的值
+        {
+            let _guard = PreemptGuard::new();
+            let counter = per_cpu.get();
+            kassert!(counter.load(Ordering::Relaxed) == 100);
+        }
+
+        // 验证其他 CPU 的值仍然是初始值
+        let num_cpu = unsafe { NUM_CPU };
+        let current_id = {
+            let _guard = PreemptGuard::new();
+            crate::arch::kernel::cpu::cpu_id()
+        };
+
+        for cpu_id in 0..num_cpu {
+            if cpu_id != current_id {
+                let counter = per_cpu.get_of(cpu_id);
+                kassert!(counter.load(Ordering::Relaxed) == 0);
+            }
+        }
+    });
+
+    /// 测试 PerCpu 的 new_with_id 初始化
+    test_case!(test_per_cpu_with_id, {
+        use crate::sync::PerCpu;
+
+        let per_cpu = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
+
+        let num_cpu = unsafe { NUM_CPU };
+        for cpu_id in 0..num_cpu {
+            let value = per_cpu.get_of(cpu_id);
+            kassert!(*value == cpu_id * 10);
+        }
+    });
 }
