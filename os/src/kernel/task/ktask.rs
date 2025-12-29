@@ -80,6 +80,8 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // SAFETY: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
+        // 先初始化 TrapFrame 为全 0
+        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(
             entry_point as usize,
             super::terminate_task as usize,
