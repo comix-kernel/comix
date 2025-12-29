@@ -66,7 +66,7 @@ gdb:
 		-ex "add-symbol-file ../data/bin/busybox"\
         -ex "c"
 
-# 目标 4: debug (一键启动，QEMU在前台，需要.另一个终端运行gdb)
+# 目标 4: debug (一键启动，QEMU在前台，需要另一个终端运行gdb)
 debug:
 	@cargo build --target $(TARGET)
 	@echo "======================================================="
