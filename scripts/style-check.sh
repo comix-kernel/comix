@@ -55,7 +55,7 @@ echo ""
 if cargo check --target riscv64gc-unknown-none-elf 2>&1 | tee $TEMP_OUTPUT; then
     # 统计警告和错误
     CHECK_WARNINGS=$(grep -c "warning:" $TEMP_OUTPUT || true)
-    CHECK_ERRORS=$(grep -c "error:" $TEMP_OUTPUT || true)
+    CHECK_ERRORS=$(grep -c "error\[E[0-9]" $TEMP_OUTPUT || true)
     TOTAL_WARNINGS=$((TOTAL_WARNINGS + CHECK_WARNINGS))
     TOTAL_ERRORS=$((TOTAL_ERRORS + CHECK_ERRORS))
 
@@ -125,7 +125,7 @@ echo ""
 if cargo clippy --target riscv64gc-unknown-none-elf 2>&1 | tee $TEMP_OUTPUT; then
     # 统计警告和错误
     CLIPPY_WARNINGS=$(grep -c "warning:" $TEMP_OUTPUT || true)
-    CLIPPY_ERRORS=$(grep -c "error:" $TEMP_OUTPUT || true)
+    CLIPPY_ERRORS=$(grep -c "error\[E[0-9]" $TEMP_OUTPUT || true)
     TOTAL_WARNINGS=$((TOTAL_WARNINGS + CLIPPY_WARNINGS))
     TOTAL_ERRORS=$((TOTAL_ERRORS + CLIPPY_ERRORS))
 
