@@ -2,6 +2,7 @@
 pub mod boot;
 pub mod constant;
 pub mod intr;
+pub mod ipi;
 pub mod kernel;
 pub mod lib;
 pub mod mm;
