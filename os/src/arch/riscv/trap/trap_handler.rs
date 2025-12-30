@@ -76,6 +76,10 @@ pub fn user_trap(
             crate::arch::timer::set_next_trigger();
             check_timer();
         }
+        Trap::Interrupt(1) => {
+            // 软件中断（IPI）
+            crate::arch::ipi::handle_ipi();
+        }
         _ => {
             // 立即读取相关寄存器的当前值
             let stval_val = stval::read();
@@ -234,6 +238,10 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
             // 处理时钟中断
             crate::arch::timer::set_next_trigger();
             check_timer();
+        }
+        Trap::Interrupt(1) => {
+            // 软件中断（IPI）
+            crate::arch::ipi::handle_ipi();
         }
         // 中断处理时发生异常一般是致命的
         Trap::Exception(e) => {
