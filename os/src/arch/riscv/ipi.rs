@@ -35,16 +35,7 @@ pub enum IpiType {
 /// Per-CPU 待处理 IPI 标志
 ///
 /// 每个 CPU 一个原子变量，存储待处理的 IPI 类型位掩码
-static IPI_PENDING: [AtomicU32; MAX_CPU_COUNT] = [
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-    AtomicU32::new(0),
-];
+static IPI_PENDING: [AtomicU32; MAX_CPU_COUNT] = [const { AtomicU32::new(0) }; MAX_CPU_COUNT];
 
 /// 发送 IPI 到指定 CPU
 ///
@@ -100,19 +91,12 @@ pub fn send_reschedule_ipi(cpu: usize) {
 ///
 /// 通知所有其他 CPU 刷新 TLB
 pub fn send_tlb_flush_ipi_all() {
-    let current = super::kernel::cpu::cpu_id();
+    let current_cpu_id = super::kernel::cpu::cpu_id();
     let num_cpu = unsafe { crate::kernel::NUM_CPU };
-    let mut mask = 0usize;
-
-    for cpu in 0..num_cpu {
-        if cpu != current {
-            IPI_PENDING[cpu].fetch_or(IpiType::TlbFlush as u32, Ordering::Release);
-            mask |= 1 << cpu;
-        }
-    }
+    let mask = ((1 << num_cpu) - 1) & !(1 << current_cpu_id);
 
     if mask != 0 {
-        crate::arch::lib::sbi::send_ipi(mask);
+        send_ipi_many(mask, IpiType::TlbFlush);
     }
 }
 
