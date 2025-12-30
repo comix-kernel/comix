@@ -11,6 +11,8 @@
 ### 导航
 
 - **[自旋锁 (`SpinLock`)](./spin_lock.md)**: 用于保护短临界区的互斥锁。
+- **[读写锁 (`RwLock`)](./rwlock.md)**: 允许多个读者并发访问或单个写者独占访问。
+- **[票号锁 (`TicketLock`)](./ticket_lock.md)**: 提供公平性保证的自旋锁，按 FIFO 顺序获取。
 - **[睡眠锁 (`SleepLock`)](./sleep_lock.md)**: 用于保护长临界区，会使等待者任务睡眠。
 - **[中断屏蔽 (`IntrGuard`)](./intr_guard.md)**: 用于在单核上实现临界区的底层机制。
 - **[Per-CPU 变量 (`PerCpu`)](./per_cpu.md)**: 每个 CPU 维护独立数据副本，避免锁竞争。
@@ -33,6 +35,8 @@
 | 原语             | 源码链接                                                                              | 核心机制                                       | 适用场景                                                                 |
 |------------------|---------------------------------------------------------------------------------------|------------------------------------------------|--------------------------------------------------------------------------|
 | **`SpinLock<T>`**| [`os/src/sync/spin_lock.rs`](/os/src/sync/spin_lock.rs)                | 屏蔽中断 + 原子操作自旋                        | 保护访问耗时**极短**的共享数据，例如修改一个计数器或链表指针。             |
+| **`RwLock<T>`**  | [`os/src/sync/rwlock.rs`](/os/src/sync/rwlock.rs)                      | 原子操作 + 读写分离                            | 读多写少场景，允许多个读者并发访问。                                     |
+| **`TicketLock<T>`**| [`os/src/sync/ticket_lock.rs`](/os/src/sync/ticket_lock.rs)          | 原子操作 + 票号机制                            | 需要严格公平性的场景，防止饥饿。                                         |
 | **`SleepLock`**  | [`os/src/sync/sleep_lock.rs`](/os/src/sync/sleep_lock.rs)              | 原子操作 + 任务睡眠 (`WaitQueue`)              | 保护访问耗时**较长**的共享数据，例如执行I/O操作或复杂的计算。            |
 | **`IntrGuard`**  | [`os/src/sync/intr_guard.rs`](/os/src/sync/intr_guard.rs)              | 屏蔽/恢复中断 (RAII)                           | 作为其他锁的底层实现，或在确定为单核且无需锁的场景下临时屏蔽中断。       |
 | **`PerCpu<T>`**  | [`os/src/sync/per_cpu.rs`](/os/src/sync/per_cpu.rs)                    | 每核独立数据副本 + 抢占控制                    | 频繁访问的统计计数器、Per-CPU 运行队列、对象缓存等无锁场景。            |

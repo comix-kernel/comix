@@ -1,8 +1,6 @@
 //! 时间相关功能
 
-use spin::RwLock;
-
-use crate::{device::RTC_DRIVERS, pr_info, vfs::TimeSpec};
+use crate::{device::RTC_DRIVERS, pr_info, sync::RwLock, vfs::TimeSpec};
 
 lazy_static::lazy_static! {
     /// 墙上时钟，记录自 1970-01-01 00:00:00 UTC 以来的时间（以秒为单位）

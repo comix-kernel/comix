@@ -26,6 +26,8 @@
 
 - [同步机制概述](sync/README.md)
   - [自旋锁](sync/spin_lock.md)
+  - [读写锁](sync/rwlock.md)
+  - [票号锁](sync/ticket_lock.md)
   - [睡眠锁](sync/sleep_lock.md)
   - [中断保护](sync/intr_guard.md)
   - [Per-CPU 变量](sync/per_cpu.md)
