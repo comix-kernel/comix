@@ -106,10 +106,12 @@ impl<T> RwLock<T> {
 
         // 等待直到可以设置写者标志
         loop {
-            if self
-                .state
-                .compare_exchange_weak(0, WRITER_BIT, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
+            // 先检查 state 是否为 0，减少 CAS 失败时的总线争用
+            if self.state.load(Ordering::Relaxed) == 0
+                && self
+                    .state
+                    .compare_exchange_weak(0, WRITER_BIT, Ordering::Acquire, Ordering::Relaxed)
+                    .is_ok()
             {
                 return RwLockWriteGuard {
                     lock: self,
@@ -338,9 +340,11 @@ mod tests {
     test_case!(test_rwlock_try_read, {
         let lock = RwLock::new(42);
 
-        let guard = lock.try_read();
-        kassert!(guard.is_some());
-        kassert!(*guard.unwrap() == 42);
+        if let Some(guard) = lock.try_read() {
+            kassert!(*guard == 42);
+        } else {
+            kassert!(false); // try_read 应该成功
+        }
     });
 
     test_case!(test_rwlock_try_write, {
