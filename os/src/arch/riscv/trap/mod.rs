@@ -26,6 +26,10 @@ pub fn init_boot_trap() {
 /// 初始化陷阱处理程序
 pub fn init() {
     set_trap_entry();
+    // 启用软件中断（用于 IPI）
+    unsafe {
+        crate::arch::intr::enable_software_interrupt();
+    }
 }
 
 /// 恢复到陷阱前的上下文
