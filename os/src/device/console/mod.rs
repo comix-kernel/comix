@@ -3,8 +3,8 @@
 pub mod frame_console;
 pub mod uart_console;
 
+use crate::sync::RwLock;
 use alloc::{string::String, sync::Arc, vec::Vec};
-use spin::RwLock;
 
 lazy_static::lazy_static! {
     /// 全局控制台列表

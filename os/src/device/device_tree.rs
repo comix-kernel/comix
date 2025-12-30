@@ -5,10 +5,10 @@ use crate::{
     kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
     pr_info,
+    sync::RwLock,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 use fdt::{Fdt, node::FdtNode};
-use spin::RwLock;
 /// 指向设备树的指针，在启动时由引导程序设置
 #[unsafe(no_mangle)]
 pub static mut DTP: usize = 0x114514; // 占位地址，实际由引导程序设置
