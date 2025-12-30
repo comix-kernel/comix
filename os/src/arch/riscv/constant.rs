@@ -30,5 +30,7 @@ pub const USER_TOP: usize = 0x0000_003f_ffff_ffff;
 pub const IRQ_MIN: usize = usize::MAX / 2;
 pub const IRQ_MAX: usize = usize::MAX;
 
+/// 软件中断（用于 IPI）
+pub const SUPERVISOR_SOFTWARE: usize = usize::MAX / 2 + 1 + 1;
 pub const TIMER: usize = usize::MAX / 2 + 1 + 5;
 pub const SUPERVISOR_EXTERNAL: usize = usize::MAX / 2 + 1 + 8;
