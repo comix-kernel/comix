@@ -37,20 +37,17 @@ impl File for StdinFile {
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
-        use crate::arch::lib::sbi::console_getchar;
+        use crate::console::getchar as console_getchar;
 
         let mut count = 0;
         for byte in buf.iter_mut() {
-            let ch = console_getchar();
-            // SBI console_getchar 返回 -1 (usize::MAX) 表示无输入
-            if ch == usize::MAX {
-                break;
-            }
-
-            *byte = ch as u8;
-            count += 1;
-
-            if ch == b'\n' as usize {
+            if let Some(ch) = console_getchar() {
+                *byte = ch;
+                count += 1;
+                if ch == b'\n' {
+                    break;
+                }
+            } else {
                 break;
             }
         }
@@ -108,9 +105,14 @@ impl File for StdoutFile {
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        use crate::arch::lib::sbi::console_putchar;
-        for &byte in buf {
-            console_putchar(byte as usize);
+        // 将整个缓冲区作为字符串输出，在一个锁内完成
+        if let Ok(s) = core::str::from_utf8(buf) {
+            crate::console::write_str(s);
+        } else {
+            // 如果不是有效 UTF-8，逐字节输出
+            for &byte in buf {
+                crate::console::putchar(byte);
+            }
         }
         Ok(buf.len())
     }
@@ -159,9 +161,14 @@ impl File for StderrFile {
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        use crate::arch::lib::sbi::console_putchar;
-        for &byte in buf {
-            console_putchar(byte as usize);
+        // 将整个缓冲区作为字符串输出，在一个锁内完成
+        if let Ok(s) = core::str::from_utf8(buf) {
+            crate::console::write_str(s);
+        } else {
+            // 如果不是有效 UTF-8，逐字节输出
+            for &byte in buf {
+                crate::console::putchar(byte);
+            }
         }
         Ok(buf.len())
     }
