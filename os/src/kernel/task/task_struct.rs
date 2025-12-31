@@ -63,6 +63,12 @@ pub struct Task {
     pub priority: u8,
     /// 任务所在的处理器id。暂未使用
     pub processor_id: usize,
+    /// 任务当前运行的 CPU 核心
+    /// None 表示任务未运行在任何 CPU 上
+    pub on_cpu: Option<usize>,
+    /// CPU 亲和性掩码
+    /// -1 表示可以在任何 CPU 上运行
+    pub cpu_affinity: i32,
     /// 任务当前的状态
     pub state: TaskState,
     /// 任务的id
@@ -382,6 +388,8 @@ impl Task {
             preempt_count: 0,
             priority: 0,
             processor_id: 0,
+            on_cpu: None,
+            cpu_affinity: -1,
             state: TaskState::Running,
             tid,
             pid,

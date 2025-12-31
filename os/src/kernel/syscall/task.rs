@@ -14,9 +14,9 @@ use crate::{
     },
     ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{
-        FUTEX_MANAGER, SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE,
-        TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
-        exit_process, schedule, sleep_task_with_block, sleep_task_with_guard_and_block,
+        FUTEX_MANAGER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
+        TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
+        sleep_task_with_block, sleep_task_with_guard_and_block,
         syscall::util::{get_args_safe, get_path_safe},
         time::{REALTIME, realtime_now},
         yield_task,
@@ -244,8 +244,21 @@ pub fn clone(
         .lock()
         .push(child_task.clone());
 
+    // 选择目标 CPU（负载均衡）
+    let target_cpu = crate::kernel::pick_cpu();
+    child_task.lock().on_cpu = Some(target_cpu);
+
     TASK_MANAGER.lock().add_task(child_task.clone());
-    SCHEDULER.lock().add_task(child_task);
+    crate::kernel::scheduler_of(target_cpu)
+        .lock()
+        .add_task(child_task.clone());
+
+    // 如果目标 CPU 不是当前 CPU，发送 IPI
+    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    if target_cpu != current_cpu {
+        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+    }
+
     tid as c_int
 }
 
