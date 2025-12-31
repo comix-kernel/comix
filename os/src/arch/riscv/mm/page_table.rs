@@ -242,8 +242,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 // 创建新的叶子 PTE，设置 PPN 和标志位 (VALID 必须设置)
                 *pte = PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::VALID);
 
-                // 刷新所有 CPU 的 TLB 确保新映射对所有 CPU 可见
-                Self::tlb_flush_all_cpus(vpn);
                 return Ok(());
             } else {
                 // 中间级别 - 需要继续向下遍历
@@ -306,7 +304,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             if pte.is_huge() || level == 0 {
                 // 清空 PTE 以解除映射
                 pte.clear();
-                Self::tlb_flush_all_cpus(vpn); // 刷新所有 CPU 的 TLB
                 return Ok(());
             }
 
@@ -357,7 +354,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             if pte.is_huge() || level == 0 {
                 // 设置新的标志位 (VALID 必须保持设置)
                 pte.set_flags(flags | UniversalPTEFlag::VALID);
-                Self::tlb_flush_all_cpus(vpn); // 刷新所有 CPU 的 TLB
                 return Ok(());
             }
 
@@ -439,6 +435,114 @@ impl PageTableInner {
         if num_cpu > 1 {
             send_tlb_flush_ipi_all();
         }
+    }
+
+    /// 带批处理支持的映射方法
+    pub fn map_with_batch(
+        &mut self,
+        vpn: Vpn,
+        ppn: Ppn,
+        page_size: PageSize,
+        flags: UniversalPTEFlag,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::map(self, vpn, ppn, page_size, flags)?;
+        // 总是刷新本地 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        // 只有在非批处理模式下才发送 IPI
+        if batch.is_none() {
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+        }
+        Ok(())
+    }
+
+    /// 带批处理支持的解除映射方法
+    pub fn unmap_with_batch(
+        &mut self,
+        vpn: Vpn,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::unmap(self, vpn)?;
+        // 总是刷新本地 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        // 只有在非批处理模式下才发送 IPI
+        if batch.is_none() {
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+        }
+        Ok(())
+    }
+
+    /// 带批处理支持的更新权限方法
+    pub fn update_flags_with_batch(
+        &mut self,
+        vpn: Vpn,
+        flags: UniversalPTEFlag,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::update_flags(self, vpn, flags)?;
+        // 总是刷新本地 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        // 只有在非批处理模式下才发送 IPI
+        if batch.is_none() {
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+        }
+        Ok(())
+    }
+}
+
+/// TLB 批量刷新上下文
+///
+/// 用于在批量页表操作期间延迟 TLB 刷新，减少 IPI 数量
+pub struct TlbBatchContext {
+    enabled: bool,
+}
+
+impl TlbBatchContext {
+    /// 创建新的批处理上下文
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+
+    /// 在批处理上下文中执行操作
+    pub fn execute<F, R>(f: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        let mut ctx = Self::new();
+        let result = f(&mut ctx);
+        ctx.flush();
+        result
+    }
+
+    /// 刷新所有待处理的 TLB 条目
+    pub fn flush(&mut self) {
+        if self.enabled {
+            // 刷新本地 TLB
+            unsafe {
+                core::arch::asm!("sfence.vma");
+            }
+            // 发送一次 IPI 到所有其他 CPU
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+            self.enabled = false;
+        }
+    }
+}
+
+impl Drop for TlbBatchContext {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 

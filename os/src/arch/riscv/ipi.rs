@@ -116,6 +116,12 @@ pub fn send_tlb_flush_ipi_all() {
 pub fn handle_ipi() {
     let cpu = super::kernel::cpu::cpu_id();
 
+    // 清除 SSIP 位（软件中断挂起位）
+    // SAFETY: 清除 sip 寄存器的 SSIP 位是安全的，这是标准的中断处理流程
+    unsafe {
+        core::arch::asm!("csrc sip, {}", in(reg) 1 << 1);
+    }
+
     // 读取并清除待处理标志
     let pending = IPI_PENDING[cpu].swap(0, Ordering::AcqRel);
 

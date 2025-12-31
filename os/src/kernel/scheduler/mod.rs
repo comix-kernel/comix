@@ -145,6 +145,9 @@ pub fn wake_up_with_block(task: SharedTask) {
     let target_cpu = pick_cpu();
     let current_cpu = crate::arch::kernel::cpu::cpu_id();
 
+    let task_tid = task.lock().tid;
+    crate::pr_info!("[Scheduler] Waking up task {} on CPU {}", task_tid, target_cpu);
+
     {
         let mut sched = scheduler_of(target_cpu).lock();
         sched.wake_up(task.clone());
@@ -153,6 +156,7 @@ pub fn wake_up_with_block(task: SharedTask) {
 
     // 跨核唤醒发送 IPI
     if target_cpu != current_cpu {
+        crate::pr_info!("[Scheduler] Sending IPI from CPU {} to CPU {} for task {}", current_cpu, target_cpu, task_tid);
         crate::arch::ipi::send_reschedule_ipi(target_cpu);
     }
 }

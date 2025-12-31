@@ -76,8 +76,6 @@ pub fn user_trap(
         }
         Trap::Interrupt(1) => {
             // 软件中断（IPI）
-            let cpu_id = crate::arch::kernel::cpu::cpu_id();
-            crate::pr_info!("[Trap] CPU {} received software interrupt (IPI)", cpu_id);
             crate::arch::ipi::handle_ipi();
         }
         _ => {
@@ -241,8 +239,6 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
         }
         Trap::Interrupt(1) => {
             // 软件中断（IPI）
-            let cpu_id = crate::arch::kernel::cpu::cpu_id();
-            crate::pr_info!("[Trap] CPU {} received software interrupt (IPI)", cpu_id);
             crate::arch::ipi::handle_ipi();
         }
         // 中断处理时发生异常一般是致命的
