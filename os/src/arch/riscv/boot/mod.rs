@@ -10,8 +10,8 @@ use crate::{
     earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        FsStruct, NUM_CPU, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct,
-        current_cpu, current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
+        FsStruct, NUM_CPU, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
+        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
         sleep_task_with_block, time, yield_task,
     },
     mm::{
@@ -97,6 +97,8 @@ pub fn rest_init() {
     let ptr = task.trap_frame_ptr.load(Ordering::SeqCst);
     // init 进程不同于其他内核线程，需要有一个独立的内存空间
     task.memory_space = Some(current_memory_space());
+    // init 任务运行在 CPU 0
+    task.on_cpu = Some(0);
     let task = task.into_shared();
     unsafe {
         sscratch::write(ptr as usize);
@@ -204,8 +206,10 @@ fn create_kthreadd() {
         (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
     }
     let task = task.into_shared();
+    // kthreadd 任务运行在 CPU 0
+    task.lock().on_cpu = Some(0);
     TASK_MANAGER.lock().add_task(task.clone());
-    SCHEDULER.lock().add_task(task);
+    crate::kernel::scheduler_of(0).lock().add_task(task);
 }
 
 pub fn main(hartid: usize) {

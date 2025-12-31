@@ -5,10 +5,11 @@ mod rr_scheduler;
 mod task_queue;
 mod wait_queue;
 
-use lazy_static::lazy_static;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     arch::kernel::{context::Context, switch},
+    config::MAX_CPU_COUNT,
     kernel::{TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     pr_debug,
     sync::{SpinLock, SpinLockGuard},
@@ -17,9 +18,14 @@ use crate::{
 pub use task_queue::TaskQueue;
 pub use wait_queue::WaitQueue;
 
-lazy_static! {
-    pub static ref SCHEDULER: SpinLock<RRScheduler> = SpinLock::new(RRScheduler::new());
-}
+/// Per-CPU 调度器数组
+/// 每个 CPU 拥有独立的运行队列和调度器实例
+static SCHEDULERS: [SpinLock<RRScheduler>; MAX_CPU_COUNT] =
+    [const { SpinLock::new(RRScheduler::empty()) }; MAX_CPU_COUNT];
+
+/// 负载均衡计数器
+/// 用于简单轮转选择目标 CPU
+static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
 
 /// 上下文切换计划结构体
 pub(crate) struct SwitchPlan {
@@ -76,10 +82,27 @@ pub trait Scheduler {
     );
 }
 
+/// 获取当前 CPU 的调度器
+pub fn current_scheduler() -> &'static SpinLock<RRScheduler> {
+    let cpu_id = crate::arch::kernel::cpu::cpu_id();
+    &SCHEDULERS[cpu_id]
+}
+
+/// 获取指定 CPU 的调度器
+pub fn scheduler_of(cpu_id: usize) -> &'static SpinLock<RRScheduler> {
+    &SCHEDULERS[cpu_id]
+}
+
+/// 选择负载最轻的 CPU（简单轮转）
+pub fn pick_cpu() -> usize {
+    let num_cpu = unsafe { crate::kernel::NUM_CPU };
+    NEXT_CPU.fetch_add(1, Ordering::Relaxed) % num_cpu
+}
+
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
     let plan = {
-        let mut sched = SCHEDULER.lock();
+        let mut sched = current_scheduler().lock();
         // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
         sched.next_task()
     };
@@ -106,7 +129,12 @@ pub fn yield_task() {
 /// * `receive_signal`: 是否可被信号中断
 /// 注意: 该函数仅设置状态，不负责切换任务
 pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
-    SCHEDULER.lock().sleep_task(task, receive_signal);
+    let cpu_id = {
+        let t = task.lock();
+        t.on_cpu
+            .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id())
+    };
+    scheduler_of(cpu_id).lock().sleep_task(task, receive_signal);
 }
 
 /// 唤醒任务
@@ -114,7 +142,19 @@ pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
 /// 参数:
 /// * `task`: 需要唤醒的任务
 pub fn wake_up_with_block(task: SharedTask) {
-    SCHEDULER.lock().wake_up(task);
+    let target_cpu = pick_cpu();
+    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+
+    {
+        let mut sched = scheduler_of(target_cpu).lock();
+        sched.wake_up(task.clone());
+        task.lock().on_cpu = Some(target_cpu);
+    }
+
+    // 跨核唤醒发送 IPI
+    if target_cpu != current_cpu {
+        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+    }
 }
 
 /// 任务终止
@@ -122,7 +162,12 @@ pub fn wake_up_with_block(task: SharedTask) {
 /// 参数:
 /// * `task`: 需要终止的任务
 pub fn exit_task_with_block(task: SharedTask) {
-    SCHEDULER.lock().exit_task(task);
+    let cpu_id = {
+        let t = task.lock();
+        t.on_cpu
+            .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id())
+    };
+    scheduler_of(cpu_id).lock().exit_task(task);
 }
 
 /// 带保护地阻塞任务
@@ -138,7 +183,10 @@ pub fn sleep_task_with_guard_and_block(
     stask: SharedTask,
     receive_signal: bool,
 ) {
-    SCHEDULER
+    let cpu_id = task
+        .on_cpu
+        .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id());
+    scheduler_of(cpu_id)
         .lock()
         .sleep_task_with_guard(task, stask, receive_signal);
 }

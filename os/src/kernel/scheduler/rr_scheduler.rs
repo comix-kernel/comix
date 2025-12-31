@@ -28,6 +28,26 @@ pub struct RRScheduler {
 }
 
 impl RRScheduler {
+    /// 创建一个空的调度器（const 版本）
+    /// 用于静态数组初始化
+    pub const fn empty() -> Self {
+        RRScheduler {
+            run_queue: TaskQueue::empty(),
+            time_slice: DEFAULT_TIME_SLICE,
+            current_slice: DEFAULT_TIME_SLICE,
+        }
+    }
+
+    /// 获取调度器中的任务数量
+    pub fn task_count(&self) -> usize {
+        self.run_queue.len()
+    }
+
+    /// 检查调度器是否为空
+    pub fn is_empty(&self) -> bool {
+        self.run_queue.is_empty()
+    }
+
     /// 更新当前时间片计数器
     /// # 返回值
     /// 如果时间片用尽，返回 true；否则返回 false
@@ -91,6 +111,11 @@ impl Scheduler for RRScheduler {
         }
 
         // 在切换前，更新当前任务与时间片
+        // 更新 on_cpu 字段
+        {
+            let cpu_id = crate::arch::kernel::cpu::cpu_id();
+            next_task.lock().on_cpu = Some(cpu_id);
+        }
         current_cpu().switch_task(next_task);
         self.current_slice = self.time_slice;
 
