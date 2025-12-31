@@ -56,6 +56,16 @@ pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
     // 2. 通过 SBI 触发软件中断
     let hart_mask = 1usize << target_cpu;
     crate::arch::lib::sbi::send_ipi(hart_mask);
+
+    // 3. 检查目标CPU的sip寄存器（仅用于调试）
+    if target_cpu == crate::arch::kernel::cpu::cpu_id() {
+        // 如果是当前CPU，可以读取sip
+        unsafe {
+            let sip: usize;
+            core::arch::asm!("csrr {}, sip", out(reg) sip);
+            crate::pr_info!("[IPI] After send_ipi, current CPU sip={:#x}, SSIP bit: {}", sip, (sip >> 1) & 1);
+        }
+    }
 }
 
 /// 发送 IPI 到多个 CPU
@@ -113,10 +123,11 @@ pub fn handle_ipi() {
         return;
     }
 
-    crate::pr_debug!("[IPI] CPU {} handling IPI: {:#x}", cpu, pending);
+    crate::pr_info!("[IPI] CPU {} handling IPI: {:#x}", cpu, pending);
 
     // 处理调度 IPI
     if pending & (IpiType::Reschedule as u32) != 0 {
+        crate::pr_info!("[IPI] CPU {} received Reschedule IPI", cpu);
         // 调度将在中断返回时由 check_signal 后的逻辑处理
         // 这里只需要标记即可
     }

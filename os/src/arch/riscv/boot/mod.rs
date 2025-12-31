@@ -327,6 +327,89 @@ mod tests {
 ///
 /// 由 SBI HSM 调用启动，hartid 通过 a0 寄存器传递。
 ///
+/// Idle循环函数，用于CPU空闲时执行
+fn idle_loop() -> ! {
+    loop {
+        crate::kernel::schedule();
+
+        // 确保中断启用
+        if !crate::arch::intr::are_interrupts_enabled() {
+            unsafe {
+                crate::arch::intr::enable_interrupts();
+            }
+        }
+
+        // 等待中断
+        unsafe {
+            core::arch::asm!("wfi");
+        }
+    }
+}
+
+/// 为指定CPU创建idle任务
+fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
+    use crate::kernel::{TaskStruct, TASK_MANAGER};
+    use crate::mm::frame_allocator::alloc_contig_frames;
+    use crate::arch::trap::TrapFrame;
+    use crate::vfs::fd_table::FDTable;
+    use crate::kernel::FsStruct;
+    use crate::ipc::{SignalHandlerTable, SignalPending};
+    use crate::uapi::signal::SignalFlags;
+    use crate::uapi::uts_namespace::UtsNamespace;
+    use crate::uapi::resource::{RlimitStruct, INIT_RLIMITS};
+    use alloc::sync::Arc;
+    use crate::sync::SpinLock;
+    use core::sync::atomic::Ordering;
+
+    let tid = TASK_MANAGER.lock().allocate_tid();
+
+    // 分配最小资源
+    let kstack_tracker = alloc_contig_frames(1)
+        .expect("Failed to allocate kernel stack for idle task");
+    let trap_frame_tracker = alloc_frame()
+        .expect("Failed to allocate trap frame for idle task");
+
+    // 创建最小化的任务结构
+    let mut task = TaskStruct::ktask_create(
+        tid,
+        tid,  // pid = tid
+        0,    // ppid = 0 (no parent)
+        TaskStruct::empty_children(),
+        kstack_tracker,
+        trap_frame_tracker,
+        Arc::new(SpinLock::new(SignalHandlerTable::new())),
+        SignalFlags::empty(),
+        Arc::new(SpinLock::new(SignalPending::empty())),
+        Arc::new(SpinLock::new(UtsNamespace::default())),
+        Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
+        Arc::new(FDTable::new()),
+        Arc::new(SpinLock::new(FsStruct::new(None, None))),
+    );
+
+    // 设置trap frame指向idle_loop
+    let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+    unsafe {
+        core::ptr::write(tf, TrapFrame::zero_init());
+        (*tf).set_kernel_trap_frame(
+            idle_loop as usize,
+            0,
+            task.kstack_base
+        );
+    }
+
+    // 设置CPU亲和性
+    task.on_cpu = Some(cpu_id);
+
+    let task = task.into_shared();
+
+    // 注册到任务管理器（但不加入调度队列）
+    TASK_MANAGER.lock().add_task(task.clone());
+
+    pr_info!("[SMP] Created idle task {} for CPU {}", tid, cpu_id);
+
+    task
+}
+
 /// # 初始化流程
 /// 1. 初始化 boot trap 处理（设置 stvec）
 /// 2. 设置 tp 指向对应的 Cpu 结构体
@@ -358,23 +441,51 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
 
     pr_info!("[SMP] CPU {} is online", hartid);
 
-    // 禁用中断，避免在 WFI 循环中响应中断
-    // 等待多核调度器实现后再启用
+    // 初始化完整的 trap 处理
+    trap::init();
+
+    // 创建并设置idle任务
+    let idle_task = create_idle_task(hartid);
+
+    // 设置sscratch指向idle任务的TrapFrame
+    let tf_ptr = idle_task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        crate::arch::intr::disable_interrupts();
+        riscv::register::sscratch::write(tf_ptr as usize);
+    }
+    pr_info!("[SMP] CPU {} set sscratch to {:#x}", hartid, tf_ptr as usize);
+
+    // 设置idle任务为当前任务
+    current_cpu().switch_task(idle_task);
+    pr_info!("[SMP] CPU {} set idle task as current_task", hartid);
+
+    // 初始化定时器
+    timer::init();
+
+    // 启用中断
+    unsafe {
+        intr::enable_interrupts();
     }
 
-    pr_info!(
-        "[SMP] CPU {} entering WFI loop with interrupts disabled",
-        hartid
-    );
-
-    // 进入 WFI 循环，等待多核调度器实现
-    loop {
-        unsafe {
-            core::arch::asm!("wfi");
-        }
+    // 检查中断配置状态
+    unsafe {
+        let sstatus: usize;
+        let sie: usize;
+        let sip: usize;
+        core::arch::asm!("csrr {}, sstatus", out(reg) sstatus);
+        core::arch::asm!("csrr {}, sie", out(reg) sie);
+        core::arch::asm!("csrr {}, sip", out(reg) sip);
+        pr_info!("[SMP] CPU {} interrupt status: sstatus={:#x}, sie={:#x}, sip={:#x}", hartid, sstatus, sie, sip);
+        pr_info!("[SMP] CPU {} SIE bit: {}, SSIE bit: {}, SSIP bit: {}", hartid, (sstatus >> 1) & 1, (sie >> 1) & 1, (sip >> 1) & 1);
     }
+
+    // 注意：mideleg 是 M-mode CSR，S-mode 无法读取
+    // 如果尝试读取会触发非法指令异常
+    // 我们需要通过其他方式验证中断委托配置
+
+    pr_info!("[SMP] CPU {} entering idle loop", hartid);
+
+    // 进入idle循环（永不返回）
+    idle_loop();
 }
 
 /// SBI HSM 从核入口（在 entry.S 中定义）

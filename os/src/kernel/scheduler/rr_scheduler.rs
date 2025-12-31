@@ -75,6 +75,9 @@ impl Scheduler for RRScheduler {
     fn next_task(&mut self) -> Option<SwitchPlan> {
         let _guard = crate::sync::PreemptGuard::new();
 
+        let cpu_id = crate::arch::kernel::cpu::cpu_id();
+        crate::pr_info!("[Scheduler] CPU {} next_task called, queue size: {}", cpu_id, self.run_queue.len());
+
         // 取出当前任务，避免在下面赋值时被 Drop 掉
         let prev_task_opt = current_cpu().current_task.take();
 
@@ -83,6 +86,7 @@ impl Scheduler for RRScheduler {
             Some(t) => t,
             None => {
                 // 没有可运行任务：恢复 current 并返回
+                crate::pr_info!("[Scheduler] CPU {} no tasks in queue, staying idle", cpu_id);
                 current_cpu().current_task = prev_task_opt;
                 return None;
             }
@@ -126,10 +130,14 @@ impl Scheduler for RRScheduler {
     }
 
     fn add_task(&mut self, task: SharedTask) {
-        let state = { task.lock().state };
+        let (state, tid) = {
+            let t = task.lock();
+            (t.state, t.tid)
+        };
         match state {
             TaskState::Running => {
                 self.run_queue.add_task(task);
+                crate::pr_info!("[Scheduler] Task {} added to run queue, new size: {}", tid, self.run_queue.len());
             }
             _ => {
                 panic!("RRScheduler: can only add running tasks to scheduler");

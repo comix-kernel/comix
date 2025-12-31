@@ -103,6 +103,8 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
     // 更新任务的 on_cpu 字段
     task.lock().on_cpu = Some(target_cpu);
 
+    crate::pr_info!("[SMP] Task {} assigned to CPU {}", tid, target_cpu);
+
     // 将任务加入调度器和任务管理器
     TASK_MANAGER.lock().add_task(task.clone());
     crate::kernel::scheduler_of(target_cpu)
