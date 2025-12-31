@@ -86,14 +86,19 @@ pub fn hart_start(hartid: usize, start_addr: usize, opaque: usize) -> SbiRet {
 /// # 参数
 /// - hart_mask: hart 位掩码，每位代表一个 hart
 pub fn send_ipi(hart_mask: usize) {
+    crate::pr_info!("[SBI] Sending IPI with hart_mask: {:#x}", hart_mask);
+
     // 尝试使用 SBI IPI 扩展
     let ret = sbi_call(EID_IPI, FID_SEND_IPI, hart_mask, 0, 0);
 
     if ret.error == 0 {
+        crate::pr_info!("[SBI] IPI sent successfully via IPI extension");
         return;
     }
 
+    crate::pr_warn!("[SBI] IPI extension failed with error {}, trying legacy", ret.error);
     // 回退到 Legacy SBI
     // Legacy SBI 使用指针传递 hart_mask
-    let _ = sbi_call(LEGACY_SEND_IPI, 0, &hart_mask as *const _ as usize, 0, 0);
+    let ret2 = sbi_call(LEGACY_SEND_IPI, 0, &hart_mask as *const _ as usize, 0, 0);
+    crate::pr_info!("[SBI] Legacy IPI result: error={}, value={}", ret2.error, ret2.value);
 }
