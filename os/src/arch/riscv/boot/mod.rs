@@ -330,8 +330,6 @@ mod tests {
 /// Idle循环函数，用于CPU空闲时执行
 fn idle_loop() -> ! {
     loop {
-        crate::kernel::schedule();
-
         // 确保中断启用
         if !crate::arch::intr::are_interrupts_enabled() {
             unsafe {
@@ -339,7 +337,7 @@ fn idle_loop() -> ! {
             }
         }
 
-        // 等待中断
+        // 等待中断（timer或IPI会触发调度）
         unsafe {
             core::arch::asm!("wfi");
         }

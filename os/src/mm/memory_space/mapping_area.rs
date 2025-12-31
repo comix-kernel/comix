@@ -1,7 +1,7 @@
 use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
-use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr, TlbBatchContext};
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
@@ -124,6 +124,16 @@ impl MappingArea {
         page_table: &mut ActivePageTableInner,
         vpn: Vpn,
     ) -> Result<(), page_table::PagingError> {
+        self.map_one_with_batch(page_table, vpn, None)
+    }
+
+    /// 映射单个虚拟页到物理页（支持批处理）
+    fn map_one_with_batch(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        vpn: Vpn,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> Result<(), page_table::PagingError> {
         let ppn = match self.map_type {
             MapType::Direct => {
                 // 对于直接映射，VPN 等于 PPN + 偏移量
@@ -140,7 +150,7 @@ impl MappingArea {
             }
         };
 
-        page_table.map(vpn, ppn, PageSize::Size4K, self.permission.clone())?;
+        page_table.map_with_batch(vpn, ppn, PageSize::Size4K, self.permission.clone(), batch)?;
         Ok(())
     }
 
@@ -149,10 +159,12 @@ impl MappingArea {
         &mut self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<(), page_table::PagingError> {
-        for vpn in self.vpn_range {
-            self.map_one(page_table, vpn)?;
-        }
-        Ok(())
+        TlbBatchContext::execute(|batch| {
+            for vpn in self.vpn_range {
+                self.map_one_with_batch(page_table, vpn, Some(batch))?;
+            }
+            Ok(())
+        })
     }
 
     /// 解除映射单个虚拟页
@@ -161,7 +173,17 @@ impl MappingArea {
         page_table: &mut ActivePageTableInner,
         vpn: Vpn,
     ) -> Result<(), page_table::PagingError> {
-        page_table.unmap(vpn)?;
+        self.unmap_one_with_batch(page_table, vpn, None)
+    }
+
+    /// 解除映射单个虚拟页（支持批处理）
+    fn unmap_one_with_batch(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        vpn: Vpn,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> Result<(), page_table::PagingError> {
+        page_table.unmap_with_batch(vpn, batch)?;
 
         // 对于帧映射，移除帧跟踪器
         if self.map_type == MapType::Framed {
@@ -175,10 +197,12 @@ impl MappingArea {
         &mut self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<(), page_table::PagingError> {
-        for vpn in self.vpn_range {
-            self.unmap_one(page_table, vpn)?;
-        }
-        Ok(())
+        TlbBatchContext::execute(|batch| {
+            for vpn in self.vpn_range {
+                self.unmap_one_with_batch(page_table, vpn, Some(batch))?;
+            }
+            Ok(())
+        })
     }
 
     /// 复制数据到已映射的区域
@@ -248,13 +272,16 @@ impl MappingArea {
         &self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<Self, page_table::PagingError> {
+        use crate::arch::mm::TlbBatchContext;
+
         let mut new_area = self.clone_metadata();
         if self.map_type != MapType::Framed {
             return Err(page_table::PagingError::UnsupportedMapType);
         }
 
-        // 遍历原 area 的 frames BTreeMap
-        for (vpn, tracked_frames) in &self.frames {
+        TlbBatchContext::execute(|batch| {
+            // 遍历原 area 的 frames BTreeMap
+            for (vpn, tracked_frames) in &self.frames {
             match tracked_frames {
                 TrackedFrames::Single(frame) => {
                     // 复制单个 4K 页
@@ -277,7 +304,7 @@ impl MappingArea {
                     }
 
                     // 建立页表映射
-                    page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission.clone())?;
+                    page_table.map_with_batch(*vpn, new_ppn, PageSize::Size4K, self.permission.clone(), Some(batch))?;
 
                     new_area
                         .frames
@@ -306,7 +333,7 @@ impl MappingArea {
                         }
 
                         // 建立页表映射
-                        page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission.clone())?;
+                        page_table.map_with_batch(*vpn, new_ppn, PageSize::Size4K, self.permission.clone(), Some(batch))?;
 
                         new_frames.push(new_frame);
                     }
@@ -359,6 +386,7 @@ impl MappingArea {
         }
 
         Ok(new_area)
+        })
     }
 
     /// 拆分区域为两部分：[start, split_vpn) 和 [split_vpn, end)
@@ -495,9 +523,12 @@ impl MappingArea {
         }
 
         // 修改页表中的权限
-        for vpn in VpnRange::new(change_start, change_end) {
-            page_table.update_flags(vpn, new_perm)?;
-        }
+        TlbBatchContext::execute(|batch| {
+            for vpn in VpnRange::new(change_start, change_end) {
+                page_table.update_flags_with_batch(vpn, new_perm, Some(batch))?;
+            }
+            Ok::<(), page_table::PagingError>(())
+        })?;
 
         // 根据修改范围决定如何分割区域
         if change_start == area_start && change_end == area_end {
@@ -720,9 +751,12 @@ impl MappingArea {
         }
 
         // 解除映射指定范围内的页
-        for vpn in VpnRange::new(unmap_start, unmap_end) {
-            self.unmap_one(page_table, vpn)?;
-        }
+        TlbBatchContext::execute(|batch| {
+            for vpn in VpnRange::new(unmap_start, unmap_end) {
+                self.unmap_one_with_batch(page_table, vpn, Some(batch))?;
+            }
+            Ok::<(), page_table::PagingError>(())
+        })?;
 
         // 根据解除映射的位置，决定返回什么
         if unmap_start == area_start && unmap_end == area_end {
@@ -871,6 +905,8 @@ impl MappingArea {
         &self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<(), page_table::PagingError> {
+        use crate::arch::mm::TlbBatchContext;
+
         if let Some(ref mmap_file) = self.file {
             // 只有 MAP_SHARED 映射才需要写回
             if !mmap_file.flags.contains(MapFlags::SHARED) {
@@ -883,6 +919,7 @@ impl MappingArea {
                 .map_err(|_| page_table::PagingError::InvalidAddress)?;
             let start_vpn = self.vpn_range.start();
 
+            TlbBatchContext::execute(|batch| {
             for (vpn, tracked_frame) in &self.frames {
                 // 获取页表项的标志位，检查 Dirty 位
                 let (_, _, flags) = match page_table.walk(*vpn) {
@@ -939,10 +976,13 @@ impl MappingArea {
                 }
 
                 // 清除 Dirty 位
-                page_table.update_flags(*vpn, flags & !UniversalPTEFlag::DIRTY)?;
+                page_table.update_flags_with_batch(*vpn, flags & !UniversalPTEFlag::DIRTY, Some(batch))?;
             }
+            Ok(())
+            })
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
