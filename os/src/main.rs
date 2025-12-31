@@ -14,6 +14,7 @@ extern crate alloc;
 
 mod arch;
 mod config;
+mod console;
 mod device;
 mod fs;
 mod ipc;
