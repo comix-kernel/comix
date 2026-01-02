@@ -51,7 +51,9 @@ pub extern "C" fn secondary_debug_entry(hartid: usize) {
 /// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
 pub fn rest_init() {
-    let tid = TASK_MANAGER.lock().allocate_tid();
+    // init进程必须使用TID 1，不从分配器获取
+    // TID分配器从2开始，所以idle任务会获得TID 2, 3, ...
+    let tid = 1;
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
     let fd_table = fd_table::FDTable::new();
@@ -257,6 +259,15 @@ pub fn main(hartid: usize) {
     // 在从核启动完成后再初始化定时器，避免主核在等待时收到中断
     timer::init();
 
+    // 为 CPU0 创建并登记 idle 任务（不加入调度队列，仅作兜底）
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        if current_cpu().idle_task.is_none() {
+            let idle0 = create_idle_task(0);
+            current_cpu().idle_task = Some(idle0);
+        }
+    }
+
     // 注意：中断在 init() 函数中启用，在设置好 sscratch 之后
     rest_init();
 }
@@ -359,6 +370,9 @@ fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
     use crate::sync::SpinLock;
     use core::sync::atomic::Ordering;
 
+    // idle任务从TID分配器正常分配TID
+    // TID分配器从2开始，所以idle任务会获得TID 2, 3, ...
+    // init进程会手动设置为TID 1
     let tid = TASK_MANAGER.lock().allocate_tid();
 
     // 分配最小资源
@@ -400,7 +414,8 @@ fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
 
     let task = task.into_shared();
 
-    // 注册到任务管理器（但不加入调度队列）
+    // 将idle任务加入TaskManager
+    // 现在idle任务使用正常的TID（2, 3, ...），不会冲突
     TASK_MANAGER.lock().add_task(task.clone());
 
     pr_info!("[SMP] Created idle task {} for CPU {}", tid, cpu_id);
@@ -452,8 +467,13 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     }
     pr_info!("[SMP] CPU {} set sscratch to {:#x}", hartid, tf_ptr as usize);
 
-    // 设置idle任务为当前任务
-    current_cpu().switch_task(idle_task);
+    // 设置idle任务为当前任务，并记录为本CPU的idle句柄
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
+        cpu.idle_task = Some(idle_task.clone());
+        cpu.switch_task(idle_task);
+    }
     pr_info!("[SMP] CPU {} set idle task as current_task", hartid);
 
     // 初始化定时器

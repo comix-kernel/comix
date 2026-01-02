@@ -37,6 +37,9 @@ pub struct Cpu {
     /// 当前使用的内存空间
     /// 对于内核线程，其本身相应字段为 None，因而使用上一个任务的内存空间
     pub current_memory_space: Option<Arc<SpinLock<MemorySpace>>>,
+    /// 本 CPU 的 idle 任务（永远可用的兜底任务）
+    /// 不在运行队列中，当没有可运行任务时切换到它并在其中 WFI。
+    pub idle_task: Option<SharedTask>,
 }
 
 impl Cpu {
@@ -46,6 +49,7 @@ impl Cpu {
             cpu_id: 0,
             current_task: None,
             current_memory_space: None,
+            idle_task: None,
         }
     }
 
@@ -55,6 +59,7 @@ impl Cpu {
             cpu_id,
             current_task: None,
             current_memory_space: None,
+            idle_task: None,
         }
     }
 
@@ -72,6 +77,15 @@ impl Cpu {
                     .lock()
                     .root_ppn(),
             );
+        }
+        // 更新 sscratch 指向新任务的 TrapFrame，确保后续陷阱保存/恢复正确
+        let tf_ptr = task
+            .lock()
+            .trap_frame_ptr
+            .load(core::sync::atomic::Ordering::SeqCst) as usize;
+        #[cfg(target_arch = "riscv64")]
+        unsafe {
+            riscv::register::sscratch::write(tf_ptr);
         }
     }
 

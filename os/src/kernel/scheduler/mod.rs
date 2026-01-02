@@ -101,18 +101,41 @@ pub fn pick_cpu() -> usize {
 
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
-    let plan = {
-        let mut sched = current_scheduler().lock();
-        // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
-        sched.next_task()
+    // 读取并禁用中断，保护整个调度过程，并在返回时恢复原状态
+    let flags = unsafe { crate::arch::intr::read_and_disable_interrupts() };
+
+    // 快速路径：如果运行队列为空且当前任务仍是 Running，就无需进入调度器
+    let should_try_switch = {
+        let sched = current_scheduler().lock();
+        let rq_empty = sched.is_empty();
+        drop(sched);
+
+        let cur_running = {
+            let cpu = crate::kernel::current_cpu();
+            cpu.current_task
+                .as_ref()
+                .map(|t| t.lock().state == crate::kernel::TaskState::Running)
+                .unwrap_or(false)
+        };
+        !(rq_empty && cur_running)
     };
 
-    if let Some(plan) = plan {
-        pr_debug!("Switched to task {}", current_task().lock().tid);
-        // SAFETY: prepare_switch 生成的切换计划中的指针均合法
-        unsafe { switch(plan.old, plan.new) };
-        // 通常不会立即返回；返回时再继续当前上下文后续逻辑
+    if should_try_switch {
+        let plan = {
+            let mut sched = current_scheduler().lock();
+            // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
+            sched.next_task()
+        }; // 调度器锁在这里释放
+
+        if let Some(plan) = plan {
+            // SAFETY: next_task 生成的上下文指针有效
+            unsafe { switch(plan.old, plan.new) };
+            // 通常不会立即返回；返回时再继续当前上下文后续逻辑
+        }
     }
+
+    // 恢复进入前的中断状态
+    unsafe { crate::arch::intr::restore_interrupts(flags) };
 }
 
 /// 主动放弃 CPU

@@ -55,11 +55,12 @@ impl RRScheduler {
         if self.current_slice > 0 {
             self.current_slice -= 1;
         }
-        if self.current_slice == 0 {
-            self.current_slice = self.time_slice;
-            return true;
-        }
-        false
+        self.current_slice == 0
+    }
+
+    /// 重置时间片（在任务切换后调用）
+    fn reset_time_slice(&mut self) {
+        self.current_slice = self.time_slice;
     }
 }
 
@@ -76,52 +77,88 @@ impl Scheduler for RRScheduler {
         let _guard = crate::sync::PreemptGuard::new();
 
         let cpu_id = crate::arch::kernel::cpu::cpu_id();
-        crate::pr_info!("[Scheduler] CPU {} next_task called, queue size: {}", cpu_id, self.run_queue.len());
+        crate::pr_info!(
+            "[Scheduler] CPU {} next_task called, queue size: {}",
+            cpu_id,
+            self.run_queue.len()
+        );
 
-        // 取出当前任务，避免在下面赋值时被 Drop 掉
-        let prev_task_opt = current_cpu().current_task.take();
-
-        // 选择下一个可运行任务（或返回/转 idle）
+        // 选择下一个可运行任务
         let next_task = match self.run_queue.pop_task() {
             Some(t) => t,
             None => {
-                // 没有可运行任务：恢复 current 并返回
-                crate::pr_info!("[Scheduler] CPU {} no tasks in queue, staying idle", cpu_id);
-                current_cpu().current_task = prev_task_opt;
-                return None;
+                // 没有可运行任务：
+                // - 如果当前任务仍为 Running，则继续运行它（不切换）。
+                // - 否则（已阻塞/退出），切换到本 CPU 的 idle 任务。
+                let prev_task = crate::kernel::current_cpu()
+                    .current_task
+                    .as_ref()
+                    .expect("RRScheduler: no current task")
+                    .clone();
+
+                let prev_running = { prev_task.lock().state == TaskState::Running };
+                if prev_running {
+                    return None;
+                }
+
+                let idle = crate::kernel::current_cpu()
+                    .idle_task
+                    .as_ref()
+                    .expect("idle_task not set")
+                    .clone();
+
+                // 切到 idle
+                crate::kernel::current_cpu().switch_task(idle.clone());
+
+                let new_ctx_ptr: *const Context = {
+                    let g = idle.lock();
+                    &g.context as *const _
+                };
+                let old_ctx_ptr: *mut Context = {
+                    let mut g = prev_task.lock();
+                    &mut g.context as *mut _
+                };
+
+                return Some(SwitchPlan { old: old_ctx_ptr, new: new_ctx_ptr });
             }
         };
 
-        // 准备 new 上下文指针（短作用域锁）
+        // 读取当前任务，避免产生 None 窗口
+        let prev_task = {
+            current_cpu()
+                .current_task
+                .as_ref()
+                .expect("RRScheduler: no current task to schedule from")
+                .clone()
+        };
+
+        // 切换到新任务（也会切换地址空间）
+        current_cpu().switch_task(next_task.clone());
+
+        // 准备上下文指针
         let new_ctx_ptr: *const Context = {
             let g = next_task.lock();
             &g.context as *const _
         };
-
-        // 准备 old 上下文指针
-        let old_ctx_ptr: *mut Context = if let Some(ref prev) = prev_task_opt {
-            let mut g = prev.lock();
+        let old_ctx_ptr: *mut Context = {
+            let mut g = prev_task.lock();
             &mut g.context as *mut _
-        } else {
-            panic!("RRScheduler: no current task to schedule from");
         };
 
-        // 轮转策略：旧任务若仍可运行，放回运行队列尾
-        if let Some(prev) = &prev_task_opt {
-            let still_running = { prev.lock().state == TaskState::Running };
+        // 轮转：旧任务若仍可运行，放回运行队列尾
+        {
+            let still_running = { prev_task.lock().state == TaskState::Running };
             if still_running {
-                self.run_queue.add_task(prev.clone());
+                self.run_queue.add_task(prev_task.clone());
             }
         }
 
-        // 在切换前，更新当前任务与时间片
-        // 更新 on_cpu 字段
+        // 更新 on_cpu 字段和时间片
         {
             let cpu_id = crate::arch::kernel::cpu::cpu_id();
             next_task.lock().on_cpu = Some(cpu_id);
         }
-        current_cpu().switch_task(next_task);
-        self.current_slice = self.time_slice;
+        self.reset_time_slice();
 
         Some(SwitchPlan {
             old: old_ctx_ptr,

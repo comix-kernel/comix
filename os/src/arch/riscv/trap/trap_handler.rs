@@ -38,20 +38,21 @@ pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
     let scause = scause::read();
 
     match sstatus_old.spp() {
-        SPP::User => user_trap(scause, sepc_old, sstatus_old, trap_frame),
+        SPP::User => {
+            user_trap(scause, sepc_old, sstatus_old, trap_frame);
+            // 仅在返回用户态时检查信号
+            check_signal();
+        }
         SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old),
     }
-
-    check_signal();
-    // Safe:
-    // restore 是一个汇编函数，它恢复寄存器并执行 sret。
-    //
-    // 这里的 unsafe 调用是安全的，前提是：
-    // 1. 所有的中断处理逻辑处理已完成。
-    // 2. **关键前提：在 match 中调用的 `user_trap` 必须保证如果它修改了 `trap_frame`，
-    //    则其中的所有寄存器值（尤其是 sepc 和栈指针）都是有效的、合法的上下文状态。**
-    // 3. `restore` 的汇编实现本身是正确的。
-    unsafe { restore(trap_frame) };
+    // 恢复“当前任务”的陷阱帧。
+    // 注意：在陷阱处理中可能发生了调度（例如用户态定时器中断），
+    // 这时需要恢复到新任务的 TrapFrame，而不是入口参数 trap_frame。
+    let tf_ptr = crate::kernel::try_current_task()
+        .map(|t| t.lock().trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst) as usize)
+        .unwrap_or(trap_frame as *mut _ as usize);
+    // SAFETY: 指针来源于当前任务保存的 trap_frame_ptr 或回退到入口参数。
+    unsafe { restore(&*(tf_ptr as *const super::TrapFrame)) };
 }
 
 /// 处理来自用户态的陷阱（系统调用、中断、异常）
@@ -75,8 +76,15 @@ pub fn user_trap(
             check_timer();
         }
         Trap::Interrupt(1) => {
-            // 软件中断（IPI）
+            // 软件中断（IPI）：仅当有待运行任务时才调度，避免空转
             crate::arch::ipi::handle_ipi();
+            let need_sched = {
+                let sched = crate::kernel::current_scheduler().lock();
+                !sched.is_empty()
+            };
+            if need_sched {
+                schedule();
+            }
         }
         _ => {
             // 立即读取相关寄存器的当前值
@@ -217,7 +225,6 @@ pub fn user_trap(
             }
             crate::earlyprintln!("");
             crate::earlyprintln!("===============================================");
-
             panic!(
                 "Unexpected trap in user mode: {:?}, sepc = {:#x}, stval = {:#x}, sstatus = {:#x}",
                 scause.cause(),
@@ -233,13 +240,20 @@ pub fn user_trap(
 pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus::Sstatus) {
     match scause.cause() {
         Trap::Interrupt(5) => {
-            // 处理时钟中断
+            // 处理时钟中断（内核态）：仅设置下一次触发，避免在内核态发起调度。
+            // 抢占调度留给用户态路径，降低内核抢占导致的一致性风险。
             crate::arch::timer::set_next_trigger();
-            check_timer();
         }
         Trap::Interrupt(1) => {
-            // 软件中断（IPI）
+            // 软件中断（IPI）：仅当运行队列非空时触发调度
             crate::arch::ipi::handle_ipi();
+            let need_sched = {
+                let sched = crate::kernel::current_scheduler().lock();
+                !sched.is_empty()
+            };
+            if need_sched {
+                schedule();
+            }
         }
         // 中断处理时发生异常一般是致命的
         Trap::Exception(e) => {
@@ -284,10 +298,12 @@ pub fn check_timer() {
             TIMER.lock().push(next_trigger, entry);
         }
     }
-    if crate::kernel::current_scheduler()
-        .lock()
-        .update_time_slice()
-    {
+    // 仅在时间片用尽且运行队列非空时才触发调度，避免空转日志刷屏
+    let do_sched = {
+        let mut sched = crate::kernel::current_scheduler().lock();
+        sched.update_time_slice() && !sched.is_empty()
+    };
+    if do_sched {
         schedule();
     }
 }
