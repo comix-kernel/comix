@@ -10,7 +10,9 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::{
     arch::kernel::{context::Context, switch},
     config::MAX_CPU_COUNT,
-    kernel::{TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    kernel::{
+        TaskState, TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask,
+    },
     pr_debug,
     sync::{SpinLock, SpinLockGuard},
 };
@@ -167,19 +169,41 @@ pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
 pub fn wake_up_with_block(task: SharedTask) {
     let target_cpu = pick_cpu();
     let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    let task_tid = { task.lock().tid };
 
-    let task_tid = task.lock().tid;
-    crate::pr_info!("[Scheduler] Waking up task {} on CPU {}", task_tid, target_cpu);
-
+    // 关键：多核下 wake 可能被重复触发（不同 CPU/不同事件源），必须做到“全局幂等”：
+    // - 若任务已经是 Running（正在跑/已入队），则不要再次入队到其他 CPU 的运行队列
+    // 否则同一任务可能被两个 CPU 同时调度运行，导致 TrapFrame/上下文被并发破坏（海森堡 panic/挂起）。
+    let mut should_ipi = false;
     {
         let mut sched = scheduler_of(target_cpu).lock();
+
+        // 用 task 锁串行化唤醒状态转换，避免跨 CPU 的“双重入队”
+        {
+            let mut t = task.lock();
+            if t.state == TaskState::Running {
+                return;
+            }
+            // Zombie/Stopped 不应被重新唤醒入队（保持现状，避免状态机混乱）
+            if matches!(t.state, TaskState::Zombie | TaskState::Stopped) {
+                return;
+            }
+            t.state = TaskState::Running;
+            t.on_cpu = Some(target_cpu);
+        }
+
+        crate::pr_info!("[Scheduler] Waking up task {} on CPU {}", task_tid, target_cpu);
         sched.wake_up(task.clone());
-        task.lock().on_cpu = Some(target_cpu);
+        should_ipi = target_cpu != current_cpu;
     }
 
-    // 跨核唤醒发送 IPI
-    if target_cpu != current_cpu {
-        crate::pr_info!("[Scheduler] Sending IPI from CPU {} to CPU {} for task {}", current_cpu, target_cpu, task_tid);
+    if should_ipi {
+        crate::pr_info!(
+            "[Scheduler] Sending IPI from CPU {} to CPU {} for task {}",
+            current_cpu,
+            target_cpu,
+            task_tid
+        );
         crate::arch::ipi::send_reschedule_ipi(target_cpu);
     }
 }
