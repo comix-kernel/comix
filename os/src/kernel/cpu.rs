@@ -67,6 +67,7 @@ impl Cpu {
     /// # 参数
     /// * `task` - 要切换到的任务
     pub fn switch_task(&mut self, task: SharedTask) {
+        // 切换当前任务，并在必要时切换到其地址空间
         self.current_task = Some(task.clone());
         if !task.lock().is_kernel_thread() {
             self.current_memory_space = task.lock().memory_space.clone();
@@ -78,14 +79,26 @@ impl Cpu {
                     .root_ppn(),
             );
         }
-        // 更新 sscratch 指向新任务的 TrapFrame，确保后续陷阱保存/恢复正确
-        let tf_ptr = task
-            .lock()
-            .trap_frame_ptr
-            .load(core::sync::atomic::Ordering::SeqCst) as usize;
+
+        // 同步 TrapFrame 的 cpu_ptr 指向当前 CPU，确保多核迁移后 trap_entry 恢复正确的 tp
+        // 说明：trap_entry 会从 TrapFrame.cpu_ptr 恢复 tp，如果任务在不同 CPU 之间迁移，
+        // 需要将该字段更新为当前 CPU 的地址，否则进入内核后会把 tp 设置为错误的 CPU，
+        // 导致 current_cpu()/per-CPU 数据读取混乱乃至崩溃。
+        let tf_usize = {
+            use core::sync::atomic::Ordering;
+            task.lock().trap_frame_ptr.load(Ordering::SeqCst) as usize
+        };
         #[cfg(target_arch = "riscv64")]
         unsafe {
-            riscv::register::sscratch::write(tf_ptr);
+            // Safety: tf_usize 指向任务自有的 TrapFrame 缓冲区
+            let tf = (tf_usize as *mut crate::arch::trap::TrapFrame).as_mut().unwrap();
+            tf.cpu_ptr = self as *const _ as usize;
+        }
+
+        // 更新 sscratch 指向新任务的 TrapFrame，确保后续陷阱保存/恢复正确
+        #[cfg(target_arch = "riscv64")]
+        unsafe {
+            riscv::register::sscratch::write(tf_usize);
         }
     }
 

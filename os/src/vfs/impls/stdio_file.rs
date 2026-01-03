@@ -37,17 +37,60 @@ impl File for StdinFile {
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
-        use crate::console::getchar as console_getchar;
+        use crate::console::{getchar as console_getchar, putchar as console_putchar};
 
-        let mut count = 0;
-        for byte in buf.iter_mut() {
-            if let Some(ch) = console_getchar() {
-                *byte = ch;
-                count += 1;
-                if ch == b'\n' {
-                    break;
-                }
-            } else {
+        // Minimal termios handling for stdio-backed console
+        // Align behavior with CharDeviceFile so CR/NL, echo, and canonical mode work as expected
+        const ICRNL: u32 = 0x0100; // map CR->NL on input
+        const INLCR: u32 = 0x0040; // map NL->CR on input
+        const IGNCR: u32 = 0x0080; // ignore CR on input
+        const ICANON: u32 = 0x0002; // canonical input
+        const ECHO: u32 = 0x0008; // echo input
+
+        let term = *STDIO_TERMIOS.lock();
+        let canonical = (term.c_lflag & ICANON) != 0;
+        let do_echo = (term.c_lflag & ECHO) != 0;
+
+        let mut count = 0usize;
+        // Lightweight, rate-limited diagnostics to confirm console input path
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        static READ_LOG_COUNT: AtomicUsize = AtomicUsize::new(0);
+        let log_once = READ_LOG_COUNT.fetch_add(1, Ordering::Relaxed) < 6;
+
+        while count < buf.len() {
+            let ch_opt = console_getchar();
+            let mut ch = match ch_opt {
+                Some(c) => c,
+                None => break,
+            };
+
+            // input mapping
+            if (term.c_iflag & IGNCR) != 0 && ch == b'\r' {
+                continue; // drop CR
+            }
+            if (term.c_iflag & ICRNL) != 0 && ch == b'\r' {
+                ch = b'\n';
+            } else if (term.c_iflag & INLCR) != 0 && ch == b'\n' {
+                ch = b'\r';
+            }
+
+            // echo
+            if do_echo {
+                console_putchar(ch);
+            }
+
+            buf[count] = ch;
+            count += 1;
+
+            if log_once && count == 1 {
+                crate::pr_info!(
+                    "[STDIO] read first byte: 0x{:02x} (canonical={})",
+                    ch,
+                    canonical
+                );
+            }
+
+            if !canonical || ch == b'\n' {
                 break;
             }
         }
@@ -217,8 +260,12 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                     return Ok(-EINVAL as isize);
                 }
 
-                // 清零结构体（包括 padding），避免泄露内核栈数据
-                core::ptr::write_bytes(termios_ptr, 0, 1);
+                    // 清零结构体（包括 padding），避免泄露内核栈数据
+                    core::ptr::write_bytes(
+                        termios_ptr as *mut u8,
+                        0,
+                        core::mem::size_of::<Termios>(),
+                    );
 
                 // 返回保存的 termios 设置
                 let termios = *STDIO_TERMIOS.lock();

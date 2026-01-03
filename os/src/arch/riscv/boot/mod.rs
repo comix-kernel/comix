@@ -18,7 +18,7 @@ use crate::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
     },
-    pr_err, pr_info,
+    pr_err, pr_info, pr_warn,
     sync::SpinLock,
     test::run_early_tests,
     uapi::{
@@ -147,12 +147,16 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
-    // // 挂载 /dev 并创建设备节点
-    // if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
-    //     pr_err!("[Init] Failed to mount /dev: {:?}", e);
-    // } else if let Err(e) = crate::fs::init_dev() {
-    //     pr_err!("[Init] Failed to create devices: {:?}", e);
-    // }
+    // 挂载 /dev 并创建设备节点
+    // 说明：/dev 会在用户态 rcS 中被 tmpfs 覆盖的情况下丢失设备节点。
+    // 这里在内核侧统一完成 /dev 的挂载与必要节点创建，避免依赖用户态 mdev。
+    if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
+        pr_err!("[Init] Failed to mount /dev: {:?}", e);
+    } else if let Err(e) = crate::fs::init_dev() {
+        pr_err!("[Init] Failed to create devices: {:?}", e);
+    } else {
+        pr_info!("[Init] /dev mounted and device nodes created (console, ttyS0, null, etc.)");
+    }
 
     kernel_execve("/sbin/init", &["/sbin/init"], &[]);
 }
@@ -338,7 +342,7 @@ mod tests {
 ///
 /// 由 SBI HSM 调用启动，hartid 通过 a0 寄存器传递。
 ///
-/// Idle循环函数，用于CPU空闲时执行
+/// Idle循环：等待中断；被 S 态时钟中断唤醒后，trap_handler 会决定是否调度
 fn idle_loop() -> ! {
     loop {
         // 确保中断启用
@@ -519,17 +523,23 @@ unsafe extern "C" {
 /// # Panics
 /// - 如果从核启动超时
 pub fn boot_secondary_cpus(num_cpus: usize) {
+    use crate::arch::timer::{clock_freq, get_time};
+
     if num_cpus <= 1 {
         pr_info!("[SMP] Single CPU mode, skipping secondary boot");
+        // 标记主核在线
+        CPU_ONLINE_MASK.fetch_or(1, Ordering::Release);
+        unsafe { NUM_CPU = 1 };
         return;
     }
 
-    pr_info!("[SMP] Booting {} secondary CPUs...", num_cpus - 1);
+    pr_info!("[SMP] Booting up to {} secondary CPUs...", num_cpus - 1);
 
-    // 主核标记上线
+    // 主核标记在线
     CPU_ONLINE_MASK.fetch_or(1, Ordering::Release);
 
-    // 使用 SBI HSM 调用启动每个从核
+    // 尝试启动每个从核，记录预期应当在线的掩码（仅统计成功发起的启动请求）
+    let mut expected_mask: usize = 1; // CPU0 已在线
     for hartid in 1..num_cpus {
         let start_vaddr = secondary_sbi_entry as usize;
         let start_paddr = unsafe { crate::arch::mm::vaddr_to_paddr(start_vaddr) };
@@ -542,31 +552,49 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
 
         let ret = crate::arch::lib::sbi::hart_start(hartid, start_paddr, hartid);
         if ret.error != 0 {
-            pr_err!(
-                "[SMP] Failed to start hart {}: SBI error {}",
-                hartid,
-                ret.error
-            );
-        } else {
-            pr_info!("[SMP] Hart {} SBI call succeeded", hartid);
+            // HSM 不支持或被拒绝等，降级单核/少核而不是 panic
+            pr_err!("[SMP] Failed to start hart {}: SBI error {}", hartid, ret.error);
+            continue;
         }
+        expected_mask |= 1 << hartid;
+        pr_info!("[SMP] Hart {} SBI call accepted", hartid);
     }
 
-    // 等待所有核心上线（带超时）
-    let expected_mask = (1 << num_cpus) - 1;
-    let mut timeout = 10_000_000;
+    // 若没有任何从核被接受启动请求，立即降级到单核
+    if expected_mask == 1 {
+        pr_warn!("[SMP] No secondary hart could be started; falling back to single-core");
+        unsafe { NUM_CPU = 1 };
+        return;
+    }
 
+    // 基于时间的超时等待（避免与主机性能相关的固定次数循环）
+    // 设定 2 秒的上线等待窗口
+    let deadline = get_time().saturating_add(clock_freq() * 2);
     while CPU_ONLINE_MASK.load(Ordering::Acquire) != expected_mask {
-        if timeout == 0 {
+        if get_time() >= deadline {
             let current_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
-            panic!(
-                "[SMP] Timeout waiting for secondary CPUs! Expected: {:#b}, got: {:#b}",
-                expected_mask, current_mask
+            pr_warn!(
+                "[SMP] Timeout waiting secondary CPUs. Expected: {:#b}, got: {:#b}",
+                expected_mask,
+                current_mask
             );
+            break;
         }
-        timeout -= 1;
         core::hint::spin_loop();
     }
 
-    pr_info!("[SMP] All {} CPUs are online!", num_cpus);
+    // 以实际在线核数为准，更新 NUM_CPU，避免后续调度把任务分配到离线 CPU
+    let online_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
+    let online_cnt = online_mask.count_ones() as usize;
+    unsafe { NUM_CPU = core::cmp::max(online_cnt, 1) };
+
+    if online_mask == expected_mask {
+        pr_info!("[SMP] All {} CPUs are online!", unsafe { NUM_CPU });
+    } else {
+        pr_warn!(
+            "[SMP] Proceeding with {} online CPU(s), mask={:#b}",
+            unsafe { NUM_CPU },
+            online_mask
+        );
+    }
 }

@@ -240,9 +240,33 @@ pub fn user_trap(
 pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus::Sstatus) {
     match scause.cause() {
         Trap::Interrupt(5) => {
-            // 处理时钟中断（内核态）：仅设置下一次触发，避免在内核态发起调度。
-            // 抢占调度留给用户态路径，降低内核抢占导致的一致性风险。
+            // 时钟中断（内核态）
+            // 1) 设置下一次触发
+            // 2) 驱动内核定时器与唤醒队列（与用户态路径一致），避免 CPU 停在 idle 时错过唤醒
+            // 3) 若有可运行任务，或当前正处于 idle 任务，则立即调度
             crate::arch::timer::set_next_trigger();
+
+            // 驱动 TIMER/TIMER_QUEUE，唤醒超时任务
+            check_timer();
+
+            // 是否需要在内核态进行一次调度：
+            // - 运行队列非空；或
+            // - 当前任务就是 idle（典型 WFI 返回场景）
+            let need_sched = {
+                let sched = crate::kernel::current_scheduler().lock();
+                !sched.is_empty()
+            };
+            let is_idle = {
+                let cpu = crate::kernel::current_cpu();
+                if let (Some(cur), Some(idle)) = (&cpu.current_task, &cpu.idle_task) {
+                    alloc::sync::Arc::ptr_eq(cur, idle)
+                } else {
+                    false
+                }
+            };
+            if need_sched || is_idle {
+                schedule();
+            }
         }
         Trap::Interrupt(1) => {
             // 软件中断（IPI）：仅当运行队列非空时触发调度

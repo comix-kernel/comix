@@ -279,8 +279,10 @@ fn create_devices() -> Result<(), FsError> {
     // /dev/urandom (1, 9)
     dev_inode.mknod("urandom", char_mode, makedev(chrdev_major::MEM, 9))?;
 
-    // /dev/console (5, 1) - 只读
+    // /dev/tty (5, 0) - 当前控制终端的别名（这里简化为同控制台驱动）
     let console_mode = FileMode::S_IFCHR | FileMode::from_bits_truncate(0o600);
+    dev_inode.mknod("tty", console_mode, makedev(chrdev_major::CONSOLE, 0))?;
+    // /dev/console (5, 1) - 只读
     dev_inode.mknod("console", console_mode, makedev(chrdev_major::CONSOLE, 1))?;
 
     // /dev/ttyS0 (4, 64)
