@@ -1,0 +1,311 @@
+cd os && cargo run
+Using existing fs.img (1GB Ext4 filesystem)
+Starting QEMU in normal run mode.
+
+OpenSBI v1.5.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : medeleg
+Platform HART Count       : 2
+Platform IPI Device       : aclint-mswi
+Platform Timer Device     : aclint-mtimer @ 10000000Hz
+Platform Console Device   : uart8250
+Platform HSM Device       : ---
+Platform PMU Device       : ---
+Platform Reboot Device    : syscon-reboot
+Platform Shutdown Device  : syscon-poweroff
+Platform Suspend Device   : ---
+Platform CPPC Device      : ---
+Firmware Base             : 0x80000000
+Firmware Size             : 337 KB
+Firmware RW Offset        : 0x40000
+Firmware RW Size          : 81 KB
+Firmware Heap Offset      : 0x4b000
+Firmware Heap Size        : 37 KB (total), 2 KB (reserved), 11 KB (used), 23 KB (free)
+Firmware Scratch Size     : 4096 B (total), 416 B (used), 3680 B (free)
+Runtime SBI Version       : 2.0
+
+Domain0 Name              : root
+Domain0 Boot HART         : 0
+Domain0 HARTs             : 0*,1*
+Domain0 Region00          : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01          : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02          : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region03          : 0x0000000080040000-0x000000008005ffff M: (R,W) S/U: ()
+Domain0 Region04          : 0x0000000080000000-0x000000008003ffff M: (R,X) S/U: ()
+Domain0 Region05          : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06          : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07          : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Arg1         : 0x0000000087e00000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+Domain0 SysSuspend        : yes
+
+Boot HART ID              : 0
+Boot HART Domain          : root
+Boot HART Priv Version    : v1.12
+Boot HART Base ISA        : rv64imafdch
+Boot HART ISA Extensions  : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 2 bits
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Info       : 16 (0x0007fff8)
+Boot HART Debug Triggers  : 2 triggers
+Boot HART MIDELEG         : 0x0000000000001666
+Boot HART MEDELEG         : 0x0000000000f0b509
+[36m[early_test] No early tests to run.[0m
+[Boot] Hello, world!
+[Boot] RISC-V Hart 0 is up!
+Initializing heap: start=0xffffffc0803ea000, end=0xffffffc0823ea000, size=0x2000000 (32 MB)
+Heap allocator initialized successfully
+[MM] Created kernel space, root PPN: 0x823ea
+[Boot] Initialized CPUS, tp = 0xffffffc0803eabc0
+[Boot] Activated kernel address space
+[37m[INFO] [     1150885] [CPU0/T  0] [Device] devicetree of riscv-virtio,qemu is initialized[0m
+[37m[INFO] [     1181948] [CPU0/T  0] [Device] now has 2 CPU(s)[0m
+[37m[INFO] [     1184892] [CPU0/T  0] [Device] CLOCK_FREQ set to 10000000 Hz[0m
+[37m[INFO] [     1193801] [CPU0/T  0] [Device] Memory Region: Start = 0x80000000, Size = 0x8000000[0m
+[37m[INFO] [     1202446] [CPU0/T  0] [Device] Found device: interrupt-controller[0m
+[37m[INFO] [     1206415] [CPU0/T  0] [Device] Found device: interrupt-controller[0m
+[37m[INFO] [     1208649] [CPU0/T  0] [Device] Found device: plic@c000000[0m
+[37m[INFO] [     1261549] [CPU0/T  0] [Device] PLIC initialized from device tree node plic@c000000[0m
+[37m[INFO] [     1264258] [CPU0/T  0] [Device] Found device: /[0m
+[37m[INFO] [     1265715] [CPU0/T  0] [Device] Found device: poweroff[0m
+[37m[INFO] [     1267257] [CPU0/T  0] [Device] Found device: reboot[0m
+[37m[INFO] [     1268713] [CPU0/T  0] [Device] Found device: platform-bus@4000000[0m
+[37m[INFO] [     1270444] [CPU0/T  0] [Device] Found device: cpu@0[0m
+[37m[INFO] [     1271974] [CPU0/T  0] [Device] Found device: cpu@1[0m
+[37m[INFO] [     1273458] [CPU0/T  0] [Device] Found device: pmu[0m
+[37m[INFO] [     1274857] [CPU0/T  0] [Device] Found device: fw-cfg@10100000[0m
+[37m[INFO] [     1276495] [CPU0/T  0] [Device] Found device: flash@20000000[0m
+[37m[INFO] [     1278078] [CPU0/T  0] [Device] Found device: soc[0m
+[37m[INFO] [     1279479] [CPU0/T  0] [Device] Found device: rtc@101000[0m
+[37m[INFO] [     1284878] [CPU0/T  0] [Device] RTC Goldfish initialized[0m
+[37m[INFO] [     1287618] [CPU0/T  0] [Device] Found device: serial@10000000[0m
+[37m[INFO] [     1297953] [CPU0/T  0] [Device] Serial driver (uart16550) is initialized[0m
+[37m[INFO] [     1301072] [CPU0/T  0] [Device] Found device: test@100000[0m
+[37m[INFO] [     1303773] [CPU0/T  0] [Device] Found device: virtio_mmio@10008000[0m
+[37m[INFO] [     1311516] [CPU0/T  0] [Device] Initializing network driver (virtio-net)[0m
+[37m[INFO] [     1315792] [CPU0/T  0] [Device] Find VirtioNetDevice with ID: 0[0m
+[33m[WARNING] [     1358574] [CPU0/T  0] [Device] Failed to initialize VirtioNetDevice: DeviceNotReady[0m
+[37m[INFO] [     1362455] [CPU0/T  0] [Device] Found device: virtio_mmio@10007000[0m
+[33m[WARNING] [     1369241] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1376783] [CPU0/T  0] [Device] Found device: virtio_mmio@10006000[0m
+[33m[WARNING] [     1397648] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1400740] [CPU0/T  0] [Device] Found device: virtio_mmio@10005000[0m
+[33m[WARNING] [     1415619] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1418733] [CPU0/T  0] [Device] Found device: virtio_mmio@10004000[0m
+[33m[WARNING] [     1422092] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1424958] [CPU0/T  0] [Device] Found device: virtio_mmio@10003000[0m
+[33m[WARNING] [     1427596] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1430530] [CPU0/T  0] [Device] Found device: virtio_mmio@10002000[0m
+[33m[WARNING] [     1433214] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1436026] [CPU0/T  0] [Device] Found device: virtio_mmio@10001000[0m
+[37m[INFO] [     1448556] [CPU0/T  0] [Device] Block driver (virtio-blk) is initialized[0m
+[37m[INFO] [     1450561] [CPU0/T  0] [Device] Found device: clint@2000000[0m
+[37m[INFO] [     1452115] [CPU0/T  0] [Device] Found device: pci@30000000[0m
+[37m[INFO] [     1454914] [CPU0/T  0] [Console] Switched to runtime console[0m
+[37m[INFO] [     1459645] [CPU0/T  0] Initializing REALTIME clock...[0m
+[37m[INFO] [     1462324] [CPU0/T  0] REALTIME clock initialized to TimeSpec { tv_sec: 1767456293, tv_nsec: 853810400 } seconds since epoch.[0m
+[37m[INFO] [     1467261] [CPU0/T  0] [SMP] Booting up to 1 secondary CPUs...[0m
+[37m[INFO] [     1470546] [CPU0/T  0] [SMP] Starting hart 1 at vaddr=0xffffffc080200058, paddr=0x80200058[0m
+[37m[INFO] [     1479150] [CPU0/T  0] [SMP] Hart 1 SBI call accepted[0m
+[37m[INFO] [     1485492] [CPU1/T  0] [SMP] CPU 1 is online[0m
+[37m[INFO] [     1486124] [CPU0/T  0] [SMP] All 2 CPUs are online![0m
+[37m[INFO] [     1508848] [CPU0/T  0] [SMP] Created idle task 3 for CPU 0[0m
+[37m[INFO] [     1513195] [CPU1/T  0] [SMP] Created idle task 2 for CPU 1[0m
+[37m[INFO] [     1514741] [CPU1/T  0] [SMP] CPU 1 set sscratch to 0xffffffc082434000[0m
+[37m[INFO] [     1517657] [CPU1/T  2] [SMP] CPU 1 set idle task as current_task[0m
+[37m[INFO] [     1519876] [CPU1/T  2] [SMP] CPU 1 switched to global kernel space, root PPN: 0x823ea[0m
+[37m[INFO] [     1523137] [CPU1/T  2] [SMP] CPU 1 interrupt status: sstatus=0x8000000200006002, sie=0x22, sip=0x0[0m
+[37m[INFO] [     1524845] [CPU1/T  2] [SMP] CPU 1 SIE bit: 1, SSIE bit: 1, SSIP bit: 0[0m
+[37m[INFO] [     1526890] [CPU1/T  2] [SMP] CPU 1 entering idle loop[0m
+[37m[INFO] [     1541221] [CPU0/T  1] [Scheduler] Task 4 added to run queue, new size: 1[0m
+[37m[INFO] [     1543945] [CPU0/T  1] [Ext4] Initializing Ext4 filesystem from block device[0m
+[37m[INFO] [     1546841] [CPU0/T  1] [Ext4] Using block device: virtio_block[0m
+[37m[INFO] [     1550561] [CPU0/T  1] [Ext4] Ext4 block size: 4096, Total blocks: 262144, Image size: 1024 MB[0m
+[37m[INFO] [     1552867] [CPU0/T  1] [Ext4] Opening Ext4 filesystem on block device[0m
+[37m[INFO] [     1554096] [CPU0/T  1] [Ext4] Device block size: 4096, total blocks: 262144[0m
+[37m[INFO] [     1555692] [CPU0/T  1] [Ext4Adapter] Created adapter: ext4_block_size=4096, sector_size=512[0m
+[37m[INFO] [     1559245] [CPU0/T  1] [Ext4] Calling ext4_rs::Ext4::open...[0m
+[37m[INFO] [     1596894] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [     1604012] [CPU0/T  4] [SMP] Task 5 assigned to CPU 0[0m
+[37m[INFO] [     1605475] [CPU0/T  4] [Scheduler] Task 5 added to run queue, new size: 2[0m
+[37m[INFO] [     1609191] [CPU0/T  4] [Scheduler] CPU 0 next_task called, queue size: 2[0m
+[37m[INFO] [     1611925] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [     1621379] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [     1809774] [CPU0/T  1] [Ext4] ext4_rs returned successfully[0m
+[37m[INFO] [     1812094] [CPU0/T  1] [Ext4] Filesystem opened successfully[0m
+[37m[INFO] [     1813351] [CPU0/T  1] [Ext4] Mounting Ext4 as root filesystem[0m
+[37m[INFO] [     1830684] [CPU0/T  1] [Ext4] Root filesystem mounted at /[0m
+[37m[INFO] [     1834154] [CPU0/T  1] [Ext4] Root directory contents:[0m
+[37m[INFO] [     1879972] [CPU0/T  1]   - . (type: Directory)[0m
+[37m[INFO] [     1882608] [CPU0/T  1]   - .. (type: Directory)[0m
+[37m[INFO] [     1884407] [CPU0/T  1]   - lost+found (type: Directory)[0m
+[37m[INFO] [     1887962] [CPU0/T  1]   - bin (type: Directory)[0m
+[37m[INFO] [     1891263] [CPU0/T  1]   - dev (type: Directory)[0m
+[37m[INFO] [     1892039] [CPU0/T  1]   - etc (type: Directory)[0m
+[37m[INFO] [     1893226] [CPU0/T  1]   - home (type: Directory)[0m
+[37m[INFO] [     1894516] [CPU0/T  1]   - linuxrc (type: File)[0m
+[37m[INFO] [     1897211] [CPU0/T  1]   - proc (type: Directory)[0m
+[37m[INFO] [     1898212] [CPU0/T  1]   - sbin (type: Directory)[0m
+[37m[INFO] [     1900476] [CPU0/T  1]   - sys (type: Directory)[0m
+[37m[INFO] [     1901990] [CPU0/T  1]   - usr (type: Directory)[0m
+[37m[INFO] [     1904369] [CPU0/T  1] [Tmpfs] Creating tmpfs filesystem (max_size: unlimited MB)[0m
+[37m[INFO] [     1924158] [CPU0/T  1] [Tmpfs] Tmpfs mounted at /dev[0m
+[37m[INFO] [     1999052] [CPU0/T  1] [Init] /dev mounted and device nodes created (console, ttyS0, null, etc.)[0m
+[37m[INFO] [     2002115] [CPU0/T  1] [kernel_execve] Loading: /sbin/init[0m
+[37m[INFO] [    14668320] [CPU0/T  1] [kernel_execve] Loaded 9616272 bytes[0m
+[37m[INFO] [    14692460] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    14695010] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    14698292] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    14901968] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15455195] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15491034] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15493848] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15498073] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15534424] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15542866] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15654714] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    15656119] [CPU0/T  1] [kernel_execve] Created memory space, entry=0x10170[0m
+[37m[INFO] [    15668288] [CPU0/T  1] [kernel_execve] Switching to user mode[0m
+[1;31m[ALERT] [    15682290] [CPU0/T  1] reboot: unsupported reboot operation code 0
+[0m
+ioctl: VT_OPENQRY not supported (no VT subsystem)
+[37m[INFO] [    15769424] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+TCGETS: returning termios: iflag=0x100, oflag=0x5, cflag=0xb0, lflag=0x1b, ispeed=0xf, ospeed=0xf
+TCSETS: received termios: iflag=0x1500, oflag=0x5, cflag=0xcb0, lflag=0x8a3b, ispeed=0xf, ospeed=0xf
+[37m[INFO] [    15970802] [CPU0/T  1] [sys_read] fd=3 ty=OTHER ret=926 count=1024[0m
+[37m[INFO] [    16018717] [CPU0/T  1] [sys_read] fd=3 ty=OTHER ret=0 count=1024[0m
+[37m[INFO] [    16038890] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16041899] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16043312] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16048433] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16266645] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16865952] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16902304] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16904997] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16906842] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16969414] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    16971814] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    17093995] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    17097091] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    17103982] [CPU0/T  1] [SMP] Task 6 (child) assigned to CPU 1[0m
+[37m[INFO] [    17106580] [CPU0/T  1] [SMP] Adding task 6 to CPU 1 scheduler[0m
+[37m[INFO] [    17109284] [CPU0/T  1] [Scheduler] Task 6 added to run queue, new size: 1[0m
+[37m[INFO] [    17111293] [CPU0/T  1] [SMP] Sending IPI from CPU 0 to CPU 1[0m
+[37m[INFO] [    17117187] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x1[0m
+[37m[INFO] [    17119260] [CPU1/T  2] [IPI] CPU 1 received Reschedule IPI[0m
+[37m[INFO] [    17120959] [CPU1/T  2] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+TCGETS: returning termios: iflag=0x1500, oflag=0x5, cflag=0xcb0, lflag=0x8a3b, ispeed=0xf, ospeed=0xf
+TCSETS: received termios: iflag=0x1500, oflag=0x5, cflag=0xcb0, lflag=0x8a3[37mb, ispeed=0xf, ospeed=0xf
+[INFO] [    17132336] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 0[0m
+[37m[INFO] [    29614747] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    29618308] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    29619634] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    29621587] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    29625648] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    29824933] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30343138] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30380423] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30382135] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30384008] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30386427] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30388000] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30426124] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    30429150] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[execve] Dropping 96[37m[INFO] [    1627230508928] [CPU0/T   3] [IPI] CbyPU 0 te ELhandling F buffeIPI: 0x2[0rm
+ before switching to user space
+[37m[INFO] [    31658160] [CPU1/T  6] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    31759060] [CPU1/T  2] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    31770365] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    31776864] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+fcntl_dupfd: old_fd=3 -> new_fd=10, min_fd=10, cloexec=true
+[37m[INFO] [    31862213] [CPU1/T  6] [sys_read] fd=10 ty=OTHER ret=1023 count=1023[0m
+[37m[INFO] [    31864348] [CPU1/T  6] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    31867723] [CPU1/T  2] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+--- Starting Minimal BusyBox System ---
+[37m[INFO] [    31913003] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    31916679] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    31917875] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    31919977] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    31924312] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32117992] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32662496] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32701092] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32703318] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32705714] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32729423] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32731015] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32839250] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x2[0m
+[37m[INFO] [    32841871] [CPU1/T  6] [SMP] Task 7 (child) assigned to CPU 0[0m
+[37m[INFO] [    32845789] [CPU1/T  6] [SMP] Adding task 7 to CPU 0 scheduler[0m
+[37m[INFO] [    32850229] [CPU1/T  6] [Scheduler] Task 7 added to run queue, new size: 1[0m
+[37m[INFO] [    32855285] [CPU1/T  6] [SMP] Sending IPI from CPU 1 to CPU 0[0m
+[37m[INFO] [    32857517] [CPU0/T  3] [IPI] CPU 0 handling IPI: 0x1[0m
+[37m[INFO] [    32857815] [CPU1/T  6] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    32858493] [CPU0/T  3] [IPI] CPU 0 received Reschedule IPI[0m
+[37m[INFO] [    32863727] [CPU0/T  3] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    32958359] [CPU1/T  2] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    32966615] [CPU1/T  6] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    44710131] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    44712506] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    44715135] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    44718891] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    44893005] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45401357] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45433994] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45436094] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45438282] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45440161] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45441259] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45443119] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45444617] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45463055] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    45467191] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[execve[37m[INFO] [    45549696] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [    48688685] [CPU0/T  7] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    48789433] [CPU0/T  3] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    48800711] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x2[0m
+[37m[INFO] [    48844409] [CPU0/T  7] [SYSCALL] mount: source='none', target='/proc', type='proc'[0m
+[37m[INFO] [    48846276] [CPU0/T  7] [ProcFS] Initializing procfs[0m
+[37m[INFO] [    48861144] [CPU0/T  7] [ProcFS] Procfs mounted at /proc[0m
+[37m[INFO] [    48872327] [CPU0/T  7] [Scheduler] Waking up task 6 on CPU 1[0m
+[37m[INFO] [    48874475] [CPU0/T  7] [Scheduler] Sending IPI from CPU 0 to CPU 1 for task 6[0m
+[37m[INFO] [    48876177] [CPU1/T  2] [IPI] CPU 1 handling IPI: 0x1[0m
+[37m[INFO] [    48876618] [CPU0/T  7] [Scheduler] Waking up task 6 on CPU 0[0m
+[37m[INFO] [    48877312] [CPU1/T  2] [IPI] CPU 1 received Reschedule IPI[0m
+[37m[INFO] [    48878738] [CPU0/T  7] [Scheduler] CPU 0 next_task called, queue size: 2[0m
+[37m[INFO] [    48879212] [CPU1/T  2] [Scheduler] CPU 1 next_task called, queue size: 1[0m
+[37m[INFO] [    48880190] [CPU0/T  3] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    48882474] [CPU0/T  6] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+
+
+================ KERNEL PANIC ================
+
+
+================ KERNEL PANIC ================
+Unexpected exception in S-Mode (Kernel)!
+
+
+================ KERNEL PANIC ================
+Unexpected exception in S-Mode (Kernel)!
+----------------------------------------------
+  Exception: 12 (Raw scause: 0xc)
+  Faulting VA (stval): 0x6
+  Faulting PC (sepc):  0x6
+  sstatus:             0x8000000200006100
+  sscratch:            0x7
+==============================================
+Panicked at src/arch/riscv/trap/trap_handler.rs:301 Kernel exception in S-Mode

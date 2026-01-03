@@ -28,6 +28,8 @@ use crate::{
     },
     vfs::{create_stdio_files, fd_table, get_root_dentry},
 };
+// Needed for Ppn::as_usize
+use crate::mm::address::UsizeConvert;
 
 /// 已上线 CPU 位掩码
 ///
@@ -479,6 +481,25 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
         cpu.switch_task(idle_task);
     }
     pr_info!("[SMP] CPU {} set idle task as current_task", hartid);
+
+    // 切换到最终的内核页表（与 CPU0 共享），避免长期停留在 boot_pagetable
+    if let Some(kernel_space) = crate::mm::get_global_kernel_space() {
+        {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu().switch_space(kernel_space.clone());
+        }
+        let root_ppn = kernel_space.lock().root_ppn();
+        pr_info!(
+            "[SMP] CPU {} switched to global kernel space, root PPN: 0x{:x}",
+            hartid,
+            root_ppn.as_usize()
+        );
+    } else {
+        pr_warn!(
+            "[SMP] CPU {} could not get global kernel space; still on boot_pagetable",
+            hartid
+        );
+    }
 
     // 初始化定时器
     timer::init();

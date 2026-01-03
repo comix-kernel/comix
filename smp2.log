@@ -1,0 +1,3 @@
+cd os && cargo run
+Using existing fs.img (1GB Ext4 filesystem)
+Starting QEMU in normal run mode.

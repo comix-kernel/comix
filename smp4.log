@@ -1,0 +1,292 @@
+cd os && cargo run
+Using existing fs.img (1GB Ext4 filesystem)
+Starting QEMU in normal run mode.
+
+OpenSBI v1.5.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : medeleg
+Platform HART Count       : 2
+Platform IPI Device       : aclint-mswi
+Platform Timer Device     : aclint-mtimer @ 10000000Hz
+Platform Console Device   : uart8250
+Platform HSM Device       : ---
+Platform PMU Device       : ---
+Platform Reboot Device    : syscon-reboot
+Platform Shutdown Device  : syscon-poweroff
+Platform Suspend Device   : ---
+Platform CPPC Device      : ---
+Firmware Base             : 0x80000000
+Firmware Size             : 337 KB
+Firmware RW Offset        : 0x40000
+Firmware RW Size          : 81 KB
+Firmware Heap Offset      : 0x4b000
+Firmware Heap Size        : 37 KB (total), 2 KB (reserved), 11 KB (used), 23 KB (free)
+Firmware Scratch Size     : 4096 B (total), 416 B (used), 3680 B (free)
+Runtime SBI Version       : 2.0
+
+Domain0 Name              : root
+Domain0 Boot HART         : 1
+Domain0 HARTs             : 0*,1*
+Domain0 Region00          : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01          : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02          : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region03          : 0x0000000080040000-0x000000008005ffff M: (R,W) S/U: ()
+Domain0 Region04          : 0x0000000080000000-0x000000008003ffff M: (R,X) S/U: ()
+Domain0 Region05          : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06          : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07          : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Arg1         : 0x0000000087e00000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+Domain0 SysSuspend        : yes
+
+Boot HART ID              : 1
+Boot HART Domain          : root
+Boot HART Priv Version    : v1.12
+Boot HART Base ISA        : rv64imafdch
+Boot HART ISA Extensions  : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 2 bits
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Info       : 16 (0x0007fff8)
+Boot HART Debug Triggers  : 2 triggers
+Boot HART MIDELEG         : 0x0000000000001666
+Boot HART MEDELEG         : 0x0000000000f0b509
+[36m[early_test] No early tests to run.[0m
+[Boot] Hello, world!
+[Boot] RISC-V Hart 1 is up!
+Initializing heap: start=0xffffffc0803ea000, end=0xffffffc0823ea000, size=0x2000000 (32 MB)
+Heap allocator initialized successfully
+[MM] Created kernel space, root PPN: 0x823ea
+[Boot] Initialized CPUS, tp = 0xffffffc0803eabc0
+[Boot] Activated kernel address space
+[37m[INFO] [     1019953] [CPU0/T  0] [Device] devicetree of riscv-virtio,qemu is initialized[0m
+[37m[INFO] [     1046448] [CPU0/T  0] [Device] now has 2 CPU(s)[0m
+[37m[INFO] [     1049664] [CPU0/T  0] [Device] CLOCK_FREQ set to 10000000 Hz[0m
+[37m[INFO] [     1058422] [CPU0/T  0] [Device] Memory Region: Start = 0x80000000, Size = 0x8000000[0m
+[37m[INFO] [     1071411] [CPU0/T  0] [Device] Found device: interrupt-controller[0m
+[37m[INFO] [     1075272] [CPU0/T  0] [Device] Found device: interrupt-controller[0m
+[37m[INFO] [     1077533] [CPU0/T  0] [Device] Found device: plic@c000000[0m
+[37m[INFO] [     1125823] [CPU0/T  0] [Device] PLIC initialized from device tree node plic@c000000[0m
+[37m[INFO] [     1128831] [CPU0/T  0] [Device] Found device: /[0m
+[37m[INFO] [     1130543] [CPU0/T  0] [Device] Found device: poweroff[0m
+[37m[INFO] [     1132058] [CPU0/T  0] [Device] Found device: reboot[0m
+[37m[INFO] [     1133739] [CPU0/T  0] [Device] Found device: platform-bus@4000000[0m
+[37m[INFO] [     1135579] [CPU0/T  0] [Device] Found device: cpu@0[0m
+[37m[INFO] [     1137280] [CPU0/T  0] [Device] Found device: cpu@1[0m
+[37m[INFO] [     1138774] [CPU0/T  0] [Device] Found device: pmu[0m
+[37m[INFO] [     1140193] [CPU0/T  0] [Device] Found device: fw-cfg@10100000[0m
+[37m[INFO] [     1142138] [CPU0/T  0] [Device] Found device: flash@20000000[0m
+[37m[INFO] [     1144031] [CPU0/T  0] [Device] Found device: soc[0m
+[37m[INFO] [     1145537] [CPU0/T  0] [Device] Found device: rtc@101000[0m
+[37m[INFO] [     1150780] [CPU0/T  0] [Device] RTC Goldfish initialized[0m
+[37m[INFO] [     1152834] [CPU0/T  0] [Device] Found device: serial@10000000[0m
+[37m[INFO] [     1160656] [CPU0/T  0] [Device] Serial driver (uart16550) is initialized[0m
+[37m[INFO] [     1162860] [CPU0/T  0] [Device] Found device: test@100000[0m
+[37m[INFO] [     1164458] [CPU0/T  0] [Device] Found device: virtio_mmio@10008000[0m
+[37m[INFO] [     1170442] [CPU0/T  0] [Device] Initializing network driver (virtio-net)[0m
+[37m[INFO] [     1175244] [CPU0/T  0] [Device] Find VirtioNetDevice with ID: 0[0m
+[33m[WARNING] [     1214398] [CPU0/T  0] [Device] Failed to initialize VirtioNetDevice: DeviceNotReady[0m
+[37m[INFO] [     1219160] [CPU0/T  0] [Device] Found device: virtio_mmio@10007000[0m
+[33m[WARNING] [     1226255] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1233428] [CPU0/T  0] [Device] Found device: virtio_mmio@10006000[0m
+[33m[WARNING] [     1243962] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1250608] [CPU0/T  0] [Device] Found device: virtio_mmio@10005000[0m
+[33m[WARNING] [     1264356] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1267651] [CPU0/T  0] [Device] Found device: virtio_mmio@10004000[0m
+[33m[WARNING] [     1271184] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1274785] [CPU0/T  0] [Device] Found device: virtio_mmio@10003000[0m
+[33m[WARNING] [     1277846] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1281418] [CPU0/T  0] [Device] Found device: virtio_mmio@10002000[0m
+[33m[WARNING] [     1284479] [CPU0/T  0] Error creating VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0[0m
+[37m[INFO] [     1287881] [CPU0/T  0] [Device] Found device: virtio_mmio@10001000[0m
+[37m[INFO] [     1304996] [CPU0/T  0] [Device] Block driver (virtio-blk) is initialized[0m
+[37m[INFO] [     1309537] [CPU0/T  0] [Device] Found device: clint@2000000[0m
+[37m[INFO] [     1312932] [CPU0/T  0] [Device] Found device: pci@30000000[0m
+[37m[INFO] [     1317389] [CPU0/T  0] [Console] Switched to runtime console[0m
+[37m[INFO] [     1326510] [CPU0/T  0] Initializing REALTIME clock...[0m
+[37m[INFO] [     1330049] [CPU0/T  0] REALTIME clock initialized to TimeSpec { tv_sec: 1767456462, tv_nsec: 867052800 } seconds since epoch.[0m
+[37m[INFO] [     1336533] [CPU0/T  0] [SMP] Booting up to 1 secondary CPUs...[0m
+[37m[INFO] [     1338872] [CPU0/T  0] [SMP] Starting hart 1 at vaddr=0xffffffc080200058, paddr=0x80200058[0m
+[31m[ERR] [     1343729] [CPU0/T  0] [SMP] Failed to start hart 1: SBI error -6[0m
+[33m[WARNING] [     1348548] [CPU0/T  0] [SMP] No secondary hart could be started; falling back to single-core[0m
+[37m[INFO] [     1372040] [CPU0/T  0] [SMP] Created idle task 2 for CPU 0[0m
+[37m[INFO] [     1410799] [CPU0/T  1] [Scheduler] Task 3 added to run queue, new size: 1[0m
+[37m[INFO] [     1414129] [CPU0/T  1] [Ext4] Initializing Ext4 filesystem from block device[0m
+[37m[INFO] [     1416707] [CPU0/T  1] [Ext4] Using block device: virtio_block[0m
+[37m[INFO] [     1420416] [CPU0/T  1] [Ext4] Ext4 block size: 4096, Total blocks: 262144, Image size: 1024 MB[0m
+[37m[INFO] [     1422280] [CPU0/T  1] [Ext4] Opening Ext4 filesystem on block device[0m
+[37m[INFO] [     1423464] [CPU0/T  1] [Ext4] Device block size: 4096, total blocks: 262144[0m
+[37m[INFO] [     1424753] [CPU0/T  1] [Ext4Adapter] Created adapter: ext4_block_size=4096, sector_size=512[0m
+[37m[INFO] [     1426312] [CPU0/T  1] [Ext4] Calling ext4_rs::Ext4::open...[0m
+[37m[INFO] [     1457486] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [     1465007] [CPU0/T  3] [SMP] Task 4 assigned to CPU 0[0m
+[37m[INFO] [     1466578] [CPU0/T  3] [Scheduler] Task 4 added to run queue, new size: 2[0m
+[37m[INFO] [     1470411] [CPU0/T  3] [Scheduler] CPU 0 next_task called, queue size: 2[0m
+[37m[INFO] [     1473249] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [     1475892] [CPU0/T  4] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [     1684019] [CPU0/T  1] [Ext4] ext4_rs returned successfully[0m
+[37m[INFO] [     1686136] [CPU0/T  1] [Ext4] Filesystem opened successfully[0m
+[37m[INFO] [     1687328] [CPU0/T  1] [Ext4] Mounting Ext4 as root filesystem[0m
+[37m[INFO] [     1702907] [CPU0/T  1] [Ext4] Root filesystem mounted at /[0m
+[37m[INFO] [     1706103] [CPU0/T  1] [Ext4] Root directory contents:[0m
+[37m[INFO] [     1758485] [CPU0/T  1]   - . (type: Directory)[0m
+[37m[INFO] [     1759648] [CPU0/T  1]   - .. (type: Directory)[0m
+[37m[INFO] [     1760500] [CPU0/T  1]   - lost+found (type: Directory)[0m
+[37m[INFO] [     1762326] [CPU0/T  1]   - bin (type: Directory)[0m
+[37m[INFO] [     1763148] [CPU0/T  1]   - dev (type: Directory)[0m
+[37m[INFO] [     1763949] [CPU0/T  1]   - etc (type: Directory)[0m
+[37m[INFO] [     1765197] [CPU0/T  1]   - home (type: Directory)[0m
+[37m[INFO] [     1766423] [CPU0/T  1]   - linuxrc (type: File)[0m
+[37m[INFO] [     1767369] [CPU0/T  1]   - proc (type: Directory)[0m
+[37m[INFO] [     1768176] [CPU0/T  1]   - sbin (type: Directory)[0m
+[37m[INFO] [     1768848] [CPU0/T  1]   - sys (type: Directory)[0m
+[37m[INFO] [     1769508] [CPU0/T  1]   - usr (type: Directory)[0m
+[37m[INFO] [     1771953] [CPU0/T  1] [Tmpfs] Creating tmpfs filesystem (max_size: unlimited MB)[0m
+[37m[INFO] [     1790221] [CPU0/T  1] [Tmpfs] Tmpfs mounted at /dev[0m
+[37m[INFO] [     1866783] [CPU0/T  1] [Init] /dev mounted and device nodes created (console, ttyS0, null, etc.)[0m
+[37m[INFO] [     1870342] [CPU0/T  1] [kernel_execve] Loading: /sbin/init[0m
+[37m[INFO] [    16704151] [CPU0/T  1] [kernel_execve] Loaded 9616272 bytes[0m
+[37m[INFO] [    17641409] [CPU0/T  1] [kernel_execve] Created memory space, entry=0x10170[0m
+[37m[INFO] [    17653088] [CPU0/T  1] [kernel_execve] Switching to user mode[0m
+[1;31m[ALERT] [    17665193] [CPU0/T  1] reboot: unsupported reboot operation code 0
+[0m
+ioctl: VT_OPENQRY not supported (no VT subsystem)
+TCGETS: returning termios: iflag=0x100, oflag=0x5, cflag=0xb0, lflag=0x1b, ispeed=0xf, ospeed=0xf
+TCSETS: received termios: iflag=0x1500, oflag=0x5, cflag=0xcb0, lflag=0x8a3b, ispeed=0xf, ospeed=0xf
+[37m[INFO] [    17940490] [CPU0/T  1] [sys_read] fd=3 ty=OTHER ret=926 count=1024[0m
+[37m[INFO] [    17984511] [CPU0/T  1] [sys_read] fd=3 ty=OTHER ret=0 count=1024[0m
+[37m[INFO] [    19033996] [CPU0/T  1] [SMP] Task 5 (child) assigned to CPU 0[0m
+[37m[INFO] [    19036529] [CPU0/T  1] [SMP] Adding task 5 to CPU 0 scheduler[0m
+[37m[INFO] [    19037793] [CPU0/T  1] [Scheduler] Task 5 added to run queue, new size: 1[0m
+[37m[INFO] [    19040008] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+TCGETS: returning termios: iflag=0x1500, oflag=0x5, cflag=0xcb0, lflag=0x8a3b, ispeed=0xf, ospeed=0xf
+TCSETS: received termios: iflag=0x1500, oflag=0x5, cflag=0xcb0, lflag=0x8a3b, ispeed=0xf, ospeed=0xf
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [    35784123] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    35790117] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+fcntl_dupfd: old_fd=3 -> new_fd=10, min_fd=10, cloexec=true
+[37m[INFO] [    35900246] [CPU0/T  5] [sys_read] fd=10 ty=OTHER ret=1023 count=1023[0m
+--- Starting Minimal BusyBox System ---
+[37m[INFO] [    36801338] [CPU0/T  5] [SMP] Task 6 (child) assigned to CPU 0[0m
+[37m[INFO] [    36802773] [CPU0/T  5] [SMP] Adding task 6 to CPU 0 scheduler[0m
+[37m[INFO] [    36803766] [CPU0/T  5] [Scheduler] Task 6 added to run queue, new size: 1[0m
+[37m[INFO] [    36805248] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [    55876474] [CPU0/T  6] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    55880864] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    55937922] [CPU0/T  6] [SYSCALL] mount: source='none', target='/proc', type='proc'[0m
+[37m[INFO] [    55939886] [CPU0/T  6] [ProcFS] Initializing procfs[0m
+[37m[INFO] [    55965933] [CPU0/T  6] [ProcFS] Procfs mounted at /proc[0m
+[37m[INFO] [    55987011] [CPU0/T  6] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [    55996059] [CPU0/T  6] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [    55999904] [CPU0/T  6] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+[37m[INFO] [    61938785] [CPU0/T  5] [SMP] Task 7 (child) assigned to CPU 0[0m
+[37m[INFO] [    61940267] [CPU0/T  5] [SMP] Adding task 7 to CPU 0 scheduler[0m
+[37m[INFO] [    61941164] [CPU0/T  5] [Scheduler] Task 7 added to run queue, new size: 1[0m
+[37m[INFO] [    61942664] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [    81025612] [CPU0/T  7] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    81028732] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [    81079210] [CPU0/T  7] [SYSCALL] mount: source='none', target='/sys', type='sysfs'[0m
+[37m[INFO] [    81080894] [CPU0/T  7] [SysFS] Initializing sysfs[0m
+[37m[INFO] [    81129074] [CPU0/T  7] [SysFS] Sysfs mounted at /sys[0m
+[37m[INFO] [    81133248] [CPU0/T  7] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [    81134358] [CPU0/T  7] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [    81135256] [CPU0/T  7] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+[37m[INFO] [    87077519] [CPU0/T  5] [SMP] Task 8 (child) assigned to CPU 0[0m
+[37m[INFO] [    87079066] [CPU0/T  5] [SMP] Adding task 8 to CPU 0 scheduler[0m
+[37m[INFO] [    87079965] [CPU0/T  5] [Scheduler] Task 8 added to run queue, new size: 1[0m
+[37m[INFO] [    87081415] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [   104087194] [CPU0/T  8] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   104089725] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   104137542] [CPU0/T  8] [SYSCALL] mount: source='none', target='/tmp', type='tmpfs'[0m
+[37m[INFO] [   104139390] [CPU0/T  8] [Tmpfs] Creating tmpfs filesystem (max_size: unlimited MB)[0m
+[37m[INFO] [   104145283] [CPU0/T  8] [Tmpfs] Tmpfs mounted at /tmp[0m
+[37m[INFO] [   104149279] [CPU0/T  8] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [   104150281] [CPU0/T  8] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [   104151200] [CPU0/T  8] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+[37m[INFO] [   109039227] [CPU0/T  5] [sys_read] fd=10 ty=OTHER ret=604 count=1023[0m
+[37m[INFO] [   109936756] [CPU0/T  5] [SMP] Task 9 (child) assigned to CPU 0[0m
+[37m[INFO] [   109938357] [CPU0/T  5] [SMP] Adding task 9 to CPU 0 scheduler[0m
+[37m[INFO] [   109939346] [CPU0/T  5] [Scheduler] Task 9 added to run queue, new size: 1[0m
+[37m[INFO] [   109940742] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [   127620496] [CPU0/T  9] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   127624360] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   127641775] [CPU0/T  9] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [   127643314] [CPU0/T  9] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [   127644547] [CPU0/T  9] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+Warning: /etc/hostname not found. Hostname set to default: comix
+Mounting file systems via fstab...
+[37m[INFO] [   133386380] [CPU0/T  5] [SMP] Task 10 (child) assigned to CPU 0[0m
+[37m[INFO] [   133388570] [CPU0/T  5] [SMP] Adding task 10 to CPU 0 scheduler[0m
+[37m[INFO] [   133389791] [CPU0/T  5] [Scheduler] Task 10 added to run queue, new size: 1[0m
+[37m[INFO] [   133391495] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [   150611451] [CPU0/T 10] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   150614272] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+mount: can't read '/etc/fstab': No such file or directory
+[37m[INFO] [   150676273] [CPU0/T 10] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [   150678801] [CPU0/T 10] [Scheduler] Waking up task 5 on CPU 0[0m
+[37m[INFO] [   150680275] [CPU0/T 10] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+System initialization finished.
+rcS finished; spawning shell on ttyS0 via inittab
+[37m[INFO] [   155638168] [CPU0/T  5] [Scheduler] Waking up task 1 on CPU 0[0m
+[37m[INFO] [   155639387] [CPU0/T  5] [Scheduler] Waking up task 1 on CPU 0[0m
+[37m[INFO] [   155640254] [CPU0/T  5] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+[37m[INFO] [   161776155] [CPU0/T  1] [SMP] Task 11 (child) assigned to CPU 0[0m
+[37m[INFO] [   161778451] [CPU0/T  1] [SMP] Adding task 11 to CPU 0 scheduler[0m
+[37m[INFO] [   161779715] [CPU0/T  1] [Scheduler] Task 11 added to run queue, new size: 1[0m
+[37m[INFO] [   161782045] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [   181640399] [CPU0/T 11] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   181652539] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+fcntl_dupfd: old_fd=0 -> new_fd=10, min_fd=10, cloexec=true
+fcntl_dupfd: old_fd=1 -> new_fd=11, min_fd=10, cloexec=true
+fcntl_dupfd: old_fd=2 -> new_fd=12, min_fd=10, cloexec=true
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [   200239461] [CPU0/T 11] [Scheduler] Waking up task 1 on CPU 0[0m
+[37m[INFO] [   200241172] [CPU0/T 11] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   200245285] [CPU0/T  1] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+fcntl_dupfd: old_fd=3 -> new_fd=10, min_fd=10, cloexec=true
+ioctl: TIOCGPGRP writing pgid=11 to 0x3fffffec1c
+ioctl: TIOCGPGRP completed
+ioctl: TIOCSPGRP set pgid=11
+/ # [37m[INFO] [   292222502] [CPU0/T 11] [sys_read] fd=0 ty=CHARDEV ret=1 count=1[0m
+l[37m[INFO] [   297210416] [CPU0/T 11] [sys_read] fd=0 ty=CHARDEV ret=1 count=1[0m
+s[37m[INFO] [   301723445] [CPU0/T 11] [sys_read] fd=0 ty=CHARDEV ret=1 count=1[0m
+
+[37m[INFO] [   302920869] [CPU0/T 11] [SMP] Task 12 (child) assigned to CPU 0[0m
+[37m[INFO] [   302924076] [CPU0/T 11] [SMP] Adding task 12 to CPU 0 scheduler[0m
+[37m[INFO] [   302926045] [CPU0/T 11] [Scheduler] Task 12 added to run queue, new size: 1[0m
+[37m[INFO] [   302928161] [CPU0/T 11] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+ioctl: TIOCSPGRP set pgid=12
+[execve] Dropping 9616272 byte ELF buffer before switching to user space
+[37m[INFO] [   322736996] [CPU0/T 12] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[37m[INFO] [   322742594] [CPU0/T 11] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[1;34mbin[m         [1;34metc[m         [1;32mlinuxrc[m     [1;34mproc[m        [1;34msys[m
+[1;34mdev[m         [1;34mhome[m        [1;34mlost+found[m  [1;34msbin[m        [1;34musr[m
+[37m[INFO] [   323349021] [CPU0/T 12] [Scheduler] Waking up task 11 on CPU 0[0m
+[37m[INFO] [   323350301] [CPU0/T 12] [Scheduler] Waking up task 11 on CPU 0[0m
+[37m[INFO] [   323351218] [CPU0/T 12] [Scheduler] CPU 0 next_task called, queue size: 1[0m
+[wait4] Removed from parent.children: 0 -> 0
+ioctl: TIOCSPGRP set pgid=11
+/ # 
