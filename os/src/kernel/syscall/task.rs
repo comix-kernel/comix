@@ -465,8 +465,11 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         }
     };
 
-    unsafe {
-        write_to_user(wstatus, status.raw());
+    // wstatus 允许为 NULL（例如 waitpid(-1, NULL, 0)），此时不写回状态
+    if !wstatus.is_null() {
+        unsafe {
+            write_to_user(wstatus, status.raw());
+        }
     }
 
     // 如果子任务是 Zombie 状态，从 TASK_MANAGER 中释放它
