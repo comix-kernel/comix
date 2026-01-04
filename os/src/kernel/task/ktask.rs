@@ -87,12 +87,11 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
             super::terminate_task as usize,
             task.kstack_base,
         );
-        // 设置 cpu_ptr 指向当前 CPU
         let cpu_ptr = {
             let _guard = crate::sync::PreemptGuard::new();
             crate::kernel::current_cpu() as *const _ as usize
         };
-        (*tf).cpu_ptr = cpu_ptr;
+        crate::arch::trap::set_trap_frame_cpu_ptr(tf, cpu_ptr);
     }
     let tid = task.tid;
     let task = task.into_shared();
