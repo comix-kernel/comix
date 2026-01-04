@@ -258,6 +258,34 @@ impl MemorySpace {
         Ok(())
     }
 
+    /// 插入VMA但不分配物理页（用于PROT_NONE）
+    pub fn insert_vma_only(
+        &mut self,
+        vpn_range: VpnRange,
+        area_type: AreaType,
+    ) -> Result<(), PagingError> {
+        // 1. 检查重叠
+        for existing in &self.areas {
+            if existing.vpn_range().overlaps(&vpn_range) {
+                return Err(PagingError::AlreadyMapped);
+            }
+        }
+
+        // 2. 创建VMA但不映射到页表（无权限，无物理页）
+        let area = MappingArea::new(
+            vpn_range,
+            area_type,
+            MapType::Framed,
+            UniversalPTEFlag::empty(), // 无任何权限
+            None,
+        );
+
+        // 3. 添加到区域列表
+        self.areas.push(area);
+
+        Ok(())
+    }
+
     /// 插入一个帧映射区域，并可选择复制数据
     pub fn insert_framed_area(
         &mut self,
@@ -422,6 +450,49 @@ impl MemorySpace {
     /// - ELF 解析失败
     /// - 架构不匹配（非 RISC-V）
     /// - 段与保留区域重叠
+
+    /// 写入usize到用户空间地址（用于重定位）
+    /// 使用 Eager Allocation 避免缺页中断导致的死锁
+    fn write_user_usize(&mut self, vaddr: usize, value: usize) -> Result<(), PagingError> {
+        use crate::arch::mm::paddr_to_vaddr;
+        use crate::mm::frame_allocator::alloc_frame;
+
+        let vpn = Vpn::from_addr_floor(Vaddr::from_usize(vaddr));
+        let byte_offset = vaddr % PAGE_SIZE;
+
+        // 尝试获取物理地址
+        let paddr = if let Some(paddr) = self.page_table.translate(Vaddr::from_usize(vaddr)) {
+            paddr.as_usize()
+        } else {
+            // 页面未分配，需要强制分配（Eager Allocation）
+            // 找到对应的 MappingArea
+            let area = self.areas.iter_mut()
+                .find(|a| a.vpn_range().contains(vpn))
+                .ok_or(PagingError::InvalidAddress)?;
+
+            // 分配物理页
+            let frame = alloc_frame().ok_or(PagingError::OutOfMemory)?;
+            let ppn = frame.ppn();
+
+            // 映射到页表
+            self.page_table.map(vpn, ppn, crate::mm::page_table::PageSize::Size4K, area.flags())?;
+
+            // 将帧添加到 area 的跟踪列表
+            area.insert_frame(vpn, frame);
+
+            ppn.as_usize() * PAGE_SIZE + byte_offset
+        };
+
+        // 转换为内核虚拟地址
+        let kvaddr = paddr_to_vaddr(paddr);
+
+        // 写入值
+        unsafe {
+            core::ptr::write_volatile(kvaddr as *mut usize, value);
+        }
+        Ok(())
+    }
+
     pub fn from_elf(
         elf_data: &[u8],
     ) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
@@ -473,6 +544,14 @@ impl MemorySpace {
 
             let start_va = ph.virtual_addr() as usize;
             let end_va = (ph.virtual_addr() + ph.mem_size()) as usize;
+            let file_size = ph.file_size() as usize;
+            let mem_size = ph.mem_size() as usize;
+            let offset = ph.offset() as usize;
+
+            crate::pr_debug!(
+                "[ELF] LOAD segment: vaddr={:#x}..{:#x}, filesz={:#x}, memsz={:#x}, offset={:#x}",
+                start_va, end_va, file_size, mem_size, offset
+            );
 
             // 检查段是否与栈/陷阱区域重叠
             if start_va >= USER_STACK_TOP - USER_STACK_SIZE {
@@ -513,9 +592,28 @@ impl MemorySpace {
 
             // 获取段数据
             let data = match ph.get_data(&elf) {
-                Ok(SegmentData::Undefined(data)) => Some(data),
-                _ => None,
+                Ok(SegmentData::Undefined(data)) => {
+                    crate::pr_debug!("[ELF] Segment data: {} bytes from file", data.len());
+                    Some(data)
+                },
+                _ => {
+                    crate::pr_debug!("[ELF] Segment has no file data (BSS)");
+                    None
+                },
             };
+
+            // 检查特定地址 0x2830c
+            if start_va <= 0x2830c && 0x2830c < end_va {
+                crate::pr_debug!(
+                    "[ELF] Address 0x2830c is in this segment: filesz={:#x}, memsz={:#x}",
+                    file_size, mem_size
+                );
+                if 0x2830c < start_va + file_size {
+                    crate::pr_debug!("[ELF] 0x2830c is in file data range");
+                } else {
+                    crate::pr_debug!("[ELF] 0x2830c is in BSS range (zero-filled)");
+                }
+            }
 
             // 插入区域（将在内部检查重叠）
             space.insert_framed_area_with_offset(
@@ -563,6 +661,66 @@ impl MemorySpace {
                 if ph_off >= offset && ph_off < offset + filesz {
                     phdr_addr = vaddr + (ph_off - offset);
                     break;
+                }
+            }
+        }
+
+        // 处理重定位（用于 static-PIE）
+        use xmas_elf::sections::SectionData;
+        use xmas_elf::symbol_table::Entry;
+
+        crate::pr_debug!("[ELF] Starting relocation processing");
+
+        // 查找 .rela.dyn 段
+        for section in elf.section_iter() {
+            if let Ok(name) = section.get_name(&elf) {
+                if name == ".rela.dyn" {
+                    if let Ok(SectionData::Rela64(relas)) = section.get_data(&elf) {
+                        crate::pr_debug!("[ELF] Found .rela.dyn with {} entries", relas.len());
+
+                        for (idx, rela) in relas.iter().enumerate() {
+                            let r_type = rela.get_type();
+                            let r_offset = rela.get_offset() as usize;
+                            let r_addend = rela.get_addend() as usize;
+
+                            if idx < 5 || idx % 50 == 0 {
+                                crate::pr_debug!("[ELF] Reloc #{}: type={} offset={:#x}", idx, r_type, r_offset);
+                            }
+
+                            let value = match r_type {
+                                // R_RISCV_64: S + A (符号地址 + addend)
+                                2 => {
+                                    let sym_idx = rela.get_symbol_table_index() as usize;
+                                    if let Some(symtab_section) = elf.find_section_by_name(".dynsym") {
+                                        if let Ok(SectionData::DynSymbolTable64(symtab)) = symtab_section.get_data(&elf) {
+                                            if sym_idx < symtab.len() {
+                                                let sym = &symtab[sym_idx];
+                                                let sym_value = sym.value() as usize;
+                                                Some(sym_value + r_addend)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                // R_RISCV_RELATIVE: B + A (base_addr + addend)
+                                3 => Some(r_addend), // base_addr = 0 for PIE
+                                _ => None,
+                            };
+
+                            if let Some(value) = value {
+                                if let Err(_) = space.write_user_usize(r_offset, value) {
+                                    crate::pr_warn!("[ELF] Failed to apply relocation type {} at {:#x}", r_type, r_offset);
+                                }
+                            }
+                        }
+
+                        crate::pr_debug!("[ELF] Relocation processing completed");
+                    }
                 }
             }
         }

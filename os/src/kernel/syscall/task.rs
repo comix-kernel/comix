@@ -62,10 +62,20 @@ use crate::{
 /// # 参数
 /// - `code`: 退出代码
 pub fn exit(code: c_int) -> c_int {
-    // TODO: 处理 tid_addr 和 robust_list
-    // TODO: clear_child_tid 的处理
     let task = current_task();
-    let (pid, tid) = { let t = task.lock(); (t.pid, t.tid) };
+    let (pid, tid, clear_child_tid) = {
+        let t = task.lock();
+        (t.pid, t.tid, t.clear_child_tid)
+    };
+
+    if clear_child_tid != 0 {
+        unsafe {
+            write_to_user(clear_child_tid as *mut c_int, 0);
+        }
+        use crate::kernel::task::FUTEX_MANAGER;
+        FUTEX_MANAGER.lock().get_wait_queue(clear_child_tid).wake_up_one();
+    }
+
     crate::pr_info!("[Task] exit: tid={}, code={}", tid, code);
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
@@ -118,6 +128,14 @@ pub fn clone(
     }
     if !requested_flags.is_supported() {
         return -ENOSYS;
+    }
+    // CLONE_THREAD 必须和 CLONE_SIGHAND 一起使用
+    if requested_flags.contains(CloneFlags::THREAD) && !requested_flags.contains(CloneFlags::SIGHAND) {
+        return -EINVAL;
+    }
+    // CLONE_SIGHAND 必须和 CLONE_VM 一起使用
+    if requested_flags.contains(CloneFlags::SIGHAND) && !requested_flags.contains(CloneFlags::VM) {
+        return -EINVAL;
     }
     // 根据 clone(2) 的 man page，当指定 CLONE_VM 标志时，必须为子进程提供一个新的栈
     // 否则父子进程将共享同一个栈，导致栈污染和程序崩溃
@@ -203,7 +221,7 @@ pub fn clone(
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let child_task = TaskStruct::utask_create(
+    let mut child_task = TaskStruct::utask_create(
         tid,
         pid,
         ppid,
@@ -224,6 +242,7 @@ pub fn clone(
     );
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
+        child_task.set_child_tid = ctid as usize;
         unsafe {
             write_to_user(ctid, tid as c_int);
         }
@@ -232,6 +251,9 @@ pub fn clone(
         unsafe {
             write_to_user(ptid, tid as c_int);
         }
+    }
+    if requested_flags.contains(CloneFlags::CHILD_CLEARTID) {
+        child_task.clear_child_tid = ctid as usize;
     }
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
@@ -247,11 +269,91 @@ pub fn clone(
 
     TASK_MANAGER.lock().add_task(child_task.clone());
     SCHEDULER.lock().add_task(child_task.clone());
-    
+
     let parent_tid = current_task().lock().tid;
     crate::pr_info!("[Task] clone: parent_tid={} -> child_tid={}, flags={:#x}",
             parent_tid, tid, flags);
     tid as c_int
+}
+
+/// clone3 - 创建子进程/线程（新接口）
+///
+/// clone3使用结构体传递参数，提供更好的扩展性
+pub fn clone3(args: *const u8, size: usize) -> c_int {
+    use crate::arch::trap::SumGuard;
+
+    // 验证参数
+    if args.is_null() || size < 64 {
+        return -EINVAL;
+    }
+
+    // 读取clone_args结构体
+    let _guard = SumGuard::new();
+    let (flags, pidfd, child_tid, parent_tid, _exit_signal, stack, _stack_size, tls) = unsafe {
+        let ptr = args as *const u64;
+        (
+            *ptr.add(0),           // flags
+            *ptr.add(1) as *mut i32, // pidfd
+            *ptr.add(2) as *mut i32, // child_tid
+            *ptr.add(3) as *mut i32, // parent_tid
+            *ptr.add(4),           // exit_signal
+            *ptr.add(5),           // stack
+            *ptr.add(6),           // stack_size
+            *ptr.add(7) as *mut core::ffi::c_void, // tls
+        )
+    };
+
+    // pidfd功能：暂不支持，但不阻止clone继续执行
+    // 如果用户请求pidfd，我们忽略它（不写入文件描述符）
+    // 这样程序可以继续运行，只是没有pidfd功能
+    // 注意：pidfd字段在clone_args中的偏移是8字节（第二个u64）
+
+    // 调用原有的clone实现
+    clone(
+        flags,
+        stack,
+        parent_tid,
+        tls,
+        child_tid,
+    )
+}
+
+/// rseq - 可重启序列（Restartable Sequences）
+///
+/// rseq是Linux的性能优化特性，用于无锁的per-CPU操作
+pub fn rseq(
+    rseq: *mut u8,
+    rseq_len: u32,
+    flags: i32,
+    _sig: u32,
+) -> c_int {
+    use crate::arch::trap::SumGuard;
+
+    // 验证参数
+    if rseq_len != 32 {
+        return -EINVAL;
+    }
+
+    if flags != 0 {
+        return -EINVAL;
+    }
+
+    // 当前简化实现：记录rseq地址但不实际使用
+    // 真正的rseq需要内核在上下文切换时更新cpu_id
+    if !rseq.is_null() {
+        let _guard = SumGuard::new();
+        unsafe {
+            // 初始化rseq结构
+            let ptr = rseq as *mut u32;
+            *ptr.add(0) = 0; // cpu_id_start
+            *ptr.add(1) = 0; // cpu_id (假设单核)
+            // rseq_cs和flags保持不变
+        }
+    }
+
+    // 返回成功，但实际不提供rseq功能
+    // 程序会认为rseq可用但性能优化不会生效
+    0
 }
 
 /// 执行一个新程序（execve）

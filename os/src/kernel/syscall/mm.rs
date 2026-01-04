@@ -240,6 +240,23 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
         }
     };
 
+    // PROT_NONE: 不分配物理页，不设置VALID位
+    if prot_flags.is_empty() {
+        let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start_addr));
+        let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start_addr + len));
+        let vpn_range = VpnRange::new(start_vpn, end_vpn);
+
+        // 只创建VMA，不分配物理页，不设置页表项
+        if let Err(e) = space.insert_vma_only(vpn_range, AreaType::UserMmap) {
+            pr_err!(
+                "mmap PROT_NONE failed: {:?}, addr=0x{:x}, len=0x{:x}",
+                e, start_addr, len
+            );
+            return MAP_FAILED;
+        }
+        return start_addr as isize;
+    }
+
     // 转换权限标志
     let mut pte_flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
 
@@ -253,15 +270,6 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
     }
     if prot_flags.contains(ProtFlags::EXEC) {
         pte_flags |= UniversalPTEFlag::EXECUTABLE;
-    }
-
-    // PROT_NONE: 页面不可访问，但预留地址空间
-    // RISC-V 要求至少有一个 R/W/X 权限，所以 PROT_NONE 的页面暂时不映射
-    if prot_flags.is_empty() {
-        // 只预留地址空间，不实际映射物理页
-        // TODO: 实现延迟映射机制
-        pr_warn!("mmap: PROT_NONE not fully supported, returning success without mapping");
-        return start_addr as isize;
     }
 
     // 创建映射

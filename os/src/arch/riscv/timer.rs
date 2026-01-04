@@ -42,6 +42,10 @@ pub fn set_next_trigger() {
 
 /// 初始化定时器
 pub fn init() {
+    // 设置 scounteren 允许用户态读取 time/cycle/instret CSR
+    unsafe {
+        core::arch::asm!("csrw scounteren, {}", in(reg) 0x7);
+    }
     set_next_trigger();
     // Safe: 只在内核初始化阶段调用，确保唯一性
     unsafe { crate::arch::intr::enable_timer_interrupt() };

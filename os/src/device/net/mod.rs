@@ -6,6 +6,7 @@ use crate::device::NetDevice;
 use crate::sync::SpinLock;
 use alloc::{sync::Arc, vec::Vec};
 
+pub mod loopback;
 pub mod net_device;
 pub mod virtio_net;
 

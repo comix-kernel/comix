@@ -490,16 +490,11 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
 /// * **失败**：返回负的 errno
 pub fn getrandom(buf: *mut c_void, len: SizeT, _flags: c_uint) -> c_int {
     let mut pool = BiogasPoll::new();
-    for i in 0..len {
-        let byte = match pool.try_fill(core::slice::from_mut(unsafe {
-            &mut *(buf as *mut u8).add(i as usize)
-        })) {
-            Ok(_) => unsafe { *(buf as *mut u8).add(i as usize) },
-            Err(_) => return -EINVAL,
-        };
-        unsafe {
-            *(buf as *mut u8).add(i as usize) = byte;
-        }
+    let mut random_bytes = alloc::vec![0u8; len as usize];
+    if pool.try_fill(&mut random_bytes).is_err() {
+        return -EINVAL;
     }
+    let user_buf = UserBuffer::new(buf as *mut u8, len as usize);
+    unsafe { user_buf.copy_to_user(&random_bytes) };
     len as c_int
 }

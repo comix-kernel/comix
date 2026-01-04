@@ -89,6 +89,15 @@ impl MappingArea {
         self.area_type
     }
 
+    pub fn flags(&self) -> UniversalPTEFlag {
+        self.permission.clone()
+    }
+
+    /// 插入已分配的帧到跟踪列表（用于重定位时的 Eager Allocation）
+    pub fn insert_frame(&mut self, vpn: Vpn, frame: crate::mm::frame_allocator::FrameTracker) {
+        self.frames.insert(vpn, TrackedFrames::Single(frame));
+    }
+
     /// 获取虚拟页号（VPN）对应的物理页号（PPN）（如果已映射）
     pub fn get_ppn(&self, vpn: Vpn) -> Option<crate::mm::address::Ppn> {
         self.frames.get(&vpn).map(|tracked| match tracked {

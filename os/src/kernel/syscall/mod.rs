@@ -61,6 +61,7 @@ impl_syscall!(sys_ioctl, ioctl, (i32, u32, usize));
 impl_syscall!(sys_mknodat, mknodat, (i32, *const c_char, u32, u64));
 impl_syscall!(sys_mkdirat, mkdirat, (i32, *const c_char, u32));
 impl_syscall!(sys_unlinkat, unlinkat, (i32, *const c_char, u32));
+impl_syscall!(sys_unlink, unlink, (*const c_char));
 impl_syscall!(
     sys_symlinkat,
     symlinkat,
@@ -72,6 +73,8 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 
 // 文件大小/权限/所有权 (File Size/Permissions/Ownership)
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
+impl_syscall!(sys_access, access, (*const c_char, i32));
+impl_syscall!(sys_ftruncate, ftruncate, (usize, i64));
 impl_syscall!(sys_chdir, chdir, (*const c_char));
 impl_syscall!(sys_fchmodat, fchmodat, (i32, *const c_char, u32, u32));
 impl_syscall!(sys_fchownat, fchownat, (i32, *const c_char, u32, u32, u32));
@@ -235,6 +238,7 @@ impl_syscall!(
     getsockopt,
     (i32, i32, i32, *mut u8, *mut u32)
 );
+impl_syscall!(sys_shutdown, shutdown, (i32, i32));
 
 // 进程创建/执行 (Process Creation/Execution)
 impl_syscall!(
@@ -248,6 +252,8 @@ impl_syscall!(
         *mut c_int   // child_tid (a4)
     )
 );
+impl_syscall!(sys_clone3, clone3, (*const u8, usize));
+impl_syscall!(sys_rseq, rseq, (*mut u8, u32, i32, u32));
 impl_syscall!(
     sys_execve,
     execve,

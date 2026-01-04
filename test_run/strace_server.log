@@ -1,0 +1,23 @@
+36930 set_tid_address(0x41cd8) = 36930
+36930 brk(NULL) = 0x0000000000044000
+36930 brk(0x0000000000045000) = 0x0000000000045000
+36930 rt_sigprocmask(SIG_UNBLOCK,[33 34],NULL,8) = 0
+36930 rt_sigaction(SIGINT,0x00007f19c30ce8a0,0x00007f19c30ce8c0) = 0
+36930 rt_sigaction(SIGTERM,0x00007f19c30ce8a0,0x00007f19c30ce8c0) = 0
+36930 rt_sigaction(SIGHUP,0x00007f19c30ce8b0,0x00007f19c30ce8d0) = 0
+36930 rt_sigaction(SIGPIPE,0x00007f19c30ce8b0,0x00007f19c30ce8d0) = 0
+36930 socket(10,SOCK_STREAM,IPPROTO_IP) = 3
+36930 setsockopt(3,1,2,0x7f19c30ce7ec,0x4) = 0
+36930 setsockopt(3,41,26,0x7f19c30ce7ec,0x4) = 0
+36930 bind(3,{sa_family=10, sa_data={13, 89, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00}},28) = 0
+36930 listen(3,2147483647) = 0
+36930 ioctl(1,TIOCGWINSZ,0x00007f19c30ce738) = -1 errno=25 (Inappropriate ioctl for device)
+36930 writev(1,0x7f19c30ce6e0,0x2) = 60
+36930 clock_gettime(CLOCK_MONOTONIC,0x00007f19c30ce880) = 0 ({tv_sec = 25778,tv_nsec = 236373506})
+36930 clock_gettime(CLOCK_MONOTONIC,0x00007f19c30ce880) = 0 ({tv_sec = 25778,tv_nsec = 236588182})
+36930 pselect6(4,139748623313152,139748623313280,0,0,139748623313024) = -1 errno=4 (Interrupted system call)
+--- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=36929, si_uid=1000} ---
+36930 writev(2,0x7f19c30ce400,0x2)iperf3: interrupt - the server has terminated
+ = 46
+36930 writev(1,0x7f19c30ce570,0x2) = 95
+36930 exit_group(1)

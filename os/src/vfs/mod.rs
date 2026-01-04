@@ -202,7 +202,19 @@ pub fn vfs_load_elf(path: &str) -> Result<Vec<u8>, FsError> {
     }
 
     let mut buf = vec![0u8; metadata.size];
-    inode.read_at(0, &mut buf)?;
+    let mut total_read = 0;
+
+    // 循环读取直到读完整个文件（处理短读）
+    while total_read < metadata.size {
+        let bytes_read = inode.read_at(total_read, &mut buf[total_read..])?;
+        if bytes_read == 0 {
+            crate::pr_warn!("[VFS] Unexpected EOF: expected {} bytes, got {} bytes for {}",
+                metadata.size, total_read, path);
+            break;
+        }
+        total_read += bytes_read;
+    }
+
     Ok(buf)
 }
 

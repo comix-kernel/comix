@@ -31,6 +31,8 @@ use lazy_static::lazy_static;
 pub enum DeviceType {
     /// 网络设备
     Net,
+    /// Loopback 设备
+    Loopback,
     /// 图形处理单元设备
     Gpu,
     /// 输入设备

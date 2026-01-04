@@ -18,7 +18,7 @@ use crate::{
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
-            MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE, SS_AUTODISARM,
+            MINSIGSTKSZ, NSIG, NUM_SIGKILL, NUM_SIGSTOP, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE, SS_AUTODISARM,
             SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags, UContextT,
         },
         time::TimeSpec,
@@ -77,6 +77,10 @@ pub fn rt_sigprocmask(
                 return -EINVAL;
             }
         }
+
+        // SIGKILL和SIGSTOP不能被阻塞
+        let cant_mask = SignalFlags::from_bits((1 << (NUM_SIGKILL - 1)) | (1 << (NUM_SIGSTOP - 1))).unwrap();
+        t.blocked.remove(cant_mask);
     }
 
     0

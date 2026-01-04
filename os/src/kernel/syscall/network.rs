@@ -18,7 +18,9 @@ macro_rules! set_sockopt_int {
             if val < 0 {
                 return -(EINVAL as isize);
             }
-            $field = val as usize;
+            // Clamp to reasonable range: min 4KB, max 16MB
+            let val = (val as usize).max(4096).min(16 * 1024 * 1024);
+            $field = val;
         }
     };
 }
@@ -133,6 +135,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
 
     let mut task_lock = task.lock();
+    let tid = task_lock.tid;
     match task_lock.fd_table.alloc(socket_file) {
         Ok(fd) => {
             register_socket_fd(task_lock.tid as usize, fd, handle);
@@ -140,7 +143,8 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
                 SocketHandle::Tcp(_) => "TCP",
                 SocketHandle::Udp(_) => "UDP",
             };
-            pr_debug!("socket: domain={}, type={} -> fd={}, handle={}", domain, socket_type, fd, handle_type);
+            pr_info!("[SOCKET] Created {} socket: tid={}, fd={}, domain={}, type={}",
+                handle_type, tid, fd, domain, socket_type);
             fd as isize
         }
         Err(_) => -24, // EMFILE
@@ -310,12 +314,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
         let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
         let state = listen_socket.state();
-        let has_remote = listen_socket.remote_endpoint().is_some();
 
-        // Socket transitions from Listen to SynReceived/Established when connection arrives
-        let connection_ready = state != smoltcp::socket::tcp::State::Listen && has_remote;
-
-        if connection_ready {
+        // Wait until connection is fully established
+        if state == smoltcp::socket::tcp::State::Established {
             break;
         }
 
@@ -388,17 +389,8 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let sockets = SOCKET_SET.lock();
     let conn_socket = sockets.get::<tcp::Socket>(listen_handle);
 
-    // Verify socket is in a valid state for data transfer
-    let state = conn_socket.state();
-    let recv_queue = conn_socket.recv_queue();
     pr_debug!("accept: tid={}, listen_handle={:?}, state={:?}, recv_queue={}",
-        tid, listen_handle, state, recv_queue);
-
-    if state != smoltcp::socket::tcp::State::Established {
-        pr_debug!("accept: socket state={:?}, not Established, returning error", state);
-        drop(sockets);
-        return -11; // EAGAIN
-    }
+        tid, listen_handle, conn_socket.state(), conn_socket.recv_queue());
 
     if let Some(local_ep) = conn_socket.local_endpoint() {
         socket_file.set_local_endpoint(local_ep);
@@ -534,7 +526,28 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 return -115; // EINPROGRESS
             }
         }
-        SocketHandle::Udp(_) => {
+        SocketHandle::Udp(h) => {
+            pr_debug!("connect: sockfd={} UDP", sockfd);
+
+            // Check if socket is already bound
+            let mut sockets = SOCKET_SET.lock();
+            let socket = sockets.get_mut::<udp::Socket>(h);
+
+            if !socket.is_open() {
+                // Implicit bind: allocate ephemeral port
+                use core::sync::atomic::{AtomicU16, Ordering};
+                static NEXT_UDP_PORT: AtomicU16 = AtomicU16::new(49152);
+                let port = NEXT_UDP_PORT.fetch_add(1, Ordering::Relaxed);
+                let port = if port >= 65535 { 49152 } else { port };
+
+                let local_endpoint = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), port);
+                if socket.bind(local_endpoint).is_err() {
+                    return -98; // EADDRINUSE
+                }
+                pr_debug!("connect: UDP implicit bind to port {}", port);
+            }
+
+            drop(sockets);
             pr_debug!("connect: sockfd={} UDP -> success", sockfd);
         }
     }
@@ -702,12 +715,19 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
                     SO_REUSEADDR => set_sockopt_bool!(optval, optlen, opts.reuse_addr),
                     SO_REUSEPORT => set_sockopt_bool!(optval, optlen, opts.reuse_port),
                     SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
+                    // Note: SO_SNDBUF/SO_RCVBUF are stored but not applied to smoltcp sockets
+                    // smoltcp uses fixed-size buffers allocated at socket creation time
                     SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
                     SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
+                    SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ },
                     _ => return -(ENOPROTOOPT as isize),
                 },
                 IPPROTO_TCP => match optname {
                     TCP_NODELAY => set_sockopt_bool!(optval, optlen, opts.tcp_nodelay),
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                IPPROTO_IPV6 => match optname {
+                    IPV6_V6ONLY => set_sockopt_bool!(optval, optlen, opts.ipv6_v6only),
                     _ => return -(ENOPROTOOPT as isize),
                 },
                 _ => return -(ENOPROTOOPT as isize),
@@ -780,6 +800,15 @@ pub fn getsockopt(
                 IPPROTO_TCP => match optname {
                     TCP_NODELAY => {
                         get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len)
+                    }
+                    TCP_MAXSEG => {
+                        get_sockopt_int!(optval, available_len, opts.tcp_maxseg, written_len)
+                    }
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                IPPROTO_IPV6 => match optname {
+                    IPV6_V6ONLY => {
+                        get_sockopt_bool!(optval, available_len, opts.ipv6_v6only, written_len)
                     }
                     _ => return -(ENOPROTOOPT as isize),
                 },

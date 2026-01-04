@@ -56,7 +56,7 @@ impl Default for UtsNamespace {
             },
             release: {
                 let mut buf = [0u8; 65];
-                let bytes = "0.1.0".as_bytes();
+                let bytes = "5.10.0".as_bytes();
                 buf[..bytes.len()].copy_from_slice(bytes);
                 buf
             },
