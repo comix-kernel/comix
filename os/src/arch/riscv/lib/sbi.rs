@@ -95,5 +95,5 @@ pub fn send_ipi(hart_mask: usize) {
 
     // 回退到 Legacy SBI
     // Legacy SBI 使用指针传递 hart_mask
-    let _ = sbi_call(LEGACY_SEND_IPI, 0, &hart_mask as *const _ as usize, 0, 0);
+    let _ret2 = sbi_call(LEGACY_SEND_IPI, 0, &hart_mask as *const _ as usize, 0, 0);
 }

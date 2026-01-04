@@ -1,5 +1,7 @@
 //! RISC-V 架构的 CPU 相关功能
 
+use riscv::register::sscratch;
+
 /// 获取当前 CPU 的 ID
 ///
 /// 从 tp 寄存器指向的 Cpu 结构体中读取 CPU ID。
@@ -22,4 +24,24 @@ pub fn cpu_id() -> usize {
         );
     }
     id
+}
+
+/// 在切换到指定任务后执行的架构相关收尾工作。
+///
+/// - 更新 TrapFrame 中的 per-CPU 指针（供 trap_entry 恢复 tp）。
+/// - 更新 sscratch 指向新任务的 TrapFrame（供陷阱保存/恢复使用）。
+pub fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
+    if trap_frame_ptr == 0 {
+        return;
+    }
+
+    // Safety: trap_frame_ptr 指向任务自有的 TrapFrame 缓冲区。
+    unsafe {
+        let tf = (trap_frame_ptr as *mut crate::arch::trap::TrapFrame)
+            .as_mut()
+            .expect("on_task_switch: null TrapFrame");
+        tf.cpu_ptr = cpu_ptr;
+
+        sscratch::write(trap_frame_ptr);
+    }
 }

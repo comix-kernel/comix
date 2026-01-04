@@ -37,6 +37,9 @@ pub struct Cpu {
     /// 当前使用的内存空间
     /// 对于内核线程，其本身相应字段为 None，因而使用上一个任务的内存空间
     pub current_memory_space: Option<Arc<SpinLock<MemorySpace>>>,
+    /// 本 CPU 的 idle 任务（永远可用的兜底任务）
+    /// 不在运行队列中，当没有可运行任务时切换到它并在其中 WFI。
+    pub idle_task: Option<SharedTask>,
 }
 
 impl Cpu {
@@ -46,6 +49,7 @@ impl Cpu {
             cpu_id: 0,
             current_task: None,
             current_memory_space: None,
+            idle_task: None,
         }
     }
 
@@ -55,6 +59,7 @@ impl Cpu {
             cpu_id,
             current_task: None,
             current_memory_space: None,
+            idle_task: None,
         }
     }
 
@@ -62,6 +67,7 @@ impl Cpu {
     /// # 参数
     /// * `task` - 要切换到的任务
     pub fn switch_task(&mut self, task: SharedTask) {
+        // 切换当前任务，并在必要时切换到其地址空间
         self.current_task = Some(task.clone());
         if !task.lock().is_kernel_thread() {
             self.current_memory_space = task.lock().memory_space.clone();
@@ -73,6 +79,16 @@ impl Cpu {
                     .root_ppn(),
             );
         }
+
+        // 同步 TrapFrame 的 cpu_ptr 指向当前 CPU，确保多核迁移后 trap_entry 恢复正确的 tp
+        // 说明：trap_entry 会从 TrapFrame.cpu_ptr 恢复 tp，如果任务在不同 CPU 之间迁移，
+        // 需要将该字段更新为当前 CPU 的地址，否则进入内核后会把 tp 设置为错误的 CPU，
+        // 导致 current_cpu()/per-CPU 数据读取混乱乃至崩溃。
+        let tf_usize = {
+            use core::sync::atomic::Ordering;
+            task.lock().trap_frame_ptr.load(Ordering::SeqCst) as usize
+        };
+        crate::arch::kernel::cpu::on_task_switch(tf_usize, self as *const _ as usize);
     }
 
     /// 切换当前内存空间

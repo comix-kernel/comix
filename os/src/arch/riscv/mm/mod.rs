@@ -20,7 +20,7 @@
 mod page_table; // 模块：页表
 mod page_table_entry; // 模块：页表项
 
-pub use page_table::PageTableInner; // 导出：页表内部结构
+pub use page_table::{PageTableInner, TlbBatchContext}; // 导出：页表内部结构和TLB批处理上下文
 pub use page_table_entry::PageTableEntry; // 导出：页表项结构体
 
 /// SV39 中虚拟地址空间的起始地址

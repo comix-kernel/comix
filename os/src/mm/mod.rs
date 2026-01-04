@@ -22,8 +22,10 @@ pub use global_allocator::init_heap;
 
 use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
+use crate::earlyprintln;
 use crate::mm::address::{Ppn, UsizeConvert};
-use crate::println;
+use crate::sync::SpinLock;
+use alloc::sync::Arc;
 
 unsafe extern "C" {
     // 链接器脚本中定义的内核结束地址
@@ -58,28 +60,17 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     init_heap();
 
     // 3. 创建内核地址空间（不激活，由调用者在合适时机激活）
-    #[cfg(target_arch = "riscv64")]
-    {
-        use alloc::sync::Arc;
+    let space = Arc::new(SpinLock::new(memory_space::MemorySpace::new_kernel()));
 
-        use crate::{earlyprintln, mm::memory_space::MemorySpace, sync::SpinLock};
+    // 记录全局内核空间句柄，供次核切换使用（确保所有 CPU 使用同一份内核页表）
+    set_global_kernel_space(space.clone());
 
-        let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
-        let root_ppn = space.lock().root_ppn();
-        earlyprintln!(
-            "[MM] Created kernel space, root PPN: 0x{:x}",
-            root_ppn.as_usize()
-        );
-
-        return space;
-    }
-
-    #[cfg(not(target_arch = "riscv64"))]
-    {
-        use crate::{mm::memory_space::MemorySpace, sync::SpinLock};
-        use alloc::sync::Arc;
-        Arc::new(SpinLock::new(MemorySpace::new_kernel()))
-    }
+    let root_ppn = space.lock().root_ppn();
+    earlyprintln!(
+        "[MM] Created kernel space, root PPN: 0x{:x}",
+        root_ppn.as_usize()
+    );
+    space
 }
 
 /// 激活指定的地址空间
@@ -94,4 +85,26 @@ pub fn activate(root_ppn: Ppn) {
     use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
     // 调用特定架构的页表激活函数，例如在 RISC-V 上设置 SATP 寄存器。
     crate::arch::mm::PageTableInner::activate(root_ppn);
+}
+
+// === 全局内核空间句柄（供所有 CPU 共享同一内核页表） ===
+
+/// 保存 CPU0 创建的最终内核页表（MemorySpace）的共享句柄。
+///
+/// 说明：
+/// - 仅在启动阶段由 `mm::init()` 设置一次。
+/// - 其他 CPU 在启动时（secondary_start）应当从这里获取并切换到该页表，
+///   确保所有 CPU 的内核映射完全一致，避免早期页表（boot_pagetable）长期驻留引发不一致。
+static GLOBAL_KERNEL_SPACE: SpinLock<Option<Arc<SpinLock<memory_space::MemorySpace>>>> =
+    SpinLock::new(None);
+
+/// 由 CPU0 在初始化完成时设置全局内核空间。
+pub fn set_global_kernel_space(space: Arc<SpinLock<memory_space::MemorySpace>>) {
+    let mut g = GLOBAL_KERNEL_SPACE.lock();
+    *g = Some(space);
+}
+
+/// 获取全局内核空间句柄（如果已初始化）。
+pub fn get_global_kernel_space() -> Option<Arc<SpinLock<memory_space::MemorySpace>>> {
+    GLOBAL_KERNEL_SPACE.lock().as_ref().cloned()
 }

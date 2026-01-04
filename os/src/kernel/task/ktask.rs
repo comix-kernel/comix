@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use crate::{
     arch::{intr::disable_interrupts, trap::restore},
     kernel::{
-        SCHEDULER, TaskState,
+        TaskState,
         cpu::current_cpu,
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
@@ -87,19 +87,34 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
             super::terminate_task as usize,
             task.kstack_base,
         );
-        // 设置 cpu_ptr 指向当前 CPU
         let cpu_ptr = {
             let _guard = crate::sync::PreemptGuard::new();
             crate::kernel::current_cpu() as *const _ as usize
         };
-        (*tf).cpu_ptr = cpu_ptr;
+        crate::arch::trap::set_trap_frame_cpu_ptr(tf, cpu_ptr);
     }
     let tid = task.tid;
     let task = task.into_shared();
 
+    // 选择目标 CPU（负载均衡）
+    let target_cpu = crate::kernel::pick_cpu();
+
+    // 更新任务的 on_cpu 字段
+    task.lock().on_cpu = Some(target_cpu);
+
+    crate::pr_debug!("[SMP] Task {} assigned to CPU {}", tid, target_cpu);
+
     // 将任务加入调度器和任务管理器
     TASK_MANAGER.lock().add_task(task.clone());
-    SCHEDULER.lock().add_task(task);
+    crate::kernel::scheduler_of(target_cpu)
+        .lock()
+        .add_task(task);
+
+    // 如果目标 CPU 不是当前 CPU，发送 IPI
+    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    if target_cpu != current_cpu {
+        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+    }
 
     tid
 }

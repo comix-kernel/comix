@@ -5,21 +5,26 @@ mod rr_scheduler;
 mod task_queue;
 mod wait_queue;
 
-use lazy_static::lazy_static;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     arch::kernel::{context::Context, switch},
-    kernel::{TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
-    pr_debug,
+    config::MAX_CPU_COUNT,
+    kernel::{TaskState, TaskStruct, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     sync::{SpinLock, SpinLockGuard},
 };
 
 pub use task_queue::TaskQueue;
 pub use wait_queue::WaitQueue;
 
-lazy_static! {
-    pub static ref SCHEDULER: SpinLock<RRScheduler> = SpinLock::new(RRScheduler::new());
-}
+/// Per-CPU 调度器数组
+/// 每个 CPU 拥有独立的运行队列和调度器实例
+static SCHEDULERS: [SpinLock<RRScheduler>; MAX_CPU_COUNT] =
+    [const { SpinLock::new(RRScheduler::empty()) }; MAX_CPU_COUNT];
+
+/// 负载均衡计数器
+/// 用于简单轮转选择目标 CPU
+static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
 
 /// 上下文切换计划结构体
 pub(crate) struct SwitchPlan {
@@ -76,20 +81,60 @@ pub trait Scheduler {
     );
 }
 
+/// 获取当前 CPU 的调度器
+pub fn current_scheduler() -> &'static SpinLock<RRScheduler> {
+    let cpu_id = crate::arch::kernel::cpu::cpu_id();
+    &SCHEDULERS[cpu_id]
+}
+
+/// 获取指定 CPU 的调度器
+pub fn scheduler_of(cpu_id: usize) -> &'static SpinLock<RRScheduler> {
+    &SCHEDULERS[cpu_id]
+}
+
+/// 通过轮询方式为新任务选择一个目标 CPU。
+pub fn pick_cpu() -> usize {
+    let num_cpu = unsafe { crate::kernel::NUM_CPU };
+    NEXT_CPU.fetch_add(1, Ordering::Relaxed) % num_cpu
+}
+
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
-    let plan = {
-        let mut sched = SCHEDULER.lock();
-        // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
-        sched.next_task()
+    // 读取并禁用中断，保护整个调度过程，并在返回时恢复原状态
+    let flags = unsafe { crate::arch::intr::read_and_disable_interrupts() };
+
+    // 快速路径：如果运行队列为空且当前任务仍是 Running，就无需进入调度器
+    let should_try_switch = {
+        let sched = current_scheduler().lock();
+        let rq_empty = sched.is_empty();
+        drop(sched);
+
+        let cur_running = {
+            let cpu = crate::kernel::current_cpu();
+            cpu.current_task
+                .as_ref()
+                .map(|t| t.lock().state == crate::kernel::TaskState::Running)
+                .unwrap_or(false)
+        };
+        !(rq_empty && cur_running)
     };
 
-    if let Some(plan) = plan {
-        pr_debug!("Switched to task {}", current_task().lock().tid);
-        // SAFETY: prepare_switch 生成的切换计划中的指针均合法
-        unsafe { switch(plan.old, plan.new) };
-        // 通常不会立即返回；返回时再继续当前上下文后续逻辑
+    if should_try_switch {
+        let plan = {
+            let mut sched = current_scheduler().lock();
+            // NOTE: next_task 内部会更新 current_task 与 current_memory_space 并切换页表
+            sched.next_task()
+        }; // 调度器锁在这里释放
+
+        if let Some(plan) = plan {
+            // SAFETY: next_task 生成的上下文指针有效
+            unsafe { switch(plan.old, plan.new) };
+            // 通常不会立即返回；返回时再继续当前上下文后续逻辑
+        }
     }
+
+    // 恢复进入前的中断状态
+    unsafe { crate::arch::intr::restore_interrupts(flags) };
 }
 
 /// 主动放弃 CPU
@@ -106,7 +151,12 @@ pub fn yield_task() {
 /// * `receive_signal`: 是否可被信号中断
 /// 注意: 该函数仅设置状态，不负责切换任务
 pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
-    SCHEDULER.lock().sleep_task(task, receive_signal);
+    let cpu_id = {
+        let t = task.lock();
+        t.on_cpu
+            .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id())
+    };
+    scheduler_of(cpu_id).lock().sleep_task(task, receive_signal);
 }
 
 /// 唤醒任务
@@ -114,7 +164,49 @@ pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
 /// 参数:
 /// * `task`: 需要唤醒的任务
 pub fn wake_up_with_block(task: SharedTask) {
-    SCHEDULER.lock().wake_up(task);
+    let target_cpu = pick_cpu();
+    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    let task_tid = { task.lock().tid };
+
+    // 关键：多核下 wake 可能被重复触发（不同 CPU/不同事件源），必须做到“全局幂等”：
+    // - 若任务已经是 Running（正在跑/已入队），则不要再次入队到其他 CPU 的运行队列
+    // 否则同一任务可能被两个 CPU 同时调度运行，导致 TrapFrame/上下文被并发破坏（海森堡 panic/挂起）。
+    let mut should_ipi = false;
+    {
+        let mut sched = scheduler_of(target_cpu).lock();
+
+        // 用 task 锁串行化唤醒状态转换，避免跨 CPU 的“双重入队”
+        {
+            let mut t = task.lock();
+            if t.state == TaskState::Running {
+                return;
+            }
+            // Zombie/Stopped 不应被重新唤醒入队（保持现状，避免状态机混乱）
+            if matches!(t.state, TaskState::Zombie | TaskState::Stopped) {
+                return;
+            }
+            t.state = TaskState::Running;
+            t.on_cpu = Some(target_cpu);
+        }
+
+        crate::pr_debug!(
+            "[Scheduler] Waking up task {} on CPU {}",
+            task_tid,
+            target_cpu
+        );
+        sched.wake_up(task);
+        should_ipi = target_cpu != current_cpu;
+    }
+
+    if should_ipi {
+        crate::pr_debug!(
+            "[Scheduler] Sending IPI from CPU {} to CPU {} for task {}",
+            current_cpu,
+            target_cpu,
+            task_tid
+        );
+        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+    }
 }
 
 /// 任务终止
@@ -122,7 +214,12 @@ pub fn wake_up_with_block(task: SharedTask) {
 /// 参数:
 /// * `task`: 需要终止的任务
 pub fn exit_task_with_block(task: SharedTask) {
-    SCHEDULER.lock().exit_task(task);
+    let cpu_id = {
+        let t = task.lock();
+        t.on_cpu
+            .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id())
+    };
+    scheduler_of(cpu_id).lock().exit_task(task);
 }
 
 /// 带保护地阻塞任务
@@ -138,7 +235,10 @@ pub fn sleep_task_with_guard_and_block(
     stask: SharedTask,
     receive_signal: bool,
 ) {
-    SCHEDULER
+    let cpu_id = task
+        .on_cpu
+        .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id());
+    scheduler_of(cpu_id)
         .lock()
         .sleep_task_with_guard(task, stask, receive_signal);
 }

@@ -1,7 +1,7 @@
 use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
-use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::arch::mm::{TlbBatchContext, paddr_to_vaddr, vaddr_to_paddr};
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
@@ -124,6 +124,16 @@ impl MappingArea {
         page_table: &mut ActivePageTableInner,
         vpn: Vpn,
     ) -> Result<(), page_table::PagingError> {
+        self.map_one_with_batch(page_table, vpn, None)
+    }
+
+    /// 映射单个虚拟页到物理页（支持批处理）
+    fn map_one_with_batch(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        vpn: Vpn,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> Result<(), page_table::PagingError> {
         let ppn = match self.map_type {
             MapType::Direct => {
                 // 对于直接映射，VPN 等于 PPN + 偏移量
@@ -140,7 +150,7 @@ impl MappingArea {
             }
         };
 
-        page_table.map(vpn, ppn, PageSize::Size4K, self.permission.clone())?;
+        page_table.map_with_batch(vpn, ppn, PageSize::Size4K, self.permission.clone(), batch)?;
         Ok(())
     }
 
@@ -149,10 +159,12 @@ impl MappingArea {
         &mut self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<(), page_table::PagingError> {
-        for vpn in self.vpn_range {
-            self.map_one(page_table, vpn)?;
-        }
-        Ok(())
+        TlbBatchContext::execute(|batch| {
+            for vpn in self.vpn_range {
+                self.map_one_with_batch(page_table, vpn, Some(batch))?;
+            }
+            Ok(())
+        })
     }
 
     /// 解除映射单个虚拟页
@@ -161,7 +173,17 @@ impl MappingArea {
         page_table: &mut ActivePageTableInner,
         vpn: Vpn,
     ) -> Result<(), page_table::PagingError> {
-        page_table.unmap(vpn)?;
+        self.unmap_one_with_batch(page_table, vpn, None)
+    }
+
+    /// 解除映射单个虚拟页（支持批处理）
+    fn unmap_one_with_batch(
+        &mut self,
+        page_table: &mut ActivePageTableInner,
+        vpn: Vpn,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> Result<(), page_table::PagingError> {
+        page_table.unmap_with_batch(vpn, batch)?;
 
         // 对于帧映射，移除帧跟踪器
         if self.map_type == MapType::Framed {
@@ -175,10 +197,12 @@ impl MappingArea {
         &mut self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<(), page_table::PagingError> {
-        for vpn in self.vpn_range {
-            self.unmap_one(page_table, vpn)?;
-        }
-        Ok(())
+        TlbBatchContext::execute(|batch| {
+            for vpn in self.vpn_range {
+                self.unmap_one_with_batch(page_table, vpn, Some(batch))?;
+            }
+            Ok(())
+        })
     }
 
     /// 复制数据到已映射的区域
@@ -248,48 +272,22 @@ impl MappingArea {
         &self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<Self, page_table::PagingError> {
+        use crate::arch::mm::TlbBatchContext;
+
         let mut new_area = self.clone_metadata();
         if self.map_type != MapType::Framed {
             return Err(page_table::PagingError::UnsupportedMapType);
         }
 
-        // 遍历原 area 的 frames BTreeMap
-        for (vpn, tracked_frames) in &self.frames {
-            match tracked_frames {
-                TrackedFrames::Single(frame) => {
-                    // 复制单个 4K 页
-                    let new_frame =
-                        alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
-
-                    let new_ppn = new_frame.ppn();
-                    let src_ppn = frame.ppn();
-
-                    // 复制数据到新帧
-                    unsafe {
-                        let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                        let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
-
-                        core::ptr::copy_nonoverlapping(
-                            src_va as *const u8,
-                            dst_va as *mut u8,
-                            crate::config::PAGE_SIZE,
-                        );
-                    }
-
-                    // 建立页表映射
-                    page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission.clone())?;
-
-                    new_area
-                        .frames
-                        .insert(*vpn, TrackedFrames::Single(new_frame));
-                }
-                TrackedFrames::Multiple(frames) => {
-                    // 复制多个不连续的页
-                    let mut new_frames = alloc::vec::Vec::new();
-
-                    for frame in frames.iter() {
+        TlbBatchContext::execute(|batch| {
+            // 遍历原 area 的 frames BTreeMap
+            for (vpn, tracked_frames) in &self.frames {
+                match tracked_frames {
+                    TrackedFrames::Single(frame) => {
+                        // 复制单个 4K 页
                         let new_frame =
                             alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+
                         let new_ppn = new_frame.ppn();
                         let src_ppn = frame.ppn();
 
@@ -306,59 +304,101 @@ impl MappingArea {
                         }
 
                         // 建立页表映射
-                        page_table.map(*vpn, new_ppn, PageSize::Size4K, self.permission.clone())?;
+                        page_table.map_with_batch(
+                            *vpn,
+                            new_ppn,
+                            PageSize::Size4K,
+                            self.permission.clone(),
+                            Some(batch),
+                        )?;
 
-                        new_frames.push(new_frame);
+                        new_area
+                            .frames
+                            .insert(*vpn, TrackedFrames::Single(new_frame));
                     }
+                    TrackedFrames::Multiple(frames) => {
+                        // 复制多个不连续的页
+                        let mut new_frames = alloc::vec::Vec::new();
 
-                    new_area
-                        .frames
-                        .insert(*vpn, TrackedFrames::Multiple(new_frames));
-                }
-                // TODO(暂时注释): 大页克隆逻辑
-                //
-                // TrackedFrames::Contiguous(frame_range) => {
-                //    // 复制连续页（大页）
-                //    let num_pages = frame_range.len();
-                //    let new_frame_range = crate::mm::frame_allocator::alloc_contig_frames_aligned(
-                //        num_pages,
-                //        num_pages,
-                //    ).ok_or(page_table::PagingError::FrameAllocFailed)?;
-                //
-                //    let src_ppn = frame_range.start_ppn();
-                //    let new_ppn = new_frame_range.start_ppn();
-                //    let total_size = num_pages * crate::config::PAGE_SIZE;
-                //
-                //    // 复制数据到新帧
-                //    unsafe {
-                //        let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                //        let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
-                //
-                //        core::ptr::copy_nonoverlapping(
-                //            src_va as *const u8,
-                //            dst_va as *mut u8,
-                //            total_size
-                //        );
-                //    }
-                //
-                //    // 建立页表映射 (根据页大小确定 PageSize)
-                //    let page_size = match num_pages {
-                //        262144 => PageSize::Size1G,  // 1GB = 262144 * 4KB
-                //        512 => PageSize::Size2M,     // 2MB = 512 * 4KB
-                //        _ => PageSize::Size4K,       // 其他情况使用 4K
-                //    };
-                //    page_table.map(*vpn, new_ppn, page_size, self.permission)?;
-                //
-                //    new_area.frames.insert(*vpn, TrackedFrames::Contiguous(new_frame_range));
-                // }
-                TrackedFrames::Contiguous(_) => {
-                    // 当前不支持大页克隆（已暂时禁用大页功能）
-                    return Err(page_table::PagingError::HugePageSplitNotImplemented);
+                        for frame in frames.iter() {
+                            let new_frame =
+                                alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+                            let new_ppn = new_frame.ppn();
+                            let src_ppn = frame.ppn();
+
+                            // 复制数据到新帧
+                            unsafe {
+                                let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                                let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
+
+                                core::ptr::copy_nonoverlapping(
+                                    src_va as *const u8,
+                                    dst_va as *mut u8,
+                                    crate::config::PAGE_SIZE,
+                                );
+                            }
+
+                            // 建立页表映射
+                            page_table.map_with_batch(
+                                *vpn,
+                                new_ppn,
+                                PageSize::Size4K,
+                                self.permission.clone(),
+                                Some(batch),
+                            )?;
+
+                            new_frames.push(new_frame);
+                        }
+
+                        new_area
+                            .frames
+                            .insert(*vpn, TrackedFrames::Multiple(new_frames));
+                    }
+                    // TODO(暂时注释): 大页克隆逻辑
+                    //
+                    // TrackedFrames::Contiguous(frame_range) => {
+                    //    // 复制连续页（大页）
+                    //    let num_pages = frame_range.len();
+                    //    let new_frame_range = crate::mm::frame_allocator::alloc_contig_frames_aligned(
+                    //        num_pages,
+                    //        num_pages,
+                    //    ).ok_or(page_table::PagingError::FrameAllocFailed)?;
+                    //
+                    //    let src_ppn = frame_range.start_ppn();
+                    //    let new_ppn = new_frame_range.start_ppn();
+                    //    let total_size = num_pages * crate::config::PAGE_SIZE;
+                    //
+                    //    // 复制数据到新帧
+                    //    unsafe {
+                    //        let src_va = paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                    //        let dst_va = paddr_to_vaddr(new_ppn.start_addr().as_usize());
+                    //
+                    //        core::ptr::copy_nonoverlapping(
+                    //            src_va as *const u8,
+                    //            dst_va as *mut u8,
+                    //            total_size
+                    //        );
+                    //    }
+                    //
+                    //    // 建立页表映射 (根据页大小确定 PageSize)
+                    //    let page_size = match num_pages {
+                    //        262144 => PageSize::Size1G,  // 1GB = 262144 * 4KB
+                    //        512 => PageSize::Size2M,     // 2MB = 512 * 4KB
+                    //        _ => PageSize::Size4K,       // 其他情况使用 4K
+                    //    };
+                    //    page_table.map(*vpn, new_ppn, page_size, self.permission)?;
+                    //
+                    //    new_area.frames.insert(*vpn, TrackedFrames::Contiguous(new_frame_range));
+                    // }
+                    TrackedFrames::Contiguous(_) => {
+                        // 当前不支持大页克隆（已暂时禁用大页功能）
+                        return Err(page_table::PagingError::HugePageSplitNotImplemented);
+                    }
                 }
             }
-        }
 
-        Ok(new_area)
+            Ok(new_area)
+        })
     }
 
     /// 拆分区域为两部分：[start, split_vpn) 和 [split_vpn, end)
@@ -495,9 +535,12 @@ impl MappingArea {
         }
 
         // 修改页表中的权限
-        for vpn in VpnRange::new(change_start, change_end) {
-            page_table.update_flags(vpn, new_perm)?;
-        }
+        TlbBatchContext::execute(|batch| {
+            for vpn in VpnRange::new(change_start, change_end) {
+                page_table.update_flags_with_batch(vpn, new_perm, Some(batch))?;
+            }
+            Ok::<(), page_table::PagingError>(())
+        })?;
 
         // 根据修改范围决定如何分割区域
         if change_start == area_start && change_end == area_end {
@@ -720,9 +763,12 @@ impl MappingArea {
         }
 
         // 解除映射指定范围内的页
-        for vpn in VpnRange::new(unmap_start, unmap_end) {
-            self.unmap_one(page_table, vpn)?;
-        }
+        TlbBatchContext::execute(|batch| {
+            for vpn in VpnRange::new(unmap_start, unmap_end) {
+                self.unmap_one_with_batch(page_table, vpn, Some(batch))?;
+            }
+            Ok::<(), page_table::PagingError>(())
+        })?;
 
         // 根据解除映射的位置，决定返回什么
         if unmap_start == area_start && unmap_end == area_end {
@@ -871,6 +917,8 @@ impl MappingArea {
         &self,
         page_table: &mut ActivePageTableInner,
     ) -> Result<(), page_table::PagingError> {
+        use crate::arch::mm::TlbBatchContext;
+
         if let Some(ref mmap_file) = self.file {
             // 只有 MAP_SHARED 映射才需要写回
             if !mmap_file.flags.contains(MapFlags::SHARED) {
@@ -883,66 +931,75 @@ impl MappingArea {
                 .map_err(|_| page_table::PagingError::InvalidAddress)?;
             let start_vpn = self.vpn_range.start();
 
-            for (vpn, tracked_frame) in &self.frames {
-                // 获取页表项的标志位，检查 Dirty 位
-                let (_, _, flags) = match page_table.walk(*vpn) {
-                    Ok(result) => result,
-                    Err(_) => continue, // 页面未映射，跳过
-                };
+            TlbBatchContext::execute(|batch| {
+                for (vpn, tracked_frame) in &self.frames {
+                    // 获取页表项的标志位，检查 Dirty 位
+                    let (_, _, flags) = match page_table.walk(*vpn) {
+                        Ok(result) => result,
+                        Err(_) => continue, // 页面未映射，跳过
+                    };
 
-                if !flags.contains(UniversalPTEFlag::DIRTY) {
-                    continue; // 未被修改，跳过
-                }
-
-                // 计算文件偏移量
-                let page_offset = vpn.as_usize() - start_vpn.as_usize();
-                let file_offset = mmap_file.offset + page_offset * PAGE_SIZE;
-
-                // 获取物理页内容
-                let ppn = match tracked_frame {
-                    TrackedFrames::Single(frame) => frame.ppn(),
-                    TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
-                    TrackedFrames::Contiguous(_) => {
-                        panic!("当前实现不支持连续帧");
+                    if !flags.contains(UniversalPTEFlag::DIRTY) {
+                        continue; // 未被修改，跳过
                     }
-                };
 
-                let paddr = ppn.start_addr();
-                let kernel_vaddr = paddr_to_vaddr(paddr.as_usize());
-                let buffer =
-                    unsafe { core::slice::from_raw_parts(kernel_vaddr as *const u8, PAGE_SIZE) };
+                    // 计算文件偏移量
+                    let page_offset = vpn.as_usize() - start_vpn.as_usize();
+                    let file_offset = mmap_file.offset + page_offset * PAGE_SIZE;
 
-                // 计算实际写入长度（处理文件末尾）
-                let write_len = min(
-                    PAGE_SIZE,
-                    mmap_file.len.saturating_sub(page_offset * PAGE_SIZE),
-                );
+                    // 获取物理页内容
+                    let ppn = match tracked_frame {
+                        TrackedFrames::Single(frame) => frame.ppn(),
+                        TrackedFrames::Multiple(frames) => frames.first().map(|f| f.ppn()).unwrap(),
+                        TrackedFrames::Contiguous(_) => {
+                            panic!("当前实现不支持连续帧");
+                        }
+                    };
 
-                if write_len == 0 {
-                    continue; // 超出文件范围
-                }
+                    let paddr = ppn.start_addr();
+                    let kernel_vaddr = paddr_to_vaddr(paddr.as_usize());
+                    let buffer = unsafe {
+                        core::slice::from_raw_parts(kernel_vaddr as *const u8, PAGE_SIZE)
+                    };
 
-                // 写回文件
-                let actual_written = inode
-                    .write_at(file_offset, &buffer[..write_len])
-                    .map_err(|_| page_table::PagingError::InvalidAddress)?;
-
-                // 检查是否完全写入
-                if actual_written != write_len {
-                    pr_err!(
-                        "Partial write at offset {}: expected {}, got {}",
-                        file_offset,
-                        write_len,
-                        actual_written
+                    // 计算实际写入长度（处理文件末尾）
+                    let write_len = min(
+                        PAGE_SIZE,
+                        mmap_file.len.saturating_sub(page_offset * PAGE_SIZE),
                     );
-                    return Err(page_table::PagingError::InvalidAddress);
-                }
 
-                // 清除 Dirty 位
-                page_table.update_flags(*vpn, flags & !UniversalPTEFlag::DIRTY)?;
-            }
+                    if write_len == 0 {
+                        continue; // 超出文件范围
+                    }
+
+                    // 写回文件
+                    let actual_written = inode
+                        .write_at(file_offset, &buffer[..write_len])
+                        .map_err(|_| page_table::PagingError::InvalidAddress)?;
+
+                    // 检查是否完全写入
+                    if actual_written != write_len {
+                        pr_err!(
+                            "Partial write at offset {}: expected {}, got {}",
+                            file_offset,
+                            write_len,
+                            actual_written
+                        );
+                        return Err(page_table::PagingError::InvalidAddress);
+                    }
+
+                    // 清除 Dirty 位
+                    page_table.update_flags_with_batch(
+                        *vpn,
+                        flags & !UniversalPTEFlag::DIRTY,
+                        Some(batch),
+                    )?;
+                }
+                Ok(())
+            })
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 

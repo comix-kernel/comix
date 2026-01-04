@@ -81,9 +81,9 @@ macro_rules! early_test {
             #[allow(dead_code)] // 函数不是直接调用的，所以允许未使用
             fn [<early_test_ $func_name>]() {
                 // 打印测试开始信息，此时 console 应该已经可以工作
-                println!("\x1b[36m[early_test] Running: {}\x1b[0m\n", stringify!($func_name));
+                crate::println!("\x1b[36m[early_test] Running: {}\x1b[0m\n", stringify!($func_name));
                 $body
-                println!("\x1b[36m[early_test] Passed: {}\x1b[0m\n", stringify!($func_name));
+                crate::println!("\x1b[36m[early_test] Passed: {}\x1b[0m\n", stringify!($func_name));
             }
 
             // 将函数指针放入自定义的链接器段

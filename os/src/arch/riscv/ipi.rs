@@ -56,6 +56,20 @@ pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
     // 2. 通过 SBI 触发软件中断
     let hart_mask = 1usize << target_cpu;
     crate::arch::lib::sbi::send_ipi(hart_mask);
+
+    // 3. 检查目标CPU的sip寄存器（仅用于调试）
+    if target_cpu == crate::arch::kernel::cpu::cpu_id() {
+        // 如果是当前CPU，可以读取sip
+        unsafe {
+            let sip: usize;
+            core::arch::asm!("csrr {}, sip", out(reg) sip);
+            crate::pr_debug!(
+                "[IPI] After send_ipi, current CPU sip={:#x}, SSIP bit: {}",
+                sip,
+                (sip >> 1) & 1
+            );
+        }
+    }
 }
 
 /// 发送 IPI 到多个 CPU
@@ -106,6 +120,12 @@ pub fn send_tlb_flush_ipi_all() {
 pub fn handle_ipi() {
     let cpu = super::kernel::cpu::cpu_id();
 
+    // 清除 SSIP 位（软件中断挂起位）
+    // SAFETY: 清除 sip 寄存器的 SSIP 位是安全的，这是标准的中断处理流程
+    unsafe {
+        core::arch::asm!("csrc sip, {}", in(reg) 1 << 1);
+    }
+
     // 读取并清除待处理标志
     let pending = IPI_PENDING[cpu].swap(0, Ordering::AcqRel);
 
@@ -117,6 +137,7 @@ pub fn handle_ipi() {
 
     // 处理调度 IPI
     if pending & (IpiType::Reschedule as u32) != 0 {
+        crate::pr_debug!("[IPI] CPU {} received Reschedule IPI", cpu);
         // 调度将在中断返回时由 check_signal 后的逻辑处理
         // 这里只需要标记即可
     }
@@ -131,7 +152,7 @@ pub fn handle_ipi() {
 
     // 处理停止 IPI
     if pending & (IpiType::Stop as u32) != 0 {
-        crate::pr_info!("[IPI] CPU {} stopping", cpu);
+        crate::pr_debug!("[IPI] CPU {} stopping", cpu);
         loop {
             // SAFETY: wfi 是安全的 RISC-V 指令，用于等待中断
             unsafe {
