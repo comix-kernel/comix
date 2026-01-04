@@ -21,7 +21,7 @@ use crate::{
         self,
         frame_allocator::{alloc_contig_frames, alloc_frame},
     },
-    pr_err, pr_info, pr_warn,
+    pr_debug, pr_err, pr_info, pr_warn,
     sync::SpinLock,
     test::run_early_tests,
     uapi::{
@@ -469,7 +469,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     unsafe {
         riscv::register::sscratch::write(tf_ptr as usize);
     }
-    pr_info!(
+    pr_debug!(
         "[SMP] CPU {} set sscratch to {:#x}",
         hartid,
         tf_ptr as usize
@@ -519,14 +519,14 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
         core::arch::asm!("csrr {}, sstatus", out(reg) sstatus);
         core::arch::asm!("csrr {}, sie", out(reg) sie);
         core::arch::asm!("csrr {}, sip", out(reg) sip);
-        pr_info!(
+        pr_debug!(
             "[SMP] CPU {} interrupt status: sstatus={:#x}, sie={:#x}, sip={:#x}",
             hartid,
             sstatus,
             sie,
             sip
         );
-        pr_info!(
+        pr_debug!(
             "[SMP] CPU {} SIE bit: {}, SSIE bit: {}, SSIP bit: {}",
             hartid,
             (sstatus >> 1) & 1,
@@ -539,7 +539,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     // 如果尝试读取会触发非法指令异常
     // 我们需要通过其他方式验证中断委托配置
 
-    pr_info!("[SMP] CPU {} entering idle loop", hartid);
+    pr_debug!("[SMP] CPU {} entering idle loop", hartid);
 
     // 进入idle循环（永不返回）
     idle_loop();

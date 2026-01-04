@@ -63,7 +63,7 @@ pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
         unsafe {
             let sip: usize;
             core::arch::asm!("csrr {}, sip", out(reg) sip);
-            crate::pr_info!(
+            crate::pr_debug!(
                 "[IPI] After send_ipi, current CPU sip={:#x}, SSIP bit: {}",
                 sip,
                 (sip >> 1) & 1
@@ -133,11 +133,11 @@ pub fn handle_ipi() {
         return;
     }
 
-    crate::pr_info!("[IPI] CPU {} handling IPI: {:#x}", cpu, pending);
+    crate::pr_debug!("[IPI] CPU {} handling IPI: {:#x}", cpu, pending);
 
     // 处理调度 IPI
     if pending & (IpiType::Reschedule as u32) != 0 {
-        crate::pr_info!("[IPI] CPU {} received Reschedule IPI", cpu);
+        crate::pr_debug!("[IPI] CPU {} received Reschedule IPI", cpu);
         // 调度将在中断返回时由 check_signal 后的逻辑处理
         // 这里只需要标记即可
     }
@@ -152,7 +152,7 @@ pub fn handle_ipi() {
 
     // 处理停止 IPI
     if pending & (IpiType::Stop as u32) != 0 {
-        crate::pr_info!("[IPI] CPU {} stopping", cpu);
+        crate::pr_debug!("[IPI] CPU {} stopping", cpu);
         loop {
             // SAFETY: wfi 是安全的 RISC-V 指令，用于等待中断
             unsafe {

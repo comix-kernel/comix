@@ -233,7 +233,7 @@ impl Inode for Ext4Inode {
         let inode_id = fs
             .generic_open(name, &mut parent, true, ftype, &mut name_off)
             .map_err(|e| {
-                crate::println!("[Ext4Inode::mkdir] generic_open failed: {:?}", e);
+                crate::pr_debug!("[Ext4Inode::mkdir] generic_open failed: {:?}", e);
                 FsError::NoSpace
             })?;
 

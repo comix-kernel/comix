@@ -10,10 +10,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::{
     arch::kernel::{context::Context, switch},
     config::MAX_CPU_COUNT,
-    kernel::{
-        TaskState, TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask,
-    },
-    pr_debug,
+    kernel::{TaskState, TaskStruct, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     sync::{SpinLock, SpinLockGuard},
 };
 
@@ -95,7 +92,7 @@ pub fn scheduler_of(cpu_id: usize) -> &'static SpinLock<RRScheduler> {
     &SCHEDULERS[cpu_id]
 }
 
-/// 选择负载最轻的 CPU（简单轮转）
+/// 通过轮询方式为新任务选择一个目标 CPU。
 pub fn pick_cpu() -> usize {
     let num_cpu = unsafe { crate::kernel::NUM_CPU };
     NEXT_CPU.fetch_add(1, Ordering::Relaxed) % num_cpu
@@ -192,17 +189,17 @@ pub fn wake_up_with_block(task: SharedTask) {
             t.on_cpu = Some(target_cpu);
         }
 
-        crate::pr_info!(
+        crate::pr_debug!(
             "[Scheduler] Waking up task {} on CPU {}",
             task_tid,
             target_cpu
         );
-        sched.wake_up(task.clone());
+        sched.wake_up(task);
         should_ipi = target_cpu != current_cpu;
     }
 
     if should_ipi {
-        crate::pr_info!(
+        crate::pr_debug!(
             "[Scheduler] Sending IPI from CPU {} to CPU {} for task {}",
             current_cpu,
             target_cpu,
