@@ -26,7 +26,7 @@
 mod page_table;
 mod page_table_entry;
 
-pub use page_table::PageTableInner;
+pub use page_table::{PageTableInner, TlbBatchContext};
 pub use page_table_entry::PageTableEntry;
 
 /// LoongArch64 直接映射窗口起始地址

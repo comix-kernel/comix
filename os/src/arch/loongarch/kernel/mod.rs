@@ -23,6 +23,11 @@ pub mod cpu {
     pub fn cpu_id() -> usize {
         hart_id()
     }
+
+    /// 在切换到指定任务后执行的架构相关收尾工作。
+    ///
+    /// LoongArch 目前尚未实现 trap/上下文切换，因此此处为 no-op。
+    pub fn on_task_switch(_trap_frame_ptr: usize, _cpu_ptr: usize) {}
 }
 
 pub use context::TaskContext;

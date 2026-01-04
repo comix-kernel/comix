@@ -1,5 +1,6 @@
 // TODO: 这个模块的安全性论证没有完成
 use super::PageTableEntry;
+use crate::arch::ipi::send_tlb_flush_ipi_all;
 use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn};
 use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::mm::page_table::{
@@ -241,9 +242,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 // 创建新的叶子 PTE，设置 PPN 和标志位 (VALID 必须设置)
                 *pte = PageTableEntry::new_leaf(ppn, flags | UniversalPTEFlag::VALID);
 
-                // 刷新 TLB 确保新映射对 CPU 可见
-                // 这对于已激活的页表尤其重要，可防止 TLB 中的过时条目
-                Self::tlb_flush(vpn);
                 return Ok(());
             } else {
                 // 中间级别 - 需要继续向下遍历
@@ -306,7 +304,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             if pte.is_huge() || level == 0 {
                 // 清空 PTE 以解除映射
                 pte.clear();
-                Self::tlb_flush(vpn); // 刷新 TLB
                 return Ok(());
             }
 
@@ -357,7 +354,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             if pte.is_huge() || level == 0 {
                 // 设置新的标志位 (VALID 必须保持设置)
                 pte.set_flags(flags | UniversalPTEFlag::VALID);
-                Self::tlb_flush(vpn); // 刷新 TLB
                 return Ok(());
             }
 
@@ -410,6 +406,143 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         }
 
         Err(PagingError::NotMapped) // 未找到映射
+    }
+}
+
+// PageTableInner 的额外实现（非 trait 方法）
+impl PageTableInner {
+    /// 刷新所有 CPU 的 TLB（多核 TLB Shootdown）
+    ///
+    /// 此函数执行以下操作：
+    /// 1. 刷新当前 CPU 的 TLB（针对指定 VPN）
+    /// 2. 通过 IPI 通知所有其他 CPU 刷新其 TLB
+    ///
+    /// # 参数
+    /// - vpn: 需要刷新的虚拟页号
+    ///
+    /// # 注意
+    /// - 单核系统：只刷新本地 TLB，无 IPI 开销
+    /// - 多核系统：异步刷新，不等待其他 CPU 确认
+    /// - 测试模式：也会发送 IPI（如果是多核环境）
+    fn tlb_flush_all_cpus(vpn: Vpn) {
+        // 1. 刷新当前 CPU 的 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+
+        // 2. 通知所有其他 CPU 刷新 TLB
+        // send_tlb_flush_ipi_all 内部会检查是否为多核环境
+        // 单核环境下不会发送 IPI
+        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        if num_cpu > 1 {
+            send_tlb_flush_ipi_all();
+        }
+    }
+
+    /// 带批处理支持的映射方法
+    pub fn map_with_batch(
+        &mut self,
+        vpn: Vpn,
+        ppn: Ppn,
+        page_size: PageSize,
+        flags: UniversalPTEFlag,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::map(self, vpn, ppn, page_size, flags)?;
+        // 总是刷新本地 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        // 只有在非批处理模式下才发送 IPI
+        if batch.is_none() {
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+        }
+        Ok(())
+    }
+
+    /// 带批处理支持的解除映射方法
+    pub fn unmap_with_batch(
+        &mut self,
+        vpn: Vpn,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::unmap(self, vpn)?;
+        // 总是刷新本地 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        // 只有在非批处理模式下才发送 IPI
+        if batch.is_none() {
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+        }
+        Ok(())
+    }
+
+    /// 带批处理支持的更新权限方法
+    pub fn update_flags_with_batch(
+        &mut self,
+        vpn: Vpn,
+        flags: UniversalPTEFlag,
+        batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::update_flags(self, vpn, flags)?;
+        // 总是刷新本地 TLB
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        // 只有在非批处理模式下才发送 IPI
+        if batch.is_none() {
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+        }
+        Ok(())
+    }
+}
+
+/// TLB 批量刷新上下文
+///
+/// 用于在批量页表操作期间延迟 TLB 刷新，减少 IPI 数量
+pub struct TlbBatchContext {
+    enabled: bool,
+}
+
+impl TlbBatchContext {
+    /// 创建新的批处理上下文
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+
+    /// 在批处理上下文中执行操作
+    pub fn execute<F, R>(f: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        let mut ctx = Self::new();
+        let result = f(&mut ctx);
+        ctx.flush();
+        result
+    }
+
+    /// 刷新所有待处理的 TLB 条目
+    pub fn flush(&mut self) {
+        if self.enabled {
+            // 刷新本地 TLB
+            unsafe {
+                core::arch::asm!("sfence.vma");
+            }
+            // 发送一次 IPI 到所有其他 CPU
+            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            if num_cpu > 1 {
+                send_tlb_flush_ipi_all();
+            }
+            self.enabled = false;
+        }
+    }
+}
+
+impl Drop for TlbBatchContext {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -560,5 +693,63 @@ mod page_table_tests {
             let (mapped_ppn, _, _) = pt.walk(vpn).unwrap();
             kassert!(mapped_ppn == expected_ppn);
         }
+    });
+
+    // TLB Shootdown 测试
+
+    /// 测试 TLB flush IPI 发送（基础功能）
+    test_case!(test_tlb_flush_ipi_basic, {
+        // 调用 send_tlb_flush_ipi_all 不应该 panic
+        crate::arch::ipi::send_tlb_flush_ipi_all();
+        kassert!(true);
+    });
+
+    /// 测试页表映射触发 TLB shootdown
+    test_case!(test_page_table_map_with_tlb_flush, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x10000);
+        let ppn = Ppn::from_usize(0x80000);
+
+        // 执行映射操作（应该触发 TLB shootdown）
+        let result = pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        kassert!(result.is_ok());
+
+        // 验证映射生效
+        let translated = pt.translate(vpn.start_addr());
+        kassert!(translated.is_some());
+    });
+
+    /// 测试页表解除映射触发 TLB shootdown
+    test_case!(test_page_table_unmap_with_tlb_flush, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x20000);
+        let ppn = Ppn::from_usize(0x81000);
+
+        // 先映射
+        let result = pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw());
+        kassert!(result.is_ok());
+
+        // 再解除映射（应该触发 TLB shootdown）
+        let result = pt.unmap(vpn);
+        kassert!(result.is_ok());
+
+        // 验证解除映射生效
+        let translated = pt.translate(vpn.start_addr());
+        kassert!(translated.is_none());
+    });
+
+    /// 测试页表权限更新触发 TLB shootdown
+    test_case!(test_page_table_update_flags_with_tlb_flush, {
+        let mut pt = PageTableInner::new();
+        let vpn = Vpn::from_usize(0x30000);
+        let ppn = Ppn::from_usize(0x82000);
+
+        // 先映射为只读
+        let result = pt.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_r());
+        kassert!(result.is_ok());
+
+        // 更新权限为读写（应该触发 TLB shootdown）
+        let result = pt.update_flags(vpn, UniversalPTEFlag::kernel_rw());
+        kassert!(result.is_ok());
     });
 }

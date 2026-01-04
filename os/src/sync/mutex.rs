@@ -2,7 +2,7 @@
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::kernel::{WaitQueue, current_cpu, yield_task};
+use crate::kernel::{WaitQueue, current_cpu, current_task, yield_task};
 use crate::sync::SpinLock;
 use crate::sync::{raw_spin_lock::RawSpinLock, raw_spin_lock::RawSpinLockGuard};
 
@@ -42,12 +42,7 @@ impl<T> Mutex<T> {
                 };
             }
             // 已被占用：把当前任务挂到等待队列
-            let current = current_cpu()
-                .lock()
-                .current_task
-                .as_ref()
-                .expect("mutex::lock: no current task")
-                .clone();
+            let current = current_task();
             self.queue.lock().sleep(current);
             // 释放短锁后让调度器切走
             drop(spin);

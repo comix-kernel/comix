@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     config::PAGE_SIZE,
-    kernel::current_cpu,
+    kernel::{current_cpu, current_task},
     mm::{
         frame_allocator::{FrameTracker, alloc_frames},
         page_table::{PagingError, UniversalPTEFlag},
@@ -81,13 +81,7 @@ impl SharedMemory {
     /// 返回
     /// - Ok(usize) 成功；Err(PagingError) 失败
     pub fn map_to_user(self) -> Result<usize, PagingError> {
-        let current = {
-            let cpu = current_cpu().lock();
-            cpu.current_task
-                .as_ref()
-                .expect("map_to_user_at: no current task")
-                .clone()
-        };
+        let current = current_task();
         let mut task = current.lock();
         let space = task
             .memory_space

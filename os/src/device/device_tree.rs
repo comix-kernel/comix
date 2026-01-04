@@ -5,10 +5,10 @@ use crate::{
     kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
     pr_info,
+    sync::RwLock,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 use fdt::{Fdt, node::FdtNode};
-use spin::RwLock;
 /// 指向设备树的指针，在启动时由引导程序设置
 #[unsafe(no_mangle)]
 pub static mut DTP: usize = 0x114514; // 占位地址，实际由引导程序设置
@@ -37,17 +37,13 @@ lazy_static::lazy_static! {
         RwLock::new(BTreeMap::new());
 }
 
-/// 初始化设备树
-pub fn init() {
-    pr_info!(
-        "[Device] devicetree of {} is initialized",
-        FDT.root().model()
-    );
-
+/// 早期初始化: 只解析 CPU 数量和时钟频率
+///
+/// 此函数在堆分配器初始化之前调用,因此不能使用任何需要堆分配的操作。
+pub fn early_init() {
     let cpus = FDT.cpus().count();
     // SAFETY: 这里是在单核初始化阶段设置 CPU 数量
     unsafe { NUM_CPU = cpus };
-    pr_info!("[Device] now has {} CPU(s)", cpus);
 
     unsafe {
         CLOCK_FREQ = FDT
@@ -56,6 +52,18 @@ pub fn init() {
             .expect("No CPU found in device tree")
             .timebase_frequency()
     };
+}
+
+/// 初始化设备树
+pub fn init() {
+    pr_info!(
+        "[Device] devicetree of {} is initialized",
+        FDT.root().model()
+    );
+
+    // 设置 NUM_CPU 和 CLOCK_FREQ
+    early_init();
+    pr_info!("[Device] now has {} CPU(s)", unsafe { NUM_CPU });
     pr_info!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
 
     FDT.memory().regions().for_each(|region| {

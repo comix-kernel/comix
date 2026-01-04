@@ -30,6 +30,24 @@ pub unsafe fn disable_timer_interrupt() {
     unsafe { sie::clear_stimer() };
 }
 
+/// 启用软件中断（用于 IPI）
+///
+/// # Safety
+///
+/// 该函数直接操作 CPU 寄存器，调用者必须确保在适当的上下文中调用
+pub unsafe fn enable_software_interrupt() {
+    sie::set_ssoft()
+}
+
+/// 禁用软件中断
+///
+/// # Safety
+///
+/// 该函数直接操作 CPU 寄存器，调用者必须确保在适当的上下文中调用
+pub unsafe fn disable_software_interrupt() {
+    sie::clear_ssoft()
+}
+
 /// 启用中断
 /// 安全性: 该函数直接操作 CPU 寄存器，启用中断可能会引发竞态条件或不一致状态。
 /// 调用者必须确保在适当的上下文中调用此函数，以避免潜在的问题。

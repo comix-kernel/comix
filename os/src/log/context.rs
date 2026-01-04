@@ -29,11 +29,14 @@ pub(super) fn collect_context() -> LogContext {
     // 注意：在早期启动或中断上下文中可能没有当前任务
     // 更重要的是：如果当前已经在持有 task lock 的上下文中（例如 wait4），
     // 再次尝试获取锁会导致死锁。因此这里必须使用 try_lock。
-    let task_id = crate::kernel::current_cpu()
-        .try_lock()
-        .and_then(|cpu| cpu.current_task.as_ref().cloned())
-        .and_then(|task| task.try_lock().map(|t| t.tid))
-        .unwrap_or(0);
+    let task_id = {
+        let _guard = crate::sync::PreemptGuard::new();
+        crate::kernel::current_cpu()
+            .current_task
+            .as_ref()
+            .and_then(|task| task.try_lock().map(|t| t.tid))
+            .unwrap_or(0)
+    };
 
     LogContext {
         cpu_id,

@@ -11,17 +11,22 @@
 ### 导航
 
 - **[自旋锁 (`SpinLock`)](./spin_lock.md)**: 用于保护短临界区的互斥锁。
+- **[读写锁 (`RwLock`)](./rwlock.md)**: 允许多个读者并发访问或单个写者独占访问。
+- **[票号锁 (`TicketLock`)](./ticket_lock.md)**: 提供公平性保证的自旋锁，按 FIFO 顺序获取。
 - **[睡眠锁 (`SleepLock`)](./sleep_lock.md)**: 用于保护长临界区，会使等待者任务睡眠。
 - **[中断屏蔽 (`IntrGuard`)](./intr_guard.md)**: 用于在单核上实现临界区的底层机制。
+- **[Per-CPU 变量 (`PerCpu`)](./per_cpu.md)**: 每个 CPU 维护独立数据副本，避免锁竞争。
+- **[抢占控制 (`PreemptGuard`)](./preempt.md)**: 防止任务在访问 Per-CPU 数据期间被迁移。
 - **[锁顺序与死锁预防](./deadlock.md)**: 内核中必须遵守的锁获取规则。
 - **[SMP内核的中断与并发问题](./smp_interrupts.md)**: SMP系统中的中断和并发挑战。
 
 ## 2. 核心概念
 
-本内核主要采用两种策略来解决并发问题：
+本内核主要采用三种策略来解决并发问题：
 
 1.  **中断屏蔽 (Interrupt Disabling)**: 在单核处理器上，禁用中断可以防止当前代码被中断处理程序打断，从而避免了任务代码与中断代码之间的竞争。这是实现其他更复杂锁的底层基础。
-2.  **原子操作与自旋 (Atomic Operations & Spinning)**: 在多核处理器上，仅屏蔽本地核心的中断是不够的，因为其他核心仍然可以访问共享数据。自旋锁利用CPU提供的原子操作（如 `amoswap`）来循环检查并获取锁。如果锁已被占用，它会“自旋”（在一个紧凑循环中等待），直到锁被释放。
+2.  **原子操作与自旋 (Atomic Operations & Spinning)**: 在多核处理器上，仅屏蔽本地核心的中断是不够的，因为其他核心仍然可以访问共享数据。自旋锁利用CPU提供的原子操作（如 `amoswap`）来循环检查并获取锁。如果锁已被占用，它会"自旋"（在一个紧凑循环中等待），直到锁被释放。
+3.  **Per-CPU 数据与抢占控制 (Per-CPU Data & Preemption Control)**: 为每个 CPU 核心维护独立的数据副本，完全避免锁竞争。通过禁用抢占防止任务在访问期间被迁移到其他核心，确保数据一致性。
 
 ## 3. 同步原语概览
 
@@ -30,8 +35,12 @@
 | 原语             | 源码链接                                                                              | 核心机制                                       | 适用场景                                                                 |
 |------------------|---------------------------------------------------------------------------------------|------------------------------------------------|--------------------------------------------------------------------------|
 | **`SpinLock<T>`**| [`os/src/sync/spin_lock.rs`](/os/src/sync/spin_lock.rs)                | 屏蔽中断 + 原子操作自旋                        | 保护访问耗时**极短**的共享数据，例如修改一个计数器或链表指针。             |
+| **`RwLock<T>`**  | [`os/src/sync/rwlock.rs`](/os/src/sync/rwlock.rs)                      | 原子操作 + 读写分离                            | 读多写少场景，允许多个读者并发访问。                                     |
+| **`TicketLock<T>`**| [`os/src/sync/ticket_lock.rs`](/os/src/sync/ticket_lock.rs)          | 原子操作 + 票号机制                            | 需要严格公平性的场景，防止饥饿。                                         |
 | **`SleepLock`**  | [`os/src/sync/sleep_lock.rs`](/os/src/sync/sleep_lock.rs)              | 原子操作 + 任务睡眠 (`WaitQueue`)              | 保护访问耗时**较长**的共享数据，例如执行I/O操作或复杂的计算。            |
 | **`IntrGuard`**  | [`os/src/sync/intr_guard.rs`](/os/src/sync/intr_guard.rs)              | 屏蔽/恢复中断 (RAII)                           | 作为其他锁的底层实现，或在确定为单核且无需锁的场景下临时屏蔽中断。       |
+| **`PerCpu<T>`**  | [`os/src/sync/per_cpu.rs`](/os/src/sync/per_cpu.rs)                    | 每核独立数据副本 + 抢占控制                    | 频繁访问的统计计数器、Per-CPU 运行队列、对象缓存等无锁场景。            |
+| **`PreemptGuard`**| [`os/src/sync/preempt.rs`](/os/src/sync/preempt.rs)                   | 禁用抢占 (RAII)                                | 访问 Per-CPU 变量时防止任务迁移，保护短临界区。                         |
 | `RawSpinLock`    | [`os/src/sync/raw_spin_lock.rs`](/os/src/sync/raw_spin_lock.rs)        | 纯粹的原子操作自旋                             | `SpinLock` 和 `SleepLock` 的内部构件，不推荐直接使用。                   |
 
 ## 4. 设计哲学：RAII 与锁守卫
