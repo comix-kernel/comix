@@ -1,9 +1,12 @@
 //! RISC-V 架构相关的启动代码
 
+use core::arch::global_asm;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use alloc::sync::Arc;
 use riscv::register::sscratch;
+
+global_asm!(include_str!("entry.S"));
 
 use crate::{
     arch::{intr, mm::vaddr_to_paddr, platform, timer, trap, trap::TrapFrame},

@@ -88,20 +88,7 @@ impl Cpu {
             use core::sync::atomic::Ordering;
             task.lock().trap_frame_ptr.load(Ordering::SeqCst) as usize
         };
-        #[cfg(target_arch = "riscv64")]
-        unsafe {
-            // Safety: tf_usize 指向任务自有的 TrapFrame 缓冲区
-            let tf = (tf_usize as *mut crate::arch::trap::TrapFrame)
-                .as_mut()
-                .unwrap();
-            tf.cpu_ptr = self as *const _ as usize;
-        }
-
-        // 更新 sscratch 指向新任务的 TrapFrame，确保后续陷阱保存/恢复正确
-        #[cfg(target_arch = "riscv64")]
-        unsafe {
-            riscv::register::sscratch::write(tf_usize);
-        }
+        crate::arch::kernel::cpu::on_task_switch(tf_usize, self as *const _ as usize);
     }
 
     /// 切换当前内存空间
