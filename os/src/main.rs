@@ -31,12 +31,9 @@ mod log;
 mod net;
 
 use crate::arch::lib::sbi::shutdown;
-use core::arch::global_asm;
 use core::panic::PanicInfo;
 #[cfg(test)]
 use test::test_runner;
-#[cfg(target_arch = "riscv64")]
-global_asm!(include_str!("./arch/riscv/boot/entry.S"));
 
 /// Rust 内核主入口点
 ///

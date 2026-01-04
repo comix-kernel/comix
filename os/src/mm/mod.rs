@@ -22,8 +22,8 @@ pub use global_allocator::init_heap;
 
 use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
+use crate::earlyprintln;
 use crate::mm::address::{Ppn, UsizeConvert};
-use crate::println;
 use crate::sync::SpinLock;
 use alloc::sync::Arc;
 
@@ -60,30 +60,17 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     init_heap();
 
     // 3. 创建内核地址空间（不激活，由调用者在合适时机激活）
-    #[cfg(target_arch = "riscv64")]
-    {
-        use alloc::sync::Arc;
+    let space = Arc::new(SpinLock::new(memory_space::MemorySpace::new_kernel()));
 
-        use crate::{earlyprintln, mm::memory_space::MemorySpace, sync::SpinLock};
+    // 记录全局内核空间句柄，供次核切换使用（确保所有 CPU 使用同一份内核页表）
+    set_global_kernel_space(space.clone());
 
-        let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
-        // 记录全局内核空间句柄，供次核切换使用（确保所有 CPU 使用同一份内核页表）
-        set_global_kernel_space(space.clone());
-        let root_ppn = space.lock().root_ppn();
-        earlyprintln!(
-            "[MM] Created kernel space, root PPN: 0x{:x}",
-            root_ppn.as_usize()
-        );
-
-        return space;
-    }
-
-    #[cfg(not(target_arch = "riscv64"))]
-    {
-        use crate::{mm::memory_space::MemorySpace, sync::SpinLock};
-        use alloc::sync::Arc;
-        Arc::new(SpinLock::new(MemorySpace::new_kernel()))
-    }
+    let root_ppn = space.lock().root_ppn();
+    earlyprintln!(
+        "[MM] Created kernel space, root PPN: 0x{:x}",
+        root_ppn.as_usize()
+    );
+    space
 }
 
 /// 激活指定的地址空间
