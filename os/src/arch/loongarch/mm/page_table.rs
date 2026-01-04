@@ -355,6 +355,85 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 }
 
 impl PageTableInner {
+    /// 带批处理支持的映射方法（与 RISC-V 端保持签名一致）
+    pub fn map_with_batch(
+        &mut self,
+        vpn: Vpn,
+        ppn: Ppn,
+        page_size: PageSize,
+        flags: UniversalPTEFlag,
+        _batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::map(self, vpn, ppn, page_size, flags)?;
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        Ok(())
+    }
+
+    /// 带批处理支持的解除映射方法（与 RISC-V 端保持签名一致）
+    pub fn unmap_with_batch(
+        &mut self,
+        vpn: Vpn,
+        _batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::unmap(self, vpn)?;
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        Ok(())
+    }
+
+    /// 带批处理支持的更新权限方法（与 RISC-V 端保持签名一致）
+    pub fn update_flags_with_batch(
+        &mut self,
+        vpn: Vpn,
+        flags: UniversalPTEFlag,
+        _batch: Option<&mut TlbBatchContext>,
+    ) -> PagingResult<()> {
+        <Self as PageTableInnerTrait<PageTableEntry>>::update_flags(self, vpn, flags)?;
+        <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
+        Ok(())
+    }
+}
+
+/// TLB 批量刷新上下文（占位符实现）
+///
+/// 用于在批量页表操作期间延迟 TLB 刷新，减少跨核通知次数。
+/// LoongArch 端多核 IPI 尚未接入，因此目前只保证本地 TLB 刷新。
+pub struct TlbBatchContext {
+    enabled: bool,
+}
+
+impl TlbBatchContext {
+    /// 创建新的批处理上下文
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+
+    /// 在批处理上下文中执行操作
+    pub fn execute<F, R>(f: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        let mut ctx = Self::new();
+        let result = f(&mut ctx);
+        ctx.flush();
+        result
+    }
+
+    /// 刷新所有待处理的 TLB 条目
+    pub fn flush(&mut self) {
+        if self.enabled {
+            <PageTableInner as PageTableInnerTrait<PageTableEntry>>::tlb_flush_all();
+            self.enabled = false;
+        }
+    }
+}
+
+impl Drop for TlbBatchContext {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+impl PageTableInner {
     /// 从 VPN 计算指定级别的索引
     ///
     /// 每级 9 位索引：

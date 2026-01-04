@@ -43,7 +43,8 @@ use crate::{
 pub(crate) fn forkret() {
     let fp: *mut TrapFrame;
     {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         let task = cpu.current_task.as_ref().unwrap();
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
@@ -58,7 +59,8 @@ pub(crate) fn forkret() {
 /// * `code`: 任务的退出码
 pub(crate) fn terminate_task(code: usize) -> ! {
     let task = {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         cpu.current_task.as_ref().unwrap().clone()
     };
 
@@ -73,22 +75,33 @@ pub(crate) fn terminate_task(code: usize) -> ! {
     unreachable!("terminate_task: should not return after scheduled out terminated task");
 }
 
+/// 尝试获取当前task
+/// # 返回值：当前任务的SharedTask，如果没有则返回None
+pub fn try_current_task() -> Option<SharedTask> {
+    let _guard = crate::sync::PreemptGuard::new();
+    current_cpu().current_task.as_ref().cloned()
+}
+
 /// 获取当前task
 /// # 返回值：当前任务的SharedTask
+/// # Panics：如果当前CPU没有任务则panic
 pub fn current_task() -> SharedTask {
-    current_cpu()
-        .lock()
-        .current_task
-        .as_ref()
-        .expect("current_task: CPU has no current task")
-        .clone()
+    match try_current_task() {
+        Some(task) => task,
+        None => {
+            // 打印调用栈信息以便调试
+            crate::pr_err!("current_task called with no current task!");
+            crate::pr_err!("CPU ID: {}", crate::arch::kernel::cpu::cpu_id());
+            panic!("current_task: CPU has no current task")
+        }
+    }
 }
 
 /// 获取当前任务的内存空间
 /// # 返回值：当前任务的内存空间
 pub fn current_memory_space() -> Arc<SpinLock<MemorySpace>> {
+    let _guard = crate::sync::PreemptGuard::new();
     current_cpu()
-        .lock()
         .current_memory_space
         .as_ref()
         .expect("current_memory_space: current task has no memory space")

@@ -3,7 +3,7 @@
 //! 该模块将所有日志状态和逻辑封装到一个单独的 `LogCore` 结构体中，
 //! 可以在保持**无锁、零分配**设计的同时，独立实例化用于测试。
 
-use crate::arch::lib::console::Stdout;
+use crate::console::Stdout;
 
 use super::buffer::GlobalLogBuffer;
 use super::config::{DEFAULT_CONSOLE_LEVEL, DEFAULT_LOG_LEVEL};
@@ -225,7 +225,8 @@ impl LogCore {
 
         let mut stdout = Stdout;
         // 直接格式化输出，不使用堆分配
-        let _ = write!(
+        // 使用单个 writeln! 调用以确保整个日志条目在一个锁内完成
+        let _ = writeln!(
             stdout,
             "{}{} [{:12}] [CPU{}/T{:3}] {}{}",
             entry.level().color_code(),
@@ -236,7 +237,6 @@ impl LogCore {
             entry.message(),
             entry.level().reset_color_code()
         );
-        let _ = writeln!(stdout);
     }
 }
 

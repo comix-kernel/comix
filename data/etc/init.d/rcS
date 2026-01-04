@@ -12,7 +12,8 @@ echo "--- Starting Minimal BusyBox System ---"
 /bin/mount -t sysfs none /sys
 # tmpfs/devtmpfs: 临时文件系统和设备文件
 /bin/mount -t tmpfs none /tmp
-/bin/mount -t tmpfs none /dev
+# /dev 已由内核在 early init 阶段挂载并自动创建设备节点，避免在此处覆盖已有的 /dev 挂载
+# /bin/mount -t tmpfs none /dev
 
 # --- 2. 处理设备文件 ---
 # mdev 是 BusyBox 中用于创建设备文件 (/dev/null, /dev/console 等) 的工具
@@ -48,10 +49,5 @@ echo "Mounting file systems via fstab..."
 
 echo "System initialization finished."
 
-# 重新创建必要的设备节点（因为 /dev 被 tmpfs 覆盖了）
-/bin/mknod /dev/console c 5 1
-/bin/mknod /dev/ttyS0 c 4 64
-/bin/mknod /dev/null c 1 3
-
-# 启动交互式 shell，重定向标准输入输出到 console
-exec /bin/sh < /dev/console > /dev/console 2>&1
+echo "rcS finished; spawning shell on ttyS0 via inittab"
+exit 0
