@@ -85,7 +85,8 @@ const CURRENTLY_SUPPORTED_FLAGS: CloneFlags = CloneFlags::from_bits_truncate(
         | CloneFlags::PARENT.bits()
         | CloneFlags::THREAD.bits()
         | CloneFlags::PARENT_SETTID.bits()
-        | CloneFlags::CHILD_SETTID.bits(),
+        | CloneFlags::CHILD_SETTID.bits()
+        | CloneFlags::CHILD_CLEARTID.bits(),
 );
 
 impl CloneFlags {

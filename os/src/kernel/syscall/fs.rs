@@ -13,6 +13,7 @@ use crate::{
             resolve_at_path_with_flags,
         },
     },
+    pr_debug,
     uapi::{
         errno::{EACCES, EINVAL, ENOENT},
         fs::{AtFlags, F_OK, FileSystemType, LinuxStatFs, R_OK, W_OK, X_OK},
@@ -179,6 +180,11 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     }
 }
 
+/// unlink - delete a file (wrapper for unlinkat)
+pub fn unlink(pathname: *const c_char) -> isize {
+    unlinkat(AT_FDCWD, pathname, 0)
+}
+
 pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     // 解析路径
     let _guard = SumGuard::new();
@@ -319,6 +325,15 @@ pub fn fstat(fd: usize, statbuf: *mut Stat) -> isize {
 
     // 转换为 Stat 结构
     let stat = crate::vfs::Stat::from_metadata(&metadata);
+
+    pr_debug!(
+        "[fstat] fd={}, st_mode={:#o}, st_rdev={:#x} (major={}, minor={})",
+        fd,
+        stat.st_mode,
+        stat.st_rdev,
+        stat.st_rdev >> 32,
+        stat.st_rdev & 0xFFFFFFFF
+    );
 
     // 写回用户空间
     {
@@ -496,6 +511,11 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     0
 }
 
+/// access - check file access permissions (wrapper for faccessat)
+pub fn access(pathname: *const c_char, mode: i32) -> isize {
+    faccessat(AT_FDCWD, pathname, mode, 0)
+}
+
 pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> isize {
     // 解析路径字符串
     let _guard = SumGuard::new();
@@ -622,6 +642,29 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     }
 
     bytes_read as isize
+}
+
+/// ftruncate - truncate a file to a specified length
+pub fn ftruncate(fd: usize, length: i64) -> isize {
+    if length < 0 {
+        return -(EINVAL as isize);
+    }
+
+    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let file = match task.lock().fd_table.get(fd) {
+        Ok(f) => f,
+        Err(e) => return e.to_errno(),
+    };
+
+    // Check if it's a regular file
+    if let Some(reg_file) = file.as_any().downcast_ref::<RegFile>() {
+        match reg_file.dentry.inode.truncate(length as usize) {
+            Ok(_) => 0,
+            Err(e) => e.to_errno(),
+        }
+    } else {
+        -(EINVAL as isize)
+    }
 }
 
 pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags: u32) -> isize {

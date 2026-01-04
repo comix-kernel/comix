@@ -1,10 +1,13 @@
 //! IO 相关的系统调用实现
 
+use core::any::Any;
+
 use crate::arch::trap::SumGuard;
 use crate::kernel::current_cpu;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
+use crate::uapi::signal::SignalFlags;
 use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
 
 /// 向文件描述符写入数据
@@ -15,18 +18,34 @@ use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     // 1. 获取文件对象
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let tid = task.lock().tid;
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
     };
+
+    // Check if this is a socket
+    let is_socket = file.as_any().downcast_ref::<crate::net::socket::SocketFile>().is_some();
 
     // 2. 访问用户态缓冲区并调用 File::write
     let result = {
         let _guard = SumGuard::new();
         let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
         match file.write(buffer) {
-            Ok(n) => n as isize,
-            Err(e) => e.to_errno(),
+            Ok(n) => {
+                if is_socket {
+                    crate::pr_info!("[WRITE] Socket write: tid={}, fd={}, requested={}, written={}",
+                        tid, fd, count, n);
+                }
+                n as isize
+            }
+            Err(e) => {
+                if is_socket {
+                    crate::pr_info!("[WRITE] Socket write failed: tid={}, fd={}, requested={}, error={:?}",
+                        tid, fd, count, e);
+                }
+                e.to_errno()
+            }
         }
     };
 
@@ -643,18 +662,60 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
 }
 
 /// pselect6 - synchronous I/O multiplexing with signal mask
-/// Note: sigmask handling requires signal subsystem refactoring, currently ignored
 pub fn pselect6(
     nfds: usize,
     readfds: usize,
     writefds: usize,
     exceptfds: usize,
     timeout: usize,
-    _sigmask: usize,
+    sigmask: usize,
 ) -> isize {
-    // TODO: Implement signal mask handling when signal subsystem is refactored
-    // Requires exposing signal field in Task or adding helper methods
-    select(nfds, readfds, writefds, exceptfds, timeout)
+    use crate::arch::trap::SumGuard;
+    use crate::uapi::types::SigSetT;
+
+    // Handle signal mask if provided
+    let old_mask = if sigmask != 0 {
+        let _guard = SumGuard::new();
+        unsafe {
+            // sigmask points to a structure: { sigset_t *ss; size_t ss_len; }
+            let sigmask_ptr = sigmask as *const usize;
+            let ss = *sigmask_ptr;
+            let ss_len = *sigmask_ptr.add(1);
+
+            if ss != 0 && ss_len == core::mem::size_of::<SigSetT>() {
+                let new_mask = *(ss as *const SigSetT);
+                let task = crate::kernel::current_task();
+                let mut t = task.lock();
+                let old = t.blocked.bits() as SigSetT;
+
+                // Temporarily set new signal mask
+                if let Some(flags) = SignalFlags::from_bits(new_mask as usize) {
+                    t.blocked = flags;
+                }
+                drop(t);
+                drop(task);
+                Some(old)
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Perform select
+    let result = select(nfds, readfds, writefds, exceptfds, timeout);
+
+    // Restore old signal mask
+    if let Some(old) = old_mask {
+        let task = crate::kernel::current_task();
+        let mut t = task.lock();
+        if let Some(flags) = SignalFlags::from_bits(old as usize) {
+            t.blocked = flags;
+        }
+    }
+
+    result
 }
 
 /// select - synchronous I/O multiplexing
@@ -751,17 +812,24 @@ pub fn select(
             };
 
             let mut fd_ready = false;
+            let is_readable = file.readable();
+            let is_writable = file.writable();
+
             // Closed sockets are readable (EOF)
-            if check_read && (file.readable() || is_closed) {
+            if check_read && (is_readable || is_closed) {
                 if let Some(ref mut set) = read_set {
                     set.set(fd);
                     fd_ready = true;
+                    crate::pr_debug!("pselect: fd={} set READ bit, readable={}, is_closed={}",
+                        fd, is_readable, is_closed );
                 }
             }
-            if check_write && file.writable() {
+            if check_write && is_writable {
                 if let Some(ref mut set) = write_set {
                     set.set(fd);
                     fd_ready = true;
+                    crate::pr_debug!("pselect: fd={} set WRITE bit, writable={}",
+                        fd, is_writable);
                 }
             }
             // exceptfds: OOB data, errors (not implemented yet)

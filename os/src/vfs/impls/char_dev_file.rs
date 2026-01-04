@@ -252,6 +252,10 @@ impl File for CharDeviceFile {
                 // MISC 设备 ioctl (包括 RTC)
                 self.misc_ioctl(request, arg)
             }
+            chrdev_major::MEM => {
+                // /dev/null, /dev/zero 等不支持 ioctl，返回 ENOTTY
+                Ok(-ENOTTY as isize)
+            }
             _ => Err(FsError::NotSupported),
         }
     }

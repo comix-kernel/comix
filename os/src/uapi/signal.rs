@@ -243,8 +243,8 @@ bitflags! {
         /// 清除信号处理函数：信号在投递后，其处理函数被重置为 SIG_DFL。
         const RESETHAND = 0x8000_0000;
 
-        /// 不受支持的标志位。用于用户空间检测内核对标志位的支持情况。
-        const UNSUPPORTED = 0x0000_0400;
+        /// glibc内部标志，表示提供了restorer函数（内核接受但忽略）
+        const RESTORER = 0x0000_0400;
 
         /// 暴露架构定义的标签位（tag bits）到 siginfo.si_addr 中。
         const EXPOSE_TAGBITS = 0x0000_0800;
@@ -260,7 +260,15 @@ bitflags! {
 
 const ALL_KNOWN_FLAGS: SaFlags = SaFlags::all();
 
-const NOW_SUPPORTED_FLAGS: SaFlags = SaFlags::UNSUPPORTED;
+const NOW_SUPPORTED_FLAGS: SaFlags = SaFlags::from_bits_truncate(
+    SaFlags::NOCLDSTOP.bits()
+        | SaFlags::NOCLDWAIT.bits()
+        | SaFlags::SIGINFO.bits()
+        | SaFlags::RESTART.bits()
+        | SaFlags::NODEFER.bits()
+        | SaFlags::RESETHAND.bits()
+        | SaFlags::RESTORER.bits(),
+);
 
 impl SaFlags {
     /// 检查标志位是否在当前内核支持的范围内

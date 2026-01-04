@@ -52,8 +52,15 @@ else
     echo "Starting QEMU in normal run mode."
 fi
 
+# Trace 模式
+if [ "$2" == "trace" ] || [ "$3" == "trace" ]; then
+    echo "Enabling QEMU trace for exec_tb"
+    QEMU_ARGS="$QEMU_ARGS -d exec,cpu,in_asm -D qemu_trace.log"
+fi
+
 # 创建日志文件
-LOG_FILE="/home/littlesand/Code/comix-fork/kernel.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$SCRIPT_DIR/../kernel.log"
 echo "Logging to $LOG_FILE"
 
 # 运行QEMU并同时输出到终端和日志文件

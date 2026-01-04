@@ -82,20 +82,40 @@ pub fn first_deliverable_signal(
 fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedTask) {
     let sig_num = signal_from_flag(sig_flag).unwrap();
 
-    match unsafe { action.sa_handler() } as isize {
-        SIG_DFL => match sig_num {
+    let handler_addr = unsafe { action.sa_handler() } as isize;
+    match handler_addr {
+        SIG_DFL | 0 => match sig_num {
             NUM_SIGQUIT | NUM_SIGILL | NUM_SIGABRT | NUM_SIGBUS | NUM_SIGFPE | NUM_SIGSEGV
-            | NUM_SIGSYS | NUM_SIGXCPU | NUM_SIGXFSZ => sig_dump(sig_num), // 致命错误，调用退出系统调用或内核退出函数
+            | NUM_SIGSYS | NUM_SIGXCPU | NUM_SIGXFSZ => sig_dump(sig_num),
 
             NUM_SIGHUP | NUM_SIGINT | NUM_SIGPIPE | NUM_SIGALRM | NUM_SIGTERM | NUM_SIGUSR1
-            | NUM_SIGUSR2 | NUM_SIGSTKFLT | NUM_SIGPROF | NUM_SIGPWR => sig_terminate(sig_num), // 默认终止
-            NUM_SIGKILL => sig_terminate(sig_num), // SIGKILL 总是终止
+            | NUM_SIGUSR2 | NUM_SIGSTKFLT | NUM_SIGPROF | NUM_SIGPWR => sig_terminate(sig_num),
+            NUM_SIGKILL => sig_terminate(sig_num),
             NUM_SIGSTOP | NUM_SIGTSTP | NUM_SIGTTIN | NUM_SIGTTOU => sig_stop(sig_num),
             NUM_SIGCONT => sig_continue(sig_num),
             NUM_SIGCHLD | NUM_SIGURG | NUM_SIGWINCH | NUM_SIGIO => sig_ignore(sig_num),
             _ => panic!("Unhandled signal"),
         },
         SIG_IGN => sig_ignore(sig_num),
+        handler_addr if handler_addr > 0 && handler_addr < 0x1000 => {
+            // 无效的handler地址，使用默认处理
+            crate::pr_warn!(
+                "[signal] Invalid handler address 0x{:x} for signal {}, using SIG_DFL",
+                handler_addr,
+                sig_num
+            );
+            match sig_num {
+                NUM_SIGQUIT | NUM_SIGILL | NUM_SIGABRT | NUM_SIGBUS | NUM_SIGFPE | NUM_SIGSEGV
+                | NUM_SIGSYS | NUM_SIGXCPU | NUM_SIGXFSZ => sig_dump(sig_num),
+                NUM_SIGHUP | NUM_SIGINT | NUM_SIGPIPE | NUM_SIGALRM | NUM_SIGTERM | NUM_SIGUSR1
+                | NUM_SIGUSR2 | NUM_SIGSTKFLT | NUM_SIGPROF | NUM_SIGPWR => sig_terminate(sig_num),
+                NUM_SIGKILL => sig_terminate(sig_num),
+                NUM_SIGSTOP | NUM_SIGTSTP | NUM_SIGTTIN | NUM_SIGTTOU => sig_stop(sig_num),
+                NUM_SIGCONT => sig_continue(sig_num),
+                NUM_SIGCHLD | NUM_SIGURG | NUM_SIGWINCH | NUM_SIGIO => sig_ignore(sig_num),
+                _ => panic!("Unhandled signal"),
+            }
+        }
         handler_addr => {
             // 自定义处理器：构造用户栈上下文并跳转
             // **将 action.mask 传递给安装跳板函数**

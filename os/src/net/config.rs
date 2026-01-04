@@ -102,21 +102,35 @@ impl NetworkConfigManager {
             interface.add_ip_address(ip_cidr);
             earlyprintln!("Set IP address: 192.168.1.100/24");
 
-            // 添加loopback地址到同一接口
-            let loopback_cidr = IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8);
-            interface.add_ip_address(loopback_cidr);
-            earlyprintln!("Set loopback address: 127.0.0.1/8");
-
             // 设置默认网关
             let gateway = Ipv4Address::new(192, 168, 1, 1);
             interface.set_ipv4_gateway(Some(gateway));
             earlyprintln!("Set default gateway: 192.168.1.1");
 
-            // Initialize global interface for socket operations
-            let smoltcp_iface = interface.create_smoltcp_interface();
+            // Initialize ethernet interface for socket operations
+            let smoltcp_iface = interface.create_smoltcp_interface(smoltcp::phy::Medium::Ethernet);
             use crate::net::socket::init_network;
             init_network(smoltcp_iface);
-            earlyprintln!("Initialized global network interface");
+            earlyprintln!("Initialized ethernet interface");
+
+            // Create and initialize loopback interface
+            use crate::device::net::loopback::LoopbackDevice;
+            use crate::net::interface::NetworkInterface;
+            use alloc::sync::Arc;
+
+            let loopback_device = Arc::new(LoopbackDevice::new());
+            let loopback_iface = NetworkInterface::new("lo".into(), loopback_device);
+
+            // Set loopback IP address
+            let loopback_cidr = IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8);
+            loopback_iface.add_ip_address(loopback_cidr);
+            earlyprintln!("Set loopback address: 127.0.0.1/8");
+
+            // Initialize loopback interface with Medium::Ip
+            let loopback_smoltcp = loopback_iface.create_smoltcp_interface(smoltcp::phy::Medium::Ip);
+            use crate::net::socket::init_loopback;
+            init_loopback(loopback_smoltcp);
+            earlyprintln!("Initialized loopback interface");
 
             Ok(())
         } else {
