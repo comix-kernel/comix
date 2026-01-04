@@ -49,7 +49,11 @@ pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
     // 注意：在陷阱处理中可能发生了调度（例如用户态定时器中断），
     // 这时需要恢复到新任务的 TrapFrame，而不是入口参数 trap_frame。
     let tf_ptr = crate::kernel::try_current_task()
-        .map(|t| t.lock().trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst) as usize)
+        .map(|t| {
+            t.lock()
+                .trap_frame_ptr
+                .load(core::sync::atomic::Ordering::SeqCst) as usize
+        })
         .unwrap_or(trap_frame as *mut _ as usize);
     // SAFETY: 指针来源于当前任务保存的 trap_frame_ptr 或回退到入口参数。
     unsafe { restore(&*(tf_ptr as *const super::TrapFrame)) };

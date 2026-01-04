@@ -260,12 +260,8 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                     return Ok(-EINVAL as isize);
                 }
 
-                    // 清零结构体（包括 padding），避免泄露内核栈数据
-                    core::ptr::write_bytes(
-                        termios_ptr as *mut u8,
-                        0,
-                        core::mem::size_of::<Termios>(),
-                    );
+                // 清零结构体（包括 padding），避免泄露内核栈数据
+                core::ptr::write_bytes(termios_ptr as *mut u8, 0, core::mem::size_of::<Termios>());
 
                 // 返回保存的 termios 设置
                 let termios = *STDIO_TERMIOS.lock();

@@ -14,7 +14,7 @@ impl TidAllocator {
     /// 创建一个新的TidAllocator实例。
     pub const fn new() -> Self {
         TidAllocator {
-            next_tid: AtomicU32::new(2),  // 从2开始，TID 1保留给init进程
+            next_tid: AtomicU32::new(2), // 从2开始，TID 1保留给init进程
         }
     }
 

@@ -63,7 +63,11 @@ pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
         unsafe {
             let sip: usize;
             core::arch::asm!("csrr {}, sip", out(reg) sip);
-            crate::pr_info!("[IPI] After send_ipi, current CPU sip={:#x}, SSIP bit: {}", sip, (sip >> 1) & 1);
+            crate::pr_info!(
+                "[IPI] After send_ipi, current CPU sip={:#x}, SSIP bit: {}",
+                sip,
+                (sip >> 1) & 1
+            );
         }
     }
 }

@@ -185,19 +185,27 @@ impl File for CharDeviceFile {
                     // 非阻塞：有就读，必要时做输入映射；规范模式不强制等到换行
                     if let Some(b) = serial.try_read() {
                         if let Some(mapped) = Self::map_input_byte(b, term.c_iflag) {
-                            if do_echo { self.echo_byte(mapped); }
+                            if do_echo {
+                                self.echo_byte(mapped);
+                            }
                             buf[count] = mapped;
                             count += 1;
                         }
                         while count < buf.len() {
                             if let Some(nb) = serial.try_read() {
                                 if let Some(mapped) = Self::map_input_byte(nb, term.c_iflag) {
-                                    if do_echo { self.echo_byte(mapped); }
+                                    if do_echo {
+                                        self.echo_byte(mapped);
+                                    }
                                     buf[count] = mapped;
                                     count += 1;
-                                    if canonical && mapped == b'\n' { break; }
+                                    if canonical && mapped == b'\n' {
+                                        break;
+                                    }
                                 }
-                            } else { break; }
+                            } else {
+                                break;
+                            }
                         }
                         Ok(count)
                     } else {
@@ -207,9 +215,17 @@ impl File for CharDeviceFile {
                     // 阻塞：非规范模式读1字节；规范模式直到换行
                     loop {
                         // 等到一个字节
-                        let b = match serial.try_read() { Some(bb) => bb, None => { core::hint::spin_loop(); continue; } };
+                        let b = match serial.try_read() {
+                            Some(bb) => bb,
+                            None => {
+                                core::hint::spin_loop();
+                                continue;
+                            }
+                        };
                         if let Some(mapped) = Self::map_input_byte(b, term.c_iflag) {
-                            if do_echo { self.echo_byte(mapped); }
+                            if do_echo {
+                                self.echo_byte(mapped);
+                            }
                             buf[count] = mapped;
                             count += 1;
                             if !canonical || mapped == b'\n' || count >= buf.len() {
@@ -248,7 +264,11 @@ impl File for CharDeviceFile {
                 let onlcr = (term.c_oflag & Self::ONLCR) != 0;
                 if post && onlcr {
                     for &ch in buf {
-                        if ch == b'\n' { serial.write(&[b'\r', b'\n']); } else { serial.write(&[ch]); }
+                        if ch == b'\n' {
+                            serial.write(&[b'\r', b'\n']);
+                        } else {
+                            serial.write(&[ch]);
+                        }
                     }
                 } else {
                     serial.write(buf);
