@@ -20,15 +20,35 @@ pub fn init() {
     CONSOLE_RUNTIME.store(true, Ordering::Release);
 }
 
+#[inline]
+fn write_str_unlocked(s: &str) {
+    if CONSOLE_RUNTIME.load(Ordering::Acquire) {
+        if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
+            console.write_str(s);
+            return;
+        }
+    }
+
+    for b in s.bytes() {
+        crate::arch::lib::sbi::console_putchar(b as usize);
+    }
+}
+
 /// 无锁的单字符输出（内部使用）
 #[inline]
 fn putchar_unlocked(c: u8) {
     if CONSOLE_RUNTIME.load(Ordering::Acquire) {
         // 运行时：使用 device console
         if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
-            let mut buf = [0u8; 4];
-            let s = (c as char).encode_utf8(&mut buf);
-            console.write_str(s);
+            // `Console::write_str` 只接受 UTF-8 字符串，因此这里只对 ASCII 走 runtime console；
+            // 对于非 ASCII 字节，直接降级到 SBI，避免破坏 UTF-8 多字节序列。
+            if c.is_ascii() {
+                let buf = [c];
+                let s = core::str::from_utf8(&buf).unwrap();
+                console.write_str(s);
+            } else {
+                crate::arch::lib::sbi::console_putchar(c as usize);
+            }
         } else {
             // 降级到 SBI
             crate::arch::lib::sbi::console_putchar(c as usize);
@@ -70,9 +90,7 @@ fn getchar_unlocked() -> Option<u8> {
 /// 带锁的字符串输出（公开接口）
 pub fn write_str(s: &str) {
     let _guard = CONSOLE_LOCK.lock();
-    for c in s.chars() {
-        putchar_unlocked(c as u8);
-    }
+    write_str_unlocked(s);
 }
 
 /// 带锁的单字符输出（公开接口，用于兼容性）
@@ -92,11 +110,7 @@ pub struct Stdout;
 
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        // 在这里加锁，保护整个字符串的输出
-        let _guard = CONSOLE_LOCK.lock();
-        for c in s.chars() {
-            putchar_unlocked(c as u8);
-        }
+        crate::console::write_str(s);
         Ok(())
     }
 
@@ -109,9 +123,7 @@ impl Write for Stdout {
         struct UnlockedWriter;
         impl Write for UnlockedWriter {
             fn write_str(&mut self, s: &str) -> fmt::Result {
-                for c in s.chars() {
-                    putchar_unlocked(c as u8);
-                }
+                write_str_unlocked(s);
                 Ok(())
             }
         }
