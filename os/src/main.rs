@@ -31,6 +31,8 @@ mod log;
 mod net;
 
 use crate::arch::lib::sbi::shutdown;
+#[cfg(target_arch = "loongarch64")]
+use core::arch::asm;
 use core::panic::PanicInfo;
 #[cfg(test)]
 use test::test_runner;
@@ -62,5 +64,16 @@ fn panic(info: &PanicInfo) -> ! {
     } else {
         earlyprintln!("Panicked: {}", info.message());
     }
+
+    // LoongArch virt 没有 ACPI GED 关机路径，直接停机避免再次陷阱。
+    #[cfg(target_arch = "loongarch64")]
+    {
+        loop {
+            unsafe { asm!("idle 0") }
+        }
+    }
+
+    // 其他架构仍按原行为触发关机。
+    #[cfg(not(target_arch = "loongarch64"))]
     shutdown(true)
 }
