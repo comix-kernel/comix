@@ -11,7 +11,7 @@ use crate::arch::trap::restore;
 use crate::earlyprintln;
 use crate::ipc::check_signal;
 use crate::kernel::{
-    SCHEDULER, TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block,
+    TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block,
 };
 
 use super::TrapFrame;
@@ -163,7 +163,11 @@ fn check_timer() {
             TIMER.lock().push(next_trigger, entry);
         }
     }
-    if SCHEDULER.lock().update_time_slice() {
+    let should_preempt = {
+        let mut sched = crate::kernel::current_scheduler().lock();
+        sched.update_time_slice() && !sched.is_empty()
+    };
+    if should_preempt {
         schedule();
     }
 }

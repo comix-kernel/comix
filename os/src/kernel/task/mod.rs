@@ -33,13 +33,55 @@ use crate::mm::memory_space::MemorySpace;
 use crate::sync::SpinLock;
 use crate::uapi::signal::NUM_SIGCHLD;
 use crate::{
-    arch::trap::{TrapFrame, restore},
+    arch::trap::restore,
     kernel::{cpu::current_cpu, schedule},
     vfs::{FDTable, File, FsError},
 };
 
+#[cfg(not(target_arch = "loongarch64"))]
+use crate::arch::trap::TrapFrame;
+
 /// 新创建的线程发生第一次调度时会从 forkret 开始执行
 /// 该函数负责恢复任务的陷阱帧，从而进入任务的实际执行上下文
+#[cfg(target_arch = "loongarch64")]
+pub(crate) fn forkret() {
+    let (tf_ptr, is_kernel_thread) = {
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
+        let task = cpu
+            .current_task
+            .as_ref()
+            .expect("forkret: CPU has no current task")
+            .clone();
+        let t = task.lock();
+        (
+            t.trap_frame_ptr.load(Ordering::SeqCst),
+            t.memory_space.is_none(),
+        )
+    };
+
+    // LoongArch: 内核线程首次运行不走 “ertn” 的异常返回路径，
+    // 否则会错误改写 CRMD/翻译模式导致卡死；直接切换栈并跳转到 entry 即可。
+    if is_kernel_thread {
+        // SAFETY: tf_ptr 指向当前任务拥有的 TrapFrame；entry/sp 由创建逻辑填充
+        let (entry, sp) = unsafe { ((*tf_ptr).era, (*tf_ptr).kernel_sp) };
+        unsafe {
+            core::arch::asm!(
+                "addi.d $sp, {sp}, 0",
+                "jirl $zero, {entry}, 0",
+                sp = in(reg) sp,
+                entry = in(reg) entry,
+                options(noreturn)
+            );
+        }
+    }
+
+    // 用户任务：仍然通过 restore->ertn 进入用户态
+    // SAFETY: tf_ptr 指向的内存已经被分配且由当前任务拥有
+    unsafe { restore(&*tf_ptr) };
+}
+
+#[cfg(not(target_arch = "loongarch64"))]
 pub(crate) fn forkret() {
     let fp: *mut TrapFrame;
     {
