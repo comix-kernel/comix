@@ -249,26 +249,26 @@ pub fn clone(
     child_task.lock().on_cpu = Some(target_cpu);
 
     let child_tid = child_task.lock().tid;
-    crate::pr_info!(
+    crate::pr_debug!(
         "[SMP] Task {} (child) assigned to CPU {}",
         child_tid,
         target_cpu
     );
 
     TASK_MANAGER.lock().add_task(child_task.clone());
-    crate::pr_info!(
+    crate::pr_debug!(
         "[SMP] Adding task {} to CPU {} scheduler",
         child_tid,
         target_cpu
     );
     crate::kernel::scheduler_of(target_cpu)
         .lock()
-        .add_task(child_task.clone());
+        .add_task(child_task);
 
     // 如果目标 CPU 不是当前 CPU，发送 IPI
     let current_cpu = crate::arch::kernel::cpu::cpu_id();
     if target_cpu != current_cpu {
-        crate::pr_info!(
+        crate::pr_debug!(
             "[SMP] Sending IPI from CPU {} to CPU {}",
             current_cpu,
             target_cpu
@@ -347,7 +347,7 @@ pub fn execve(
     };
 
     // 显式释放 data 缓冲区，避免内存泄漏
-    crate::earlyprintln!(
+    crate::pr_debug!(
         "[execve] Dropping {} byte ELF buffer before switching to user space",
         data.len()
     );
@@ -497,7 +497,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
             let mut children = p_lock.children.lock();
             let old_len = children.len();
             children.retain(|c| c.lock().tid != tid);
-            crate::earlyprintln!(
+            crate::pr_debug!(
                 "[wait4] Removed from parent.children: {} -> {}",
                 old_len,
                 children.len()

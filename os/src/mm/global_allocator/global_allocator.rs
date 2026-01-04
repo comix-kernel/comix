@@ -8,7 +8,7 @@
 //! - 由链接器符号定义的堆内存区域。
 //! - 用于设置堆的初始化函数。
 
-use crate::{earlyprintln, println, sync::RawSpinLockWithoutGuard};
+use crate::{earlyprintln, sync::RawSpinLockWithoutGuard};
 use talc::{Span, Talc, Talck};
 
 /// 全局堆分配器实例

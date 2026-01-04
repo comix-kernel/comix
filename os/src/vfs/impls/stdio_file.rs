@@ -267,9 +267,8 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 let termios = *STDIO_TERMIOS.lock();
                 core::ptr::write_volatile(termios_ptr, termios);
 
-                // 调试：打印返回的termios内容
-                use crate::earlyprintln;
-                earlyprintln!(
+                // 调试：打印返回的 termios 内容
+                crate::pr_debug!(
                     "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
                     termios.c_iflag,
                     termios.c_oflag,
@@ -297,9 +296,8 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 // 读取新的 termios 设置并保存
                 let new_termios = core::ptr::read_volatile(termios_ptr);
 
-                // 调试：打印接收到的termios内容
-                use crate::earlyprintln;
-                earlyprintln!(
+                // 调试：打印接收到的 termios 内容
+                crate::pr_debug!(
                     "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
                     new_termios.c_iflag,
                     new_termios.c_oflag,
@@ -337,8 +335,7 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 let winsize = *STDIO_WINSIZE.lock();
                 core::ptr::write_volatile(winsize_ptr, winsize);
 
-                use crate::earlyprintln;
-                earlyprintln!(
+                crate::pr_debug!(
                     "TIOCGWINSZ: returning {}x{} ({}x{} pixels)",
                     winsize.ws_row,
                     winsize.ws_col,
@@ -365,8 +362,7 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 let new_winsize = core::ptr::read_volatile(winsize_ptr);
                 *STDIO_WINSIZE.lock() = new_winsize;
 
-                use crate::earlyprintln;
-                earlyprintln!(
+                crate::pr_debug!(
                     "TIOCSWINSZ: set to {}x{} ({}x{} pixels)",
                     new_winsize.ws_row,
                     new_winsize.ws_col,

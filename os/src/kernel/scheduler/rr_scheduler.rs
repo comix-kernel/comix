@@ -77,7 +77,7 @@ impl Scheduler for RRScheduler {
         let _guard = crate::sync::PreemptGuard::new();
 
         let cpu_id = crate::arch::kernel::cpu::cpu_id();
-        crate::pr_info!(
+        crate::pr_debug!(
             "[Scheduler] CPU {} next_task called, queue size: {}",
             cpu_id,
             self.run_queue.len()
@@ -177,7 +177,7 @@ impl Scheduler for RRScheduler {
         match state {
             TaskState::Running => {
                 self.run_queue.add_task(task);
-                crate::pr_info!(
+                crate::pr_debug!(
                     "[Scheduler] Task {} added to run queue, new size: {}",
                     tid,
                     self.run_queue.len()

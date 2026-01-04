@@ -118,7 +118,7 @@ impl Drop for InterruptGuard {
 
 #[cfg(test)]
 mod tests {
-    use crate::{early_test, kassert, println, test_case};
+    use crate::{early_test, kassert, test_case};
 
     test_case!(trivial_assertion, {
         kassert!(0 != 1);

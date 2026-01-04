@@ -50,32 +50,10 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
     let result = {
         let _guard = SumGuard::new();
         let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-        // 轻量级诊断：前几次调用打印 fd 与返回值，帮助定位 shell 输入阻塞
-        static READ_LOG_COUNT: core::sync::atomic::AtomicUsize =
-            core::sync::atomic::AtomicUsize::new(0);
-        let log = READ_LOG_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed) < 12;
-        let ret = match file.read(buffer) {
+        match file.read(buffer) {
             Ok(n) => n as isize,
             Err(e) => e.to_errno(),
-        };
-        if log {
-            // 打印文件类型标签，便于区分是 stdio 还是 char 设备
-            let ty = if file
-                .as_any()
-                .is::<crate::vfs::impls::stdio_file::StdinFile>()
-            {
-                "STDIN"
-            } else if file
-                .as_any()
-                .is::<crate::vfs::impls::char_dev_file::CharDeviceFile>()
-            {
-                "CHARDEV"
-            } else {
-                "OTHER"
-            };
-            crate::pr_info!("[sys_read] fd={} ty={} ret={} count={}", fd, ty, ret, count);
         }
-        ret
     };
 
     result

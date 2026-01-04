@@ -53,7 +53,6 @@ use crate::{
             write_sockaddr_in,
         },
     },
-    println,
 };
 use alloc::sync::Arc;
 use smoltcp::socket::{tcp, udp};
@@ -108,7 +107,7 @@ pub fn set_network_interface_config(
         {
             Ok(_) => 0,
             Err(e) => {
-                println!("Network config error: {:?}", e);
+                crate::pr_debug!("Network config error: {:?}", e);
                 -5
             }
         }
@@ -447,7 +446,7 @@ fn get_interface_stats(ifname: *const c_char, stats: *mut u8, size: usize) -> is
 }
 
 pub fn init_network_syscalls() {
-    println!("Network syscalls initialized");
+    crate::pr_debug!("Network syscalls initialized");
 }
 
 /// 获取网络接口地址列表 (Linux标准系统调用)
