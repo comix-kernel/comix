@@ -31,4 +31,8 @@ pub trait Console: Send + Sync {
 pub fn init() {
     MAIN_CONSOLE.write().replace(CONSOLES.read()[0].clone());
     // frame_console::init();
+
+    // 切换到运行时控制台
+    crate::console::init();
+    crate::pr_info!("[Console] Switched to runtime console");
 }

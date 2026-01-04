@@ -317,7 +317,7 @@ fn fcntl_dupfd(
     // 使用 FDTable 的标准方法进行复制
     let new_fd = match task.lock().fd_table.dup_from(old_fd, min_fd, flags) {
         Ok(fd) => {
-            crate::earlyprintln!(
+            crate::pr_debug!(
                 "fcntl_dupfd: old_fd={} -> new_fd={}, min_fd={}, cloexec={}",
                 old_fd,
                 fd,
@@ -327,7 +327,7 @@ fn fcntl_dupfd(
             fd
         }
         Err(e) => {
-            crate::earlyprintln!("fcntl_dupfd: failed: {:?}", e);
+            crate::pr_debug!("fcntl_dupfd: failed: {:?}", e);
             return e.to_errno();
         }
     };

@@ -7,7 +7,7 @@ use crate::kernel::current_task;
 use crate::uapi::errno::{EBADF, EINVAL, ENOTTY, EOPNOTSUPP};
 use crate::uapi::ioctl::*;
 use crate::vfs::FsError;
-use crate::{earlyprintln, pr_debug, pr_err, pr_warn};
+use crate::{pr_debug, pr_err, pr_warn};
 
 /// ioctl - 设备特定的输入/输出控制
 ///
@@ -234,13 +234,13 @@ fn handle_tiocgpgrp(
     }
 
     let pgid = task.lock().pgid as i32;
-    earlyprintln!("ioctl: TIOCGPGRP writing pgid={} to {:#x}", pgid, arg);
+    pr_debug!("ioctl: TIOCGPGRP writing pgid={} to {:#x}", pgid, arg);
 
     unsafe {
         crate::util::user_buffer::write_to_user(arg as *mut i32, pgid);
     }
 
-    earlyprintln!("ioctl: TIOCGPGRP completed");
+    pr_debug!("ioctl: TIOCGPGRP completed");
     0
 }
 
@@ -261,7 +261,7 @@ fn handle_tiocspgrp(
         // 设置当前任务的进程组 ID
         task.lock().pgid = pgid as u32;
 
-        earlyprintln!("ioctl: TIOCSPGRP set pgid={}", pgid);
+        pr_debug!("ioctl: TIOCSPGRP set pgid={}", pgid);
         0
     }
 }
@@ -274,7 +274,7 @@ fn handle_tiocspgrp(
 fn handle_tiocsctty(_file: &alloc::sync::Arc<dyn crate::vfs::File>, _arg: usize) -> isize {
     // TODO: 实现完整的控制终端管理
     // 目前只是返回成功，让 init 可以继续运行
-    earlyprintln!("ioctl: TIOCSCTTY accepted (not fully implemented)");
+    pr_debug!("ioctl: TIOCSCTTY accepted (not fully implemented)");
     0
 }
 
@@ -288,7 +288,7 @@ fn handle_vt_openqry(arg: usize) -> isize {
     }
 
     // 对于不支持虚拟终端的系统，返回 ENOTTY
-    earlyprintln!("ioctl: VT_OPENQRY not supported (no VT subsystem)");
+    pr_debug!("ioctl: VT_OPENQRY not supported (no VT subsystem)");
     -ENOTTY as isize
 }
 
@@ -315,7 +315,7 @@ fn handle_siocgifconf(arg: usize) -> isize {
         new_ifconf.ifc_len = 0;
         core::ptr::write_volatile(ifconf_ptr, new_ifconf);
 
-        earlyprintln!("ioctl: SIOCGIFCONF returned 0 interfaces");
+        pr_debug!("ioctl: SIOCGIFCONF returned 0 interfaces");
         0
     }
 }
@@ -335,11 +335,11 @@ fn handle_ifreq(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, ar
         match request {
             SIOCGIFADDR | SIOCGIFFLAGS | SIOCGIFNETMASK | SIOCGIFMTU | SIOCGIFHWADDR
             | SIOCGIFINDEX => {
-                earlyprintln!("ioctl: network get request {:#x} not implemented", request);
+                pr_debug!("ioctl: network get request {:#x} not implemented", request);
                 -EOPNOTSUPP as isize
             }
             SIOCSIFADDR | SIOCSIFFLAGS | SIOCSIFNETMASK | SIOCSIFMTU | SIOCSIFHWADDR => {
-                earlyprintln!("ioctl: network set request {:#x} not implemented", request);
+                pr_debug!("ioctl: network set request {:#x} not implemented", request);
                 -EOPNOTSUPP as isize
             }
             _ => -EINVAL as isize,

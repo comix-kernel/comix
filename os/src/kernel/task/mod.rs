@@ -75,15 +75,26 @@ pub(crate) fn terminate_task(code: usize) -> ! {
     unreachable!("terminate_task: should not return after scheduled out terminated task");
 }
 
+/// 尝试获取当前task
+/// # 返回值：当前任务的SharedTask，如果没有则返回None
+pub fn try_current_task() -> Option<SharedTask> {
+    let _guard = crate::sync::PreemptGuard::new();
+    current_cpu().current_task.as_ref().cloned()
+}
+
 /// 获取当前task
 /// # 返回值：当前任务的SharedTask
+/// # Panics：如果当前CPU没有任务则panic
 pub fn current_task() -> SharedTask {
-    let _guard = crate::sync::PreemptGuard::new();
-    current_cpu()
-        .current_task
-        .as_ref()
-        .expect("current_task: CPU has no current task")
-        .clone()
+    match try_current_task() {
+        Some(task) => task,
+        None => {
+            // 打印调用栈信息以便调试
+            crate::pr_err!("current_task called with no current task!");
+            crate::pr_err!("CPU ID: {}", crate::arch::kernel::cpu::cpu_id());
+            panic!("current_task: CPU has no current task")
+        }
+    }
 }
 
 /// 获取当前任务的内存空间

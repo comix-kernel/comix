@@ -37,20 +37,60 @@ impl File for StdinFile {
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
-        use crate::arch::lib::sbi::console_getchar;
+        use crate::console::{getchar as console_getchar, putchar as console_putchar};
 
-        let mut count = 0;
-        for byte in buf.iter_mut() {
-            let ch = console_getchar();
-            // SBI console_getchar 返回 -1 (usize::MAX) 表示无输入
-            if ch == usize::MAX {
-                break;
+        // Minimal termios handling for stdio-backed console
+        // Align behavior with CharDeviceFile so CR/NL, echo, and canonical mode work as expected
+        const ICRNL: u32 = 0x0100; // map CR->NL on input
+        const INLCR: u32 = 0x0040; // map NL->CR on input
+        const IGNCR: u32 = 0x0080; // ignore CR on input
+        const ICANON: u32 = 0x0002; // canonical input
+        const ECHO: u32 = 0x0008; // echo input
+
+        let term = *STDIO_TERMIOS.lock();
+        let canonical = (term.c_lflag & ICANON) != 0;
+        let do_echo = (term.c_lflag & ECHO) != 0;
+
+        let mut count = 0usize;
+        // Lightweight, rate-limited diagnostics to confirm console input path
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        static READ_LOG_COUNT: AtomicUsize = AtomicUsize::new(0);
+        let log_once = READ_LOG_COUNT.fetch_add(1, Ordering::Relaxed) < 6;
+
+        while count < buf.len() {
+            let ch_opt = console_getchar();
+            let mut ch = match ch_opt {
+                Some(c) => c,
+                None => break,
+            };
+
+            // input mapping
+            if (term.c_iflag & IGNCR) != 0 && ch == b'\r' {
+                continue; // drop CR
+            }
+            if (term.c_iflag & ICRNL) != 0 && ch == b'\r' {
+                ch = b'\n';
+            } else if (term.c_iflag & INLCR) != 0 && ch == b'\n' {
+                ch = b'\r';
             }
 
-            *byte = ch as u8;
+            // echo
+            if do_echo {
+                console_putchar(ch);
+            }
+
+            buf[count] = ch;
             count += 1;
 
-            if ch == b'\n' as usize {
+            if log_once && count == 1 {
+                crate::pr_info!(
+                    "[STDIO] read first byte: 0x{:02x} (canonical={})",
+                    ch,
+                    canonical
+                );
+            }
+
+            if !canonical || ch == b'\n' {
                 break;
             }
         }
@@ -108,9 +148,14 @@ impl File for StdoutFile {
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        use crate::arch::lib::sbi::console_putchar;
-        for &byte in buf {
-            console_putchar(byte as usize);
+        // 将整个缓冲区作为字符串输出，在一个锁内完成
+        if let Ok(s) = core::str::from_utf8(buf) {
+            crate::console::write_str(s);
+        } else {
+            // 如果不是有效 UTF-8，逐字节输出
+            for &byte in buf {
+                crate::console::putchar(byte);
+            }
         }
         Ok(buf.len())
     }
@@ -159,9 +204,14 @@ impl File for StderrFile {
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        use crate::arch::lib::sbi::console_putchar;
-        for &byte in buf {
-            console_putchar(byte as usize);
+        // 将整个缓冲区作为字符串输出，在一个锁内完成
+        if let Ok(s) = core::str::from_utf8(buf) {
+            crate::console::write_str(s);
+        } else {
+            // 如果不是有效 UTF-8，逐字节输出
+            for &byte in buf {
+                crate::console::putchar(byte);
+            }
         }
         Ok(buf.len())
     }
@@ -211,15 +261,14 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 }
 
                 // 清零结构体（包括 padding），避免泄露内核栈数据
-                core::ptr::write_bytes(termios_ptr, 0, 1);
+                core::ptr::write_bytes(termios_ptr as *mut u8, 0, core::mem::size_of::<Termios>());
 
                 // 返回保存的 termios 设置
                 let termios = *STDIO_TERMIOS.lock();
                 core::ptr::write_volatile(termios_ptr, termios);
 
-                // 调试：打印返回的termios内容
-                use crate::earlyprintln;
-                earlyprintln!(
+                // 调试：打印返回的 termios 内容
+                crate::pr_debug!(
                     "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
                     termios.c_iflag,
                     termios.c_oflag,
@@ -247,9 +296,8 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 // 读取新的 termios 设置并保存
                 let new_termios = core::ptr::read_volatile(termios_ptr);
 
-                // 调试：打印接收到的termios内容
-                use crate::earlyprintln;
-                earlyprintln!(
+                // 调试：打印接收到的 termios 内容
+                crate::pr_debug!(
                     "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
                     new_termios.c_iflag,
                     new_termios.c_oflag,
@@ -287,8 +335,7 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 let winsize = *STDIO_WINSIZE.lock();
                 core::ptr::write_volatile(winsize_ptr, winsize);
 
-                use crate::earlyprintln;
-                earlyprintln!(
+                crate::pr_debug!(
                     "TIOCGWINSZ: returning {}x{} ({}x{} pixels)",
                     winsize.ws_row,
                     winsize.ws_col,
@@ -315,8 +362,7 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 let new_winsize = core::ptr::read_volatile(winsize_ptr);
                 *STDIO_WINSIZE.lock() = new_winsize;
 
-                use crate::earlyprintln;
-                earlyprintln!(
+                crate::pr_debug!(
                     "TIOCSWINSZ: set to {}x{} ({}x{} pixels)",
                     new_winsize.ws_row,
                     new_winsize.ws_col,
