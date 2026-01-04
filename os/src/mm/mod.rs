@@ -20,12 +20,12 @@ pub mod page_table;
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
 
-use alloc::sync::Arc;
 use crate::arch::mm::vaddr_to_paddr;
 use crate::config::{MEMORY_END, PAGE_SIZE};
 use crate::mm::address::{Ppn, UsizeConvert};
 use crate::println;
 use crate::sync::SpinLock;
+use alloc::sync::Arc;
 
 unsafe extern "C" {
     // 链接器脚本中定义的内核结束地址

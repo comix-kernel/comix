@@ -119,7 +119,10 @@ impl Scheduler for RRScheduler {
                     &mut g.context as *mut _
                 };
 
-                return Some(SwitchPlan { old: old_ctx_ptr, new: new_ctx_ptr });
+                return Some(SwitchPlan {
+                    old: old_ctx_ptr,
+                    new: new_ctx_ptr,
+                });
             }
         };
 
@@ -174,7 +177,11 @@ impl Scheduler for RRScheduler {
         match state {
             TaskState::Running => {
                 self.run_queue.add_task(task);
-                crate::pr_info!("[Scheduler] Task {} added to run queue, new size: {}", tid, self.run_queue.len());
+                crate::pr_info!(
+                    "[Scheduler] Task {} added to run queue, new size: {}",
+                    tid,
+                    self.run_queue.len()
+                );
             }
             _ => {
                 panic!("RRScheduler: can only add running tasks to scheduler");

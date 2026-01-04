@@ -363,17 +363,17 @@ fn idle_loop() -> ! {
 
 /// 为指定CPU创建idle任务
 fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
-    use crate::kernel::{TaskStruct, TASK_MANAGER};
-    use crate::mm::frame_allocator::alloc_contig_frames;
     use crate::arch::trap::TrapFrame;
-    use crate::vfs::fd_table::FDTable;
-    use crate::kernel::FsStruct;
     use crate::ipc::{SignalHandlerTable, SignalPending};
+    use crate::kernel::FsStruct;
+    use crate::kernel::{TASK_MANAGER, TaskStruct};
+    use crate::mm::frame_allocator::alloc_contig_frames;
+    use crate::sync::SpinLock;
+    use crate::uapi::resource::{INIT_RLIMITS, RlimitStruct};
     use crate::uapi::signal::SignalFlags;
     use crate::uapi::uts_namespace::UtsNamespace;
-    use crate::uapi::resource::{RlimitStruct, INIT_RLIMITS};
+    use crate::vfs::fd_table::FDTable;
     use alloc::sync::Arc;
-    use crate::sync::SpinLock;
     use core::sync::atomic::Ordering;
 
     // idle任务从TID分配器正常分配TID
@@ -382,16 +382,15 @@ fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
     let tid = TASK_MANAGER.lock().allocate_tid();
 
     // 分配最小资源
-    let kstack_tracker = alloc_contig_frames(1)
-        .expect("Failed to allocate kernel stack for idle task");
-    let trap_frame_tracker = alloc_frame()
-        .expect("Failed to allocate trap frame for idle task");
+    let kstack_tracker =
+        alloc_contig_frames(1).expect("Failed to allocate kernel stack for idle task");
+    let trap_frame_tracker = alloc_frame().expect("Failed to allocate trap frame for idle task");
 
     // 创建最小化的任务结构
     let mut task = TaskStruct::ktask_create(
         tid,
-        tid,  // pid = tid
-        0,    // ppid = 0 (no parent)
+        tid, // pid = tid
+        0,   // ppid = 0 (no parent)
         TaskStruct::empty_children(),
         kstack_tracker,
         trap_frame_tracker,
@@ -408,11 +407,7 @@ fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
         core::ptr::write(tf, TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(
-            idle_loop as usize,
-            0,
-            task.kstack_base
-        );
+        (*tf).set_kernel_trap_frame(idle_loop as usize, 0, task.kstack_base);
     }
 
     // 设置CPU亲和性
@@ -471,7 +466,11 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     unsafe {
         riscv::register::sscratch::write(tf_ptr as usize);
     }
-    pr_info!("[SMP] CPU {} set sscratch to {:#x}", hartid, tf_ptr as usize);
+    pr_info!(
+        "[SMP] CPU {} set sscratch to {:#x}",
+        hartid,
+        tf_ptr as usize
+    );
 
     // 设置idle任务为当前任务，并记录为本CPU的idle句柄
     {
@@ -517,8 +516,20 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
         core::arch::asm!("csrr {}, sstatus", out(reg) sstatus);
         core::arch::asm!("csrr {}, sie", out(reg) sie);
         core::arch::asm!("csrr {}, sip", out(reg) sip);
-        pr_info!("[SMP] CPU {} interrupt status: sstatus={:#x}, sie={:#x}, sip={:#x}", hartid, sstatus, sie, sip);
-        pr_info!("[SMP] CPU {} SIE bit: {}, SSIE bit: {}, SSIP bit: {}", hartid, (sstatus >> 1) & 1, (sie >> 1) & 1, (sip >> 1) & 1);
+        pr_info!(
+            "[SMP] CPU {} interrupt status: sstatus={:#x}, sie={:#x}, sip={:#x}",
+            hartid,
+            sstatus,
+            sie,
+            sip
+        );
+        pr_info!(
+            "[SMP] CPU {} SIE bit: {}, SSIE bit: {}, SSIP bit: {}",
+            hartid,
+            (sstatus >> 1) & 1,
+            (sie >> 1) & 1,
+            (sip >> 1) & 1
+        );
     }
 
     // 注意：mideleg 是 M-mode CSR，S-mode 无法读取
@@ -574,7 +585,11 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
         let ret = crate::arch::lib::sbi::hart_start(hartid, start_paddr, hartid);
         if ret.error != 0 {
             // HSM 不支持或被拒绝等，降级单核/少核而不是 panic
-            pr_err!("[SMP] Failed to start hart {}: SBI error {}", hartid, ret.error);
+            pr_err!(
+                "[SMP] Failed to start hart {}: SBI error {}",
+                hartid,
+                ret.error
+            );
             continue;
         }
         expected_mask |= 1 << hartid;

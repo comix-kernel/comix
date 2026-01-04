@@ -192,7 +192,11 @@ pub fn wake_up_with_block(task: SharedTask) {
             t.on_cpu = Some(target_cpu);
         }
 
-        crate::pr_info!("[Scheduler] Waking up task {} on CPU {}", task_tid, target_cpu);
+        crate::pr_info!(
+            "[Scheduler] Waking up task {} on CPU {}",
+            task_tid,
+            target_cpu
+        );
         sched.wake_up(task.clone());
         should_ipi = target_cpu != current_cpu;
     }

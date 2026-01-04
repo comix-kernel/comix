@@ -91,7 +91,9 @@ impl Cpu {
         #[cfg(target_arch = "riscv64")]
         unsafe {
             // Safety: tf_usize 指向任务自有的 TrapFrame 缓冲区
-            let tf = (tf_usize as *mut crate::arch::trap::TrapFrame).as_mut().unwrap();
+            let tf = (tf_usize as *mut crate::arch::trap::TrapFrame)
+                .as_mut()
+                .unwrap();
             tf.cpu_ptr = self as *const _ as usize;
         }
 
