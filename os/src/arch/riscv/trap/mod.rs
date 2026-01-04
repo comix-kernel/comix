@@ -44,6 +44,23 @@ pub fn sigreturn_trampoline_address() -> usize {
     __sigreturn_trampoline as usize
 }
 
+/// 设置 TrapFrame 中与当前 CPU 相关的字段。
+///
+/// RISC-V 的 trap_entry 依赖 `TrapFrame.cpu_ptr` 来恢复内核态的 tp。
+///
+/// # Safety
+/// `trap_frame_ptr` 必须指向有效、可写且对齐的 TrapFrame。
+#[inline]
+pub unsafe fn set_trap_frame_cpu_ptr(trap_frame_ptr: *mut TrapFrame, cpu_ptr: usize) {
+    // Safety: 由调用者保证指针有效
+    unsafe {
+        let tf = trap_frame_ptr
+            .as_mut()
+            .expect("set_trap_frame_cpu_ptr: null TrapFrame");
+        tf.cpu_ptr = cpu_ptr;
+    }
+}
+
 fn set_trap_entry() {
     // Safe: 仅在内核初始化阶段调用，确保唯一性
     unsafe {
