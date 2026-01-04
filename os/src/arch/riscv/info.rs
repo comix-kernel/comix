@@ -12,4 +12,3 @@ mmu\t\t: sv39\n\
 uarch\t\t: qemu,virt\n\n"
         .to_vec()
 }
-

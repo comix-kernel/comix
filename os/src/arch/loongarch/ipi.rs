@@ -29,4 +29,3 @@ pub fn send_reschedule_ipi(cpu: usize) {
 /// 向所有 CPU 发送 TLB flush IPI（占位符：当前为 no-op）
 #[inline]
 pub fn send_tlb_flush_ipi_all() {}
-
