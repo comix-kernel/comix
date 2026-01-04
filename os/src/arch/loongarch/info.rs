@@ -9,4 +9,3 @@ pub fn proc_cpuinfo() -> Vec<u8> {
 arch\t\t: loongarch64\n\n"
         .to_vec()
 }
-
