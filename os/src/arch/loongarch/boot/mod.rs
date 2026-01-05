@@ -16,9 +16,8 @@ use crate::{
     earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        FsStruct, SCHEDULER, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
-        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker,
-        sleep_task_with_block, time, yield_task,
+        FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu, current_task,
+        kernel_execve, kthread_spawn, kworker, sleep_task_with_block, time, yield_task,
     },
     mm::{
         self,
@@ -40,6 +39,7 @@ global_asm!(include_str!("entry.S"));
 /// 内核的第一个任务启动函数
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
 pub fn rest_init() {
+    earlyprintln!("[Boot] rest_init: creating init task");
     let tid = TASK_MANAGER.lock().allocate_tid();
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
@@ -76,21 +76,27 @@ pub fn rest_init() {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
+        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base);
     }
 
     let ra = task.context.ra;
     let sp = task.context.sp;
     let ptr = task.trap_frame_ptr.load(Ordering::SeqCst);
-    // init 进程不同于其他内核线程，需要有一个独立的内存空间
-    task.memory_space = Some(current_memory_space());
+    // init 任务运行在 CPU 0
+    task.on_cpu = Some(0);
     let task = task.into_shared();
     unsafe {
         // KScratch0 <- TrapFrame 指针
         asm!("csrwr {0}, 0x48", in(reg) ptr as usize, options(nostack, preserves_flags));
     }
     TASK_MANAGER.lock().add_task(task.clone());
-    current_cpu().lock().switch_task(task);
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_task(task);
+    }
+
+    earlyprintln!("[Boot] rest_init: switching to init");
 
     // 切入 kinit：设置 sp 并跳到 ra；此调用不返回
     // SAFETY: 在 Task 创建时已正确初始化 ra 和 sp
@@ -111,7 +117,11 @@ pub fn rest_init() {
 /// 创建 kthreadd 任务
 /// 并在一切结束后转化为第一个用户态任务
 fn init() {
+    earlyprintln!("[Init] entered init()");
     super::trap::init();
+
+    // 启用中断（在设置好 trap 处理与 KScratch0 之后）
+    unsafe { intr::enable_interrupts() };
 
     create_kthreadd();
 
@@ -132,7 +142,16 @@ fn init() {
     //     pr_err!("[Init] Failed to create devices: {:?}", e);
     // }
 
-    kernel_execve("/sbin/init", &["/sbin/init"], &[]);
+    // LoongArch 目录目前为脚手架：用户态与块设备引导可能尚未就绪。
+    // 若 /sbin/init 可用则尝试进入用户态，否则保持在内核中运行。
+    if crate::vfs::vfs_lookup("/sbin/init").is_ok() {
+        kernel_execve("/sbin/init", &["/sbin/init"], &[]);
+    }
+
+    pr_info!("[Init] /sbin/init not found; staying in kernel loop");
+    loop {
+        yield_task();
+    }
 }
 
 /// 内核守护线程
@@ -181,11 +200,13 @@ fn create_kthreadd() {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // Safety: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
+        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
     }
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
-    SCHEDULER.lock().add_task(task);
+    task.lock().on_cpu = Some(0);
+    crate::kernel::scheduler_of(0).lock().add_task(task);
 }
 
 pub fn main(hartid: usize) {
@@ -196,7 +217,13 @@ pub fn main(hartid: usize) {
     earlyprintln!("[Boot] Hello, world!");
     earlyprintln!("[Boot] LoongArch CPU {} is up!", hartid);
 
-    mm::init();
+    let kernel_space = mm::init();
+
+    // 激活内核地址空间并设置 current_memory_space（供 rest_init/current_memory_space 使用）
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(kernel_space);
+    }
 
     #[cfg(test)]
     crate::test_main();
@@ -208,10 +235,8 @@ pub fn main(hartid: usize) {
     earlyprintln!("[Boot] time::init finished");
     timer::init();
     earlyprintln!("[Boot] timer::init finished");
-    unsafe { intr::enable_interrupts() };
 
-    earlyprintln!("[Boot] interrupts enabled, entering rest_init");
-
+    earlyprintln!("[Boot] entering rest_init");
     rest_init();
 }
 
