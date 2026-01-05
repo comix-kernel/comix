@@ -311,7 +311,8 @@ pub fn execve(
         Err(_) => return -EIO,
     };
 
-    let (data, argv_strings, envp_strings) =
+    let mut exec_path_str = path_str.clone();
+    let (data, argv_strings, envp_strings, exec_path_str) =
         if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
             if let Ok((path, args)) = parse_hashbang(&data) {
                 let mut new_argv = Vec::new();
@@ -328,17 +329,24 @@ pub fn execve(
                     Err(FsError::IsDirectory) => return -EISDIR,
                     Err(_) => return -EIO,
                 };
-                (data, new_argv, envp_strings)
+                exec_path_str = path.to_string();
+                (data, new_argv, envp_strings, exec_path_str)
             } else {
                 return -EINVAL;
             }
         } else {
-            (data, argv_strings, envp_strings)
+            (data, argv_strings, envp_strings, exec_path_str)
         };
 
     // // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     // let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
     // let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
+
+    // /proc/[pid]/exe 使用尽量稳定的绝对路径
+    let exe_path = match crate::vfs::vfs_lookup(&exec_path_str) {
+        Ok(d) => d.full_path(),
+        Err(_) => exec_path_str.clone(),
+    };
 
     // 解析 ELF 并准备新的地址空间（但不切换）
     let (space, entry, sp, phdr_addr, phnum, phent) = match do_execve_prepare(&data) {
@@ -361,6 +369,7 @@ pub fn execve(
         space,
         entry,
         sp,
+        exe_path,
         argv_strings, // Pass ownership
         envp_strings, // Pass ownership
         phdr_addr,
@@ -1139,6 +1148,7 @@ fn do_execve_switch(
     space: Arc<SpinLock<MemorySpace>>,
     entry: usize,
     sp: usize,
+    exe_path: alloc::string::String,
     argv: Vec<alloc::string::String>,
     envp: Vec<alloc::string::String>,
     phdr_addr: usize,
@@ -1163,6 +1173,7 @@ fn do_execve_switch(
         let envp_refs: Vec<&str> = envp.iter().map(|s| s.as_str()).collect();
 
         let mut t = task.lock();
+        t.exe_path = Some(exe_path);
         t.execve(
             space.clone(),
             entry,

@@ -375,10 +375,14 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
 
             // 3. 创建新的 dentry 并加入缓存
             let child_dentry = Dentry::new(name.clone(), child_inode);
-            base.add_child(child_dentry.clone());
-
-            // 4. 加入全局缓存
-            crate::vfs::DENTRY_CACHE.insert(&child_dentry);
+            if child_dentry.inode.cacheable() {
+                base.add_child(child_dentry.clone());
+                // 4. 加入全局缓存
+                crate::vfs::DENTRY_CACHE.insert(&child_dentry);
+            } else {
+                // 不加入树状/全局缓存，但仍需要正确的父指针以支持 `..` 和 full_path。
+                child_dentry.set_parent(&base);
+            }
 
             // 5. 检查是否有挂载点
             check_mount_point(child_dentry)
