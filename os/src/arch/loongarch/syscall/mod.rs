@@ -5,14 +5,25 @@ mod syscall_number;
 pub use syscall_number::*;
 
 use crate::arch::trap::TrapFrame;
+use crate::kernel::syscall::*;
+use crate::uapi::errno::ENOSYS;
 
 /// 分发系统调用
-pub fn dispatch_syscall(frame: &mut TrapFrame) -> isize {
-    let _syscall_id = frame.syscall_id();
-    let _args = frame.syscall_args();
+pub fn dispatch_syscall(frame: &mut TrapFrame) {
+    let syscall_id = frame.syscall_id();
 
-    // TODO: 实现系统调用分发
-    -1 // ENOSYS
+    match syscall_id {
+        nr::READ => sys_read(frame),
+        nr::WRITE => sys_write(frame),
+        nr::EXIT => sys_exit(frame),
+        nr::EXIT_GROUP => sys_exit_group(frame),
+        nr::BRK => sys_brk(frame),
+        nr::MMAP => sys_mmap(frame),
+        nr::MUNMAP => sys_munmap(frame),
+        _ => {
+            frame.set_syscall_ret((-ENOSYS) as usize);
+        }
+    }
 }
 
 /// 宏：实现系统调用函数的自动包装器 (LoongArch 版)

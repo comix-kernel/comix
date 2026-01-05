@@ -28,6 +28,9 @@ pub fn main(_hartid: usize) -> ! {
     #[cfg(test)]
     crate::test_main();
 
+    // 初始化陷阱处理入口
+    crate::arch::trap::init_boot_trap();
+
     // TODO: 初始化各子系统
     // - 中断处理
     // - 定时器
