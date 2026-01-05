@@ -10,9 +10,7 @@ use crate::arch::timer::{
 use crate::arch::trap::restore;
 use crate::earlyprintln;
 use crate::ipc::check_signal;
-use crate::kernel::{
-    TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block,
-};
+use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
 
 use super::TrapFrame;
 
