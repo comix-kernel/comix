@@ -15,7 +15,6 @@ pub const TICKS_PER_SEC: usize = 100;
 
 // LoongArch 定时器相关 CSR 编号
 const CSR_TCFG: u32 = 0x41;
-const CSR_TVAL: u32 = 0x42;
 const CSR_TICLR: u32 = 0x44;
 
 /// 初始化定时器
@@ -51,9 +50,6 @@ pub fn set_next_trigger() {
     let delta = (clock_freq() / TICKS_PER_SEC).max(1);
 
     unsafe {
-        // 写入 TVAL 作为下一次计数起点
-        core::arch::asm!("csrwr {val}, {tval}", val = in(reg) delta, tval = const CSR_TVAL, options(nostack, preserves_flags));
-
         // TCFG: [0]=EN, [1]=PERIODIC, [63:2]=初始计数值（这里使用 delta）
         let cfg = ((delta as u64) << 2) | 0b11;
         core::arch::asm!("csrwr {val}, {tcfg}", val = in(reg) cfg, tcfg = const CSR_TCFG, options(nostack, preserves_flags));
