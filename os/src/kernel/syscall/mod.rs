@@ -243,8 +243,8 @@ impl_syscall!(
         c_ulong,     // flags (a0)
         c_ulong,     // stack (a1)
         *mut c_int,  // parent_tid (a2)
-        *mut c_void, // tls (a3)
-        *mut c_int   // child_tid (a4)
+        *mut c_int,  // child_tid (a3)
+        *mut c_void  // tls (a4)
     )
 );
 impl_syscall!(

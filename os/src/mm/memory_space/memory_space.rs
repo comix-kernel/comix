@@ -280,6 +280,22 @@ impl MemorySpace {
         Ok(())
     }
 
+    /// 插入一个“保留”区域（不建立页表映射）
+    ///
+    /// 用于 mmap(PROT_NONE) / guard page 场景：需要占位并参与重叠检查，
+    /// 但不能创建 RISC-V 不合法的“无 R/W/X 叶子页表项”。
+    pub fn insert_reserved_area(
+        &mut self,
+        vpn_range: VpnRange,
+        area_type: AreaType,
+        flags: UniversalPTEFlag,
+        file: Option<MmapFile>,
+    ) -> Result<(), PagingError> {
+        let area = MappingArea::new(vpn_range, area_type, MapType::Reserved, flags, file);
+        self.insert_area(area)?;
+        Ok(())
+    }
+
     /// 插入一个帧映射区域，并可选择复制数据（带偏移量）
     pub fn insert_framed_area_with_offset(
         &mut self,
@@ -426,6 +442,8 @@ impl MemorySpace {
     ) -> Result<(Self, usize, usize, usize, usize, usize), PagingError> {
         use xmas_elf::ElfFile;
         use xmas_elf::program::{SegmentData, Type};
+        use xmas_elf::sections::{SectionData, ShType};
+        use xmas_elf::symbol_table::Entry as ElfSymEntry;
 
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
 
@@ -433,6 +451,15 @@ impl MemorySpace {
         if elf.header.pt2.machine().as_machine() != xmas_elf::header::Machine::RISC_V {
             return Err(PagingError::InvalidAddress);
         }
+
+        // 对 ET_DYN (PIE/static-pie) 采用固定 load bias，避免把可执行映射放到 VA=0。
+        // 这也便于按 ELF relocation 语义处理 R_RISCV_RELATIVE。
+        //
+        // NOTE: 目前 bias 固定；若未来引入 ASLR，可改为随机。
+        let load_bias: usize = match elf.header.pt2.type_().as_type() {
+            xmas_elf::header::Type::SharedObject => 0x10000, // ET_DYN
+            _ => 0,
+        };
 
         // 创建新的内存空间，只复制内核映射（不复制用户空间数据）
         let current_space = crate::kernel::current_memory_space();
@@ -470,8 +497,8 @@ impl MemorySpace {
                 continue;
             }
 
-            let start_va = ph.virtual_addr() as usize;
-            let end_va = (ph.virtual_addr() + ph.mem_size()) as usize;
+            let start_va = load_bias + ph.virtual_addr() as usize;
+            let end_va = load_bias + (ph.virtual_addr() + ph.mem_size()) as usize;
 
             // 检查段是否与栈/陷阱区域重叠
             if start_va >= USER_STACK_TOP - USER_STACK_SIZE {
@@ -522,9 +549,104 @@ impl MemorySpace {
                 area_type,
                 flags,
                 data,
-                start_va % PAGE_SIZE, // Use page offset, not file offset
+                start_va % PAGE_SIZE, // bias 是页对齐的，因此等价于 p_vaddr % PAGE_SIZE
                 None,                 // 非文件映射
             )?;
+        }
+
+        // 1.5 对静态 PIE/PIE 应用最小化重定位：R_RISCV_RELATIVE
+        //
+        // 典型的 riscv64 static-pie（如 data/bin/iperf3）会把 GOT/函数指针以 0 填充，
+        // 依赖 .rela.dyn 的 RELATIVE relocations 在加载时写入正确地址。
+        // 如果不做这一步，程序往往会在某个间接调用点跳到 sepc=0 执行到 ELF header。
+        const R_RISCV_64: u32 = 2;
+        const R_RISCV_RELATIVE: u32 = 3;
+
+        enum Symtab64<'a> {
+            Dyn(&'a [xmas_elf::symbol_table::DynEntry64]),
+            Std(&'a [xmas_elf::symbol_table::Entry64]),
+        }
+
+        let mut write_usize_at = |va: usize, value: usize| -> Result<(), PagingError> {
+            let paddr = space
+                .page_table
+                .translate(Vaddr::from_usize(va))
+                .ok_or(PagingError::InvalidAddress)?;
+            let paddr_usize = paddr.as_usize();
+            let page_base = paddr_usize & !(PAGE_SIZE - 1);
+            let off = paddr_usize & (PAGE_SIZE - 1);
+            let kva = paddr_to_vaddr(page_base) + off;
+            unsafe {
+                core::ptr::write_unaligned(kva as *mut usize, value);
+            }
+            Ok(())
+        };
+
+        for sh in elf.section_iter() {
+            if sh.get_type() != Ok(ShType::Rela) {
+                continue;
+            }
+
+            // 解析 rela entries
+            let relas = match sh.get_data(&elf) {
+                Ok(SectionData::Rela64(entries)) => entries,
+                _ => continue,
+            };
+
+            // 找到该 rela section 关联的符号表（sh_link）
+            let symtab = if sh.link() != 0 {
+                match elf.section_header(sh.link() as u16) {
+                    Ok(sym_sh) => match sym_sh.get_data(&elf) {
+                        Ok(SectionData::DynSymbolTable64(syms)) => Some(Symtab64::Dyn(syms)),
+                        Ok(SectionData::SymbolTable64(syms)) => Some(Symtab64::Std(syms)),
+                        _ => None,
+                    },
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
+            for rela in relas {
+                let r_type = rela.get_type();
+                let r_offset = rela.get_offset() as usize;
+                let r_sym = rela.get_symbol_table_index() as usize;
+                let addend = rela.get_addend() as i64 as isize;
+
+                let target_va = load_bias + r_offset;
+
+                let value = match r_type {
+                    R_RISCV_RELATIVE => (load_bias as isize + addend) as usize,
+                    R_RISCV_64 => {
+                        let sym_val = if r_sym == 0 {
+                            0usize
+                        } else {
+                            let Some(symtab) = symtab.as_ref() else {
+                                pr_err!("[ELF] R_RISCV_64 requires symtab, but sh_link is missing");
+                                return Err(PagingError::InvalidAddress);
+                            };
+                            match symtab {
+                                Symtab64::Dyn(syms) => syms
+                                    .get(r_sym)
+                                    .ok_or(PagingError::InvalidAddress)?
+                                    .value() as usize,
+                                Symtab64::Std(syms) => syms
+                                    .get(r_sym)
+                                    .ok_or(PagingError::InvalidAddress)?
+                                    .value() as usize,
+                            }
+                        };
+                        let s = load_bias + sym_val;
+                        (s as isize + addend) as usize
+                    }
+                    _ => {
+                        pr_err!("[ELF] Unsupported relocation type: {}", r_type);
+                        return Err(PagingError::InvalidAddress);
+                    }
+                };
+
+                write_usize_at(target_va, value)?;
+            }
         }
 
         // 2. 初始化堆（从 ELF 结束地址开始，页对齐）
@@ -543,7 +665,7 @@ impl MemorySpace {
             None, // 非文件映射
         )?;
 
-        let entry_point = elf.header.pt2.entry_point() as usize;
+        let entry_point = load_bias + elf.header.pt2.entry_point() as usize;
         let ph_off = elf.header.pt2.ph_offset() as usize;
         let ph_num = elf.header.pt2.ph_count();
         let ph_ent = elf.header.pt2.ph_entry_size();
@@ -560,7 +682,7 @@ impl MemorySpace {
                 let offset = ph.offset() as usize;
                 let filesz = ph.file_size() as usize;
                 if ph_off >= offset && ph_off < offset + filesz {
-                    phdr_addr = vaddr + (ph_off - offset);
+                    phdr_addr = load_bias + vaddr + (ph_off - offset);
                     break;
                 }
             }
@@ -720,43 +842,41 @@ impl MemorySpace {
 
         user_areas.sort_by_key(|&(start, _)| start);
 
-        // 检查堆结束到第一个区域之间的空隙
-        let mut search_start = heap_end;
+        // Linux 行为更接近 “top-down” 分配：mmap 默认从高地址向低地址找洞，
+        // 以避免与 brk(堆) 的向上增长发生冲突。
+        //
+        // 我们以 search_limit 作为最高可用地址（栈下方保留 guard），在 [heap_end, search_limit) 内自顶向下找洞。
+        if size > search_limit.saturating_sub(heap_end) {
+            return None;
+        }
 
-        // 对齐到页边界（向上取整）
-        search_start =
-            (search_start + crate::config::PAGE_SIZE - 1) & !(crate::config::PAGE_SIZE - 1);
+        let align_down = |addr: usize, align: usize| addr & !(align - 1);
 
-        for &(area_start, area_end) in &user_areas {
-            // 跳过在 heap_end 之前的区域
-            if area_end <= heap_end {
+        let mut gap_end = search_limit;
+        for &(area_start, area_end) in user_areas.iter().rev() {
+            // 只关心 [heap_end, search_limit) 内的区域
+            if area_start >= search_limit {
                 continue;
             }
 
-            // 检查 [search_start, area_start) 是否足够大
-            if area_start > search_start {
-                let gap_size = area_start - search_start;
-                if gap_size >= size && search_start < search_limit {
-                    // 应用对齐要求
-                    let aligned_start = (search_start + align - 1) & !(align - 1);
-                    if aligned_start + size <= area_start && aligned_start < search_limit {
-                        return Some(aligned_start);
+            let clamped_end = core::cmp::min(area_end, search_limit);
+            if clamped_end < gap_end {
+                // gap = [clamped_end, gap_end)
+                if gap_end >= heap_end + size {
+                    let lowest_ok = core::cmp::max(clamped_end, heap_end);
+                    if gap_end > lowest_ok && gap_end - lowest_ok >= size {
+                        let candidate = align_down(gap_end - size, align);
+                        if candidate >= lowest_ok {
+                            return Some(candidate);
+                        }
                     }
                 }
             }
 
-            // 更新搜索起点到当前区域之后
-            search_start = area_end;
-        }
-
-        // 检查最后一个区域之后到栈之前的空间
-        if search_start < search_limit {
-            let remaining = search_limit - search_start;
-            if remaining >= size {
-                let aligned_start = (search_start + align - 1) & !(align - 1);
-                if aligned_start + size <= search_limit {
-                    return Some(aligned_start);
-                }
+            // 下一段 gap 的上界是当前区域的起点（但也不能低于 heap_end）
+            gap_end = core::cmp::max(area_start, heap_end);
+            if gap_end == heap_end {
+                break;
             }
         }
 
@@ -887,8 +1007,8 @@ impl MemorySpace {
             // 移除原区域
             let area = self.areas.remove(idx);
 
-            // 只处理 Framed 映射，Direct 映射不应该被 munmap
-            if area.map_type() != MapType::Framed {
+            // 只处理 Framed / Reserved，Direct 映射不应该被 munmap
+            if area.map_type() == MapType::Direct {
                 // 重新插入原区域
                 self.areas.insert(idx, area);
                 continue;
@@ -964,12 +1084,10 @@ impl MemorySpace {
 
         for (idx, area) in self.areas.iter().enumerate() {
             if area.vpn_range().overlaps(&change_range) {
-                // 只处理 Framed 类型的映射
-                if area.map_type() == MapType::Framed {
-                    affected_indices.push(idx);
-                } else {
-                    // Direct 映射不允许修改权限
-                    return Err(PagingError::UnsupportedMapType);
+                // 只处理 Framed / Reserved，Direct 映射不允许修改权限
+                match area.map_type() {
+                    MapType::Framed | MapType::Reserved => affected_indices.push(idx),
+                    MapType::Direct => return Err(PagingError::UnsupportedMapType),
                 }
             }
         }
@@ -982,10 +1100,10 @@ impl MemorySpace {
         // 验证所有需要修改的 VPN 都在某个 Framed 区域中
         for vpn in start_vpn.as_usize()..end_vpn.as_usize() {
             let vpn = Vpn::from_usize(vpn);
-            let found = self
-                .areas
-                .iter()
-                .any(|area| area.vpn_range().contains(vpn) && area.map_type() == MapType::Framed);
+            let found = self.areas.iter().any(|area| {
+                area.vpn_range().contains(vpn)
+                    && matches!(area.map_type(), MapType::Framed | MapType::Reserved)
+            });
             if !found {
                 return Err(PagingError::InvalidAddress);
             }
@@ -1032,6 +1150,11 @@ impl MemorySpace {
                 MapType::Framed => {
                     // 帧映射：深层复制数据
                     let new_area = area.clone_with_data(&mut new_space.page_table)?;
+                    new_space.areas.push(new_area);
+                }
+                MapType::Reserved => {
+                    // 保留区：仅克隆元数据（无页表映射、无帧）
+                    let new_area = area.clone_metadata();
                     new_space.areas.push(new_area);
                 }
             }

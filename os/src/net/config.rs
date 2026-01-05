@@ -1,4 +1,7 @@
-use crate::{earlyprintln, net::interface::NETWORK_INTERFACE_MANAGER};
+use crate::{
+    earlyprintln,
+    net::interface::{NETWORK_INTERFACE_MANAGER, NetworkInterface},
+};
 use alloc::string::String;
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address};
 
@@ -94,7 +97,23 @@ impl NetworkConfigManager {
             binding.get_interfaces().first().cloned()
         }; // NETWORK_INTERFACE_MANAGER锁已释放
 
-        if let Some(interface) = interface {
+        let interface = if let Some(interface) = interface {
+            interface
+        } else {
+            // 没有任何真实网卡（例如 QEMU 没挂 virtio-net）时，创建一个“空设备接口”，
+            // 让 smoltcp/套接字栈至少能在 loopback(127.0.0.1) 场景工作。
+            use crate::device::net::null_net::NullNetDevice;
+            use alloc::sync::Arc;
+
+            earlyprintln!("No net interfaces found; creating null loopback-only interface");
+
+            let dev = NullNetDevice::new(0);
+            let iface = Arc::new(NetworkInterface::new(String::from("lo0"), dev));
+            NETWORK_INTERFACE_MANAGER.lock().add_interface(iface.clone());
+            iface
+        };
+
+        {
             earlyprintln!("Configuring interface: {}", interface.name());
 
             // 设置默认IP地址
@@ -119,9 +138,6 @@ impl NetworkConfigManager {
             earlyprintln!("Initialized global network interface");
 
             Ok(())
-        } else {
-            earlyprintln!("No network interfaces found to configure");
-            Err(NetworkConfigError::InterfaceNotFound)
         }
     }
 

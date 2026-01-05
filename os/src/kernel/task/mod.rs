@@ -106,13 +106,28 @@ pub(crate) fn terminate_task(code: usize) -> ! {
         cpu.current_task.as_ref().unwrap().clone()
     };
 
-    {
-        let mut t = task.lock();
-        // 不必将task移出cpu,在schedule时会处理
-        t.state = TaskState::Zombie;
-        t.exit_code = Some(code as i32);
+    // 该函数目前仅用于处理“用户态致命异常”，默认行为应与 Linux 类似：
+    // 终止整个进程（线程组），并唤醒父进程的 wait。
+    let exit_code = code as i32;
+    let (pid, is_process) = {
+        let t = task.lock();
+        (t.pid, t.is_process())
+    };
+    if is_process {
+        exit_process(task, exit_code);
+    } else {
+        // 当前为线程：找到线程组 leader（pid==tid）并终止整个进程
+        let leader = TASK_MANAGER.lock().get_task(pid);
+        if let Some(leader) = leader {
+            if leader.lock().is_process() {
+                exit_process(leader, exit_code);
+            } else {
+                TASK_MANAGER.lock().exit_task(task, exit_code);
+            }
+        } else {
+            TASK_MANAGER.lock().exit_task(task, exit_code);
+        }
     }
-    drop(task);
     schedule();
     unreachable!("terminate_task: should not return after scheduled out terminated task");
 }

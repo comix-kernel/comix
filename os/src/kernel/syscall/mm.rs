@@ -241,7 +241,17 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
     };
 
     // 转换权限标志
-    let mut pte_flags = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
+    //
+    // 注意：RISC-V 叶子 PTE 语义要求至少设置 R/W/X 之一；
+    // PROT_NONE 需要用“保留区域（不建立页表映射）”来表达。
+    let wants_mapping = prot_flags.contains(ProtFlags::READ)
+        || prot_flags.contains(ProtFlags::WRITE)
+        || prot_flags.contains(ProtFlags::EXEC);
+
+    let mut pte_flags = UniversalPTEFlag::USER_ACCESSIBLE;
+    if wants_mapping {
+        pte_flags |= UniversalPTEFlag::VALID;
+    }
 
     if prot_flags.contains(ProtFlags::READ) {
         pte_flags |= UniversalPTEFlag::READABLE;
@@ -260,10 +270,14 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
     let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start_addr + len));
     let vpn_range = VpnRange::new(start_vpn, end_vpn);
 
-    // 插入映射区域
-    if let Err(e) =
+    // 插入映射区域（PROT_NONE 用 Reserved 占位，不建立页表映射）
+    let insert_result = if wants_mapping {
         space.insert_framed_area(vpn_range, AreaType::UserMmap, pte_flags, None, mmap_file)
-    {
+    } else {
+        space.insert_reserved_area(vpn_range, AreaType::UserMmap, pte_flags, mmap_file)
+    };
+
+    if let Err(e) = insert_result {
         pr_err!(
             "mmap failed to insert area: {:?}, addr=0x{:x}, len=0x{:x}, prot=0x{:x}, flags=0x{:x}",
             e,
