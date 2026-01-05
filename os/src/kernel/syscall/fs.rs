@@ -596,20 +596,18 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
         return -(EINVAL as isize);
     }
 
-    // 读取符号链接目标（使用 read_at）
-    let read_size = core::cmp::min(meta.size, bufsiz);
-    let mut temp_buf = alloc::vec![0u8; read_size];
-
-    let bytes_read = match dentry.inode.read_at(0, &mut temp_buf) {
-        Ok(n) => n,
+    // 读取符号链接目标（readlink 不依赖 metadata.size，且支持 procfs 等动态符号链接）
+    let target = match dentry.inode.readlink() {
+        Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    let bytes_read = core::cmp::min(target.as_bytes().len(), bufsiz);
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
     {
         let _guard = SumGuard::new();
         unsafe {
-            core::ptr::copy_nonoverlapping(temp_buf.as_ptr(), buf, bytes_read);
+            core::ptr::copy_nonoverlapping(target.as_bytes().as_ptr(), buf, bytes_read);
         }
     }
 

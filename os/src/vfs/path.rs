@@ -168,10 +168,12 @@
 //! ```
 
 use crate::kernel::current_task;
-use crate::vfs::{Dentry, FsError, get_root_dentry};
+use crate::vfs::{Dentry, FsError, InodeType, get_root_dentry};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+
+const MAX_SYMLINK_DEPTH: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathComponent {
@@ -313,7 +315,7 @@ pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
     let components = parse_path(path);
 
     // 确定起始 dentry
-    let mut current_dentry = if components.first() == Some(&PathComponent::Root) {
+    let current_dentry = if components.first() == Some(&PathComponent::Root) {
         // 绝对路径：从根目录开始
         get_root_dentry()?
     } else {
@@ -321,12 +323,7 @@ pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
         get_cur_dir()?
     };
 
-    // 逐个解析路径组件
-    for component in components {
-        current_dentry = resolve_component(current_dentry, component)?;
-    }
-
-    Ok(current_dentry)
+    vfs_walk(current_dentry, components, true)
 }
 
 /// 从指定的 base dentry 开始解析路径。
@@ -339,17 +336,11 @@ pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
 /// - `base`: 开始查找的目录项。
 /// - `path`: 要解析的路径字符串。
 pub fn vfs_lookup_from(base: Arc<Dentry>, path: &str) -> Result<Arc<Dentry>, FsError> {
-    let components = parse_path(path);
-    let mut current_dentry = base;
-
-    for component in components {
-        if component == PathComponent::Root {
-            continue;
-        }
-        current_dentry = resolve_component(current_dentry, component)?;
-    }
-
-    Ok(current_dentry)
+    let components: Vec<PathComponent> = parse_path(path)
+        .into_iter()
+        .filter(|c| *c != PathComponent::Root)
+        .collect();
+    vfs_walk(base, components, true)
 }
 
 /// 解析单个路径组件，处理 `.`、`..`、普通文件名和符号链接
@@ -393,6 +384,54 @@ fn resolve_component(base: Arc<Dentry>, component: PathComponent) -> Result<Arc<
             check_mount_point(child_dentry)
         }
     }
+}
+
+fn vfs_walk(
+    mut current_dentry: Arc<Dentry>,
+    mut components: Vec<PathComponent>,
+    follow_last_symlink: bool,
+) -> Result<Arc<Dentry>, FsError> {
+    let mut i = 0usize;
+    let mut symlink_depth = 0usize;
+
+    while i < components.len() {
+        let component = components[i].clone();
+        let is_last = i + 1 == components.len();
+
+        current_dentry = resolve_component(current_dentry, component)?;
+
+        let inode_type = current_dentry.inode.metadata()?.inode_type;
+        if inode_type == InodeType::Symlink && (follow_last_symlink || !is_last) {
+            if symlink_depth >= MAX_SYMLINK_DEPTH {
+                return Err(FsError::TooManySymlinks);
+            }
+            symlink_depth += 1;
+
+            let target = current_dentry.inode.readlink()?;
+
+            // 需要把“符号链接目标”替换到当前路径中，并继续解析剩余组件。
+            // 目标为绝对路径时从全局 root 开始；相对路径时从链接所在目录开始。
+            current_dentry = if target.starts_with('/') {
+                get_root_dentry()?
+            } else {
+                match current_dentry.parent() {
+                    Some(parent) => parent,
+                    None => get_root_dentry()?,
+                }
+            };
+
+            let mut target_components = parse_path(&target);
+            let mut remaining = components.split_off(i + 1);
+            target_components.append(&mut remaining);
+            components = target_components;
+            i = 0;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    Ok(current_dentry)
 }
 
 /// 检查给定的 dentry 是否有挂载点，如果有则返回挂载点的根 dentry
@@ -447,62 +486,23 @@ pub fn vfs_lookup_no_follow(path: &str) -> Result<Arc<Dentry>, FsError> {
     }
 
     // 确定起始 dentry
-    let mut current_dentry = if components.first() == Some(&PathComponent::Root) {
-        // 绝对路径：从根目录开始
+    let current_dentry = if components.first() == Some(&PathComponent::Root) {
         get_root_dentry()?
     } else {
-        // 相对路径：从当前工作目录开始
         get_cur_dir()?
     };
 
-    // 如果只有一个 Root 组件，直接返回根目录
-    if components.len() == 1 && components[0] == PathComponent::Root {
-        return Ok(current_dentry);
-    }
+    vfs_walk(current_dentry, components, false)
+}
 
-    // 解析除最后一个组件外的所有组件（这些符号链接需要跟随）
-    let len = components.len();
-    for i in 0..len - 1 {
-        current_dentry = resolve_component(current_dentry, components[i].clone())?;
-    }
-
-    // 解析最后一个组件，但不跟随符号链接
-    let last_component = &components[len - 1];
-    match last_component {
-        PathComponent::Root => {
-            // 最后一个是根，不应该发生，但处理一下
-            get_root_dentry()
-        }
-        PathComponent::Current => {
-            // "." 表示当前目录
-            Ok(current_dentry)
-        }
-        PathComponent::Parent => {
-            // ".." 表示父目录
-            match current_dentry.parent() {
-                Some(parent) => Ok(parent),
-                None => Ok(current_dentry), // 根目录的父目录是自己
-            }
-        }
-        PathComponent::Normal(name) => {
-            // 正常文件名：查找但不跟随符号链接
-
-            // 1. 先检查 dentry 缓存
-            if let Some(child) = current_dentry.lookup_child(name) {
-                return Ok(child);
-            }
-
-            // 2. 缓存未命中，通过 inode 查找
-            let child_inode = current_dentry.inode.lookup(name)?;
-
-            // 3. 创建新的 dentry 并加入缓存（不跟随符号链接）
-            let child_dentry = Dentry::new(name.clone(), child_inode);
-            current_dentry.add_child(child_dentry.clone());
-
-            // 4. 加入全局缓存
-            crate::vfs::DENTRY_CACHE.insert(&child_dentry);
-
-            Ok(child_dentry)
-        }
-    }
+/// 从指定的 base dentry 开始查找路径，但不跟随最后一个符号链接。
+///
+/// 用于 at 系列系统调用的相对路径场景，避免对 base_dentry.full_path() 做字符串拼接
+/// 造成挂载点 root dentry（full_path() == "/"）的解析错误。
+pub fn vfs_lookup_no_follow_from(base: Arc<Dentry>, path: &str) -> Result<Arc<Dentry>, FsError> {
+    let components: Vec<PathComponent> = parse_path(path)
+        .into_iter()
+        .filter(|c| *c != PathComponent::Root)
+        .collect();
+    vfs_walk(base, components, false)
 }

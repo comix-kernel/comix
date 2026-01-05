@@ -152,16 +152,9 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
-    // 挂载 /dev 并创建设备节点
-    // 说明：/dev 会在用户态 rcS 中被 tmpfs 覆盖的情况下丢失设备节点。
-    // 这里在内核侧统一完成 /dev 的挂载与必要节点创建，避免依赖用户态 mdev。
-    if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
-        pr_err!("[Init] Failed to mount /dev: {:?}", e);
-    } else if let Err(e) = crate::fs::init_dev() {
-        pr_err!("[Init] Failed to create devices: {:?}", e);
-    } else {
-        pr_info!("[Init] /dev mounted and device nodes created (console, ttyS0, null, etc.)");
-    }
+    // /dev 的挂载与设备节点创建交给用户态 rcS：
+    // - rcS 会执行 `mount -t tmpfs none /dev`
+    // - 内核在 mount("/dev") 的系统调用中对该挂载点做了特殊处理，会在挂载 tmpfs 后自动 init_dev()
 
     kernel_execve("/sbin/init", &["/sbin/init"], &[]);
 }
