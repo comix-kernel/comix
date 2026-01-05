@@ -229,13 +229,16 @@ pub fn user_trap(
             }
             crate::earlyprintln!("");
             crate::earlyprintln!("===============================================");
-            panic!(
-                "Unexpected trap in user mode: {:?}, sepc = {:#x}, stval = {:#x}, sstatus = {:#x}",
-                scause.cause(),
-                sepc_old,
-                stval_val,
-                sstatus_old.bits()
-            );
+            // 不要因为用户态异常让内核 panic；仿照 Linux 行为，终止当前任务即可。
+            // TODO: 进一步完善为向进程投递对应信号（SIGILL/SIGSEGV/...），并支持 core dump 等。
+            let sig = match scause.cause() {
+                Trap::Exception(2) => crate::uapi::signal::NUM_SIGILL, // Illegal Instruction
+                Trap::Exception(12) | Trap::Exception(13) | Trap::Exception(15) => {
+                    crate::uapi::signal::NUM_SIGSEGV
+                }
+                _ => crate::uapi::signal::NUM_SIGILL,
+            };
+            crate::kernel::terminate_task(128 + sig);
         }
     }
 }

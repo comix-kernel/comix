@@ -152,6 +152,11 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
+    // 初始化默认网络配置（eth0 + 127.0.0.1 loopback + 全局 NET_IFACE）
+    if let Err(e) = crate::net::config::NetworkConfigManager::init_default_interface() {
+        pr_warn!("[Init] Warning: Failed to init default network interface: {:?}", e);
+    }
+
     // /dev 的挂载与设备节点创建交给用户态 rcS：
     // - rcS 会执行 `mount -t tmpfs none /dev`
     // - 内核在 mount("/dev") 的系统调用中对该挂载点做了特殊处理，会在挂载 tmpfs 后自动 init_dev()

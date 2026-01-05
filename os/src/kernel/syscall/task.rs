@@ -63,7 +63,7 @@ use crate::{
 /// - `code`: 退出代码
 pub fn exit(code: c_int) -> c_int {
     // TODO: 处理 tid_addr 和 robust_list
-    // TODO: clear_child_tid 的处理
+    clear_child_tid_and_wake();
     let task = current_task();
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
@@ -86,9 +86,49 @@ pub fn exit(code: c_int) -> c_int {
 /// - `code`: 退出代码
 pub fn exit_group(code: c_int) -> ! {
     // TODO: 处理 tid_addr 和 robust_list
+    clear_child_tid_and_wake();
     exit_process(current_task(), code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
+}
+
+fn clear_child_tid_and_wake() {
+    let task = current_task();
+    let clear_addr = {
+        let mut t = task.lock();
+        let addr = t.clear_child_tid;
+        // 避免重复清理
+        t.clear_child_tid = 0;
+        addr
+    };
+
+    if clear_addr == 0 {
+        return;
+    }
+
+    // 1) 写 0 到用户地址
+    unsafe {
+        let _guard = SumGuard::new();
+        write_to_user(clear_addr as *mut c_int, 0);
+    }
+
+    // 2) futex wake
+    let paddr = {
+        let memory_space = current_task()
+            .lock()
+            .memory_space
+            .as_ref()
+            .expect("clear_child_tid: current task has no memory space.")
+            .clone();
+        match memory_space
+            .lock()
+            .translate(Vaddr::from_usize(clear_addr as usize))
+        {
+            Some(p) => p.as_usize(),
+            None => return,
+        }
+    };
+    FUTEX_MANAGER.lock().get_wait_queue(paddr).wake_up_all();
 }
 
 /// 克隆当前任务（线程或进程）
@@ -103,8 +143,8 @@ pub fn clone(
     flags: c_ulong,    // a0: clone flags
     stack: c_ulong,    // a1: child stack pointer
     ptid: *mut c_int,  // a2: parent_tid pointer
-    _tls: *mut c_void, // a3: TLS pointer
-    ctid: *mut c_int,  // a4: child_tid pointer
+    ctid: *mut c_int,  // a3: child_tid pointer
+    tls: *mut c_void,  // a4: TLS pointer
 ) -> c_int {
     let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(flags as usize) {
         requested_flags
@@ -202,7 +242,7 @@ pub fn clone(
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let child_task = TaskStruct::utask_create(
+    let mut child_task = TaskStruct::utask_create(
         tid,
         pid,
         ppid,
@@ -236,6 +276,16 @@ pub fn clone(
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
         (*tf).set_clone_trap_frame(&*ptf, child_task.kstack_base, stack as usize);
+        if requested_flags.contains(CloneFlags::SETTLS) {
+            // RISC-V userspace uses tp register as thread pointer (TLS base)
+            (*tf).x4_tp = tls as usize;
+        }
+    }
+    if requested_flags.contains(CloneFlags::CHILD_SETTID) {
+        child_task.set_child_tid = ctid as usize;
+    }
+    if requested_flags.contains(CloneFlags::CHILD_CLEARTID) {
+        child_task.clear_child_tid = ctid as usize;
     }
     let child_task = child_task.into_shared();
     current_task()
