@@ -42,6 +42,23 @@ impl NetIfaceWrapper {
         let result = iface.poll(timestamp, &mut *dev, &mut *sockets);
         crate::pr_debug!("poll: result={:?}", result);
 
+        // Reap TCP sockets that have finished a graceful close.
+        let mut pending = PENDING_TCP_CLOSE.lock();
+        pending.retain(|h| {
+            let state = sockets.get::<tcp::Socket>(*h).state();
+            if matches!(state, tcp::State::Closed | tcp::State::TimeWait) {
+                crate::pr_debug!(
+                    "[Socket] reap: removing closed tcp handle={:?}, state={:?}",
+                    h,
+                    state
+                );
+                sockets.remove(*h);
+                false
+            } else {
+                true
+            }
+        });
+
         let changed = result != smoltcp::iface::PollResult::None;
         if changed {
             crate::kernel::syscall::io::wake_poll_waiters();
@@ -66,6 +83,12 @@ lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
     pub static ref NET_IFACE: SpinLock<Option<NetIfaceWrapper>> = SpinLock::new(None);
+    // TCP sockets that initiated a graceful close on Drop, and should be removed
+    // from SocketSet once the close handshake completes.
+    //
+    // Lock order invariant: SocketSet -> PENDING_TCP_CLOSE (matches Drop path).
+    static ref PENDING_TCP_CLOSE: SpinLock<alloc::vec::Vec<SmoltcpHandle>> =
+        SpinLock::new(alloc::vec::Vec::new());
 }
 
 
@@ -248,19 +271,24 @@ impl Drop for SocketFile {
                     let socket = sockets.get_mut::<tcp::Socket>(h);
                     let state = socket.state();
                     crate::pr_debug!("[Socket] Drop: handle={:?}, state={:?}", h, state);
-                    // Check if we need to close the socket
-                    match socket.state() {
-                        tcp::State::Closed | tcp::State::Closing | tcp::State::TimeWait
-                        | tcp::State::FinWait1 | tcp::State::FinWait2 | tcp::State::LastAck => {
-                            // Already closed or closing, just remove
+                    // Check if we need to close the socket.
+                    //
+                    // For active connections, do NOT remove from SocketSet immediately after close(),
+                    // otherwise the peer may observe an abortive close and user programs (iperf3)
+                    // can treat it as "unexpectedly closed".
+                    match state {
+                        tcp::State::Closed | tcp::State::TimeWait => {
+                            // Fully closed, safe to remove now.
+                            sockets.remove(h);
                         }
                         _ => {
-                            // Active connection, close it
+                            // Initiate/continue graceful close, and defer removal until the stack
+                            // transitions to Closed/TimeWait (requires polling).
                             crate::pr_debug!("[Socket] Drop: closing socket handle={:?}", h);
                             socket.close();
+                            PENDING_TCP_CLOSE.lock().push(h);
                         }
                     }
-                    sockets.remove(h);
                 },
                 SocketHandle::Udp(h) => { sockets.remove(h); },
             }
@@ -521,7 +549,21 @@ impl File for SocketFile {
             match self.handle.lock().as_ref() {
                 Some(SocketHandle::Tcp(h)) => {
                     let socket = sockets.get_mut::<tcp::Socket>(*h);
-                    socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
+                    let result = socket.send_slice(buf).map_err(|_| FsError::WouldBlock);
+
+                    // Similar to recv_slice(), smoltcp may return Ok(0) when it cannot currently
+                    // accept more data, even though the connection is still alive.
+                    if !buf.is_empty() {
+                        if let Ok(0) = result {
+                            if socket.may_send() {
+                                return Err(FsError::WouldBlock);
+                            } else {
+                                return Err(FsError::BrokenPipe);
+                            }
+                        }
+                    }
+
+                    result
                 }
                 Some(SocketHandle::Udp(h)) => {
                     let endpoint = match self.get_remote_endpoint() {

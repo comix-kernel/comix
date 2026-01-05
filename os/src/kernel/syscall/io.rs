@@ -644,9 +644,32 @@ pub fn pselect6(
     timeout: usize,
     _sigmask: usize,
 ) -> isize {
-    // TODO: Implement signal mask handling when signal subsystem is refactored
-    // Requires exposing signal field in Task or adding helper methods
-    select(nfds, readfds, writefds, exceptfds, timeout)
+    use crate::arch::trap::SumGuard;
+    use crate::uapi::errno::EINVAL;
+    use crate::uapi::time::TimeSpec;
+
+    // pselect6 uses `timespec*` (tv_nsec), NOT `timeval*` (tv_usec).
+    let timeout_trigger = if timeout == 0 {
+        None // Infinite timeout
+    } else {
+        let _guard = SumGuard::new();
+        unsafe {
+            let ts = &*(timeout as *const TimeSpec);
+            if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
+                return -(EINVAL as isize);
+            }
+            if ts.is_zero() {
+                Some(0) // Poll mode (no wait)
+            } else {
+                use crate::arch::timer::{clock_freq, get_time};
+                let duration_ticks = ts.into_freq(clock_freq());
+                Some(get_time() + duration_ticks)
+            }
+        }
+    };
+
+    // TODO: Implement signal mask handling when signal subsystem is refactored.
+    select_common(nfds, readfds, writefds, exceptfds, timeout_trigger)
 }
 
 /// select - synchronous I/O multiplexing
@@ -658,24 +681,17 @@ pub fn select(
     timeout: usize,
 ) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::uapi::errno::{EBADF, EINVAL};
-    use crate::uapi::select::FdSet;
+    use crate::uapi::errno::EINVAL;
     use crate::uapi::time::timeval;
 
-    if nfds > crate::uapi::select::FD_SETSIZE {
-        return -(EINVAL as isize);
-    }
-
-    let task = current_task();
-
-    // Parse timeout
+    // Parse timeout (select uses `timeval*`)
     let timeout_trigger = if timeout == 0 {
         None // Infinite timeout
     } else {
         let _guard = SumGuard::new();
         unsafe {
             let tv = &*(timeout as *const timeval);
-            if tv.tv_sec < 0 || tv.tv_usec < 0 {
+            if tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= 1_000_000 {
                 return -(EINVAL as isize);
             }
             if tv.is_zero() {
@@ -687,6 +703,27 @@ pub fn select(
             }
         }
     };
+
+    select_common(nfds, readfds, writefds, exceptfds, timeout_trigger)
+}
+
+fn select_common(
+    nfds: usize,
+    readfds: usize,
+    writefds: usize,
+    exceptfds: usize,
+    timeout_trigger: Option<usize>,
+) -> isize {
+    use crate::arch::trap::SumGuard;
+    use crate::kernel::current_task;
+    use crate::uapi::errno::{EBADF, EINVAL};
+    use crate::uapi::select::FdSet;
+
+    if nfds > crate::uapi::select::FD_SETSIZE {
+        return -(EINVAL as isize);
+    }
+
+    let task = current_task();
 
     // Copy input fd_sets once before loop
     let (input_read, input_write, input_except) = {

@@ -1,5 +1,6 @@
 //! RISC-V 架构的系统调用分发模块
 use crate::kernel::syscall::*;
+use crate::uapi::errno::ENOSYS;
 
 mod syscall_number;
 
@@ -49,6 +50,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_PIPE2 => sys_pipe2(frame),
         syscall_number::SYS_GETDENTS64 => sys_getdents64(frame),
         syscall_number::SYS_LSEEK => sys_lseek(frame),
+        syscall_number::SYS_FTRUNCATE => sys_ftruncate(frame),
 
         // I/O 操作 (Input/Output Operations)
         syscall_number::SYS_READ => sys_read(frame),
@@ -187,7 +189,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
 
         _ => {
             // 未知的系统调用
-            frame.x10_a0 = (-2isize) as usize; // -ENOSYS
+            frame.x10_a0 = (-(ENOSYS as isize)) as usize;
             crate::pr_debug!("Unknown syscall: {}", frame.x17_a7);
         }
     }

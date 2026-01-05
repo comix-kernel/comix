@@ -637,56 +637,84 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 
 /// 发送数据
 pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
-    let task = current_task();
-    let file = match task.lock().fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => {
-            pr_debug!("send: sockfd={} -> EBADF", sockfd);
-            return -9;
-        }
-    };
+    loop {
+        let task = current_task();
+        let file = match task.lock().fd_table.get(sockfd as usize) {
+            Ok(f) => f,
+            Err(_) => {
+                pr_debug!("send: sockfd={} -> EBADF", sockfd);
+                return -9;
+            }
+        };
 
-    let result = {
-        let _guard = SumGuard::new();
-        let data = unsafe { core::slice::from_raw_parts(buf, len) };
-        file.write(data)
-    };
-    match result {
-        Ok(n) => {
-            pr_debug!("send: sockfd={}, len={} -> sent={}", sockfd, len, n);
-            n as isize
-        }
-        Err(e) => {
-            pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, len, e);
-            -11 // EAGAIN
+        let result = {
+            let _guard = SumGuard::new();
+            let data = unsafe { core::slice::from_raw_parts(buf, len) };
+            file.write(data)
+        };
+
+        match result {
+            Ok(n) => {
+                pr_debug!("send: sockfd={}, len={} -> sent={}", sockfd, len, n);
+                return n as isize;
+            }
+            Err(e) => {
+                pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+                if e == crate::vfs::FsError::WouldBlock {
+                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                        if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
+                            drop(file);
+                            drop(task);
+                            crate::net::socket::poll_until_empty();
+                            crate::kernel::yield_task();
+                            continue;
+                        }
+                    }
+                }
+                return e.to_errno();
+            }
         }
     }
 }
 
 /// 接收数据
 pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
-    let task = current_task();
-    let file = match task.lock().fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => {
-            pr_debug!("recv: sockfd={} -> EBADF", sockfd);
-            return -9;
-        }
-    };
+    loop {
+        let task = current_task();
+        let file = match task.lock().fd_table.get(sockfd as usize) {
+            Ok(f) => f,
+            Err(_) => {
+                pr_debug!("recv: sockfd={} -> EBADF", sockfd);
+                return -9;
+            }
+        };
 
-    let result = {
-        let _guard = SumGuard::new();
-        let data = unsafe { core::slice::from_raw_parts_mut(buf, len) };
-        file.read(data)
-    };
-    match result {
-        Ok(n) => {
-            pr_debug!("recv: sockfd={}, len={} -> received={}", sockfd, len, n);
-            n as isize
-        }
-        Err(e) => {
-            pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, len, e);
-            -11 // EAGAIN
+        let result = {
+            let _guard = SumGuard::new();
+            let data = unsafe { core::slice::from_raw_parts_mut(buf, len) };
+            file.read(data)
+        };
+
+        match result {
+            Ok(n) => {
+                pr_debug!("recv: sockfd={}, len={} -> received={}", sockfd, len, n);
+                return n as isize;
+            }
+            Err(e) => {
+                pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+                if e == crate::vfs::FsError::WouldBlock {
+                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                        if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
+                            drop(file);
+                            drop(task);
+                            crate::net::socket::poll_until_empty();
+                            crate::kernel::yield_task();
+                            continue;
+                        }
+                    }
+                }
+                return e.to_errno();
+            }
         }
     }
 }
@@ -1172,7 +1200,6 @@ pub fn getsockopt(
     optlen: *mut u32,
 ) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::kernel::current_cpu;
     use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
     use crate::uapi::socket::*;
 
@@ -1227,6 +1254,21 @@ pub fn getsockopt(
                     }
                     TCP_MAXSEG => {
                         get_sockopt_int!(optval, available_len, opts.tcp_maxseg, written_len)
+                    }
+                    TCP_CONGESTION => {
+                        // Return a dummy congestion control name. iperf3 mainly uses this for display.
+                        let cc = b"cubic\0";
+                        let n = core::cmp::min(available_len, cc.len());
+                        core::ptr::copy_nonoverlapping(cc.as_ptr(), optval, n);
+                        written_len = n;
+                    }
+                    TCP_INFO => {
+                        // Best-effort placeholder. smoltcp doesn't currently expose full tcp_info metrics.
+                        let info = TcpInfo::dummy_established();
+                        let src = &info as *const TcpInfo as *const u8;
+                        let n = core::cmp::min(available_len, core::mem::size_of::<TcpInfo>());
+                        core::ptr::copy_nonoverlapping(src, optval, n);
+                        written_len = n;
                     }
                     _ => return -(ENOPROTOOPT as isize),
                 },

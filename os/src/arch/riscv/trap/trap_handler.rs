@@ -319,6 +319,12 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+
+    // 推进网络栈，避免在仅有 loopback/null-net 且任务阻塞在 select/poll 时网络停滞。
+    // 这里用一次 poll + 唤醒等待者的策略：即便没有真实网卡中断，也能靠时钟中断驱动网络进展。
+    crate::net::socket::poll_network_interfaces();
+    crate::kernel::syscall::io::wake_poll_waiters();
+
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_with_block(task);
     }
