@@ -222,6 +222,11 @@ impl ProcInode {
         );
         let _ = proc_dir.add_child("cmdline", cmdline);
 
+        // 创建 exe 符号链接：尽量满足 readlinkat("/proc/self/exe") 的基本需求
+        // 目前 Comix 未持久化记录“可执行文件真实路径”，先返回一个稳定的绝对路径占位。
+        let exe = Self::new_dynamic_symlink("exe", || "/".to_string());
+        let _ = proc_dir.add_child("exe", exe);
+
         Some(proc_dir)
     }
 }

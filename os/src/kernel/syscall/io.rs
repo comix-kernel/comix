@@ -1,11 +1,12 @@
 //! IO 相关的系统调用实现
 
 use crate::arch::trap::SumGuard;
-use crate::kernel::{current_cpu, current_task};
+use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
 use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
+use crate::vfs::File;
 
 /// 向文件描述符写入数据
 /// # 参数
@@ -13,24 +14,43 @@ use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
 /// - `buf`: 要写入的数据缓冲区
 /// - `count`: 要写入的字节数
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
-    // 1. 获取文件对象
-    let task = current_task();
-    let file = match task.lock().fd_table.get(fd) {
-        Ok(f) => f,
-        Err(e) => return e.to_errno(),
-    };
+    loop {
+        // 1. 获取文件对象
+        let task = current_task();
+        let file = match task.lock().fd_table.get(fd) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
 
-    // 2. 访问用户态缓冲区并调用 File::write
-    let result = {
-        let _guard = SumGuard::new();
-        let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
-        match file.write(buffer) {
-            Ok(n) => n as isize,
-            Err(e) => e.to_errno(),
+        // 2. 访问用户态缓冲区并调用 File::write
+        let result = {
+            let _guard = SumGuard::new();
+            let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
+            match file.write(buffer) {
+                Ok(n) => n as isize,
+                Err(e) => e.to_errno(),
+            }
+        };
+
+        // 对 blocking socket：EAGAIN 时主动 poll + yield 重试（驱动网络前进）
+        if result == -11 {
+            use crate::net::socket::SocketFile;
+            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                if !socket_file
+                    .flags()
+                    .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
+                {
+                    drop(file);
+                    drop(task);
+                    crate::net::socket::poll_until_empty();
+                    crate::kernel::yield_task();
+                    continue;
+                }
+            }
         }
-    };
 
-    result
+        return result;
+    }
 }
 
 /// 从文件描述符读取数据
@@ -39,24 +59,43 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 /// - `buf`: 存储读取数据的缓冲区
 /// - `count`: 要读取的字节数
 pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
-    // 1. 获取文件对象
-    let task = current_task();
-    let file = match task.lock().fd_table.get(fd) {
-        Ok(f) => f,
-        Err(e) => return e.to_errno(),
-    };
+    loop {
+        // 1. 获取文件对象
+        let task = current_task();
+        let file = match task.lock().fd_table.get(fd) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
 
-    // 2. 访问用户态缓冲区并调用 File::read
-    let result = {
-        let _guard = SumGuard::new();
-        let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-        match file.read(buffer) {
-            Ok(n) => n as isize,
-            Err(e) => e.to_errno(),
+        // 2. 访问用户态缓冲区并调用 File::read
+        let result = {
+            let _guard = SumGuard::new();
+            let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
+            match file.read(buffer) {
+                Ok(n) => n as isize,
+                Err(e) => e.to_errno(),
+            }
+        };
+
+        // 对 blocking socket：EAGAIN 时主动 poll + yield 重试（驱动网络前进）
+        if result == -11 {
+            use crate::net::socket::SocketFile;
+            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+                if !socket_file
+                    .flags()
+                    .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
+                {
+                    drop(file);
+                    drop(task);
+                    crate::net::socket::poll_until_empty();
+                    crate::kernel::yield_task();
+                    continue;
+                }
+            }
         }
-    };
 
-    result
+        return result;
+    }
 }
 
 /// 向量化读取：从文件描述符读取数据到多个缓冲区
@@ -492,7 +531,6 @@ pub fn wake_poll_waiters() {
 /// ppoll - poll 的变体，支持信号掩码
 pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::kernel::current_cpu;
     use crate::uapi::errno::EINVAL;
 
     if nfds > 0 && fds == 0 {
@@ -521,6 +559,9 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     };
 
     loop {
+        // 关键：在阻塞等待前主动推进网络栈，避免 loopback/收包无人驱动导致的“永远等不到”
+        crate::net::socket::poll_network_interfaces();
+
         let mut ready_count = 0;
 
         {
@@ -580,6 +621,9 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             TIMER_QUEUE.lock().remove_task(&task);
         }
 
+        // 被唤醒后再推进一次网络栈，尽快把“刚到的数据包”转成 socket 可读事件
+        crate::net::socket::poll_network_interfaces();
+
         // Check if woken by timeout
         if let Some(trigger) = timeout_trigger {
             use crate::arch::timer::get_time;
@@ -614,7 +658,6 @@ pub fn select(
     timeout: usize,
 ) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::kernel::current_cpu;
     use crate::uapi::errno::{EBADF, EINVAL};
     use crate::uapi::select::FdSet;
     use crate::uapi::time::timeval;
@@ -711,6 +754,9 @@ pub fn select(
     };
 
     loop {
+        // 关键：在阻塞等待前主动推进网络栈（同 ppoll）
+        crate::net::socket::poll_network_interfaces();
+
         let (ready_count, read_set, write_set, except_set) = check_fds();
         if ready_count < 0 {
             return ready_count;
@@ -755,6 +801,9 @@ pub fn select(
                 use crate::kernel::timer::TIMER_QUEUE;
                 TIMER_QUEUE.lock().remove_task(&task);
             }
+
+            // 被唤醒后再推进一次网络栈
+            crate::net::socket::poll_network_interfaces();
 
             if let Some(trigger) = timeout_trigger {
                 use crate::arch::timer::get_time;
