@@ -382,7 +382,7 @@ pub fn resolve_at_path_with_flags(
     path: &str,
     follow_symlink: bool,
 ) -> Result<Arc<Dentry>, FsError> {
-    use crate::vfs::vfs_lookup_no_follow;
+    use crate::vfs::{vfs_lookup_no_follow, vfs_lookup_no_follow_from};
 
     if follow_symlink {
         // 跟随符号链接，使用标准的 resolve_at_path
@@ -410,14 +410,10 @@ pub fn resolve_at_path_with_flags(
                 file.dentry()?
             };
 
-            // 构建完整路径
-            let full_path = if base_dentry.full_path() == "/" {
-                format!("/{}", path)
-            } else {
-                format!("{}/{}", base_dentry.full_path(), path)
-            };
-
-            vfs_lookup_no_follow(&full_path)
+            // 注意：不能用 base_dentry.full_path() 拼接绝对路径，因为 base_dentry
+            // 可能是某个挂载点的 root dentry，其 full_path() 常为 "/"（不是挂载点路径）。
+            // 这里必须以 base_dentry 为起点做相对查找。
+            vfs_lookup_no_follow_from(base_dentry, path)
         }
     }
 }

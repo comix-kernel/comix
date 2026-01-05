@@ -41,6 +41,7 @@ pub enum FsError {
     // 其他
     NotSupported, // -ENOTSUP(95): 操作不支持
     TooManyLinks, // -EMLINK(31): 硬链接过多
+    TooManySymlinks, // -ELOOP(40): 符号链接层级过多
 }
 
 impl FsError {
@@ -61,6 +62,7 @@ impl FsError {
             FsError::NoSpace => -28,
             FsError::ReadOnlyFs => -30,
             FsError::TooManyLinks => -31,
+            FsError::TooManySymlinks => -40,
             FsError::BrokenPipe => -32,
             FsError::NameTooLong => -36,
             FsError::DirectoryNotEmpty => -39,
