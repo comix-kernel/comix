@@ -253,6 +253,14 @@ pub trait Inode: Send + Sync + Any {
         None
     }
 
+    /// 是否允许 VFS 缓存该节点的 dentry
+    ///
+    /// 对于像 procfs 这类“随时变化”的路径（例如 `/proc/[pid]`），缓存 dentry 可能导致
+    /// 进程退出后仍能通过缓存路径访问到旧节点（幽灵条目）。此时应返回 false。
+    fn cacheable(&self) -> bool {
+        true
+    }
+
     /// 向下转型为 &dyn Any，用于支持 downcast
     fn as_any(&self) -> &dyn Any;
 

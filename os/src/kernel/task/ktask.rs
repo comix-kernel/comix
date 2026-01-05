@@ -5,6 +5,7 @@
 //! 仅在内核态运行
 use core::{hint, sync::atomic::Ordering};
 
+use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use crate::{
@@ -194,6 +195,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     unsafe { disable_interrupts() };
     {
         let mut t = task.lock();
+        t.exe_path = Some(path.to_string());
         t.execve(space, entry, sp, argv, envp, phdr_addr, phnum, phent);
     }
     crate::pr_info!("[kernel_execve] Switching to user mode");

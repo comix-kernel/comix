@@ -12,7 +12,7 @@ impl ProcFS {
     /// 创建新的 ProcFS 实例
     pub fn new() -> Arc<Self> {
         // 创建根目录
-        let root = ProcInode::new_directory(FileMode::from_bits_truncate(
+        let root = ProcInode::new_proc_root_directory(FileMode::from_bits_truncate(
             0o555 | FileMode::S_IFDIR.bits(),
         ));
 

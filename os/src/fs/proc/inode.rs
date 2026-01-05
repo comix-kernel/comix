@@ -12,6 +12,24 @@ use alloc::{
     vec::Vec,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcInodeKind {
+    Generic,
+    Root,
+    PidDir(u32),
+}
+
+const PROC_PID_INO_BASE: usize = 1_000_000_000;
+const PROC_PID_INO_STRIDE: usize = 32;
+
+fn proc_pid_dir_inode_no(pid: u32) -> usize {
+    PROC_PID_INO_BASE + (pid as usize).saturating_mul(PROC_PID_INO_STRIDE)
+}
+
+fn proc_pid_child_inode_no(pid: u32, offset: usize) -> usize {
+    proc_pid_dir_inode_no(pid).saturating_add(offset)
+}
+
 /// 动态内容生成器 trait
 pub trait ContentGenerator: Send + Sync {
     /// 生成文件内容（每次调用时重新生成）
@@ -19,6 +37,8 @@ pub trait ContentGenerator: Send + Sync {
 }
 
 pub struct ProcInode {
+    kind: ProcInodeKind,
+
     /// 元数据
     metadata: SpinLock<InodeMetadata>,
 
@@ -47,12 +67,17 @@ pub enum ProcInodeContent {
 static NEXT_INODE_NO: AtomicUsize = AtomicUsize::new(1);
 
 impl ProcInode {
+    pub fn new_proc_root_directory(mode: FileMode) -> Arc<Self> {
+        Self::new_directory_with_inode_no(mode, None, ProcInodeKind::Root)
+    }
+
     /// 创建静态文件 inode
     pub fn new_static_file(_name: &str, content: Vec<u8>, mode: FileMode) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
         let now = TimeSpec::now();
 
         Arc::new(Self {
+            kind: ProcInodeKind::Generic,
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::File,
@@ -77,10 +102,19 @@ impl ProcInode {
         generator: Arc<dyn ContentGenerator>,
         mode: FileMode,
     ) -> Arc<Self> {
-        let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
+        Self::new_dynamic_file_with_inode_no(generator, mode, None)
+    }
+
+    fn new_dynamic_file_with_inode_no(
+        generator: Arc<dyn ContentGenerator>,
+        mode: FileMode,
+        inode_no: Option<usize>,
+    ) -> Arc<Self> {
+        let inode_no = inode_no.unwrap_or_else(|| NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed));
         let now = TimeSpec::now();
 
         Arc::new(Self {
+            kind: ProcInodeKind::Generic,
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::File,
@@ -101,10 +135,19 @@ impl ProcInode {
 
     /// 创建目录 inode
     pub fn new_directory(mode: FileMode) -> Arc<Self> {
-        let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
+        Self::new_directory_with_inode_no(mode, None, ProcInodeKind::Generic)
+    }
+
+    fn new_directory_with_inode_no(
+        mode: FileMode,
+        inode_no: Option<usize>,
+        kind: ProcInodeKind,
+    ) -> Arc<Self> {
+        let inode_no = inode_no.unwrap_or_else(|| NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed));
         let now = TimeSpec::now();
 
         Arc::new(Self {
+            kind,
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::Directory,
@@ -129,6 +172,7 @@ impl ProcInode {
         let now = TimeSpec::now();
 
         Arc::new(Self {
+            kind: ProcInodeKind::Generic,
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::Symlink,
@@ -152,10 +196,18 @@ impl ProcInode {
     where
         F: Fn() -> String + Send + Sync + 'static,
     {
-        let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
+        Self::new_dynamic_symlink_with_inode_no(generator, None)
+    }
+
+    fn new_dynamic_symlink_with_inode_no<F>(generator: F, inode_no: Option<usize>) -> Arc<Self>
+    where
+        F: Fn() -> String + Send + Sync + 'static,
+    {
+        let inode_no = inode_no.unwrap_or_else(|| NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed));
         let now = TimeSpec::now();
 
         Arc::new(Self {
+            kind: ProcInodeKind::Generic,
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::Symlink,
@@ -194,37 +246,47 @@ impl ProcInode {
         let task = TASK_MANAGER.lock().get_task(pid)?;
 
         // 创建进程目录
-        let proc_dir = Self::new_directory(FileMode::from_bits_truncate(
-            0o555 | FileMode::S_IFDIR.bits(),
-        ));
+        let proc_dir = Self::new_directory_with_inode_no(
+            FileMode::from_bits_truncate(0o555 | FileMode::S_IFDIR.bits()),
+            Some(proc_pid_dir_inode_no(pid)),
+            ProcInodeKind::PidDir(pid),
+        );
 
         // 创建 status 文件
-        let status = Self::new_dynamic_file(
-            "status",
+        let status = Self::new_dynamic_file_with_inode_no(
             Arc::new(StatusGenerator::new(Arc::downgrade(&task))),
             FileMode::from_bits_truncate(0o444),
+            Some(proc_pid_child_inode_no(pid, 1)),
         );
         let _ = proc_dir.add_child("status", status);
 
         // 创建 stat 文件
-        let stat = Self::new_dynamic_file(
-            "stat",
+        let stat = Self::new_dynamic_file_with_inode_no(
             Arc::new(StatGenerator::new(Arc::downgrade(&task))),
             FileMode::from_bits_truncate(0o444),
+            Some(proc_pid_child_inode_no(pid, 2)),
         );
         let _ = proc_dir.add_child("stat", stat);
 
         // 创建 cmdline 文件
-        let cmdline = Self::new_dynamic_file(
-            "cmdline",
+        let cmdline = Self::new_dynamic_file_with_inode_no(
             Arc::new(CmdlineGenerator::new(Arc::downgrade(&task))),
             FileMode::from_bits_truncate(0o444),
+            Some(proc_pid_child_inode_no(pid, 3)),
         );
         let _ = proc_dir.add_child("cmdline", cmdline);
 
         // 创建 exe 符号链接：尽量满足 readlinkat("/proc/self/exe") 的基本需求
-        // 目前 Comix 未持久化记录“可执行文件真实路径”，先返回一个稳定的绝对路径占位。
-        let exe = Self::new_dynamic_symlink("exe", || "/".to_string());
+        let task_weak = Arc::downgrade(&task);
+        let exe = Self::new_dynamic_symlink_with_inode_no(
+            move || {
+                task_weak
+                    .upgrade()
+                    .and_then(|t| t.lock().exe_path.clone())
+                    .unwrap_or_else(|| "/".to_string())
+            },
+            Some(proc_pid_child_inode_no(pid, 4)),
+        );
         let _ = proc_dir.add_child("exe", exe);
 
         Some(proc_dir)
@@ -233,7 +295,16 @@ impl ProcInode {
 
 impl Inode for ProcInode {
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
-        Ok(self.metadata.lock().clone())
+        let mut meta = self.metadata.lock().clone();
+        // 对符号链接，返回更符合 Linux 预期的 size（目标路径长度）。
+        if meta.inode_type == InodeType::Symlink {
+            meta.size = match &self.content {
+                ProcInodeContent::Symlink(target) => target.len(),
+                ProcInodeContent::DynamicSymlink(generator) => generator().len(),
+                _ => meta.size,
+            };
+        }
+        Ok(meta)
     }
 
     fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
@@ -271,13 +342,13 @@ impl Inode for ProcInode {
                     return Ok(child as Arc<dyn Inode>);
                 }
 
-                // 检查是否为进程目录（数字命名）
-                if let Ok(pid) = name.parse::<u32>() {
-                    // 动态创建进程目录
-                    if let Some(proc_dir) = self.create_process_dir(pid) {
-                        // 缓存到children中
-                        children.lock().insert(name.to_string(), proc_dir.clone());
-                        return Ok(proc_dir as Arc<dyn Inode>);
+                // 仅对 /proc 根目录：检查是否为进程目录（数字命名）
+                if self.kind == ProcInodeKind::Root {
+                    if let Ok(pid) = name.parse::<u32>() {
+                        // 动态创建进程目录（不缓存，避免 stale PID 与 dentry 缓存问题）
+                        if let Some(proc_dir) = self.create_process_dir(pid) {
+                            return Ok(proc_dir as Arc<dyn Inode>);
+                        }
                     }
                 }
 
@@ -337,19 +408,45 @@ impl Inode for ProcInode {
                     inode_type: InodeType::Directory,
                 });
 
-                for (name, child) in children.lock().iter() {
-                    let child_meta = child.metadata.lock();
-                    entries.push(DirEntry {
-                        name: name.clone(),
-                        inode_no: child_meta.inode_no,
-                        inode_type: child_meta.inode_type,
-                    });
+                let child_names: Vec<String> = {
+                    let guard = children.lock();
+                    for (name, child) in guard.iter() {
+                        let child_meta = child.metadata.lock();
+                        entries.push(DirEntry {
+                            name: name.clone(),
+                            inode_no: child_meta.inode_no,
+                            inode_type: child_meta.inode_type,
+                        });
+                    }
+                    guard.keys().cloned().collect()
+                };
+
+                if self.kind == ProcInodeKind::Root {
+                    use crate::kernel::{TASK_MANAGER, TaskManagerTrait};
+                    let pids = TASK_MANAGER.lock().list_process_pids_snapshot();
+                    for pid in pids {
+                        let name = pid.to_string();
+                        // 防止与已存在的静态项重名（理论上不会发生）
+                        if child_names.binary_search(&name).is_ok() {
+                            continue;
+                        }
+                        entries.push(DirEntry {
+                            name,
+                            inode_no: proc_pid_dir_inode_no(pid),
+                            inode_type: InodeType::Directory,
+                        });
+                    }
                 }
 
                 Ok(entries)
             }
             _ => Err(FsError::NotDirectory),
         }
+    }
+
+    fn cacheable(&self) -> bool {
+        // /proc/[pid] 目录不缓存：避免进程退出后仍可通过 dentry cache 访问（幽灵 PID）。
+        !matches!(self.kind, ProcInodeKind::PidDir(_))
     }
 
     fn truncate(&self, _size: usize) -> Result<(), FsError> {
@@ -388,3 +485,6 @@ impl Inode for ProcInode {
         Err(FsError::NotSupported)
     }
 }
+
+// NOTE: The rest of the Inode impl moved above as part of procfs root/pid handling.
+// Keep file structure consistent with existing style: no additional items below.
