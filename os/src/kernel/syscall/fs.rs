@@ -667,6 +667,41 @@ pub fn ftruncate(fd: usize, length: i64) -> isize {
     }
 }
 
+/// truncate - truncate a file to a specified length (by path)
+pub fn truncate(pathname: *const c_char, length: i64) -> isize {
+    if length < 0 {
+        return -(EINVAL as isize);
+    }
+
+    let _guard = SumGuard::new();
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            return FsError::InvalidArgument.to_errno();
+        }
+    };
+
+    let dentry = match resolve_at_path(AT_FDCWD, &path_str) {
+        Ok(Some(d)) => d,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+
+    let meta = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    if meta.inode_type != InodeType::File {
+        return -(EINVAL as isize);
+    }
+
+    match dentry.inode.truncate(length as usize) {
+        Ok(_) => 0,
+        Err(e) => e.to_errno(),
+    }
+}
+
 pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags: u32) -> isize {
     // 参数校验
     if statbuf.is_null() {

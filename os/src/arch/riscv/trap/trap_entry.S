@@ -48,6 +48,8 @@ trap_entry:
         # 保存 a0
         csrr t0, sscratch
         sd t0, 80(a0)
+        # 恢复 sscratch 为 trapframe 指针，避免内核态看到用户 a0
+        csrw sscratch, a0
 
         # 保存 sepc
         csrr t0, sepc

@@ -44,17 +44,17 @@ pub struct SignalAction {
     /// 包含单参数或三参数信号处理函数指针。
     pub __sa_handler: __SaHandler,
 
-    /// C: `sigset_t sa_mask`
-    /// 信号屏蔽字，在执行处理函数时将被自动添加到线程的阻塞集中。
-    pub sa_mask: SigSetT,
-
-    /// C: `int sa_flags`
+    /// C: `unsigned long sa_flags`
     /// 信号处理行为标志 (如 SA_SIGINFO, SA_RESETHAND)。
-    /// 注意：这里使用 i32 或 c_int 更符合 C 的 int 类型。
-    pub sa_flags: c_int,
+    pub sa_flags: c_ulong,
+
     /// C: `void (*sa_restorer)(void)`
     /// 信号恢复函数指针。通常由 C 库设置，用于从信号处理器返回。
     pub sa_restorer: SaRestorerPtr,
+
+    /// C: `sigset_t sa_mask`
+    /// 信号屏蔽字，在执行处理函数时将被自动添加到线程的阻塞集中。
+    pub sa_mask: SigSetT,
 }
 
 impl SignalAction {
@@ -88,7 +88,7 @@ impl SignalAction {
                 sa_handler: handler,
             },
             sa_mask: mask.bits() as SigSetT,
-            sa_flags: flags.bits() as c_int,
+            sa_flags: flags.bits() as c_ulong,
             sa_restorer: core::ptr::null_mut(),
         }
     }
@@ -196,7 +196,7 @@ impl SignalFlags {
     }
 
     pub fn from_sigset_t(set: SigSetT) -> Self {
-        SignalFlags::from_bits(set as usize).unwrap()
+        SignalFlags::from_bits_truncate(set as usize)
     }
 
     pub fn to_sigset_t(&self) -> SigSetT {
@@ -244,7 +244,7 @@ bitflags! {
         const RESETHAND = 0x8000_0000;
 
         /// glibc内部标志，表示提供了restorer函数（内核接受但忽略）
-        const RESTORER = 0x0000_0400;
+        const RESTORER = 0x0400_0000;
 
         /// 暴露架构定义的标签位（tag bits）到 siginfo.si_addr 中。
         const EXPOSE_TAGBITS = 0x0000_0800;

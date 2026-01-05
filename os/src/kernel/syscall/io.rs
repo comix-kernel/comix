@@ -689,9 +689,7 @@ pub fn pselect6(
                 let old = t.blocked.bits() as SigSetT;
 
                 // Temporarily set new signal mask
-                if let Some(flags) = SignalFlags::from_bits(new_mask as usize) {
-                    t.blocked = flags;
-                }
+                t.blocked = SignalFlags::from_bits_truncate(new_mask as usize);
                 drop(t);
                 drop(task);
                 Some(old)
@@ -710,9 +708,7 @@ pub fn pselect6(
     if let Some(old) = old_mask {
         let task = crate::kernel::current_task();
         let mut t = task.lock();
-        if let Some(flags) = SignalFlags::from_bits(old as usize) {
-            t.blocked = flags;
-        }
+        t.blocked = SignalFlags::from_bits_truncate(old as usize);
     }
 
     result

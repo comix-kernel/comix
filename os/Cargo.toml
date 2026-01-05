@@ -3,6 +3,9 @@ name = "os"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+proto-ipv6 = []
+
 [dependencies]
 talc = { version = "4" }
 lock_api = "0.4"

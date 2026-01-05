@@ -9,7 +9,10 @@ use lazy_static::lazy_static;
 
 use crate::{
     arch::kernel::{context::Context, switch},
-    kernel::{TaskStruct, current_task, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
+    kernel::{
+        TaskStruct, current_cpu, current_task, scheduler::rr_scheduler::RRScheduler,
+        task::SharedTask,
+    },
     pr_debug,
     sync::{SpinLock, SpinLockGuard},
 };
@@ -81,6 +84,18 @@ pub fn schedule() {
     let sscratch_before: usize;
     unsafe {
         core::arch::asm!("csrr {}, sscratch", out(reg) sscratch_before);
+    }
+
+    let prev_task: Option<SharedTask> = current_cpu().lock().current_task.clone();
+    if let Some(prev) = prev_task {
+        let (tid, ok) = {
+            let g = prev.lock();
+            (g.tid, g.check_kstack_canary())
+        };
+        if !ok {
+            crate::earlyprintln!("[FATAL] kstack canary corrupted before schedule: tid={}", tid);
+            panic!("kstack overflow detected");
+        }
     }
 
     let plan = {

@@ -3,6 +3,7 @@
 //! 包含 CPU 结构体及其相关操作
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::Ordering;
 
 use crate::mm::activate;
 use crate::{kernel::task::SharedTask, mm::memory_space::MemorySpace, sync::SpinLock};
@@ -46,9 +47,17 @@ impl Cpu {
     /// # 参数
     /// * `task` - 要切换到的任务
     pub fn switch_task(&mut self, task: SharedTask) {
+        let (is_kernel, memory_space, tf_ptr) = {
+            let t = task.lock();
+            (
+                t.is_kernel_thread(),
+                t.memory_space.clone(),
+                t.trap_frame_ptr.load(Ordering::SeqCst),
+            )
+        };
         self.current_task = Some(task.clone());
-        if !task.lock().is_kernel_thread() {
-            self.current_memory_space = task.lock().memory_space.clone();
+        if !is_kernel {
+            self.current_memory_space = memory_space;
             activate(
                 self.current_memory_space
                     .as_ref()
@@ -56,6 +65,10 @@ impl Cpu {
                     .lock()
                     .root_ppn(),
             );
+        }
+        #[cfg(target_arch = "riscv64")]
+        unsafe {
+            riscv::register::sscratch::write(tf_ptr as usize);
         }
     }
 

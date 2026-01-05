@@ -211,6 +211,7 @@ impl TrapFrame {
         argv: usize,
         envp: usize,
     ) {
+        crate::earlyprintln!("[TrapFrame::set_exec] entry=0x{:x}, user_sp=0x{:x}, argc={}", entry, user_sp, argc);
         let mut sstatus = sstatus::read();
         sstatus.set_spp(sstatus::SPP::User);
         sstatus.set_sie(false);
@@ -220,6 +221,7 @@ impl TrapFrame {
         *self = Self::zero_init();
 
         self.sepc = entry;
+        crate::earlyprintln!("[TrapFrame::set_exec] After setting sepc: self.sepc=0x{:x}", self.sepc);
         self.sstatus = sstatus.bits();
         self.kernel_sp = kernel_sp;
         self.x2_sp = user_sp;
