@@ -10,6 +10,7 @@ use loongArch64::register::eentry;
 pub use trap_frame::TrapFrame;
 
 global_asm!(include_str!("trap_entry.S"));
+global_asm!(include_str!("sigreturn.S"));
 
 /// 用户内存访问守卫
 pub struct SumGuard;
@@ -51,8 +52,7 @@ pub unsafe fn restore(tf: &TrapFrame) -> ! {
 
 /// 获取信号返回 trampoline 地址
 pub fn sigreturn_trampoline_address() -> usize {
-    // TODO: 实现信号返回 trampoline
-    0
+    __sigreturn_trampoline as usize
 }
 
 /// 设置当前任务的 TrapFrame 指针（使用 CSR.SAVE0）
@@ -70,4 +70,5 @@ fn set_trap_entry() {
 unsafe extern "C" {
     unsafe fn trap_entry();
     unsafe fn __restore(trap_frame: &TrapFrame) -> !;
+    unsafe fn __sigreturn_trampoline();
 }
