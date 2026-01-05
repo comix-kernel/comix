@@ -330,6 +330,10 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
             drop(sockets);
 
             socket_file.set_listener(true);
+            socket_file.clear_listen_sockets();
+            // iperf 会传入非常大的 backlog（甚至 INT_MAX），这里做一个上限避免内存/逻辑风险
+            let backlog = (backlog as usize).max(1).min(128);
+            socket_file.set_listen_backlog(backlog);
             0
         }
         SocketHandle::Udp(_) => {
@@ -358,85 +362,90 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         return -22; // EINVAL - not a listening socket
     }
 
-    // Get the socket handle
-    let listen_handle = match get_socket_handle(tid as usize, sockfd as usize) {
-        Some(SocketHandle::Tcp(h)) => h,
-        Some(SocketHandle::Udp(_)) => return -95, // EOPNOTSUPP
-        None => return -88,                       // ENOTSOCK
-    };
-
     // Check if socket is non-blocking
     let is_nonblock = socket_file.flags().contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
+    let backlog = socket_file.listen_backlog().max(1).min(128);
 
-    // Block until connection is available (for blocking sockets)
     loop {
-        // Poll until all loopback packets are processed
+        // 推进 loopback + 网络状态机
         crate::net::socket::poll_until_empty();
 
-        let mut sockets = SOCKET_SET.lock();
-
-        let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
-        let state = listen_socket.state();
-
-        // Wait until connection is fully established
-        if state == smoltcp::socket::tcp::State::Established {
-            break;
+        // 1) 先从“已排队连接”中取一个已完成握手的连接
+        if let Some(SocketHandle::Tcp(conn_handle)) = socket_file.take_established_from_listen_queue() {
+            return accept_return_conn(task.clone(), tid as usize, conn_handle, addr, addrlen);
         }
 
-        drop(sockets);
+        // 2) 检查当前监听 handle 是否已经进入握手/已建立状态；
+        //    如果进入了（state != Listen），就立刻创建一个新的 listener 继续监听，
+        //    把旧 handle 放入队列（Established 直接返回，SynReceived 等待后续成熟）。
+        let listen_handle = match get_socket_handle(tid as usize, sockfd as usize) {
+            Some(SocketHandle::Tcp(h)) => h,
+            Some(SocketHandle::Udp(_)) => return -95, // EOPNOTSUPP
+            None => return -88,                       // ENOTSOCK
+        };
+
+        let (state, listen_endpoint) = {
+            let sockets = SOCKET_SET.lock();
+            let s = sockets.get::<tcp::Socket>(listen_handle);
+            (s.state(), s.listen_endpoint())
+        };
+
+        if state != tcp::State::Listen && socket_file.listen_sockets_len() < backlog {
+            // detach current listen socket immediately
+            let new_listen_handle = match create_tcp_socket() {
+                Ok(SocketHandle::Tcp(h)) => h,
+                _ => return -12, // ENOMEM
+            };
+
+            let mut sockets = SOCKET_SET.lock();
+            let new_listen_socket = sockets.get_mut::<tcp::Socket>(new_listen_handle);
+            if new_listen_socket.listen(listen_endpoint).is_err() {
+                sockets.remove(new_listen_handle);
+                return -12; // ENOMEM or other error
+            }
+            drop(sockets);
+
+            use crate::net::socket::{update_socket_file_handle, update_socket_handle};
+            update_socket_handle(
+                tid as usize,
+                sockfd as usize,
+                SocketHandle::Tcp(new_listen_handle),
+            );
+            update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
+
+            // Established / CloseWait: this handle is ready to return right away.
+            if matches!(state, tcp::State::Established | tcp::State::CloseWait) {
+                return accept_return_conn(task.clone(), tid as usize, listen_handle, addr, addrlen);
+            }
+
+            // Otherwise: keep it as pending (SynReceived, etc).
+            socket_file.add_listen_socket(SocketHandle::Tcp(listen_handle));
+            continue;
+        }
 
         if is_nonblock {
             return -11; // EAGAIN
         }
-
         crate::kernel::yield_task();
     }
+}
 
-    let mut sockets = SOCKET_SET.lock();
-    let listen_socket = sockets.get_mut::<tcp::Socket>(listen_handle);
+fn accept_return_conn(
+    task: crate::kernel::SharedTask,
+    tid: usize,
+    conn_handle: smoltcp::iface::SocketHandle,
+    addr: *mut u8,
+    addrlen: *mut u32,
+) -> isize {
+    use crate::net::socket::SocketFile;
 
-    // Get remote endpoint and listen endpoint
-    let remote_endpoint = match listen_socket.remote_endpoint() {
+    let sockets = SOCKET_SET.lock();
+    let conn_socket = sockets.get::<tcp::Socket>(conn_handle);
+    let remote_endpoint = match conn_socket.remote_endpoint() {
         Some(ep) => ep,
         None => return -11, // EAGAIN
     };
-    let listen_endpoint = listen_socket.listen_endpoint();
 
-    // Drop sockets lock before creating new socket (create_tcp_socket needs the lock)
-    drop(sockets);
-
-    // Create new listening socket to replace the old one
-    let new_listen_handle = match create_tcp_socket() {
-        Ok(SocketHandle::Tcp(h)) => h,
-        _ => return -12, // ENOMEM
-    };
-
-    // Set new socket to listen on the same address
-    let mut sockets = SOCKET_SET.lock();
-    let new_listen_socket = sockets.get_mut::<tcp::Socket>(new_listen_handle);
-    if new_listen_socket.listen(listen_endpoint).is_err() {
-        sockets.remove(new_listen_handle);
-        return -12; // ENOMEM or other error
-    }
-
-    // The old listen_handle is now the established connection
-    // Update the mapping to point to the new listening socket
-    use crate::net::socket::{update_socket_file_handle, update_socket_handle};
-    update_socket_handle(
-        tid as usize,
-        sockfd as usize,
-        SocketHandle::Tcp(new_listen_handle),
-    );
-
-    // Also update the SocketFile's internal handle
-    let file = match task.lock().fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => return -9, // EBADF
-    };
-    update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
-
-    drop(sockets);
-    // Write address info if requested
     if !addr.is_null() && !addrlen.is_null() {
         let _guard = SumGuard::new();
         unsafe {
@@ -444,28 +453,16 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         }
     }
 
-    // Return the established connection as a new fd
-    let conn_handle = SocketHandle::Tcp(listen_handle);
-    let socket_file = Arc::new(SocketFile::new(conn_handle));
-
-    // Set endpoint information for the accepted connection
-    let sockets = SOCKET_SET.lock();
-    let conn_socket = sockets.get::<tcp::Socket>(listen_handle);
-
-    pr_debug!("accept: tid={}, listen_handle={:?}, state={:?}, recv_queue={}",
-        tid, listen_handle, conn_socket.state(), conn_socket.recv_queue());
-
+    let conn = Arc::new(SocketFile::new(SocketHandle::Tcp(conn_handle)));
     if let Some(local_ep) = conn_socket.local_endpoint() {
-        socket_file.set_local_endpoint(local_ep);
+        conn.set_local_endpoint(local_ep);
     }
-    socket_file.set_remote_endpoint(remote_endpoint);
+    conn.set_remote_endpoint(remote_endpoint);
     drop(sockets);
 
-    match task.lock().fd_table.alloc(socket_file) {
+    match task.lock().fd_table.alloc(conn) {
         Ok(fd) => {
-            register_socket_fd(tid as usize, fd, conn_handle);
-            pr_debug!("accept: tid={}, returning fd={}, handle={:?}, remote={}",
-                tid, fd, listen_handle, remote_endpoint);
+            register_socket_fd(tid, fd, SocketHandle::Tcp(conn_handle));
             fd as isize
         }
         Err(_) => -24, // EMFILE

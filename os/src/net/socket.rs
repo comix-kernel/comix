@@ -23,7 +23,7 @@ pub struct NetIfaceWrapper {
 }
 
 impl NetIfaceWrapper {
-    pub fn poll(&self, sockets: &SpinLock<SocketSet>) {
+    pub fn poll(&self, sockets: &SpinLock<SocketSet>) -> bool {
         let timestamp = smoltcp::time::Instant::from_millis(
             crate::arch::timer::get_time_ms() as i64
         );
@@ -41,6 +41,12 @@ impl NetIfaceWrapper {
         crate::pr_debug!("poll: before iface.poll");
         let result = iface.poll(timestamp, &mut *dev, &mut *sockets);
         crate::pr_debug!("poll: result={:?}", result);
+
+        let changed = result != smoltcp::iface::PollResult::None;
+        if changed {
+            crate::kernel::syscall::io::wake_poll_waiters();
+        }
+        changed
     }
 
     pub fn loopback_queue_len(&self) -> usize {
@@ -69,6 +75,7 @@ use crate::uapi::socket::SocketOptions;
 pub struct SocketFile {
     handle: SpinLock<Option<SocketHandle>>,
     listen_sockets: SpinLock<alloc::vec::Vec<SocketHandle>>,
+    listen_backlog: SpinLock<usize>,
     local_endpoint: SpinLock<Option<IpEndpoint>>,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
     shutdown_rd: SpinLock<bool>,
@@ -83,6 +90,7 @@ impl SocketFile {
         Self {
             handle: SpinLock::new(Some(handle)),
             listen_sockets: SpinLock::new(alloc::vec::Vec::new()),
+            listen_backlog: SpinLock::new(0),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
@@ -105,6 +113,7 @@ impl SocketFile {
         Self {
             handle: SpinLock::new(Some(handle)),
             listen_sockets: SpinLock::new(alloc::vec::Vec::new()),
+            listen_backlog: SpinLock::new(0),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
             shutdown_rd: SpinLock::new(false),
@@ -113,6 +122,14 @@ impl SocketFile {
             options: SpinLock::new(SocketOptions::default()),
             is_listener: SpinLock::new(false),
         }
+    }
+
+    pub fn set_listen_backlog(&self, backlog: usize) {
+        *self.listen_backlog.lock() = backlog;
+    }
+
+    pub fn listen_backlog(&self) -> usize {
+        *self.listen_backlog.lock()
     }
 
     pub fn get_socket_options(&self) -> SocketOptions {
@@ -133,6 +150,45 @@ impl SocketFile {
 
     pub fn get_listen_sockets(&self) -> alloc::vec::Vec<SocketHandle> {
         self.listen_sockets.lock().clone()
+    }
+
+    pub fn clear_listen_sockets(&self) {
+        self.listen_sockets.lock().clear();
+    }
+
+    pub fn listen_sockets_len(&self) -> usize {
+        self.listen_sockets.lock().len()
+    }
+
+    /// Pop one established connection from the listener queue.
+    ///
+    /// This is used to provide a minimal accept/backlog behavior on top of smoltcp's
+    /// single-socket listen model.
+    pub fn take_established_from_listen_queue(&self) -> Option<SocketHandle> {
+        let sockets = SOCKET_SET.lock();
+        let mut q = self.listen_sockets.lock();
+        let mut i = 0;
+        while i < q.len() {
+            match q[i] {
+                SocketHandle::Tcp(h) => {
+                    let s = sockets.get::<tcp::Socket>(h);
+                    match s.state() {
+                        tcp::State::Established | tcp::State::CloseWait => return Some(q.remove(i)),
+                        tcp::State::Closed => {
+                            q.remove(i);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                SocketHandle::Udp(_) => {
+                    q.remove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        None
     }
 
     pub fn set_handle(&self, new_handle: SocketHandle) {
@@ -314,31 +370,59 @@ pub fn socket_sendto(
     buf: &[u8],
     endpoint: IpEndpoint,
 ) -> Result<usize, FsError> {
-    let mut sockets = SOCKET_SET.lock();
-    match handle {
-        SocketHandle::Tcp(_) => Err(FsError::NotSupported), // TCP doesn't support sendto
-        SocketHandle::Udp(h) => {
-            let socket = sockets.get_mut::<udp::Socket>(h);
-            socket
-                .send_slice(buf, endpoint)
-                .map_err(|_| FsError::WouldBlock)?;
-            Ok(buf.len())
+    let result = {
+        let mut sockets = SOCKET_SET.lock();
+        match handle {
+            SocketHandle::Tcp(_) => Err(FsError::NotSupported), // TCP doesn't support sendto
+            SocketHandle::Udp(h) => {
+                let socket = sockets.get_mut::<udp::Socket>(h);
+                socket
+                    .send_slice(buf, endpoint)
+                    .map_err(|_| FsError::WouldBlock)?;
+                Ok(buf.len())
+            }
         }
+    };
+    if result.is_ok() {
+        poll_network_interfaces();
     }
+    result
 }
 
 impl File for SocketFile {
     fn readable(&self) -> bool {
+        // Listener socket: only readable when a connection is ready to accept.
         if *self.is_listener.lock() {
-            return true;
+            let sockets = SOCKET_SET.lock();
+
+            for handle in self.listen_sockets.lock().iter() {
+                if let SocketHandle::Tcp(h) = handle {
+                    let s = sockets.get::<tcp::Socket>(*h);
+                    if matches!(s.state(), tcp::State::Established | tcp::State::CloseWait) {
+                        return true;
+                    }
+                }
+            }
+
+            if let Some(SocketHandle::Tcp(h)) = *self.handle.lock() {
+                let s = sockets.get::<tcp::Socket>(h);
+                return matches!(s.state(), tcp::State::Established | tcp::State::CloseWait);
+            }
+            return false;
         }
+
         let sockets = SOCKET_SET.lock();
-        let result = match self.handle.lock().as_ref() {
+        match self.handle.lock().as_ref() {
             Some(SocketHandle::Tcp(h)) => {
                 let socket = sockets.get::<tcp::Socket>(*h);
                 let can_recv = socket.can_recv();
                 let state = socket.state();
-                crate::pr_debug!("[Socket] readable: handle={:?}, state={:?}, can_recv={}", h, state, can_recv);
+                crate::pr_debug!(
+                    "[Socket] readable: handle={:?}, state={:?}, can_recv={}",
+                    h,
+                    state,
+                    can_recv
+                );
                 // Closed sockets are readable (EOF)
                 can_recv || state == tcp::State::Closed
             }
@@ -347,8 +431,7 @@ impl File for SocketFile {
                 socket.can_recv()
             }
             None => false,
-        };
-        result
+        }
     }
     fn writable(&self) -> bool {
         let sockets = SOCKET_SET.lock();
@@ -433,26 +516,29 @@ impl File for SocketFile {
             return Err(FsError::BrokenPipe);
         }
 
-        let mut sockets = SOCKET_SET.lock();
-        let result = match self.handle.lock().as_ref() {
-            Some(SocketHandle::Tcp(h)) => {
-                let socket = sockets.get_mut::<tcp::Socket>(*h);
-                socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
+        let result = {
+            let mut sockets = SOCKET_SET.lock();
+            match self.handle.lock().as_ref() {
+                Some(SocketHandle::Tcp(h)) => {
+                    let socket = sockets.get_mut::<tcp::Socket>(*h);
+                    socket.send_slice(buf).map_err(|_| FsError::WouldBlock)
+                }
+                Some(SocketHandle::Udp(h)) => {
+                    let endpoint = match self.get_remote_endpoint() {
+                        Some(ep) => ep,
+                        None => return Err(FsError::NotConnected),
+                    };
+                    let socket = sockets.get_mut::<udp::Socket>(*h);
+                    socket
+                        .send_slice(buf, endpoint)
+                        .map_err(|_| FsError::WouldBlock)?;
+                    Ok(buf.len())
+                }
+                None => Err(FsError::InvalidArgument),
             }
-            Some(SocketHandle::Udp(h)) => {
-                let endpoint = match self.get_remote_endpoint() {
-                    Some(ep) => ep,
-                    None => return Err(FsError::NotConnected),
-                };
-                let socket = sockets.get_mut::<udp::Socket>(*h);
-                socket
-                    .send_slice(buf, endpoint)
-                    .map_err(|_| FsError::WouldBlock)?;
-                Ok(buf.len())
-            }
-            None => Err(FsError::InvalidArgument),
         };
         if result.is_ok() {
+            poll_network_interfaces();
             crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
