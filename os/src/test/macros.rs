@@ -80,10 +80,16 @@ macro_rules! early_test {
             #[doc = concat!("Early test case: ", stringify!($func_name))]
             #[allow(dead_code)] // 函数不是直接调用的，所以允许未使用
             fn [<early_test_ $func_name>]() {
-                // 打印测试开始信息，此时 console 应该已经可以工作
-                println!("\x1b[36m[early_test] Running: {}\x1b[0m\n", stringify!($func_name));
+                // 使用早期打印，避免依赖 MAIN_CONSOLE 初始化
+                $crate::earlyprintln!(
+                    "\x1b[36m[early_test] Running: {}\x1b[0m\n",
+                    stringify!($func_name)
+                );
                 $body
-                println!("\x1b[36m[early_test] Passed: {}\x1b[0m\n", stringify!($func_name));
+                $crate::earlyprintln!(
+                    "\x1b[36m[early_test] Passed: {}\x1b[0m\n",
+                    stringify!($func_name)
+                );
             }
 
             // 将函数指针放入自定义的链接器段
