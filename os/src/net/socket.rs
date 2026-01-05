@@ -97,6 +97,10 @@ impl SocketFile {
         *self.is_listener.lock() = is_listener;
     }
 
+    pub fn is_listener(&self) -> bool {
+        *self.is_listener.lock()
+    }
+
     pub fn new_with_flags(handle: SocketHandle, flags: OpenFlags) -> Self {
         Self {
             handle: SpinLock::new(Some(handle)),
