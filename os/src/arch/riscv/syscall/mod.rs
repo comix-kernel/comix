@@ -40,6 +40,8 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
 
         // 文件大小/权限/所有权 (File Size/Permissions/Ownership)
         syscall_number::SYS_FACCESSAT => sys_faccessat(frame),
+        syscall_number::SYS_TRUNCATE => sys_truncate(frame),
+        syscall_number::SYS_FTRUNCATE => sys_ftruncate(frame),
         syscall_number::SYS_CHDIR => sys_chdir(frame),
         syscall_number::SYS_FCHMODAT => sys_fchmodat(frame),
         syscall_number::SYS_FCHOWNAT => sys_fchownat(frame),

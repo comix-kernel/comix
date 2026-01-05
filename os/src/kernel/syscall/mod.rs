@@ -74,6 +74,7 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 // 文件大小/权限/所有权 (File Size/Permissions/Ownership)
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_access, access, (*const c_char, i32));
+impl_syscall!(sys_truncate, truncate, (*const c_char, i64));
 impl_syscall!(sys_ftruncate, ftruncate, (usize, i64));
 impl_syscall!(sys_chdir, chdir, (*const c_char));
 impl_syscall!(sys_fchmodat, fchmodat, (i32, *const c_char, u32, u32));

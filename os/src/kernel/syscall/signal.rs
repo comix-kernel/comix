@@ -57,11 +57,7 @@ pub fn rt_sigprocmask(
 
     if !set.is_null() {
         let new_set = unsafe { read_from_user(set) };
-        let new_flags = if let Some(flag) = SignalFlags::from_bits(new_set as usize) {
-            flag
-        } else {
-            return -EINVAL;
-        };
+        let new_flags = SignalFlags::from_bits_truncate(new_set as usize);
 
         match how {
             SIG_BLOCK => {
@@ -169,11 +165,7 @@ pub fn rt_sigtimedwait(
     }
 
     let wait_set_bits = unsafe { read_from_user(set) };
-    let wait_set = if let Some(flags) = SignalFlags::from_bits(wait_set_bits as usize) {
-        flags
-    } else {
-        return -EINVAL;
-    };
+    let wait_set = SignalFlags::from_bits_truncate(wait_set_bits as usize);
 
     let timeout_opt = if !timeout.is_null() {
         let ts = unsafe { read_from_user(timeout) };
@@ -211,11 +203,7 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
         return -EINVAL;
     }
     let new_set_bits = unsafe { read_from_user(unewset) };
-    let new_set = if let Some(flags) = SignalFlags::from_bits(new_set_bits as usize) {
-        flags
-    } else {
-        return -EINVAL;
-    };
+    let new_set = SignalFlags::from_bits_truncate(new_set_bits as usize);
     let task = current_task();
     let old_set;
     {

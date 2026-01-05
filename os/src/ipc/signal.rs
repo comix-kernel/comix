@@ -82,7 +82,14 @@ pub fn first_deliverable_signal(
 fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedTask) {
     let sig_num = signal_from_flag(sig_flag).unwrap();
 
-    let handler_addr = unsafe { action.sa_handler() } as isize;
+    let use_siginfo = action.is_siginfo();
+    let handler_addr = unsafe {
+        if use_siginfo {
+            action.sa_sigaction() as isize
+        } else {
+            action.sa_handler() as isize
+        }
+    };
     match handler_addr {
         SIG_DFL | 0 => match sig_num {
             NUM_SIGQUIT | NUM_SIGILL | NUM_SIGABRT | NUM_SIGBUS | NUM_SIGFPE | NUM_SIGSEGV
@@ -117,6 +124,13 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
             }
         }
         handler_addr => {
+            let restorer = if (action.sa_flags as u32) & SaFlags::RESTORER.bits() != 0
+                && !action.sa_restorer.is_null()
+            {
+                action.sa_restorer as usize
+            } else {
+                sigreturn_trampoline_address()
+            };
             // 自定义处理器：构造用户栈上下文并跳转
             // **将 action.mask 传递给安装跳板函数**
             install_user_signal_trap_frame(
@@ -124,6 +138,8 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
                 sig_num,
                 handler_addr,
                 SignalFlags::from_sigset_t(action.sa_mask),
+                use_siginfo,
+                restorer,
             );
         }
     }
@@ -185,8 +201,8 @@ pub fn create_siginfo_for_signal(flag: SignalFlags) -> SigInfoT {
 /// 当信号投递时，内核在信号栈上从高地址到低地址通常依次构建以下结构：
 ///     1. siginfo_t 结构体。 该结构体包含有关信号的信息（如信号编号、发送者等）。
 ///     2. ucontext_t 结构体。 该结构体保存了被信号中断时的处理器状态（寄存器等）。
-///     3. 返回地址： 指向 C 库中的一个特殊函数（称为 sigreturn 或信号 trampoline），而不是直接返回原程序。
-/// 当信号处理函数返回时，它实际上会跳转到栈上的 sigreturn 函数，该函数会调用 rt_sigreturn 系统调用。
+///     3. 返回地址（通常通过 ra/restorer 设置）：指向 C 库中的一个特殊函数（称为 sigreturn 或信号 trampoline），而不是直接返回原程序。
+/// 当信号处理函数返回时，它实际上会跳转到 sigreturn 函数，该函数会调用 rt_sigreturn 系统调用。
 /// 内核接收到这个调用后，会从栈上加载 ucontext_t 结构体，恢复所有保存的寄存器状态，从而使程序恢复到被中断时的执行点。
 /// # 参数:
 /// * `task`: 目标任务
@@ -198,12 +214,15 @@ fn install_user_signal_trap_frame(
     sig_num: usize,
     entry: isize,
     action_mask: SignalFlags,
+    use_siginfo: bool,
+    restorer: usize,
 ) {
     let mut t = task.lock();
     let tp = t.trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst);
     crate::pr_debug!("[signal] install_user_signal_trap_frame: trap_frame_ptr={:p}", tp);
     unsafe {
         let tf = &mut *tp;
+        crate::earlyprintln!("[signal] Before signal handler setup: sepc=0x{:x}, sig_num={}, entry=0x{:x}", tf.get_sepc(), sig_num, entry);
         let siginfo = create_siginfo_for_signal(SignalFlags::from_signal_num(sig_num).unwrap());
         let uc = UContextT::new(
             0,           // TODO: flags未实现
@@ -228,21 +247,8 @@ fn install_user_signal_trap_frame(
         let ucontext_addr = current_sp - size_of::<UContextT>();
         current_sp = ucontext_addr;
 
-        current_sp = align_down(current_sp, align_of::<usize>()) - size_of::<usize>();
-        let return_addr_slot = current_sp;
-
-        // HACK: 保证返回地址和 ucontext_t 结构体地址之间没有间隙
-        //       以便于在 rt_sigreturn 直接读取 ucontext_t
-        let ucontext_addr = current_sp + size_of::<usize>();
-
-        let final_sp = current_sp;
-
         write_to_user(sig_info_addr as *mut SigInfoT, siginfo);
         write_to_user(ucontext_addr as *mut UContextT, uc);
-        write_to_user(
-            return_addr_slot as *mut usize,
-            sigreturn_trampoline_address(),
-        );
 
         // 更新 blocked（跳过不可屏蔽信号）
         if sig_num != NUM_SIGKILL && sig_num != NUM_SIGSTOP {
@@ -251,9 +257,19 @@ fn install_user_signal_trap_frame(
         }
 
         // 设置用户处理器入口
+        crate::earlyprintln!("[signal] Setting sepc from 0x{:x} to 0x{:x}", tf.get_sepc(), entry as usize);
         tf.set_sepc(entry as usize);
         tf.set_a0(sig_num);
-        tf.set_sp(final_sp);
+        if use_siginfo {
+            tf.x11_a1 = sig_info_addr;
+            tf.x12_a2 = ucontext_addr;
+        } else {
+            tf.x11_a1 = 0;
+            tf.x12_a2 = 0;
+        }
+        tf.x1_ra = restorer;
+        tf.set_sp(ucontext_addr);
+        crate::earlyprintln!("[signal] After signal handler setup: sepc=0x{:x}, sp=0x{:x}", tf.get_sepc(), tf.get_sp());
     }
 }
 

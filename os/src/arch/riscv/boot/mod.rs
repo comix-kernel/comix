@@ -33,8 +33,8 @@ use crate::{
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
 pub fn rest_init() {
     let tid = TASK_MANAGER.lock().allocate_tid();
-    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
+    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let fd_table = fd_table::FDTable::new();
     let (stdin, stdout, stderr) = create_stdio_files();
     fd_table
@@ -141,8 +141,8 @@ fn kthreadd() {
 /// 创建内核守护线程 kthreadd
 fn create_kthreadd() {
     let tid = TASK_MANAGER.lock().allocate_tid();
-    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
+    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let (uts, rlimit, fd_table, fs) = {
         let task = current_task();
         let t = task.lock();

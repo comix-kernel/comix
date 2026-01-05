@@ -129,7 +129,7 @@ impl Inode for Ext4Inode {
             nlinks: inode.links_count as usize,
             uid: inode.uid as u32,
             gid: inode.gid as u32,
-            rdev: 0,
+            rdev: inode.faddr() as u64,
         })
     }
 

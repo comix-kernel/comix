@@ -62,8 +62,11 @@ pub struct MemorySpace {
     areas: Vec<MappingArea>,
 
     /// 堆的起始地址 (brk 系统调用使用，仅限用户空间)
-    /// 注意：这是堆的固定起始位置，真正的堆顶（current brk）存储在 UserHeap 区域的 vpn_range.end 中
+    /// 注意：这是堆的固定起始位置，真正的堆顶（current brk）存储在 heap_brk 中
     heap_start: Option<Vpn>,
+
+    /// 精确的当前 brk 值（可能不是页对齐）
+    heap_brk: Option<usize>,
 }
 
 impl MemorySpace {
@@ -73,6 +76,7 @@ impl MemorySpace {
             page_table: ActivePageTableInner::new(),
             areas: Vec::new(),
             heap_start: None,
+            heap_brk: None,
         }
     }
 
@@ -108,11 +112,13 @@ impl MemorySpace {
     /// - 如果堆区域不存在，返回堆的起始地址
     /// - 如果堆未初始化，返回 None
     pub fn current_brk(&self) -> Option<usize> {
-        self.areas
-            .iter()
-            .find(|a| a.area_type() == AreaType::UserHeap)
-            .map(|a| a.vpn_range().end().start_addr().as_usize())
-            .or_else(|| self.heap_start.map(|vpn| vpn.start_addr().as_usize()))
+        self.heap_brk.or_else(|| {
+            self.areas
+                .iter()
+                .find(|a| a.area_type() == AreaType::UserHeap)
+                .map(|a| a.vpn_range().end().start_addr().as_usize())
+                .or_else(|| self.heap_start.map(|vpn| vpn.start_addr().as_usize()))
+        })
     }
 
     /// 映射内核空间（所有地址空间共享）
@@ -628,6 +634,7 @@ impl MemorySpace {
 
         // 2. 初始化堆（从 ELF 结束地址开始，页对齐）
         space.heap_start = Some(max_end_vpn);
+        space.heap_brk = Some(max_end_vpn.start_addr().as_usize());
 
         // 3. 映射用户栈（带保护页）
         let user_stack_bottom =
@@ -643,6 +650,7 @@ impl MemorySpace {
         )?;
 
         let entry_point = elf.header.pt2.entry_point() as usize;
+        crate::earlyprintln!("[ELF] Entry point from header: 0x{:x}", entry_point);
         let ph_off = elf.header.pt2.ph_offset() as usize;
         let ph_num = elf.header.pt2.ph_count();
         let ph_ent = elf.header.pt2.ph_entry_size();
@@ -822,6 +830,7 @@ impl MemorySpace {
             }
         }
 
+        self.heap_brk = Some(new_brk);
         Ok(new_brk)
     }
 
@@ -1179,6 +1188,7 @@ impl MemorySpace {
     pub fn clone_for_fork(&self) -> Result<Self, PagingError> {
         let mut new_space = MemorySpace::new();
         new_space.heap_start = self.heap_start;
+        new_space.heap_brk = self.heap_brk;
 
         for area in self.areas.iter() {
             match area.map_type() {

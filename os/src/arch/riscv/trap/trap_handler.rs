@@ -52,6 +52,16 @@ pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
 
     match sstatus_old.spp() {
         SPP::User => {
+            let current_task = crate::kernel::current_task();
+            let canary_ok = {
+                let t = current_task.lock();
+                t.check_kstack_canary()
+            };
+            if !canary_ok {
+                let tid = current_task.lock().tid;
+                crate::earlyprintln!("[FATAL] kstack canary corrupted: tid={}", tid);
+                panic!("kstack overflow detected");
+            }
             user_trap(scause, sepc_old, sstatus_old, trap_frame);
 
             // 检查sepc是否被破坏
@@ -126,9 +136,10 @@ pub fn user_trap(
         // Check stack
         if let Some(t) = task {
             let task_lock = t.lock();
-            let kstack_bottom = task_lock.kstack_base;
-            let kstack_size = 8 * 4096; // Assume 8 pages
-            let kstack_top = kstack_bottom + kstack_size;
+            let kstack_size = task_lock.kstack_size();
+            let kstack_bottom = task_lock.kstack_bottom();
+            let kstack_top = task_lock.kstack_base;
+            let kstack_guard_top = task_lock.kstack_guard_top();
             let current_sp = trap_frame.x2_sp;
 
             crate::earlyprintln!("  [Stack] kstack: {:#x}..{:#x} (size={})",
@@ -137,6 +148,8 @@ pub fn user_trap(
 
             if current_sp < 0x1000 || current_sp >= 0xffffffc000000000 {
                 crate::earlyprintln!("  [Stack] ERROR: sp in kernel space!");
+            } else if current_sp < kstack_guard_top {
+                crate::earlyprintln!("  [Stack] ERROR: sp in guard page!");
             } else if current_sp < kstack_bottom || current_sp >= kstack_top {
                 crate::earlyprintln!("  [Stack] WARNING: sp outside kstack range");
             }
@@ -163,9 +176,9 @@ pub fn user_trap(
                 let task = crate::kernel::current_cpu().lock().current_task.clone();
                 if let Some(t) = task {
                     let task_lock = t.lock();
-                    let kstack_bottom = task_lock.kstack_base;
-                    let kstack_size = 8 * 4096;
-                    let kstack_top = kstack_bottom + kstack_size;
+                    let kstack_size = task_lock.kstack_size();
+                    let kstack_bottom = task_lock.kstack_bottom();
+                    let kstack_top = task_lock.kstack_base;
                     let tf_addr = trap_frame as *const _ as usize;
 
                     crate::pr_debug!("[syscall] read() returning, sepc={:#x}, ra={:#x}, a0={}",

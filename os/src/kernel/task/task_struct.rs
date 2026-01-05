@@ -2,6 +2,7 @@
 //!
 //! 包含任务的核心信息，如上下文、状态、内存空间等
 #![allow(dead_code)]
+use core::mem::size_of;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use alloc::{sync::Arc, vec::Vec};
@@ -11,6 +12,7 @@ use crate::{
         kernel::{context::Context, task::setup_stack_layout},
         trap::TrapFrame,
     },
+    config::PAGE_SIZE,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         WaitQueue,
@@ -34,6 +36,9 @@ use crate::{
 /// 共享任务句柄
 /// 用于在多个地方引用同一个任务实例
 pub type SharedTask = Arc<SpinLock<Task>>;
+
+const KSTACK_CANARY: u64 = 0x6b73_7461_636b_5f63; // "kstack_c"
+const KSTACK_CANARY_WORDS: usize = 4;
 
 /// 任务
 /// 存放任务的核心信息
@@ -264,6 +269,7 @@ impl Task {
         phnum: usize,
         phent: usize,
     ) {
+        crate::earlyprintln!("[Task::execve] tid={}, entry_point=0x{:x}", self.tid, entry_point);
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
 
@@ -349,6 +355,44 @@ impl Task {
         Arc::new(SpinLock::new(Vec::new()))
     }
 
+    #[inline]
+    pub fn kstack_size(&self) -> usize {
+        self.kstack_tracker.len() * PAGE_SIZE
+    }
+
+    #[inline]
+    pub fn kstack_bottom(&self) -> usize {
+        self.kstack_base
+            .checked_sub(self.kstack_size())
+            .expect("kstack base underflow")
+    }
+
+    #[inline]
+    pub fn kstack_guard_top(&self) -> usize {
+        self.kstack_bottom() + PAGE_SIZE
+    }
+
+    pub fn check_kstack_canary(&self) -> bool {
+        let bottom = self.kstack_bottom();
+        for idx in 0..KSTACK_CANARY_WORDS {
+            let ptr = (bottom + idx * size_of::<u64>()) as *const u64;
+            let val = unsafe { core::ptr::read_volatile(ptr) };
+            if val != KSTACK_CANARY {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn write_kstack_canary(kstack_bottom: usize) {
+        for idx in 0..KSTACK_CANARY_WORDS {
+            let ptr = (kstack_bottom + idx * size_of::<u64>()) as *mut u64;
+            unsafe {
+                core::ptr::write_volatile(ptr, KSTACK_CANARY);
+            }
+        }
+    }
+
     fn new(
         tid: u32,
         pid: u32,
@@ -370,6 +414,11 @@ impl Task {
     ) -> Self {
         let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
         let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
+        let kstack_size = kstack_tracker.len() * PAGE_SIZE;
+        let kstack_bottom = kstack_base
+            .checked_sub(kstack_size)
+            .expect("kstack base underflow");
+        Self::write_kstack_canary(kstack_bottom);
 
         Task {
             context: Context::zero_init(),
@@ -413,9 +462,9 @@ impl Task {
             mm::frame_allocator::{alloc_contig_frames, alloc_frame},
             uapi::resource::INIT_RLIMITS,
         };
+        let trap_frame_tracker = alloc_frame().expect("new_dummy_task: failed to alloc trap_frame");
         let kstack_tracker =
             alloc_contig_frames(1).expect("new_dummy_task: failed to alloc kstack");
-        let trap_frame_tracker = alloc_frame().expect("new_dummy_task: failed to alloc trap_frame");
         Self::new(
             tid,
             tid,

@@ -59,15 +59,8 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             // F_SETFL: 设置文件状态标志
             // 只能修改特定标志（APPEND, NONBLOCK, ASYNC, DIRECT, NOATIME）
             let new_flags_raw = arg as u32;
-            let new_status_flags = match FileStatusFlags::from_bits(new_flags_raw) {
-                Some(f) => f,
-                None => return -(EINVAL as isize),
-            };
-
-            // 检查是否只修改允许修改的标志
-            if !new_status_flags.is_modifiable() {
-                return -(EINVAL as isize);
-            }
+            // Ignore unknown flags instead of failing like Linux does.
+            let new_status_flags = FileStatusFlags::from_bits_truncate(new_flags_raw);
 
             let file = match task.lock().fd_table.get(fd) {
                 Ok(f) => f,

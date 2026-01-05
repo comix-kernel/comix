@@ -356,28 +356,10 @@ impl crate::device::Driver for NetworkInterface {
         // 更新最后中断时间
         self.update_interrupt_time();
 
-        // 处理接收中断：尝试接收数据包
-        let mut buffer = [0u8; 2048];
-        match self.device.receive(&mut buffer) {
-            Ok(size) if size > 0 => {
-                println!(
-                    "Received {} bytes of data on interface {}",
-                    size,
-                    self.name()
-                );
-                // Wake up tasks waiting in ppoll
-                crate::kernel::syscall::io::wake_poll_waiters();
-                true
-            }
-            Err(e) => {
-                println!("Error receiving data: {:?}", e);
-                true // 仍然返回true表示我们处理了这个中断
-            }
-            _ => {
-                // 没有接收到数据，但可能是发送完成中断等
-                true
-            }
-        }
+        // 处理接收中断：交给 smoltcp 轮询读取包
+        crate::net::socket::poll_network_interfaces();
+        crate::kernel::syscall::io::wake_poll_waiters();
+        true
     }
 
     fn device_type(&self) -> DeviceType {

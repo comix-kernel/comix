@@ -98,14 +98,14 @@ impl NetworkConfigManager {
             earlyprintln!("Configuring interface: {}", interface.name());
 
             // 设置默认IP地址
-            let ip_cidr = IpCidr::new(IpAddress::v4(192, 168, 1, 100), 24);
+            let ip_cidr = IpCidr::new(IpAddress::v4(10, 0, 2, 15), 24);
             interface.add_ip_address(ip_cidr);
-            earlyprintln!("Set IP address: 192.168.1.100/24");
+            earlyprintln!("Set IP address: 10.0.2.15/24");
 
             // 设置默认网关
-            let gateway = Ipv4Address::new(192, 168, 1, 1);
+            let gateway = Ipv4Address::new(10, 0, 2, 2);
             interface.set_ipv4_gateway(Some(gateway));
-            earlyprintln!("Set default gateway: 192.168.1.1");
+            earlyprintln!("Set default gateway: 10.0.2.2");
 
             // Initialize ethernet interface for socket operations
             let smoltcp_iface = interface.create_smoltcp_interface(smoltcp::phy::Medium::Ethernet);

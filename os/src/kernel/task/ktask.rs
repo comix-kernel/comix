@@ -56,8 +56,8 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         )
     };
 
-    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
+    let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
 
     // 分配 Task 结构体和内核栈
     let task = TaskStruct::ktask_create(

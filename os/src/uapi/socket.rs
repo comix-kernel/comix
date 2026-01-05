@@ -6,6 +6,13 @@ pub const IPPROTO_TCP: i32 = 6;
 pub const IPPROTO_IP: i32 = 0;
 pub const IPPROTO_IPV6: i32 = 41;
 
+// Socket types and flags
+pub const SOCK_STREAM: i32 = 1;
+pub const SOCK_DGRAM: i32 = 2;
+pub const SOCK_NONBLOCK: i32 = 0x800;
+pub const SOCK_CLOEXEC: i32 = 0x80000;
+pub const SOCK_TYPE_MASK: i32 = 0x0f;
+
 // SOL_SOCKET options
 pub const SO_REUSEADDR: i32 = 2;
 pub const SO_KEEPALIVE: i32 = 9;

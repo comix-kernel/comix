@@ -23,7 +23,7 @@ pub struct NetIfaceWrapper {
 }
 
 impl NetIfaceWrapper {
-    pub fn poll(&self, sockets: &SpinLock<SocketSet>) {
+    pub fn poll(&self, sockets: &SpinLock<SocketSet>) -> bool {
         let timestamp = smoltcp::time::Instant::from_millis(
             crate::arch::timer::get_time_ms() as i64
         );
@@ -31,9 +31,8 @@ impl NetIfaceWrapper {
         let mut iface = self.interface.lock();
         let mut sockets = sockets.lock();
 
-        crate::pr_debug!("poll: before iface.poll");
         let result = iface.poll(timestamp, &mut *dev, &mut *sockets);
-        crate::pr_debug!("poll: result={:?}", result);
+        result == smoltcp::iface::PollResult::SocketStateChanged
     }
 
     pub fn with_context<F, R>(&self, f: F) -> R
@@ -85,6 +84,10 @@ impl SocketFile {
 
     pub fn set_listener(&self, is_listener: bool) {
         *self.is_listener.lock() = is_listener;
+    }
+
+    pub fn is_listener(&self) -> bool {
+        *self.is_listener.lock()
     }
 
     pub fn new_with_flags(handle: SocketHandle, flags: OpenFlags) -> Self {
@@ -313,8 +316,9 @@ pub fn socket_sendto(
                 let port = NEXT_UDP_PORT.fetch_add(1, Ordering::Relaxed);
                 let port = if port >= 65535 { 49152 } else { port };
 
-                let local_endpoint = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), port);
-                socket.bind(local_endpoint).map_err(|_| FsError::InvalidArgument)?;
+                use smoltcp::wire::IpListenEndpoint;
+                let listen_endpoint = IpListenEndpoint { addr: None, port };
+                socket.bind(listen_endpoint).map_err(|_| FsError::InvalidArgument)?;
             }
 
             socket
@@ -341,19 +345,40 @@ impl File for SocketFile {
             Some(SocketHandle::Tcp(h)) => {
                 // TCP listening sockets are readable when there are pending connections
                 if is_listener {
+                    let socket = sockets.get::<tcp::Socket>(*h);
+                    let state = socket.state();
                     let has_pending = !self.listen_sockets.lock().is_empty();
-                    crate::pr_debug!("[Socket] TCP listener readable: has_pending={}", has_pending);
-                    return has_pending;
+                    let state_pending = matches!(
+                        state,
+                        tcp::State::SynReceived | tcp::State::Established | tcp::State::CloseWait
+                    );
+                    let pending = has_pending || state_pending;
+                    crate::pr_debug!(
+                        "[Socket] TCP listener readable: state={:?}, has_pending={}, state_pending={}, result={}",
+                        state,
+                        has_pending,
+                        state_pending,
+                        pending
+                    );
+                    return pending;
                 }
                 let socket = sockets.get::<tcp::Socket>(*h);
                 let state = socket.state();
                 let recv_queue = socket.recv_queue();
+                let may_recv = socket.may_recv();
 
                 // Only readable if:
                 // 1. There's actual data in the receive queue, OR
-                // 2. Socket is closed (EOF condition)
-                let result = recv_queue > 0 || state == tcp::State::Closed;
-                crate::pr_debug!("[Socket] readable: handle={:?}, state={:?}, recv_queue={}, result={}", h, state, recv_queue, result);
+                // 2. Socket can't receive anymore (EOF condition)
+                let result = recv_queue > 0 || !may_recv;
+                crate::pr_debug!(
+                    "[Socket] readable: handle={:?}, state={:?}, recv_queue={}, may_recv={}, result={}",
+                    h,
+                    state,
+                    recv_queue,
+                    may_recv,
+                    result
+                );
                 result
             }
             Some(SocketHandle::Udp(h)) => {
@@ -679,11 +704,13 @@ pub fn init_loopback(mut smoltcp_iface: crate::net::interface::SmoltcpInterface)
 
 /// Perform TCP connect with Context
 pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
-    crate::pr_debug!("tcp_connect: start, handle={:?}, remote={:?}", handle, remote);
+    crate::pr_debug!("tcp_connect: start, handle={:?}, remote={:?} , local = {:?}", handle, remote, local);
 
     // Select interface based on destination IP
     let is_loopback = match remote.addr {
         IpAddress::Ipv4(addr) => addr.octets()[0] == 127,
+        #[cfg(feature = "proto-ipv6")]
+        IpAddress::Ipv6(addr) => addr.is_loopback(),
         _ => false,
     };
 
@@ -715,15 +742,20 @@ pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint)
 
 /// Poll network interfaces to process packets
 pub fn poll_network_interfaces() {
+    let mut state_changed = false;
     // Poll loopback first for better local performance
     if let Some(ref wrapper) = *LOOPBACK_IFACE.lock() {
         crate::pr_debug!("poll_network_interfaces: calling poll on loopback");
-        wrapper.poll(&SOCKET_SET);
+        state_changed |= wrapper.poll(&SOCKET_SET);
     }
 
     if let Some(ref wrapper) = *NET_IFACE.lock() {
         crate::pr_debug!("poll_network_interfaces: calling poll on ethernet");
-        wrapper.poll(&SOCKET_SET);
+        state_changed |= wrapper.poll(&SOCKET_SET);
+    }
+
+    if state_changed {
+        crate::kernel::syscall::io::wake_poll_waiters();
     }
 }
 
