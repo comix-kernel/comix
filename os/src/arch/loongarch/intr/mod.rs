@@ -1,7 +1,10 @@
 //! LoongArch64 中断处理模块
 #![allow(unused)]
 
-use crate::arch::constant::{CSR_CRMD_IE, CSR_ECFG_LIE_MASK, SSTATUS_SIE};
+use crate::{
+    arch::constant::{CSR_CRMD_IE, CSR_ECFG_LIE_MASK, SSTATUS_SIE},
+    earlyprintln,
+};
 
 // CSR 编号
 const CRMD_CSR: u32 = 0x0;
@@ -50,28 +53,33 @@ unsafe fn read_crmd() -> usize {
 unsafe fn update_ecfg(mask: usize, set: bool) {
     // 只改动给定 mask 覆盖的位
     let mut val: usize;
-    core::arch::asm!(
-        "csrrd {val}, 0x4",
-        val = out(reg) val,
-        options(nostack, preserves_flags)
-    );
+    unsafe {
+        core::arch::asm!(
+            "csrrd {val}, 0x4",
+            val = out(reg) val,
+            options(nostack, preserves_flags)
+        );
+    }
     let bits = mask & CSR_ECFG_LIE_MASK;
     if set {
         val |= bits;
     } else {
         val &= !bits;
     }
-    core::arch::asm!(
-        "csrwr {val}, 0x4",
-        val = in(reg) val,
-        options(nostack, preserves_flags)
-    );
+    unsafe {
+        core::arch::asm!(
+            "csrwr {val}, 0x4",
+            val = in(reg) val,
+            options(nostack, preserves_flags)
+        );
+    }
 }
 
 /// 启用定时器中断（仅设置本地定时器使能位，不开启全局 IE）
 /// # Safety
 /// 直接操作 CSR，调用者需确保时序正确
 pub unsafe fn enable_timer_interrupt() {
+    earlyprintln!("Enabling timer interrupt");
     unsafe { update_ecfg(TIMER_LIE_BIT, true) };
 }
 
