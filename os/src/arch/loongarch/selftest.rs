@@ -1,6 +1,6 @@
 //! LoongArch64 early self-tests (pre-mm)
 
-use loongArch64::register::{crmd, CpuMode};
+use loongArch64::register::{CpuMode, crmd};
 
 use crate::{early_test, kassert, println};
 
