@@ -43,7 +43,7 @@ macro_rules! get_sockopt_int {
 
 use crate::{
     arch::trap::SumGuard,
-    kernel::current_cpu,
+    kernel::{current_cpu, current_task},
     net::{
         config::NetworkConfigManager,
         interface::NETWORK_INTERFACE_MANAGER,
@@ -53,7 +53,6 @@ use crate::{
             write_sockaddr_in,
         },
     },
-    println,
 };
 use alloc::sync::Arc;
 use smoltcp::socket::{tcp, udp};
@@ -108,7 +107,7 @@ pub fn set_network_interface_config(
         {
             Ok(_) => 0,
             Err(e) => {
-                println!("Network config error: {:?}", e);
+                crate::pr_debug!("Network config error: {:?}", e);
                 -5
             }
         }
@@ -134,7 +133,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     };
 
     let socket_file = Arc::new(SocketFile::new(handle));
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     let mut task_lock = task.lock();
     match task_lock.fd_table.alloc(socket_file) {
@@ -157,7 +156,7 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         }
     };
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
@@ -199,7 +198,7 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
         return -22; // EINVAL
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
@@ -235,7 +234,7 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
 
 /// 接受连接
 pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let tid = task.lock().tid;
 
     let listen_handle = match get_socket_handle(tid as usize, sockfd as usize) {
@@ -324,7 +323,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         }
     };
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
@@ -382,7 +381,7 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
         slice
     };
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9,
@@ -396,7 +395,7 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
 
 /// 接收数据
 pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9,
@@ -416,7 +415,7 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
 
 /// 关闭套接字
 pub fn close_sock(sockfd: i32) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let mut task_lock = task.lock();
     let tid = task_lock.tid;
 
@@ -447,7 +446,7 @@ fn get_interface_stats(ifname: *const c_char, stats: *mut u8, size: usize) -> is
 }
 
 pub fn init_network_syscalls() {
-    println!("Network syscalls initialized");
+    crate::pr_debug!("Network syscalls initialized");
 }
 
 /// 获取网络接口地址列表 (Linux标准系统调用)
@@ -491,7 +490,7 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
         return -(EINVAL as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -(EBADF as isize),
@@ -549,7 +548,7 @@ pub fn getsockopt(
         return -(EINVAL as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -(EBADF as isize),
@@ -651,7 +650,7 @@ pub fn sendto(
         slice
     };
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let tid = task.lock().tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
@@ -675,7 +674,7 @@ pub fn recvfrom(
     src_addr: *mut u8,
     addrlen: *mut u32,
 ) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
@@ -714,7 +713,7 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
         return -22; // EINVAL
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
@@ -759,7 +758,7 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
 
 // 获取套接字地址
 pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let tid = task.lock().tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
@@ -799,7 +798,7 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
 // 获取对端套接字地址
 pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let tid = task.lock().tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {

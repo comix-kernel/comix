@@ -2,41 +2,47 @@
 
 use core::fmt::{self, Write};
 
-use alloc::string::{String, ToString};
-
-use crate::device::console::MAIN_CONSOLE;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 pub struct Stdout;
 pub struct Stdin;
 
 pub fn console_putchar(c: usize) {
-    MAIN_CONSOLE
-        .read()
-        .as_ref()
-        .unwrap()
-        .write_str(&(c as u8 as char).to_string());
+    crate::console::putchar(c as u8);
 }
 
 /// 使用 sbi 调用从控制台获取字符(qemu uart handler)
 /// 返回值：字符的 ASCII 码
 pub fn console_getchar() -> usize {
-    MAIN_CONSOLE.read().as_ref().unwrap().read_char() as usize
+    crate::console::getchar().map_or(usize::MAX, |c| c as usize)
 }
 
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        MAIN_CONSOLE.read().as_ref().unwrap().write_str(s);
+        crate::console::write_str(s);
         Ok(())
     }
 }
 
 impl Stdin {
-    pub fn read_char(&mut self) -> char {
-        MAIN_CONSOLE.read().as_ref().unwrap().read_char()
+    pub fn read_char(&mut self) -> Option<char> {
+        crate::console::getchar().map(|c| c as char)
     }
 
     pub fn read_line(&mut self, buf: &mut String) {
-        MAIN_CONSOLE.read().as_ref().unwrap().read_line(buf);
+        let mut bytes = Vec::new();
+        loop {
+            if let Some(c) = crate::console::getchar() {
+                if c == b'\n' || c == b'\r' {
+                    break;
+                }
+                bytes.push(c);
+            } else {
+                break;
+            }
+        }
+        buf.push_str(&String::from_utf8_lossy(&bytes));
     }
 }
 
@@ -63,7 +69,7 @@ pub fn stdin() -> Stdin {
 #[macro_export]
 macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::tool::stdio::print(format_args!($fmt $(, $($arg)+)?))
+        $crate::util::stdio::print(format_args!($fmt $(, $($arg)+)?))
     }
 }
 

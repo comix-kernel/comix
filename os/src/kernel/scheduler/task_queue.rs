@@ -18,6 +18,17 @@ impl TaskQueue {
         TaskQueue { queue: Vec::new() }
     }
 
+    /// 创建一个空的任务队列（const 版本）
+    /// 用于静态数组初始化
+    pub const fn empty() -> Self {
+        TaskQueue { queue: Vec::new() }
+    }
+
+    /// 获取队列中的任务数量
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
     /// 向运行队列添加任务
     pub fn add_task(&mut self, task: SharedTask) {
         self.queue.push(task);

@@ -6,6 +6,39 @@ use crate::vfs::devno::{chrdev_major, get_chrdev_driver, misc_minor};
 use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
+impl CharDeviceFile {
+    // termios flag bits of interest
+    const ICRNL: u32 = 0x0100; // map CR to NL on input
+    const INLCR: u32 = 0x0040; // map NL to CR on input
+    const IGNCR: u32 = 0x0080; // ignore CR on input
+    const OPOST: u32 = 0x0001; // enable output processing
+    const ONLCR: u32 = 0x0004; // map NL to CR-NL on output
+    const ICANON: u32 = 0x0002; // canonical input
+    const ECHO: u32 = 0x0008; // echo input characters
+
+    #[inline]
+    fn map_input_byte(mut ch: u8, iflag: u32) -> Option<u8> {
+        if (iflag & Self::IGNCR) != 0 && ch == b'\r' {
+            return None;
+        }
+        if (iflag & Self::ICRNL) != 0 && ch == b'\r' {
+            ch = b'\n';
+        } else if (iflag & Self::INLCR) != 0 && ch == b'\n' {
+            ch = b'\r';
+        }
+        Some(ch)
+    }
+
+    #[inline]
+    fn echo_byte(&self, ch: u8) {
+        if let Some(ref driver) = self.driver {
+            if let Some(serial) = driver.as_serial() {
+                serial.write(&[ch]);
+            }
+        }
+    }
+}
+
 /// 字符设备文件
 pub struct CharDeviceFile {
     /// 关联的 dentry
@@ -141,18 +174,35 @@ impl File for CharDeviceFile {
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
             if let Some(serial) = driver.as_serial() {
+                let term = *self.termios.lock();
+                let canonical = (term.c_lflag & Self::ICANON) != 0;
+                let do_echo = (term.c_lflag & Self::ECHO) != 0;
                 let is_nonblock = self.flags.contains(OpenFlags::O_NONBLOCK);
 
+                let mut count = 0usize;
+
                 if is_nonblock {
-                    // 非阻塞模式：尝试读取，没有数据则返回 EAGAIN
-                    if let Some(byte) = serial.try_read() {
-                        buf[0] = byte;
-                        let mut count = 1;
-                        // 尽可能多读，但不阻塞
+                    // 非阻塞：有就读，必要时做输入映射；规范模式不强制等到换行
+                    if let Some(b) = serial.try_read() {
+                        if let Some(mapped) = Self::map_input_byte(b, term.c_iflag) {
+                            if do_echo {
+                                self.echo_byte(mapped);
+                            }
+                            buf[count] = mapped;
+                            count += 1;
+                        }
                         while count < buf.len() {
-                            if let Some(b) = serial.try_read() {
-                                buf[count] = b;
-                                count += 1;
+                            if let Some(nb) = serial.try_read() {
+                                if let Some(mapped) = Self::map_input_byte(nb, term.c_iflag) {
+                                    if do_echo {
+                                        self.echo_byte(mapped);
+                                    }
+                                    buf[count] = mapped;
+                                    count += 1;
+                                    if canonical && mapped == b'\n' {
+                                        break;
+                                    }
+                                }
                             } else {
                                 break;
                             }
@@ -162,16 +212,25 @@ impl File for CharDeviceFile {
                         Err(FsError::WouldBlock)
                     }
                 } else {
-                    // 阻塞模式：至少读取一个字节
-                    buf[0] = serial.read();
-                    let mut count = 1;
-                    // 尝试读取更多，但不阻塞
-                    while count < buf.len() {
-                        if let Some(b) = serial.try_read() {
-                            buf[count] = b;
+                    // 阻塞：非规范模式读1字节；规范模式直到换行
+                    loop {
+                        // 等到一个字节
+                        let b = match serial.try_read() {
+                            Some(bb) => bb,
+                            None => {
+                                core::hint::spin_loop();
+                                continue;
+                            }
+                        };
+                        if let Some(mapped) = Self::map_input_byte(b, term.c_iflag) {
+                            if do_echo {
+                                self.echo_byte(mapped);
+                            }
+                            buf[count] = mapped;
                             count += 1;
-                        } else {
-                            break;
+                            if !canonical || mapped == b'\n' || count >= buf.len() {
+                                break;
+                            }
                         }
                     }
                     Ok(count)
@@ -199,7 +258,21 @@ impl File for CharDeviceFile {
         // 其他设备：委托给驱动
         if let Some(ref driver) = self.driver {
             if let Some(serial) = driver.as_serial() {
-                serial.write(buf);
+                // 输出处理：ONLCR 将 \n 转换为 \r\n
+                let term = *self.termios.lock();
+                let post = (term.c_oflag & Self::OPOST) != 0;
+                let onlcr = (term.c_oflag & Self::ONLCR) != 0;
+                if post && onlcr {
+                    for &ch in buf {
+                        if ch == b'\n' {
+                            serial.write(&[b'\r', b'\n']);
+                        } else {
+                            serial.write(&[ch]);
+                        }
+                    }
+                } else {
+                    serial.write(buf);
+                }
                 Ok(buf.len())
             } else {
                 Err(FsError::NotSupported)
@@ -244,7 +317,7 @@ impl File for CharDeviceFile {
 
         // 根据设备类型分发 ioctl
         match maj {
-            chrdev_major::CONSOLE => {
+            chrdev_major::CONSOLE | chrdev_major::TTY => {
                 // 终端 ioctl
                 self.console_ioctl(request, arg)
             }

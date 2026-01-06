@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use crate::{
     arch::{intr::disable_interrupts, trap::restore},
     kernel::{
-        SCHEDULER, TaskState,
+        TaskState,
         cpu::current_cpu,
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
@@ -40,7 +40,8 @@ use crate::{
 pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tid = TASK_MANAGER.lock().allocate_tid();
     let (pid, ppid, signal_handlers, blocked, signal, uts, rlimit, fd_table, fs) = {
-        let cur_cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cur_cpu = current_cpu();
         let cur_task = cur_cpu.current_task.as_ref().unwrap();
         let cur_task = cur_task.lock();
         (
@@ -79,18 +80,41 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // SAFETY: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
+        // 先初始化 TrapFrame 为全 0
+        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
         (*tf).set_kernel_trap_frame(
             entry_point as usize,
             super::terminate_task as usize,
             task.kstack_base,
         );
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
+        crate::arch::trap::set_trap_frame_cpu_ptr(tf, cpu_ptr);
     }
     let tid = task.tid;
     let task = task.into_shared();
 
+    // 选择目标 CPU（负载均衡）
+    let target_cpu = crate::kernel::pick_cpu();
+
+    // 更新任务的 on_cpu 字段
+    task.lock().on_cpu = Some(target_cpu);
+
+    crate::pr_debug!("[SMP] Task {} assigned to CPU {}", tid, target_cpu);
+
     // 将任务加入调度器和任务管理器
     TASK_MANAGER.lock().add_task(task.clone());
-    SCHEDULER.lock().add_task(task);
+    crate::kernel::scheduler_of(target_cpu)
+        .lock()
+        .add_task(task);
+
+    // 如果目标 CPU 不是当前 CPU，发送 IPI
+    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    if target_cpu != current_cpu {
+        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+    }
 
     tid
 }
@@ -153,10 +177,14 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // 3. 包装内存空间
     let space = Arc::new(SpinLock::new(space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    current_cpu().lock().switch_space(space.clone());
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(space.clone());
+    }
 
     let task = {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         cpu.current_task.as_ref().unwrap().clone()
     };
     // 在restore之前不可发生中断
@@ -202,7 +230,10 @@ mod tests {
 
     // 测试 kthread_spawn：应分配 tid 并放入任务管理器
     test_case!(test_kthread_spawn_basic, {
-        current_cpu().lock().current_task = Some(mk_task(1));
+        {
+            let _guard = crate::sync::PreemptGuard::new();
+            current_cpu().current_task = Some(mk_task(1));
+        }
         let tid = kthread_spawn(dummy_thread);
         kassert!(tid != 0);
         let task_opt = TASK_MANAGER.lock().get_task(tid);

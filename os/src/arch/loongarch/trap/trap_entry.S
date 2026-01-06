@@ -1,107 +1,125 @@
-    .section .text.trap
-    .globl trap_entry
-    .globl trap_handler
-    .globl __restore
-    .align 12
+# LoongArch64 trap entry and context restore
+.text
+.globl trap_entry
+.globl boot_trap_entry
+.globl __restore
+.globl trap_handler
 
-#
-# LoongArch64 trap entry
-# - CSR.SAVE0 (0x30) holds current TrapFrame pointer
-#
 trap_entry:
-    csrrd   $t0, 0x30
+boot_trap_entry:
+    # 保留原始 t2，使用 KScratch1 作为临时保存区
+    csrwr   $t2, 0x49          # KScratch1 <- 原始 t2
 
-    # Save general registers r0-r31
-    st.d    $r0,  $t0, 0
-    st.d    $r1,  $t0, 8
-    st.d    $r2,  $t0, 16
-    st.d    $r3,  $t0, 24
-    st.d    $r4,  $t0, 32
-    st.d    $r5,  $t0, 40
-    st.d    $r6,  $t0, 48
-    st.d    $r7,  $t0, 56
-    st.d    $r8,  $t0, 64
-    st.d    $r9,  $t0, 72
-    st.d    $r10, $t0, 80
-    st.d    $r11, $t0, 88
-    st.d    $r12, $t0, 96
-    st.d    $r13, $t0, 104
-    st.d    $r14, $t0, 112
-    st.d    $r15, $t0, 120
-    st.d    $r16, $t0, 128
-    st.d    $r17, $t0, 136
-    st.d    $r18, $t0, 144
-    st.d    $r19, $t0, 152
-    st.d    $r20, $t0, 160
-    st.d    $r21, $t0, 168
-    st.d    $r22, $t0, 176
-    st.d    $r23, $t0, 184
-    st.d    $r24, $t0, 192
-    st.d    $r25, $t0, 200
-    st.d    $r26, $t0, 208
-    st.d    $r27, $t0, 216
-    st.d    $r28, $t0, 224
-    st.d    $r29, $t0, 232
-    st.d    $r30, $t0, 240
-    st.d    $r31, $t0, 248
+    # 读取 KScratch0 中的 TrapFrame 指针，顺便将原始 a0 写回 KScratch0
+    csrrd   $t1, 0x48          # t1 <- tf_ptr (保存于 KScratch0)
+    csrwr   $a0, 0x48          # KScratch0 <- 原始 a0
+    move    $a0, $t1           # a0 <- tf_ptr
 
-    # Save ERA/ESTAT/CRMD/PRMD
-    csrrd   $t1, 0x6
-    st.d    $t1, $t0, 256
-    csrrd   $t1, 0x5
-    st.d    $t1, $t0, 264
-    csrrd   $t1, 0x0
-    st.d    $t1, $t0, 272
-    csrrd   $t1, 0x1
-    st.d    $t1, $t0, 280
+    # 保存通用寄存器到 TrapFrame.regs[0..31]
+    st.d    $r0,  $a0, 0       # r0 (zero)
+    st.d    $ra,  $a0, 8       # r1
+    st.d    $tp,  $a0, 16      # r2
+    st.d    $sp,  $a0, 24      # r3
+    st.d    $a1,  $a0, 40      # r5
+    st.d    $a2,  $a0, 48      # r6
+    st.d    $a3,  $a0, 56      # r7
+    st.d    $a4,  $a0, 64      # r8
+    st.d    $a5,  $a0, 72      # r9
+    st.d    $a6,  $a0, 80      # r10
+    st.d    $a7,  $a0, 88      # r11
+    st.d    $t0,  $a0, 96      # r12
+    st.d    $t1,  $a0, 104     # r13
+    csrrd   $t2, 0x49          # 取回原始 t2
+    st.d    $t2,  $a0, 112     # r14
+    st.d    $t3,  $a0, 120     # r15
+    st.d    $t4,  $a0, 128     # r16
+    st.d    $t5,  $a0, 136     # r17
+    st.d    $t6,  $a0, 144     # r18
+    st.d    $t7,  $a0, 152     # r19
+    st.d    $t8,  $a0, 160     # r20
+    st.d    $r21, $a0, 168     # r21
+    st.d    $fp,  $a0, 176     # r22 / s0
+    st.d    $s1,  $a0, 184     # r23 / s1
+    st.d    $s2,  $a0, 192     # r24 / s2
+    st.d    $s3,  $a0, 200     # r25 / s3
+    st.d    $s4,  $a0, 208     # r26 / s4
+    st.d    $s5,  $a0, 216     # r27 / s5
+    st.d    $s6,  $a0, 224     # r28 / s6
+    st.d    $s7,  $a0, 232     # r29 / s7
+    st.d    $s8,  $a0, 240     # r30 / s8
+    st.d    $r31, $a0, 248     # r31
 
-    # Save current SP as kernel_sp (may be user SP if no stack switch)
-    st.d    $sp, $t0, 288
+    # 保存原始 a0（现存于 KScratch0 中）
+    csrrd   $t1, 0x48          # t1 <- old a0
+    st.d    $t1, $a0, 32       # r4
+    csrwr   $a0, 0x48          # 恢复 KScratch0 为 TrapFrame 指针
 
-    move    $a0, $t0
+    # 保存异常相关 CSR
+    csrrd   $t1, 0x6           # ERA
+    st.d    $t1, $a0, 256
+    csrrd   $t1, 0x5           # ESTAT
+    st.d    $t1, $a0, 264
+    csrrd   $t1, 0x0           # CRMD（当前模式/中断状态）
+    st.d    $t1, $a0, 272
+    csrrd   $t1, 0x1           # PRMD（异常前模式/中断状态）
+    st.d    $t1, $a0, 280
+
+    # 若来自用户态，则切换到保存的内核栈
+    andi    $t2, $t1, 0x3      # PRMD.PLV 位
+    beqz    $t2, 1f
+    ld.d    $sp, $a0, 288      # kernel_sp
+1:
+    # 调用 Rust trap_handler(trap_frame)
     bl      trap_handler
 
+# 注意：trap_handler 不应返回；若返回则直接跳转到恢复逻辑
+
 __restore:
-    # a0 = TrapFrame*
-    move    $t0, $a0
+    # 使用 r21 作为基址寄存器，避免提前被覆盖
+    move    $r21, $a0          # r21 <- TrapFrame 指针
+    csrwr   $r21, 0x48         # 更新 KScratch0，供下一次陷阱使用
 
-    # Restore ERA/PRMD before returning
-    ld.d    $t1, $t0, 256
-    csrwr   $t1, 0x6
-    ld.d    $t1, $t0, 280
-    csrwr   $t1, 0x1
+    # 恢复 CSR
+    ld.d    $t0, $r21, 256     # ERA
+    csrwr   $t0, 0x6
+    ld.d    $t0, $r21, 280     # PRMD
+    csrwr   $t0, 0x1
+    ld.d    $t0, $r21, 272     # CRMD
+    csrwr   $t0, 0x0
 
-    # Restore general registers (leave r12/t0 last)
-    ld.d    $r1,  $t0, 8
-    ld.d    $r2,  $t0, 16
-    ld.d    $r3,  $t0, 24
-    ld.d    $r4,  $t0, 32
-    ld.d    $r5,  $t0, 40
-    ld.d    $r6,  $t0, 48
-    ld.d    $r7,  $t0, 56
-    ld.d    $r8,  $t0, 64
-    ld.d    $r9,  $t0, 72
-    ld.d    $r10, $t0, 80
-    ld.d    $r11, $t0, 88
-    ld.d    $r13, $t0, 104
-    ld.d    $r14, $t0, 112
-    ld.d    $r15, $t0, 120
-    ld.d    $r16, $t0, 128
-    ld.d    $r17, $t0, 136
-    ld.d    $r18, $t0, 144
-    ld.d    $r19, $t0, 152
-    ld.d    $r20, $t0, 160
-    ld.d    $r21, $t0, 168
-    ld.d    $r22, $t0, 176
-    ld.d    $r23, $t0, 184
-    ld.d    $r24, $t0, 192
-    ld.d    $r25, $t0, 200
-    ld.d    $r26, $t0, 208
-    ld.d    $r27, $t0, 216
-    ld.d    $r28, $t0, 224
-    ld.d    $r29, $t0, 232
-    ld.d    $r30, $t0, 240
-    ld.d    $r31, $t0, 248
-    ld.d    $r12, $t0, 96
+    # 恢复通用寄存器（保持 r21 基址到最后）
+    ld.d    $ra,  $r21, 8
+    ld.d    $tp,  $r21, 16
+    ld.d    $sp,  $r21, 24
+    ld.d    $a1,  $r21, 40
+    ld.d    $a2,  $r21, 48
+    ld.d    $a3,  $r21, 56
+    ld.d    $a4,  $r21, 64
+    ld.d    $a5,  $r21, 72
+    ld.d    $a6,  $r21, 80
+    ld.d    $a7,  $r21, 88
+    ld.d    $t0,  $r21, 96
+    ld.d    $t1,  $r21, 104
+    ld.d    $t2,  $r21, 112
+    ld.d    $t3,  $r21, 120
+    ld.d    $t4,  $r21, 128
+    ld.d    $t5,  $r21, 136
+    ld.d    $t6,  $r21, 144
+    ld.d    $t7,  $r21, 152
+    ld.d    $t8,  $r21, 160
+    ld.d    $fp,  $r21, 176
+    ld.d    $s1,  $r21, 184
+    ld.d    $s2,  $r21, 192
+    ld.d    $s3,  $r21, 200
+    ld.d    $s4,  $r21, 208
+    ld.d    $s5,  $r21, 216
+    ld.d    $s6,  $r21, 224
+    ld.d    $s7,  $r21, 232
+    ld.d    $s8,  $r21, 240
+    ld.d    $r31, $r21, 248
+    # 先恢复 a0（返回值），再恢复 r21 本身
+    ld.d    $a0,  $r21, 32
+    ld.d    $r21, $r21, 168
 
+    # 结束陷阱，返回异常前上下文
     ertn

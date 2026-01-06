@@ -10,31 +10,6 @@ use super::super::platform::virt::UART_BASE;
 /// DMW0: 0x8000_xxxx_xxxx_xxxx -> 物理地址 (uncached, 用于 MMIO)
 const UART_VADDR: usize = UART_BASE | 0x8000_0000_0000_0000;
 
-/// QEMU virt 平台 ACPI GED 地址定义
-/// 参考 QEMU include/hw/loongarch/virt.h 和 include/hw/acpi/generic_event_device.h
-///
-/// VIRT_GED_EVT_ADDR  = 0x100e0000
-/// VIRT_GED_MEM_ADDR  = VIRT_GED_EVT_ADDR + 0x4 = 0x100e0004
-/// VIRT_GED_REG_ADDR  = VIRT_GED_MEM_ADDR + 0x14 = 0x100e0018
-///
-/// ACPI GED 寄存器偏移:
-/// - SLEEP_CTL = 0x00
-/// - SLEEP_STS = 0x01  
-/// - RESET     = 0x02
-const VIRT_GED_REG_ADDR: usize = 0x100e0018;
-const ACPI_GED_REG_SLEEP_CTL: usize = 0x00;
-const ACPI_GED_REG_RESET: usize = 0x02;
-
-/// ACPI 睡眠控制寄存器位定义 (ACPI 5.0 Chapter 4.8.3.7)
-/// SLP_TYPx: bits [4:2] - 睡眠类型
-/// SLP_EN:   bit 5      - 睡眠使能
-const ACPI_GED_SLP_TYP_POS: u8 = 2; // SLP_TYP 位偏移
-const ACPI_GED_SLP_TYP_S5: u8 = 0x05; // S5 = 关机状态
-const ACPI_GED_SLP_EN: u8 = 0x20; // 睡眠使能位
-
-/// 复位寄存器值
-const ACPI_GED_RESET_VALUE: u8 = 0x42;
-
 /// 输出字符到控制台
 pub fn console_putchar(c: usize) {
     unsafe {
@@ -58,39 +33,41 @@ pub fn console_getchar() -> usize {
     }
 }
 
-/// 设置定时器
-pub fn set_timer(_timer: usize) {
-    // TODO: 实现 LoongArch 定时器设置
-}
+/// QEMU virt 平台 ACPI GED 控制寄存器基地址
+/// 该地址直接指向了控制寄存器区域的起始位置
+const VIRT_GED_REG_ADDR: usize = 0x100e001c;
 
-/// 关机
-///
-/// 使用 QEMU virt 平台的 ACPI GED SLEEP_CTL 寄存器触发 S5 关机
-/// 参考 ACPI 5.0 规范和 QEMU hw/acpi/generic_event_device.c
+/// 寄存器偏移 (相对于 0x100e001c)
+/// 根据设备树中的 poweroff { offset = <0x00> } 和 reboot { offset = <0x02> }
+const ACPI_GED_REG_SLEEP_CTL: usize = 0x00;
+const ACPI_GED_REG_RESET: usize = 0x02;
+
+/// 写入数值 (根据设备树中的 value 属性)
+const ACPI_GED_VALUE_POWEROFF: u8 = 0x34; // poweroff { value = <0x34> }
+const ACPI_GED_VALUE_REBOOT: u8 = 0x42; // reboot { value = <0x42> }
+
+/// 关机实现
 pub fn shutdown(_failure: bool) -> ! {
-    // 计算 SLEEP_CTL 寄存器的虚拟地址（通过 DMW0 映射）
-    let sleep_ctl_addr =
-        crate::arch::mm::paddr_to_vaddr(VIRT_GED_REG_ADDR + ACPI_GED_REG_SLEEP_CTL);
-
-    // 构造 SLEEP_CTL 寄存器值: SLP_TYP=5 (S5), SLP_EN=1
-    let sleep_value: u8 = (ACPI_GED_SLP_TYP_S5 << ACPI_GED_SLP_TYP_POS) | ACPI_GED_SLP_EN;
+    // 映射到 LoongArch 的虚地址 (DMW0: 0x8000...)
+    let base_vaddr = VIRT_GED_REG_ADDR | 0x8000_0000_0000_0000;
 
     unsafe {
-        let sleep_ctl = sleep_ctl_addr as *mut u8;
-        sleep_ctl.write_volatile(sleep_value);
+        let ptr = base_vaddr as *mut u8;
+
+        // 1. 尝试执行 Poweroff (写入 0x34 到 offset 0)
+        ptr.add(ACPI_GED_REG_SLEEP_CTL)
+            .write_volatile(ACPI_GED_VALUE_POWEROFF);
+
+        // 2. 如果关机失败，尝试执行 Reboot (写入 0x42 到 offset 2)
+        // 注意：根据你的 DTS，reboot 的 value 是 0x42，offset 是 0x02
+        ptr.add(ACPI_GED_REG_RESET)
+            .write_volatile(ACPI_GED_VALUE_REBOOT);
     }
 
-    // 如果 SLEEP_CTL 关机失败，尝试复位
-    let reset_addr =
-        crate::arch::mm::paddr_to_vaddr(VIRT_GED_REG_ADDR + ACPI_GED_REG_RESET);
-    unsafe {
-        let reset_reg = reset_addr as *mut u8;
-        reset_reg.write_volatile(ACPI_GED_RESET_VALUE);
-    }
-
-    // 如果以上都失败，无限循环
+    // 如果硬件没有响应，进入死循环
     loop {
         unsafe {
+            // LoongArch 的休眠指令
             core::arch::asm!("idle 0");
         }
     }

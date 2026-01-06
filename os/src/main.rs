@@ -14,6 +14,7 @@ extern crate alloc;
 
 mod arch;
 mod config;
+mod console;
 mod device;
 mod fs;
 mod ipc;
@@ -30,12 +31,11 @@ mod log;
 mod net;
 
 use crate::arch::lib::sbi::shutdown;
-use core::arch::global_asm;
+#[cfg(target_arch = "loongarch64")]
+use core::arch::asm;
 use core::panic::PanicInfo;
 #[cfg(test)]
 use test::test_runner;
-#[cfg(target_arch = "riscv64")]
-global_asm!(include_str!("./arch/riscv/boot/entry.S"));
 
 /// Rust 内核主入口点
 ///
@@ -64,5 +64,6 @@ fn panic(info: &PanicInfo) -> ! {
     } else {
         earlyprintln!("Panicked: {}", info.message());
     }
+
     shutdown(true)
 }

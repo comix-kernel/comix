@@ -60,13 +60,9 @@ boot_trap_entry:
         ld ra, 8(sp)
         ld sp, 16(sp)
         ld gp, 24(sp)
-        // 不要恢复 tp，以防我们移动了CPU.
-        //
-        // 在多核系统（多 Hart）中，线程指针寄存器 (tp 或 x4) 
-        // 通常用于存储当前 Hart/CPU 独有的数据（如指向该 Hart 的上下文或本地存储）。
-        // 如果在内核陷阱处理（kerneltrap 的 C 代码）过程中，操作系统执行了进程/线程
-        // 迁移，将当前的执行上下文调度到了另一个 Hart 上，那么恢复旧的 tp 值将是不正确的。
-        // ld tp, 32(sp)
+        // 在 boot trap 阶段恢复 tp
+        // boot trap 用于早期启动，不会发生 CPU 迁移，所以可以安全恢复 tp
+        ld tp, 32(sp)
         ld t0, 40(sp)
         ld t1, 48(sp)
         ld t2, 56(sp)
