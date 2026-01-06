@@ -33,3 +33,6 @@ user/bin/**
 
 # Test suites
 testsuits-for-oskernel/
+
+# Logs
+os/loongarch.log

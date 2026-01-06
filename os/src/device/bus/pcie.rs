@@ -12,11 +12,11 @@ use crate::{
 };
 use core::ptr::{read_volatile, write_volatile};
 use virtio_drivers::{
+    transport::pci::bus::{BarInfo, Cam, Command, MemoryBarType, MmioCam, PciRoot},
     transport::{
         DeviceType,
         pci::{PciTransport, virtio_device_type},
     },
-    transport::pci::bus::{BarInfo, Cam, Command, MemoryBarType, MmioCam, PciRoot},
 };
 
 use crate::device::virtio_hal::VirtIOHal;
@@ -49,7 +49,7 @@ pub struct PcieHost {
 impl PcieHost {
     /// 从设备树解析
     pub fn from_fdt() -> Option<Self> {
-        let fdt = FDT.as_ref()?;
+        let fdt = &*FDT;
 
         // 找到兼容 pci-host-ecam-generic 的节点
         let mut target = None;
@@ -225,10 +225,8 @@ impl PcieHost {
 
         let ecam_end = ecam_base.saturating_add(ecam_size);
         let mmio_end = mmio_base.saturating_add(mmio_size);
-        let overlap = ecam_size != 0
-            && mmio_size != 0
-            && ecam_base < mmio_end
-            && mmio_base < ecam_end;
+        let overlap =
+            ecam_size != 0 && mmio_size != 0 && ecam_base < mmio_end && mmio_base < ecam_end;
         if overlap {
             if ecam_from_fdt {
                 if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieMmio) {
@@ -371,22 +369,20 @@ pub fn init_and_enumerate() {
 
 /// 初始化 PCIe 并枚举 VirtIO PCI 设备
 pub fn init_virtio_pci() {
-    let host = if let Some(host) = PcieHost::from_fdt().or_else(|| PcieHost::from_platform_defaults())
-    {
-        host
-    } else {
-        pr_info!("[PCIe] no host found from platform defaults");
-        return;
-    };
+    let host =
+        if let Some(host) = PcieHost::from_fdt().or_else(|| PcieHost::from_platform_defaults()) {
+            host
+        } else {
+            pr_info!("[PCIe] no host found from platform defaults");
+            return;
+        };
 
     let ecam_vaddr = match current_memory_space()
         .lock()
         .map_mmio(Paddr::from_usize(host.ecam_paddr), host.ecam_size)
     {
         Ok(vaddr) => vaddr.as_usize(),
-        Err(PagingError::AlreadyMapped) => {
-            crate::arch::mm::paddr_to_vaddr(host.ecam_paddr)
-        }
+        Err(PagingError::AlreadyMapped) => crate::arch::mm::paddr_to_vaddr(host.ecam_paddr),
         Err(e) => {
             pr_warn!("[PCIe] failed to map ECAM: {:?}", e);
             crate::arch::mm::paddr_to_vaddr(host.ecam_paddr)
@@ -464,7 +460,9 @@ fn allocate_bars(
     let mut bar_index = 0u8;
     while bar_index < 6 {
         let info = bars[usize::from(bar_index)].clone();
-        let step = info.as_ref().map_or(1, |b| if b.takes_two_entries() { 2 } else { 1 });
+        let step = info
+            .as_ref()
+            .map_or(1, |b| if b.takes_two_entries() { 2 } else { 1 });
 
         if let Some(BarInfo::Memory {
             address_type,
@@ -478,7 +476,10 @@ fn allocate_bars(
                 continue;
             }
             if address_type == MemoryBarType::Below1MiB {
-                pr_warn!("[PCIe] BAR{} requires below-1MiB window, skipping", bar_index);
+                pr_warn!(
+                    "[PCIe] BAR{} requires below-1MiB window, skipping",
+                    bar_index
+                );
                 bar_index += step;
                 continue;
             }

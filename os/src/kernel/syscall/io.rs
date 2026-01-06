@@ -489,7 +489,11 @@ pub fn wake_poll_waiters() {
     POLL_WAIT_QUEUE.lock().wake_up_all();
 }
 
-fn poll_with_timeout(fds: usize, nfds: usize, timeout: Option<crate::uapi::time::TimeSpec>) -> isize {
+fn poll_with_timeout(
+    fds: usize,
+    nfds: usize,
+    timeout: Option<crate::uapi::time::TimeSpec>,
+) -> isize {
     use crate::arch::timer::{clock_freq, get_time};
     use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
@@ -508,8 +512,7 @@ fn poll_with_timeout(fds: usize, nfds: usize, timeout: Option<crate::uapi::time:
                 return -(EINVAL as isize);
             }
             let duration_ns = (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64;
-            let duration_ticks =
-                (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
+            let duration_ticks = (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
             Some(get_time() + duration_ticks)
         }
     };
