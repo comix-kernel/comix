@@ -4,7 +4,7 @@ use crate::{
     device::{CMDLINE, irq::IntcDriver},
     kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    pr_info,
+    pr_info, pr_warn,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 use fdt::{Fdt, node::FdtNode};
@@ -17,10 +17,10 @@ lazy_static::lazy_static! {
     /// 设备树
     /// 通过 DTP 指针解析得到
     /// XXX: 是否需要这个?
-    pub static ref FDT: Fdt<'static> = {
+    pub static ref FDT: Option<Fdt<'static>> = {
         unsafe {
             let addr = Paddr::to_vaddr(&Paddr::from_usize(DTP));
-            fdt::Fdt::from_ptr(addr.as_usize() as *mut u8).expect("Failed to parse device tree")
+            fdt::Fdt::from_ptr(addr.as_usize() as *mut u8).ok()
         }
     };
 
@@ -39,26 +39,49 @@ lazy_static::lazy_static! {
 
 /// 初始化设备树
 pub fn init() {
-    pr_info!(
-        "[Device] devicetree of {} is initialized",
-        FDT.root().model()
-    );
+    let fdt = match FDT.as_ref() {
+        Some(fdt) => fdt,
+        None => {
+            pr_warn!("[Device] Failed to parse device tree, skipping init");
+            return;
+        }
+    };
 
-    let cpus = FDT.cpus().count();
+    let model = fdt
+        .root()
+        .property("model")
+        .and_then(|p| p.value.split(|b| *b == 0).next())
+        .and_then(|s| core::str::from_utf8(s).ok())
+        .unwrap_or("unknown");
+    pr_info!("[Device] devicetree of {} is initialized", model);
+
+    let cpus = fdt.cpus().count();
     // SAFETY: 这里是在单核初始化阶段设置 CPU 数量
     unsafe { NUM_CPU = cpus };
     pr_info!("[Device] now has {} CPU(s)", cpus);
 
-    unsafe {
-        CLOCK_FREQ = FDT
-            .cpus()
-            .next()
-            .expect("No CPU found in device tree")
-            .timebase_frequency()
-    };
-    pr_info!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
+    if let Some(cpu) = fdt.cpus().next() {
+        let timebase = cpu
+            .property("timebase-frequency")
+            .or_else(|| cpu.property("clock-frequency"))
+            .and_then(|p| match p.value.len() {
+                4 => Some(u32::from_be_bytes(p.value.try_into().ok()?) as usize),
+                8 => Some(u64::from_be_bytes(p.value.try_into().ok()?) as usize),
+                _ => None,
+            });
+        if let Some(freq) = timebase {
+            unsafe {
+                CLOCK_FREQ = freq;
+            }
+            pr_info!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
+        } else {
+            pr_warn!("[Device] No timebase-frequency in DTB, keeping default");
+        }
+    } else {
+        pr_warn!("[Device] No CPU found in device tree");
+    }
 
-    FDT.memory().regions().for_each(|region| {
+    fdt.memory().regions().for_each(|region| {
         pr_info!(
             "[Device] Memory Region: Start = {:#X}, Size = {:#X}",
             region.starting_address as usize,
@@ -66,7 +89,7 @@ pub fn init() {
         );
     });
 
-    if let Some(bootargs) = FDT.chosen().bootargs() {
+    if let Some(bootargs) = fdt.chosen().bootargs() {
         if !bootargs.is_empty() {
             pr_info!("Kernel cmdline: {}", bootargs);
             *CMDLINE.write() = String::from(bootargs);
@@ -74,8 +97,8 @@ pub fn init() {
     }
 
     // 首先初始化中断控制器
-    walk_dt(&FDT, true);
-    walk_dt(&FDT, false);
+    walk_dt(fdt, true);
+    walk_dt(fdt, false);
 }
 
 /// 遍历设备树，查找并初始化 virtio 设备
@@ -101,10 +124,11 @@ fn walk_dt(fdt: &Fdt, intc_only: bool) {
 /// # 返回值
 /// * `Option<(usize, usize)>` - 返回起始地址和大小的元组，如果没有有效的内存区域则返回 None
 pub fn dram_info() -> Option<(usize, usize)> {
+    let fdt = FDT.as_ref()?;
     let mut start = usize::MAX;
     let mut end = 0usize;
 
-    for region in FDT.memory().regions() {
+    for region in fdt.memory().regions() {
         let s = region.starting_address as usize;
         let size = region.size.unwrap_or(0) as usize;
         let e = s.saturating_add(size);
