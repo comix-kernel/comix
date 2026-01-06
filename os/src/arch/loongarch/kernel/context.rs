@@ -9,8 +9,8 @@ pub struct TaskContext {
     pub ra: usize,
     /// 栈指针 ($r3 / $sp)
     pub sp: usize,
-    /// callee-saved 寄存器 s0-s8 ($r23-$r31)
-    pub s: [usize; 9],
+    /// callee-saved 寄存器：fp($r22) + s0-s8 ($r23-$r31)
+    pub s: [usize; 10],
 }
 
 impl TaskContext {
@@ -19,7 +19,7 @@ impl TaskContext {
         Self {
             ra: 0,
             sp: 0,
-            s: [0; 9],
+            s: [0; 10],
         }
     }
 

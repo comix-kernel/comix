@@ -14,9 +14,9 @@ pub mod virtio_hal;
 
 pub mod device_tree;
 
+use crate::sync::RwLock;
 use alloc::sync::Arc;
 pub use block::ram_disk::RamDisk;
-use spin::RwLock;
 
 use crate::device::rtc::RtcDriver;
 

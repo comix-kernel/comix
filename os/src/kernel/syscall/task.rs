@@ -14,9 +14,9 @@ use crate::{
     },
     ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{
-        FUTEX_MANAGER, SCHEDULER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE,
-        TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
-        exit_process, schedule, sleep_task_with_block, sleep_task_with_guard_and_block,
+        FUTEX_MANAGER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
+        TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
+        sleep_task_with_block, sleep_task_with_guard_and_block,
         syscall::util::{get_args_safe, get_path_safe},
         time::{REALTIME, realtime_now},
         yield_task,
@@ -138,7 +138,8 @@ pub fn clone(
         uts,
         rlimit,
     ) = {
-        let cpu = current_cpu().lock();
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
         let task = cpu.current_task.as_ref().unwrap().lock();
         (
             task.pid,
@@ -243,8 +244,38 @@ pub fn clone(
         .lock()
         .push(child_task.clone());
 
+    // 选择目标 CPU（负载均衡）
+    let target_cpu = crate::kernel::pick_cpu();
+    child_task.lock().on_cpu = Some(target_cpu);
+
+    let child_tid = child_task.lock().tid;
+    crate::pr_debug!(
+        "[SMP] Task {} (child) assigned to CPU {}",
+        child_tid,
+        target_cpu
+    );
+
     TASK_MANAGER.lock().add_task(child_task.clone());
-    SCHEDULER.lock().add_task(child_task);
+    crate::pr_debug!(
+        "[SMP] Adding task {} to CPU {} scheduler",
+        child_tid,
+        target_cpu
+    );
+    crate::kernel::scheduler_of(target_cpu)
+        .lock()
+        .add_task(child_task);
+
+    // 如果目标 CPU 不是当前 CPU，发送 IPI
+    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    if target_cpu != current_cpu {
+        crate::pr_debug!(
+            "[SMP] Sending IPI from CPU {} to CPU {}",
+            current_cpu,
+            target_cpu
+        );
+        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+    }
+
     tid as c_int
 }
 
@@ -316,7 +347,7 @@ pub fn execve(
     };
 
     // 显式释放 data 缓冲区，避免内存泄漏
-    crate::earlyprintln!(
+    crate::pr_debug!(
         "[execve] Dropping {} byte ELF buffer before switching to user space",
         data.len()
     );
@@ -362,7 +393,7 @@ pub fn execve(
 /// 3. 错误处理
 pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusage) -> c_int {
     // 阻塞当前任务,直到指定的子任务结束
-    let cur_task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let cur_task = current_task();
     let opt = if let Some(opt) = WaitFlags::from_bits(options as usize) {
         opt
     } else {
@@ -446,8 +477,11 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         }
     };
 
-    unsafe {
-        write_to_user(wstatus, status.raw());
+    // wstatus 允许为 NULL（例如 waitpid(-1, NULL, 0)），此时不写回状态
+    if !wstatus.is_null() {
+        unsafe {
+            write_to_user(wstatus, status.raw());
+        }
     }
 
     // 如果子任务是 Zombie 状态，从 TASK_MANAGER 中释放它
@@ -463,7 +497,7 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
             let mut children = p_lock.children.lock();
             let old_len = children.len();
             children.retain(|c| c.lock().tid != tid);
-            crate::earlyprintln!(
+            crate::pr_debug!(
                 "[wait4] Removed from parent.children: {} -> {}",
                 old_len,
                 children.len()
@@ -1116,7 +1150,10 @@ fn do_execve_switch(
     task.lock().fd_table.close_exec();
 
     // 换掉当前任务的地址空间，e.g. 切换 satp
-    current_cpu().lock().switch_space(space.clone());
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(space.clone());
+    }
 
     // 此时在syscall处理的中断上下文中，中断已关闭，直接修改当前任务的trapframe
     // 注意：space 被 clone 进了 execve，所以这里的 space 变量仍然有效

@@ -4,12 +4,20 @@
 //! 包括自旋锁、睡眠锁、中断保护等
 mod intr_guard;
 mod mutex;
+mod per_cpu;
+mod preempt;
 mod raw_spin_lock;
 mod raw_spin_lock_without_guard;
+mod rwlock;
 mod spin_lock;
+mod ticket_lock;
 
 pub use intr_guard::*;
 pub use mutex::*;
+pub use per_cpu::PerCpu;
+pub use preempt::{PreemptGuard, preempt_disable, preempt_enable};
 pub use raw_spin_lock::*;
 pub use raw_spin_lock_without_guard::*;
+pub use rwlock::*;
 pub use spin_lock::*;
+pub use ticket_lock::*;

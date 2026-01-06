@@ -12,7 +12,7 @@ ifeq ($(ARCH),loongarch)
     TARGET_DIR := target/loongarch64-unknown-none/debug
     PROJECT_DIR := $(TARGET_DIR)/os
     QEMU_RUNNER := ./qemu-loongarch-run.sh
-    GDB_BIN := loongarch64-unknown-linux-gnu-gdb
+    GDB_BIN := loongarch64-unknown-elf-gdb
     GDB_ARCH_SETUP :=
 else
     TARGET := riscv64gc-unknown-none-elf
@@ -65,7 +65,7 @@ gdb:
 	$(GDB_BIN) \
 		-ex "file $(PROJECT_DIR)" \
 		-ex "target remote :1234" \
-        -ex "b *0x80200000" \
+        -ex "b _start" \
 		-ex "dir ../.ignore/busybox" \
 		-ex "dir ../.ignore/riscv-musl" \
 		-ex "add-symbol-file ../data/bin/busybox"\

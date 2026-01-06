@@ -161,6 +161,10 @@ Virtual Address: VPN[2] | VPN[1] | VPN[0] | offset
 
 ### TLB 管理
 
+TLB（Translation Lookaside Buffer）缓存虚拟地址到物理地址的翻译结果。修改页表后必须刷新 TLB，确保硬件使用最新映射。
+
+#### 单核 TLB 刷新
+
 ```rust
 // 刷新单个页
 pub fn tlb_flush(vpn: Vpn) {
@@ -176,6 +180,49 @@ pub fn tlb_flush_all() {
     }
 }
 ```
+
+#### 多核 TLB Shootdown
+
+在多核系统中，修改页表后需要通知所有 CPU 刷新 TLB。**Comix 的页表实现会自动处理这个过程**。
+
+**自动 TLB Shootdown**：
+
+页表的 `map()`, `unmap()`, `update_flags()` 操作会自动触发 TLB shootdown：
+
+```rust
+// 映射页面 - 自动刷新所有 CPU 的 TLB
+page_table.map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::user_rw())?;
+// ✓ 不需要手动调用 tlb_flush！
+
+// 解除映射 - 自动刷新所有 CPU 的 TLB
+page_table.unmap(vpn)?;
+// ✓ 不需要手动调用 tlb_flush！
+
+// 更新权限 - 自动刷新所有 CPU 的 TLB
+page_table.update_flags(vpn, UniversalPTEFlag::kernel_r())?;
+// ✓ 不需要手动调用 tlb_flush！
+```
+
+**工作原理**：
+
+`tlb_flush_all_cpus()` 方法执行以下操作：
+1. 刷新当前 CPU 的 TLB（使用 `sfence.vma`）
+2. 检查是否为多核环境（`NUM_CPU > 1`）
+3. 如果是多核，通过 IPI 通知所有其他 CPU 刷新 TLB
+
+**单核/多核行为**：
+
+- **单核环境**（`NUM_CPU = 1`）：只刷新本地 TLB，无 IPI 开销
+- **多核环境**（`NUM_CPU > 1`）：刷新本地 TLB + 发送 IPI 到其他 CPU
+- **测试模式**：自动检测环境，确保测试正常运行
+
+**性能影响**：
+
+- 单核环境：无额外开销（~10 CPU 周期）
+- 多核环境：每次页表操作增加约 0.5 微秒（4 核系统）
+- 批量操作：建议使用更大的页面或预分配页表以减少 IPI 频率
+
+详见 [IPI 文档 - 页表自动 TLB Shootdown](../arch/riscv/ipi.md#521-页表自动-tlb-shootdown)。
 
 ## 基本使用
 
@@ -201,16 +248,14 @@ page_table.map(
     PageSize::Size4K,
     UniversalPTEFlag::user_rw()
 )?;
-
-// TLB 刷新
-ActivePageTableInner::tlb_flush(vpn);
+// TLB 已自动刷新（单核/多核环境均适用）
 ```
 
 ### 取消映射
 
 ```rust
 page_table.unmap(vpn)?;
-ActivePageTableInner::tlb_flush(vpn);
+// TLB 已自动刷新
 ```
 
 ### 地址翻译
@@ -347,6 +392,24 @@ pub type PagingResult<T> = Result<T, PagingError>;
 - Bit 38 = 1，符号扩展后 bits [63:39] 全为 1
 - 低 38 位全为 0
 - 结果：`0xffff_ffc0_0000_0000`
+
+### Q5: 多核环境下如何处理 TLB？
+
+**A**: Comix 的页表实现会自动处理多核 TLB 同步：
+- 页表操作（`map`/`unmap`/`update_flags`）会自动刷新所有 CPU 的 TLB
+- 单核环境下无额外开销
+- 多核环境下通过 IPI（核间中断）通知其他 CPU 刷新 TLB
+- 详见 [TLB 管理](#tlb-管理) 章节
+
+### Q6: 为什么不需要手动刷新 TLB？
+
+**A**: 从 SMP 分支开始，页表操作内部集成了自动 TLB shootdown 机制：
+- **自动化**：`map`/`unmap`/`update_flags` 会自动调用 `tlb_flush_all_cpus()`
+- **正确性**：确保所有 CPU 看到一致的内存映射
+- **性能**：单核环境下无 IPI 开销，多核环境下自动优化
+- **简化**：用户代码无需关心 TLB 刷新细节
+
+如果需要手动控制 TLB 刷新（如批量优化），可以直接操作页表项后调用 `send_tlb_flush_ipi_all()`。
 
 ## 性能考量
 

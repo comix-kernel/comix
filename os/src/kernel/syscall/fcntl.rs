@@ -1,7 +1,7 @@
 //! fcntl 系统调用实现
 
 use crate::arch::trap::SumGuard;
-use crate::kernel::current_cpu;
+use crate::kernel::{current_cpu, current_task};
 use crate::uapi::errno::EINVAL;
 use crate::uapi::fcntl::{FcntlCmd, FdFlags, FileStatusFlags, Flock, LockType};
 use crate::vfs::{FsError, OpenFlags, file_lock_manager};
@@ -23,7 +23,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
         None => return -(EINVAL as isize),
     };
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     match cmd {
         FcntlCmd::GetFd => {
@@ -317,7 +317,7 @@ fn fcntl_dupfd(
     // 使用 FDTable 的标准方法进行复制
     let new_fd = match task.lock().fd_table.dup_from(old_fd, min_fd, flags) {
         Ok(fd) => {
-            crate::earlyprintln!(
+            crate::pr_debug!(
                 "fcntl_dupfd: old_fd={} -> new_fd={}, min_fd={}, cloexec={}",
                 old_fd,
                 fd,
@@ -327,7 +327,7 @@ fn fcntl_dupfd(
             fd
         }
         Err(e) => {
-            crate::earlyprintln!("fcntl_dupfd: failed: {:?}", e);
+            crate::pr_debug!("fcntl_dupfd: failed: {:?}", e);
             return e.to_errno();
         }
     };

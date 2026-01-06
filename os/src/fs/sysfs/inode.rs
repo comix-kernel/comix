@@ -11,8 +11,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use spin::Mutex;
 
+use crate::sync::Mutex;
 use crate::uapi::time::TimeSpec;
 use crate::vfs::{DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
 

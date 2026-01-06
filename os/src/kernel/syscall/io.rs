@@ -1,7 +1,7 @@
 //! IO 相关的系统调用实现
 
 use crate::arch::trap::SumGuard;
-use crate::kernel::current_cpu;
+use crate::kernel::{current_cpu, current_task};
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
@@ -14,7 +14,7 @@ use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
 /// - `count`: 要写入的字节数
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     // 1. 获取文件对象
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -40,7 +40,7 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 /// - `count`: 要读取的字节数
 pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
     // 1. 获取文件对象
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -74,7 +74,7 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EFAULT as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -135,7 +135,7 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EFAULT as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -192,7 +192,7 @@ pub fn pread64(fd: usize, buf: *mut u8, count: usize, offset: i64) -> isize {
         return -(EINVAL as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -221,7 +221,7 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
         return -(EINVAL as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -255,7 +255,7 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         return -(EFAULT as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -319,7 +319,7 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         return -(EFAULT as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
         Ok(f) => f,
         Err(e) => return e.to_errno(),
@@ -374,7 +374,7 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
 /// - `offset`: 输入文件偏移量指针（如果非空，从该位置读取并更新）
 /// - `count`: 要传输的字节数
 pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> isize {
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     let in_file = match task.lock().fd_table.get(in_fd) {
         Ok(f) => f,
@@ -499,7 +499,7 @@ fn poll_with_timeout(fds: usize, nfds: usize, timeout: Option<crate::uapi::time:
         return -(EINVAL as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     let timeout_trigger = match timeout {
         None => None,
@@ -637,7 +637,7 @@ pub fn select(
         return -(EINVAL as isize);
     }
 
-    let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
+    let task = current_task();
 
     // Parse timeout
     let timeout_trigger = if timeout == 0 {
