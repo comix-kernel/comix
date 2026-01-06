@@ -321,7 +321,7 @@ pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
 
     // 推进网络栈，避免在仅有 loopback/null-net 且任务阻塞在 select/poll 时网络停滞。
-    // 这里用一次 poll + 唤醒等待者的策略：即便没有真实网卡中断，也能靠时钟中断驱动网络进展。
+    // 在时钟中断里推进一次网络栈，保证即便缺少真实网卡中断也能推进 TCP 状态机/重传等。
     crate::net::socket::poll_network_interfaces();
     crate::kernel::syscall::io::wake_poll_waiters();
 

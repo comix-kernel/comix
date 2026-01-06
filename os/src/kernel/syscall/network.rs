@@ -246,20 +246,56 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             }
         }
         SocketHandle::Udp(h) => {
-            let mut sockets = SOCKET_SET.lock();
-            let socket = sockets.get_mut::<udp::Socket>(h);
-            use smoltcp::wire::IpListenEndpoint;
-            let listen_endpoint = match endpoint.addr {
-                IpAddress::Ipv4(addr) if addr.is_unspecified() => {
-                    IpListenEndpoint { addr: None, port: endpoint.port }
+            // Linux allows binding multiple UDP sockets to the same port (with SO_REUSEADDR).
+            // smoltcp's UDP demux only matches by dst_port, so we implement a per-port dispatcher:
+            // one smoltcp UDP socket per local port, and per-fd queues filtered by remote endpoint.
+
+            // Linux behavior: binding an already-bound UDP socket is invalid.
+            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
+                if let Some(old) = sf.get_local_endpoint() {
+                    if old.port != 0 {
+                        return -22; // EINVAL
+                    }
                 }
-                IpAddress::Ipv6(addr) if addr.is_unspecified() => {
-                    IpListenEndpoint { addr: None, port: endpoint.port }
-                }
-                _ => IpListenEndpoint { addr: Some(endpoint.addr), port: endpoint.port },
+            }
+
+            // Bind port 0 => allocate an ephemeral port.
+            let endpoint = if endpoint.port == 0 {
+                use core::sync::atomic::{AtomicU16, Ordering};
+                static NEXT_UDP_BIND_PORT: AtomicU16 = AtomicU16::new(49152);
+                let port = NEXT_UDP_BIND_PORT.fetch_add(1, Ordering::Relaxed);
+                let port = if port >= 65535 { 49152 } else { port };
+                IpEndpoint::new(endpoint.addr, port)
+            } else {
+                endpoint
             };
-            if socket.bind(listen_endpoint).is_err() {
-                return -98; // EADDRINUSE
+
+            // Persist local endpoint on the SocketFile for dispatch matching.
+            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
+                sf.set_local_endpoint(endpoint);
+            }
+
+            let bind_addr = match endpoint.addr {
+                IpAddress::Ipv4(a) if a.is_unspecified() => None,
+                IpAddress::Ipv4(_) => Some(endpoint.addr),
+                #[cfg(feature = "proto-ipv6")]
+                IpAddress::Ipv6(a) if a.is_unspecified() => None,
+                #[cfg(feature = "proto-ipv6")]
+                IpAddress::Ipv6(_) => Some(endpoint.addr),
+                _ => None,
+            };
+
+            if crate::net::socket::udp_attach_fd_to_port(
+                tid,
+                sockfd as usize,
+                &file,
+                h,
+                endpoint.port,
+                bind_addr,
+            )
+                .is_err()
+            {
+                return -98; // EADDRINUSE / bind error
             }
         }
     }
@@ -606,27 +642,58 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         SocketHandle::Udp(h) => {
             pr_debug!("connect: sockfd={} UDP", sockfd);
 
-            // Check if socket is already bound
-            let mut sockets = SOCKET_SET.lock();
-            let socket = sockets.get_mut::<udp::Socket>(h);
-
-            if !socket.is_open() {
-                // Implicit bind: allocate ephemeral port
-                use core::sync::atomic::{AtomicU16, Ordering};
-                static NEXT_UDP_PORT: AtomicU16 = AtomicU16::new(49152);
-                let port = NEXT_UDP_PORT.fetch_add(1, Ordering::Relaxed);
-                let port = if port >= 65535 { 49152 } else { port };
-
-                use smoltcp::wire::IpListenEndpoint;
-                let local_endpoint = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), port);
-                let listen_endpoint = IpListenEndpoint { addr: None, port: local_endpoint.port };
-                if socket.bind(listen_endpoint).is_err() {
-                    return -98; // EADDRINUSE
+            // Ensure this fd is attached to the shared per-port UDP socket.
+            // If not yet bound, implicitly bind to an ephemeral port (49152-65535).
+            let local_port = match file.as_any().downcast_ref::<SocketFile>().and_then(|sf| sf.get_local_endpoint()) {
+                Some(ep) if ep.port != 0 => ep.port,
+                _ => {
+                    use core::sync::atomic::{AtomicU16, Ordering};
+                    static NEXT_UDP_PORT: AtomicU16 = AtomicU16::new(49152);
+                    let port = NEXT_UDP_PORT.fetch_add(1, Ordering::Relaxed);
+                    if port >= 65535 { 49152 } else { port }
                 }
-                pr_debug!("connect: UDP implicit bind to port {}", port);
+            };
+
+            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
+                // IMPORTANT: use a concrete local source address for loopback, otherwise smoltcp
+                // will emit packets with src=0.0.0.0 and iperf3 UDP server will "connect()" to
+                // 127.0.0.1 and then drop subsequent datagrams (remote endpoint mismatch).
+                let local_addr = match endpoint.addr {
+                    IpAddress::Ipv4(a) if a.octets()[0] == 127 => {
+                        IpAddress::Ipv4(Ipv4Address::LOCALHOST)
+                    }
+                    #[cfg(feature = "proto-ipv6")]
+                    IpAddress::Ipv6(a) if a.is_loopback() => {
+                        use smoltcp::wire::Ipv6Address;
+                        IpAddress::Ipv6(Ipv6Address::LOOPBACK)
+                    }
+                    _ => IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
+                };
+                sf.set_local_endpoint(IpEndpoint::new(local_addr, local_port));
             }
 
-            drop(sockets);
+            let bind_addr = match endpoint.addr {
+                IpAddress::Ipv4(a) if a.octets()[0] == 127 => Some(IpAddress::Ipv4(Ipv4Address::LOCALHOST)),
+                #[cfg(feature = "proto-ipv6")]
+                IpAddress::Ipv6(a) if a.is_loopback() => {
+                    use smoltcp::wire::Ipv6Address;
+                    Some(IpAddress::Ipv6(Ipv6Address::LOOPBACK))
+                }
+                _ => None,
+            };
+
+            if crate::net::socket::udp_attach_fd_to_port(
+                tid,
+                sockfd as usize,
+                &file,
+                h,
+                local_port,
+                bind_addr,
+            )
+                .is_err()
+            {
+                return -98;
+            }
             pr_debug!("connect: sockfd={} UDP -> success", sockfd);
         }
     }
@@ -665,7 +732,7 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
                         if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
                             drop(file);
                             drop(task);
-                            crate::net::socket::poll_until_empty();
+                            crate::net::socket::poll_network_and_dispatch();
                             crate::kernel::yield_task();
                             continue;
                         }
@@ -707,7 +774,7 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
                         if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
                             drop(file);
                             drop(task);
-                            crate::net::socket::poll_until_empty();
+                            crate::net::socket::poll_network_and_dispatch();
                             crate::kernel::yield_task();
                             continue;
                         }
@@ -1435,7 +1502,7 @@ pub fn recvfrom(
                         {
                             drop(file);
                             drop(task);
-                            crate::net::socket::poll_until_empty();
+                            crate::net::socket::poll_network_and_dispatch();
                             crate::kernel::yield_task();
                             continue;
                         }

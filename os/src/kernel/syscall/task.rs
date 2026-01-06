@@ -30,7 +30,7 @@ use crate::{
     uapi::{
         errno::{
             EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOSYS, EPERM, ESRCH,
-            ETIMEDOUT,
+            ETIMEDOUT, ENOMEM,
         },
         futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
@@ -65,6 +65,9 @@ pub fn exit(code: c_int) -> c_int {
     // TODO: 处理 tid_addr 和 robust_list
     clear_child_tid_and_wake();
     let task = current_task();
+    // Linux 语义：退出时释放用户地址空间并关闭打开文件。
+    // 注意：必须先切换到内核页表，再释放当前进程页表资源，避免释放“正在使用的 satp”。
+    crate::kernel::task::cleanup_current_process_resources_on_exit();
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
     } else {
@@ -87,6 +90,7 @@ pub fn exit(code: c_int) -> c_int {
 pub fn exit_group(code: c_int) -> ! {
     // TODO: 处理 tid_addr 和 robust_list
     clear_child_tid_and_wake();
+    crate::kernel::task::cleanup_current_process_resources_on_exit();
     exit_process(current_task(), code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
@@ -203,12 +207,14 @@ pub fn clone(
     let space = if requested_flags.contains(CloneFlags::VM) {
         space
     } else {
-        Arc::new(SpinLock::new(
-            space
-                .lock()
-                .clone_for_fork()
-                .expect("fork: clone memory space failed."),
-        ))
+        let cloned = match space.lock().clone_for_fork() {
+            Ok(s) => s,
+            Err(_) => {
+                // 语义：fork/clone(不带 CLONE_VM) 内存不足时返回 ENOMEM，而不是 panic。
+                return -ENOMEM;
+            }
+        };
+        Arc::new(SpinLock::new(cloned))
     };
     let fd_table = if requested_flags.contains(CloneFlags::FILES) {
         fd_table

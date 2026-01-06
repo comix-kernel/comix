@@ -208,7 +208,7 @@ impl NetworkInterface {
         // 设置IP地址
         for ip_cidr in self.ip_addresses.lock().iter() {
             smoltcp_iface.interface_mut().update_ip_addrs(|addrs| {
-                addrs.push(*ip_cidr);
+                let _ = addrs.push(*ip_cidr);
             });
         }
 
@@ -257,29 +257,22 @@ impl smoltcp::phy::Device for NetDeviceAdapter {
         &mut self,
         _timestamp: smoltcp::time::Instant,
     ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        // 先检查loopback队列
-        let queue_len = self.loopback_queue.lock().len();
-        crate::pr_debug!("NetDeviceAdapter::receive: queue ptr={:p}, len={}",
-            Arc::as_ptr(&self.loopback_queue), queue_len);
-
-        if queue_len > 0 {
-            crate::pr_debug!("NetDeviceAdapter: loopback queue not empty, popping...");
-            if let Some(packet) = self.loopback_queue.lock().pop_front() {
-                crate::pr_debug!("NetDeviceAdapter: got packet from loopback queue, len={}", packet.len());
-                crate::pr_debug!("NetDeviceAdapter: packet data: {:02x?}", &packet[..packet.len().min(64)]);
-                self.rx_buffer[..packet.len()].copy_from_slice(&packet);
-                return Some((
-                    NetRxToken {
-                        buffer: &self.rx_buffer[..packet.len()],
-                    },
-                    NetTxToken {
-                        device: &self.device,
-                        loopback_queue: self.loopback_queue.clone(),
-                    },
-                ));
-            } else {
-                crate::pr_debug!("NetDeviceAdapter: queue was not empty but pop_front returned None!");
+        // 先检查 loopback 队列
+        if let Some(packet) = self.loopback_queue.lock().pop_front() {
+            if packet.len() > self.rx_buffer.len() {
+                // Drop oversized loopback frames to avoid panicking on buffer copy.
+                return None;
             }
+            self.rx_buffer[..packet.len()].copy_from_slice(&packet);
+            return Some((
+                NetRxToken {
+                    buffer: &self.rx_buffer[..packet.len()],
+                },
+                NetTxToken {
+                    device: &self.device,
+                    loopback_queue: self.loopback_queue.clone(),
+                },
+            ));
         }
 
         // 尝试从物理设备接收
@@ -306,9 +299,14 @@ impl smoltcp::phy::Device for NetDeviceAdapter {
 
     fn capabilities(&self) -> smoltcp::phy::DeviceCapabilities {
         let mut caps = smoltcp::phy::DeviceCapabilities::default();
-        caps.max_transmission_unit = self.device.mtu() as usize;
+        // NOTE: smoltcp expects Ethernet MTU (incl. 14-byte Ethernet header, excl. 4-byte FCS).
+        // Our NetDevice::mtu() follows the Linux convention (IP MTU), so we must add Ethernet header.
+        caps.max_transmission_unit =
+            self.device.mtu() as usize + smoltcp::wire::EthernetFrame::<&[u8]>::header_len();
         caps.medium = smoltcp::phy::Medium::Ethernet;
-        caps.max_burst_size = Some(1);
+        // Allow the stack to process more loopback packets per poll.
+        // This significantly reduces busy-wait time for high-rate workloads (e.g. iperf3 UDP).
+        caps.max_burst_size = Some(64);
         caps
     }
 }
@@ -344,29 +342,22 @@ impl smoltcp::phy::TxToken for NetTxToken<'_> {
         let mut buffer = alloc::vec![0; len];
         let result = f(&mut buffer);
 
-        // 检查是否是loopback数据包
-        let is_loopback = if buffer.len() >= 14 {
+        // 检查是否是 loopback 数据包。
+        //
+        // 特殊处理：在 NullNetDevice 上没有真实链路，发送只会被丢弃。
+        // 因此将所有 Tx 都回环到 loopback_queue，确保本机协议栈自洽（iperf3 UDP/TCP）。
+        let is_loopback = if self.device.name() == "null-net" {
+            true
+        } else if buffer.len() >= 14 {
             let ethertype = u16::from_be_bytes([buffer[12], buffer[13]]);
             match ethertype {
                 0x0800 if buffer.len() >= 34 => {
                     // IP: check both source and destination IP (offset 26 and 30)
-                    let src_is_lb = buffer[26] == 127;
-                    let dst_is_lb = buffer[30] == 127;
-                    let is_lb = src_is_lb || dst_is_lb;
-                    crate::pr_debug!("TxToken: IP packet, src_ip={}.{}.{}.{}, dst_ip={}.{}.{}.{}, is_loopback={}",
-                        buffer[26], buffer[27], buffer[28], buffer[29],
-                        buffer[30], buffer[31], buffer[32], buffer[33], is_lb);
-                    is_lb
+                    buffer[26] == 127 || buffer[30] == 127
                 },
                 0x0806 if buffer.len() >= 42 => {
                     // ARP: check both sender and target IP (offset 28 and 38)
-                    let sender_is_lb = buffer[28] == 127;
-                    let target_is_lb = buffer[38] == 127;
-                    let is_lb = sender_is_lb || target_is_lb;
-                    crate::pr_debug!("TxToken: ARP packet, sender_ip={}.{}.{}.{}, target_ip={}.{}.{}.{}, is_loopback={}",
-                        buffer[28], buffer[29], buffer[30], buffer[31],
-                        buffer[38], buffer[39], buffer[40], buffer[41], is_lb);
-                    is_lb
+                    buffer[28] == 127 || buffer[38] == 127
                 },
                 _ => false,
             }
@@ -375,10 +366,7 @@ impl smoltcp::phy::TxToken for NetTxToken<'_> {
         };
 
         if is_loopback {
-            crate::pr_debug!("TxToken: queue ptr={:p}", Arc::as_ptr(&self.loopback_queue));
             self.loopback_queue.lock().push_back(buffer);
-            crate::pr_debug!("TxToken: pushed to loopback queue, queue_len={}",
-                self.loopback_queue.lock().len());
         } else {
             let _ = self.device.send(&buffer);
         }
