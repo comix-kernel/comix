@@ -90,10 +90,6 @@ pub(crate) fn forkret() {
         let task = cpu.current_task.as_ref().unwrap();
         fp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     }
-    #[cfg(target_arch = "loongarch64")]
-    {
-        crate::arch::trap::set_trap_frame_ptr(fp as usize);
-    }
     // SAFETY: fp 指向的内存已经被分配且由当前任务拥有
     unsafe { restore(&*fp) };
 }
