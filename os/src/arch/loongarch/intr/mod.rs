@@ -3,7 +3,7 @@
 use loongArch64::register::{crmd, ecfg};
 use loongArch64::register::ecfg::LineBasedInterrupt;
 
-use crate::arch::constant::SSTATUS_SIE;
+use crate::arch::constant::{CSR_CRMD_IE, TIMER};
 
 /// 启用中断
 /// # Safety
@@ -45,7 +45,7 @@ pub fn read_and_enable_interrupts() -> usize {
 
 /// 恢复中断状态
 pub fn restore_interrupts(flags: usize) {
-    if (flags & SSTATUS_SIE) != 0 {
+    if (flags & CSR_CRMD_IE) != 0 {
         crmd::set_ie(true);
     } else {
         crmd::set_ie(false);
@@ -54,16 +54,22 @@ pub fn restore_interrupts(flags: usize) {
 
 /// 启用指定 IRQ
 pub fn enable_irq(_irq: usize) {
-    let mut lie = ecfg::read().lie();
-    lie |= LineBasedInterrupt::TIMER;
-    ecfg::set_lie(lie);
+    match _irq {
+        TIMER => unsafe { enable_timer_interrupt() },
+        _ => {
+            // TODO: 非定时器中断由平台中断控制器负责启用
+        }
+    }
 }
 
 /// 禁用指定 IRQ
 pub fn disable_irq(_irq: usize) {
-    let mut lie = ecfg::read().lie();
-    lie.remove(LineBasedInterrupt::TIMER);
-    ecfg::set_lie(lie);
+    match _irq {
+        TIMER => unsafe { disable_timer_interrupt() },
+        _ => {
+            // TODO: 非定时器中断由平台中断控制器负责关闭
+        }
+    }
 }
 
 /// 启用定时器中断
