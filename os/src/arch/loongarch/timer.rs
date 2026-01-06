@@ -2,7 +2,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::arch::intr::enable_timer_interrupt;
+use crate::{arch::intr::enable_timer_interrupt, earlyprintln};
 
 /// 定时器滴答计数
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
@@ -19,8 +19,10 @@ const CSR_TICLR: u32 = 0x44;
 
 /// 初始化定时器
 pub fn init() {
+    earlyprintln!("[Timer] Initializing timer");
     // 允许外部在平台层设置真实频率；此处仅开启本地定时器中断
     unsafe { enable_timer_interrupt() };
+    earlyprintln!("[Timer] Timer interrupt enabled");
     set_next_trigger();
 }
 
@@ -46,13 +48,26 @@ pub fn clock_freq() -> usize {
 
 /// 设置下一次定时器中断
 pub fn set_next_trigger() {
-    // 目标间隔 = 1 / TICKS_PER_SEC 秒
     let delta = (clock_freq() / TICKS_PER_SEC).max(1);
 
     unsafe {
-        // TCFG: [0]=EN, [1]=PERIODIC, [63:2]=初始计数值（这里使用 delta）
-        let cfg = ((delta as u64) << 2) | 0b11;
-        core::arch::asm!("csrwr {val}, {tcfg}", val = in(reg) cfg, tcfg = const CSR_TCFG, options(nostack, preserves_flags));
+        // 1. 先彻底关闭定时器并清除周期模式 (TCFG bit 0 and 1 = 0) 防止配置过程中的竞争
+        core::arch::asm!("csrwr $r0, 0x410");
+
+        // 2. 写入 TVAL (0x420)
+        // 在 En=0 时写入 TVAL 会直接重置当前倒计时器
+        core::arch::asm!(
+            "csrwr {val}, 0x420",
+            val = in(reg) delta
+        );
+
+        // 3. 开启定时器，设为单次触发模式 (En=1, Periodic=0)
+        // 这样定时器倒数到 0 后会停下并触发中断
+        let cfg = 0b01usize;
+        core::arch::asm!(
+            "csrwr {val}, 0x410",
+            val = in(reg) cfg
+        );
     }
 }
 
