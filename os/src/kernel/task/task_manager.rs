@@ -131,6 +131,9 @@ impl TaskManagerTrait for TaskManager {
         {
             let mut task = task.lock();
             task.exit_code = Some(code as i32);
+            // Linux 语义：线程退出时应释放其对用户地址空间的引用。
+            // 线程组共享的地址空间由 Arc 计数管理：最后一个线程退出时自动释放。
+            task.memory_space = None;
         }
         exit_task_with_block(task);
     }

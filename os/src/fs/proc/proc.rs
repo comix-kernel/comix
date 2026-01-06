@@ -60,6 +60,14 @@ impl ProcFS {
         );
         root.add_child("mounts", mounts)?;
 
+        // 创建 /proc/psmem - 进程内存快照（便于定位 FrameAllocFailed 的真实来源）
+        let psmem = ProcInode::new_dynamic_file(
+            "psmem",
+            alloc::sync::Arc::new(crate::fs::proc::generators::PsmemGenerator),
+            FileMode::from_bits_truncate(0o444),
+        );
+        root.add_child("psmem", psmem)?;
+
         // 创建 /proc/self - 动态符号链接，指向当前进程
         let self_link = ProcInode::new_dynamic_symlink("self", || {
             use alloc::string::ToString;

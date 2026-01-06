@@ -239,7 +239,7 @@ impl ProcInode {
 
     /// 为指定 PID 创建进程目录
     fn create_process_dir(&self, pid: u32) -> Option<Arc<ProcInode>> {
-        use crate::fs::proc::generators::{CmdlineGenerator, StatGenerator, StatusGenerator};
+        use crate::fs::proc::generators::{CmdlineGenerator, MapsGenerator, StatGenerator, StatusGenerator};
         use crate::kernel::{TASK_MANAGER, TaskManagerTrait};
 
         // 获取任务
@@ -288,6 +288,14 @@ impl ProcInode {
             Some(proc_pid_child_inode_no(pid, 4)),
         );
         let _ = proc_dir.add_child("exe", exe);
+
+        // 创建 maps 文件（简化版，主要用于定位内存占用与 FrameAllocFailed）
+        let maps = Self::new_dynamic_file_with_inode_no(
+            Arc::new(MapsGenerator::new(Arc::downgrade(&task))),
+            FileMode::from_bits_truncate(0o444),
+            Some(proc_pid_child_inode_no(pid, 5)),
+        );
+        let _ = proc_dir.add_child("maps", maps);
 
         Some(proc_dir)
     }

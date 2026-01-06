@@ -95,6 +95,24 @@ impl MappingArea {
         self.area_type
     }
 
+    /// 已实际映射的页数（仅对 Framed 有意义）
+    ///
+    /// 注意：Range/VPN/PPN 语义均为左闭右开。
+    pub fn mapped_pages(&self) -> usize {
+        match self.map_type {
+            MapType::Framed => self
+                .frames
+                .values()
+                .map(|t| match t {
+                    TrackedFrames::Single(_) => 1,
+                    TrackedFrames::Multiple(v) => v.len(),
+                    TrackedFrames::Contiguous(r) => r.len(),
+                })
+                .sum(),
+            _ => 0,
+        }
+    }
+
     /// 获取虚拟页号（VPN）对应的物理页号（PPN）（如果已映射）
     pub fn get_ppn(&self, vpn: Vpn) -> Option<crate::mm::address::Ppn> {
         self.frames.get(&vpn).map(|tracked| match tracked {

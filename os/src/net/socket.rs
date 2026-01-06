@@ -2,6 +2,7 @@
 
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
+use alloc::collections::VecDeque;
 use alloc::vec;
 use lazy_static::lazy_static;
 use smoltcp::iface::{Interface, SocketHandle as SmoltcpHandle, SocketSet};
@@ -23,7 +24,7 @@ pub struct NetIfaceWrapper {
 }
 
 impl NetIfaceWrapper {
-    pub fn poll(&self, sockets: &SpinLock<SocketSet>) -> bool {
+    pub fn poll(&self, sockets: &SpinLock<SocketSet<'static>>) -> bool {
         let timestamp = smoltcp::time::Instant::from_millis(
             crate::arch::timer::get_time_ms() as i64
         );
@@ -42,6 +43,29 @@ impl NetIfaceWrapper {
         let result = iface.poll(timestamp, &mut *dev, &mut *sockets);
         crate::pr_debug!("poll: result={:?}", result);
 
+        // NOTE: For loopback traffic, frames produced by Tx are enqueued into `loopback_queue`
+        // during this poll, and therefore won't be received until a subsequent poll. Do a small,
+        // bounded extra poll to consume newly enqueued frames, otherwise UDP workloads like
+        // iperf3 can appear to "stall" (server sees only the first datagram).
+        if dev.loopback_queue_len() > 0 {
+            const MAX_EXTRA_POLLS: usize = 2;
+            for _ in 0..MAX_EXTRA_POLLS {
+                if dev.loopback_queue_len() == 0 {
+                    break;
+                }
+                let _ = iface.poll(timestamp, &mut *dev, &mut *sockets);
+            }
+        }
+
+        // Drain UDP datagrams from shared per-port sockets and deliver them to per-fd queues.
+        //
+        // This must happen as part of the global poll path; otherwise, programs that wait in
+        // select()/poll() (e.g. iperf3 UDP server) never observe readability because our
+        // SocketFile::readable() checks the per-fd queue, not the smoltcp socket buffer.
+        //
+        // Lock order: SocketSet -> UDP_PORTS (see udp_attach_fd_to_port).
+        let delivered_udp = udp_dispatch_drain_locked(&mut *sockets);
+
         // Reap TCP sockets that have finished a graceful close.
         let mut pending = PENDING_TCP_CLOSE.lock();
         pending.retain(|h| {
@@ -59,7 +83,7 @@ impl NetIfaceWrapper {
             }
         });
 
-        let changed = result != smoltcp::iface::PollResult::None;
+        let changed = result != smoltcp::iface::PollResult::None || delivered_udp;
         if changed {
             crate::kernel::syscall::io::wake_poll_waiters();
         }
@@ -83,6 +107,9 @@ lazy_static! {
     pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
     pub static ref NET_IFACE: SpinLock<Option<NetIfaceWrapper>> = SpinLock::new(None);
+    // UDP port dispatcher: one smoltcp UDP socket per local port, plus multiple "logical" sockets
+    // (per fd) that receive datagrams based on their connected remote endpoint.
+    static ref UDP_PORTS: SpinLock<BTreeMap<u16, UdpPortEntry>> = SpinLock::new(BTreeMap::new());
     // TCP sockets that initiated a graceful close on Drop, and should be removed
     // from SocketSet once the close handshake completes.
     //
@@ -95,12 +122,29 @@ lazy_static! {
 use crate::uapi::fcntl::OpenFlags;
 use crate::uapi::socket::SocketOptions;
 
+const UDP_RXQ_CAP: usize = 64;
+const UDP_DGRAM_MAX: usize = 2048;
+
+#[derive(Debug)]
+struct UdpDatagram {
+    src: IpEndpoint,
+    len: usize,
+    data: [u8; UDP_DGRAM_MAX],
+}
+
+#[derive(Debug)]
+struct UdpPortEntry {
+    handle: SmoltcpHandle,
+    sockets: alloc::vec::Vec<alloc::sync::Weak<dyn crate::vfs::File>>,
+}
+
 pub struct SocketFile {
     handle: SpinLock<Option<SocketHandle>>,
     listen_sockets: SpinLock<alloc::vec::Vec<SocketHandle>>,
     listen_backlog: SpinLock<usize>,
     local_endpoint: SpinLock<Option<IpEndpoint>>,
     remote_endpoint: SpinLock<Option<IpEndpoint>>,
+    udp_rx_queue: SpinLock<VecDeque<UdpDatagram>>,
     shutdown_rd: SpinLock<bool>,
     shutdown_wr: SpinLock<bool>,
     flags: SpinLock<OpenFlags>,
@@ -116,6 +160,7 @@ impl SocketFile {
             listen_backlog: SpinLock::new(0),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
+            udp_rx_queue: SpinLock::new(VecDeque::with_capacity(UDP_RXQ_CAP)),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(OpenFlags::empty()),
@@ -139,6 +184,7 @@ impl SocketFile {
             listen_backlog: SpinLock::new(0),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
+            udp_rx_queue: SpinLock::new(VecDeque::with_capacity(UDP_RXQ_CAP)),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(flags),
@@ -234,6 +280,23 @@ impl SocketFile {
         *self.remote_endpoint.lock()
     }
 
+    fn udp_queue_len(&self) -> usize {
+        self.udp_rx_queue.lock().len()
+    }
+
+    fn udp_push(&self, d: UdpDatagram) -> bool {
+        let mut q = self.udp_rx_queue.lock();
+        if q.len() == q.capacity() {
+            return false;
+        }
+        q.push_back(d);
+        true
+    }
+
+    fn udp_pop(&self) -> Option<UdpDatagram> {
+        self.udp_rx_queue.lock().pop_front()
+    }
+
     pub fn shutdown_read(&self) {
         *self.shutdown_rd.lock() = true;
     }
@@ -290,7 +353,17 @@ impl Drop for SocketFile {
                         }
                     }
                 },
-                SocketHandle::Udp(h) => { sockets.remove(h); },
+                SocketHandle::Udp(h) => {
+                    // UDP sockets may be managed by the per-port dispatcher (shared smoltcp socket).
+                    // Do not remove from SocketSet here; stale logical sockets are cleaned up in the
+                    // dispatcher, which will remove the shared socket when no logical sockets remain.
+                    let ports = UDP_PORTS.lock();
+                    let is_shared = ports.values().any(|e| e.handle == h);
+                    drop(ports);
+                    if !is_shared {
+                        sockets.remove(h);
+                    }
+                }
             }
         }
         for handle in self.listen_sockets.lock().iter() {
@@ -413,6 +486,7 @@ pub fn socket_sendto(
     };
     if result.is_ok() {
         poll_network_interfaces();
+        crate::kernel::syscall::io::wake_poll_waiters();
     }
     result
 }
@@ -451,12 +525,13 @@ impl File for SocketFile {
                     state,
                     can_recv
                 );
-                // Closed sockets are readable (EOF)
-                can_recv || state == tcp::State::Closed
+                // Linux-like semantics: sockets become readable on FIN (EOF).
+                // smoltcp reports this as CloseWait when the peer has closed.
+                can_recv || matches!(state, tcp::State::Closed | tcp::State::CloseWait)
             }
             Some(SocketHandle::Udp(h)) => {
-                let socket = sockets.get::<udp::Socket>(*h);
-                socket.can_recv()
+                drop(sockets);
+                self.udp_queue_len() > 0
             }
             None => false,
         }
@@ -499,6 +574,12 @@ impl File for SocketFile {
                     return Ok(0);
                 }
 
+                // Linux-like EOF semantics for TCP:
+                // once peer has closed (CloseWait) and we have no pending data, read must return 0.
+                if state == tcp::State::CloseWait && recv_queue == 0 {
+                    return Ok(0);
+                }
+
                 let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
 
                 // CRITICAL FIX: smoltcp's recv_slice() returns Ok(0) when no data is available
@@ -506,6 +587,13 @@ impl File for SocketFile {
                 // 1. No data available (should return EAGAIN for non-blocking, or block for blocking)
                 // 2. Connection closed (should return 0 = EOF)
                 if let Ok(0) = result {
+                    // CloseWait indicates FIN received. Treat 0-length read as EOF.
+                    if state == tcp::State::CloseWait {
+                        crate::pr_debug!(
+                            "[Socket] read: recv_slice returned 0 and state=CloseWait, returning EOF"
+                        );
+                        Ok(0)
+                    } else
                     // recv_slice returned 0 bytes - check if this is EOF or just no data
                     if socket.may_recv() {
                         // Socket can still receive data, so this is not EOF
@@ -524,12 +612,14 @@ impl File for SocketFile {
                     result
                 }
             }
-            Some(SocketHandle::Udp(h)) => {
-                let socket = sockets.get_mut::<udp::Socket>(*h);
-                socket
-                    .recv_slice(buf)
-                    .map(|(n, _)| n)
-                    .map_err(|_| FsError::WouldBlock)
+            Some(SocketHandle::Udp(_h)) => {
+                drop(sockets);
+                let Some(d) = self.udp_pop() else {
+                    return Err(FsError::WouldBlock);
+                };
+                let n = core::cmp::min(buf.len(), d.len);
+                buf[..n].copy_from_slice(&d.data[..n]);
+                Ok(n)
             }
             None => Err(FsError::InvalidArgument),
         };
@@ -612,11 +702,26 @@ impl File for SocketFile {
         match self.handle.lock().as_ref() {
             Some(SocketHandle::Tcp(h)) => {
                 let socket = sockets.get_mut::<tcp::Socket>(*h);
-                // Closed socket returns EOF (0 bytes)
-                if socket.state() == tcp::State::Closed {
+                let state = socket.state();
+                if state == tcp::State::Closed {
                     return Ok((0, None));
                 }
-                let n = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;
+                if state == tcp::State::CloseWait && socket.recv_queue() == 0 {
+                    return Ok((0, None));
+                }
+
+                let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
+                let n = if let Ok(0) = result {
+                    if state == tcp::State::CloseWait {
+                        0
+                    } else if socket.may_recv() {
+                        return Err(FsError::WouldBlock);
+                    } else {
+                        0
+                    }
+                } else {
+                    result?
+                };
                 let remote = socket.remote_endpoint().map(|ep| {
                     let mut addr_buf = alloc::vec![0u8; 16];
                     let _ = write_sockaddr_in_to_buf(&mut addr_buf, ep);
@@ -624,11 +729,15 @@ impl File for SocketFile {
                 });
                 Ok((n, remote))
             }
-            Some(SocketHandle::Udp(h)) => {
-                let socket = sockets.get_mut::<udp::Socket>(*h);
-                let (n, metadata) = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock)?;
+            Some(SocketHandle::Udp(_h)) => {
+                drop(sockets);
+                let Some(d) = self.udp_pop() else {
+                    return Err(FsError::WouldBlock);
+                };
+                let n = core::cmp::min(buf.len(), d.len);
+                buf[..n].copy_from_slice(&d.data[..n]);
                 let mut addr_buf = alloc::vec![0u8; 16];
-                let _ = write_sockaddr_in_to_buf(&mut addr_buf, metadata.endpoint);
+                let _ = write_sockaddr_in_to_buf(&mut addr_buf, d.src);
                 Ok((n, Some(addr_buf)))
             }
             None => Err(FsError::InvalidArgument),
@@ -636,24 +745,7 @@ impl File for SocketFile {
     }
 }
 
-pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
-    let mut rx_vec = alloc::vec::Vec::new();
-    rx_vec.try_reserve(4096).map_err(|_| ())?;
-    rx_vec.resize(4096, 0);
-
-    let mut tx_vec = alloc::vec::Vec::new();
-    tx_vec.try_reserve(4096).map_err(|_| ())?;
-    tx_vec.resize(4096, 0);
-
-    let rx_buffer = tcp::SocketBuffer::new(rx_vec);
-    let tx_buffer = tcp::SocketBuffer::new(tx_vec);
-    let socket = tcp::Socket::new(rx_buffer, tx_buffer);
-
-    let handle = SOCKET_SET.lock().add(socket);
-    Ok(SocketHandle::Tcp(handle))
-}
-
-pub fn create_udp_socket() -> Result<SocketHandle, ()> {
+fn create_udp_socket_in_set(sockets: &mut SocketSet<'static>) -> Result<SmoltcpHandle, ()> {
     // Allocate metadata buffers
     let mut rx_meta_vec = alloc::vec::Vec::new();
     rx_meta_vec.try_reserve(4).map_err(|_| ())?;
@@ -675,7 +767,29 @@ pub fn create_udp_socket() -> Result<SocketHandle, ()> {
     let rx_buffer = udp::PacketBuffer::new(rx_meta_vec, rx_data_vec);
     let tx_buffer = udp::PacketBuffer::new(tx_meta_vec, tx_data_vec);
     let socket = udp::Socket::new(rx_buffer, tx_buffer);
+    Ok(sockets.add(socket))
+}
+
+pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
+    let mut rx_vec = alloc::vec::Vec::new();
+    rx_vec.try_reserve(4096).map_err(|_| ())?;
+    rx_vec.resize(4096, 0);
+
+    let mut tx_vec = alloc::vec::Vec::new();
+    tx_vec.try_reserve(4096).map_err(|_| ())?;
+    tx_vec.resize(4096, 0);
+
+    let rx_buffer = tcp::SocketBuffer::new(rx_vec);
+    let tx_buffer = tcp::SocketBuffer::new(tx_vec);
+    let socket = tcp::Socket::new(rx_buffer, tx_buffer);
+
     let handle = SOCKET_SET.lock().add(socket);
+    Ok(SocketHandle::Tcp(handle))
+}
+
+pub fn create_udp_socket() -> Result<SocketHandle, ()> {
+    let mut sockets = SOCKET_SET.lock();
+    let handle = create_udp_socket_in_set(&mut *sockets)?;
     Ok(SocketHandle::Udp(handle))
 }
 
@@ -810,14 +924,200 @@ pub fn poll_network_interfaces() {
     }
 }
 
+/// Poll smoltcp + dispatch UDP datagrams to per-fd queues.
+///
+/// IMPORTANT: this may allocate (copies UDP payloads) and therefore must not be called from
+/// interrupt context.
+pub fn poll_network_and_dispatch() {
+    poll_network_interfaces();
+    if udp_dispatch() {
+        crate::kernel::syscall::io::wake_poll_waiters();
+    }
+}
+
+/// Drain UDP datagrams from shared per-port sockets and deliver them to per-fd queues.
+///
+/// Returns whether any datagram was delivered.
+pub fn udp_dispatch() -> bool {
+    let mut sockets = SOCKET_SET.lock();
+    udp_dispatch_drain_locked(&mut *sockets)
+}
+
+/// Attach an existing UDP fd to the shared per-port UDP socket, and register it as a logical socket
+/// for datagram dispatching.
+///
+/// Lock order: SOCKET_SET -> UDP_PORTS (must match NetIfaceWrapper::poll path).
+pub fn udp_attach_fd_to_port(
+    tid: usize,
+    fd: usize,
+    file: &Arc<dyn crate::vfs::File>,
+    old_handle: SmoltcpHandle,
+    port: u16,
+    bind_addr: Option<IpAddress>,
+) -> Result<SmoltcpHandle, ()> {
+    // 1) Ensure shared per-port smoltcp socket exists and is bound.
+    let shared_handle = {
+        let mut sockets = SOCKET_SET.lock();
+        let mut ports = UDP_PORTS.lock();
+        if let Some(e) = ports.get(&port) {
+            e.handle
+        } else {
+            let h = create_udp_socket_in_set(&mut *sockets)?;
+            use smoltcp::wire::IpListenEndpoint;
+            let listen = IpListenEndpoint {
+                addr: bind_addr,
+                port,
+            };
+            if sockets.get_mut::<udp::Socket>(h).bind(listen).is_err() {
+                sockets.remove(h);
+                return Err(());
+            }
+            ports.insert(
+                port,
+                UdpPortEntry {
+                    handle: h,
+                    sockets: alloc::vec::Vec::new(),
+                },
+            );
+            h
+        }
+    };
+
+    // 2) Atomically switch fd mapping to the shared handle first (avoid stale-handle panics).
+    update_socket_handle(tid, fd, SocketHandle::Udp(shared_handle));
+    if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
+        sf.set_handle(SocketHandle::Udp(shared_handle));
+    }
+
+    // 3) Register this logical socket for dispatch.
+    {
+        let mut ports = UDP_PORTS.lock();
+        if let Some(e) = ports.get_mut(&port) {
+            let already = e
+                .sockets
+                .iter()
+                .filter_map(|w| w.upgrade())
+                .any(|f| alloc::sync::Arc::ptr_eq(&f, file));
+            if !already {
+                e.sockets.push(alloc::sync::Arc::downgrade(file));
+            }
+        }
+    }
+
+    // 4) Finally remove the old per-fd smoltcp socket handle (it is unbound and should not receive).
+    if old_handle != shared_handle {
+        // Never remove a handle that is currently used as a shared per-port socket.
+        // (This can happen if user space calls bind/connect in an unexpected order.)
+        let mut sockets = SOCKET_SET.lock();
+        let ports = UDP_PORTS.lock();
+        let old_is_shared = ports.values().any(|e| e.handle == old_handle);
+        drop(ports);
+        if !old_is_shared {
+            sockets.remove(old_handle);
+        }
+    }
+
+    Ok(shared_handle)
+}
+
+/// Drain UDP datagrams from shared per-port sockets and deliver them to per-fd queues.
+///
+/// This function must be called with `SOCKET_SET` already locked.
+fn udp_dispatch_drain_locked(sockets: &mut SocketSet<'static>) -> bool {
+    let mut delivered_any = false;
+    let mut ports = UDP_PORTS.lock();
+    let mut to_remove: alloc::vec::Vec<(u16, SmoltcpHandle)> = alloc::vec::Vec::new();
+
+    for (port, entry) in ports.iter_mut() {
+        let socket = sockets.get_mut::<udp::Socket>(entry.handle);
+
+        while socket.can_recv() {
+            let (payload, meta) = match socket.recv() {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+
+            let src = meta.endpoint;
+            let mut data = [0u8; UDP_DGRAM_MAX];
+            let copy_len = core::cmp::min(payload.len(), UDP_DGRAM_MAX);
+            data[..copy_len].copy_from_slice(&payload[..copy_len]);
+            let d = UdpDatagram {
+                src,
+                len: copy_len,
+                data,
+            };
+
+            // Prefer a connected socket that matches the remote endpoint. Otherwise, deliver to the
+            // first unconnected socket registered for this port.
+            let mut target: Option<alloc::sync::Arc<dyn crate::vfs::File>> = None;
+            let mut fallback: Option<alloc::sync::Arc<dyn crate::vfs::File>> = None;
+
+            entry.sockets.retain(|w| w.strong_count() > 0);
+
+            for w in entry.sockets.iter() {
+                let Some(f) = w.upgrade() else { continue };
+                let Some(sf) = f.as_any().downcast_ref::<SocketFile>() else { continue };
+
+                let Some(local_ep) = sf.get_local_endpoint() else { continue };
+                if local_ep.port != *port {
+                    continue;
+                }
+
+                match sf.get_remote_endpoint() {
+                    Some(remote) => {
+                        if remote.addr == src.addr && remote.port == src.port {
+                            target = Some(f.clone());
+                            break;
+                        }
+                    }
+                    None => {
+                        if fallback.is_none() {
+                            fallback = Some(f.clone());
+                        }
+                    }
+                }
+            }
+
+            let target = target.or(fallback);
+            if let Some(f) = target {
+                if let Some(sf) = f.as_any().downcast_ref::<SocketFile>() {
+                    if sf.udp_push(d) {
+                        delivered_any = true;
+                    }
+                }
+            }
+        }
+
+        // Prune dead logical sockets; if none remain, remove the shared smoltcp socket.
+        entry.sockets.retain(|w| w.strong_count() > 0);
+        if entry.sockets.is_empty() {
+            to_remove.push((*port, entry.handle));
+        }
+    }
+
+    for (port, handle) in to_remove {
+        ports.remove(&port);
+        sockets.remove(handle);
+    }
+
+    delivered_any
+}
+
 /// Poll until loopback queue is empty
 pub fn poll_until_empty() {
     if let Some(ref wrapper) = *NET_IFACE.lock() {
         // Always poll at least once to process socket state changes
         wrapper.poll(&SOCKET_SET);
 
-        // Then drain loopback queue if it has packets
-        while wrapper.loopback_queue_len() > 0 {
+        // Then drain loopback queue, but do it in bounded steps.
+        //
+        // Draining until empty can take unbounded time when user programs (e.g. iperf3 UDP)
+        // generate packets faster than the stack can consume them, causing apparent "hangs".
+        const MAX_DRAIN_POLLS: usize = 256;
+        for _ in 0..MAX_DRAIN_POLLS {
+            if wrapper.loopback_queue_len() == 0 {
+                break;
+            }
             wrapper.poll(&SOCKET_SET);
         }
     }

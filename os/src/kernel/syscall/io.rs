@@ -42,7 +42,7 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
                 {
                     drop(file);
                     drop(task);
-                    crate::net::socket::poll_until_empty();
+                    crate::net::socket::poll_network_and_dispatch();
                     crate::kernel::yield_task();
                     continue;
                 }
@@ -87,7 +87,7 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
                 {
                     drop(file);
                     drop(task);
-                    crate::net::socket::poll_until_empty();
+                    crate::net::socket::poll_network_and_dispatch();
                     crate::kernel::yield_task();
                     continue;
                 }
@@ -559,8 +559,8 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     };
 
     loop {
-        // 关键：在阻塞等待前主动推进网络栈，避免 loopback/收包无人驱动导致的“永远等不到”
-        crate::net::socket::poll_network_interfaces();
+        // 关键：在阻塞等待前主动推进网络栈，并分发 UDP 到每个 fd 的队列，避免“永远等不到”
+        crate::net::socket::poll_network_and_dispatch();
 
         let mut ready_count = 0;
 
@@ -621,8 +621,8 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             TIMER_QUEUE.lock().remove_task(&task);
         }
 
-        // 被唤醒后再推进一次网络栈，尽快把“刚到的数据包”转成 socket 可读事件
-        crate::net::socket::poll_network_interfaces();
+        // 被唤醒后再推进一次网络栈，并把“刚到的数据包”分发成 socket 可读事件
+        crate::net::socket::poll_network_and_dispatch();
 
         // Check if woken by timeout
         if let Some(trigger) = timeout_trigger {
@@ -791,8 +791,8 @@ fn select_common(
     };
 
     loop {
-        // 关键：在阻塞等待前主动推进网络栈（同 ppoll）
-        crate::net::socket::poll_network_interfaces();
+        // 关键：在阻塞等待前主动推进网络栈（同 ppoll），并分发 UDP
+        crate::net::socket::poll_network_and_dispatch();
 
         let (ready_count, read_set, write_set, except_set) = check_fds();
         if ready_count < 0 {
@@ -839,8 +839,8 @@ fn select_common(
                 TIMER_QUEUE.lock().remove_task(&task);
             }
 
-            // 被唤醒后再推进一次网络栈
-            crate::net::socket::poll_network_interfaces();
+            // 被唤醒后再推进一次网络栈，并分发 UDP
+            crate::net::socket::poll_network_and_dispatch();
 
             if let Some(trigger) = timeout_trigger {
                 use crate::arch::timer::get_time;
