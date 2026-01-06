@@ -39,7 +39,7 @@ pub fn init(transport: MmioTransport<'static>) {
                 Arc::new(NetworkInterface::new(interface_name, virtio_device.clone()));
 
             // 将设备添加到全局设备列表
-            add_network_device(virtio_device.clone());
+            add_network_device(virtio_device);
 
             // 将接口添加到全局接口管理器
             crate::net::interface::NETWORK_INTERFACE_MANAGER
@@ -79,7 +79,7 @@ pub fn init_pci(transport: PciTransport) {
             let network_interface =
                 Arc::new(NetworkInterface::new(interface_name, virtio_device.clone()));
 
-            add_network_device(virtio_device.clone());
+            add_network_device(virtio_device);
 
             crate::net::interface::NETWORK_INTERFACE_MANAGER
                 .lock()
