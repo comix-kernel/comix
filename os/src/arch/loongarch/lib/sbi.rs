@@ -69,7 +69,8 @@ pub fn set_timer(_timer: usize) {
 /// 参考 ACPI 5.0 规范和 QEMU hw/acpi/generic_event_device.c
 pub fn shutdown(_failure: bool) -> ! {
     // 计算 SLEEP_CTL 寄存器的虚拟地址（通过 DMW0 映射）
-    let sleep_ctl_addr = (VIRT_GED_REG_ADDR + ACPI_GED_REG_SLEEP_CTL) | 0x8000_0000_0000_0000;
+    let sleep_ctl_addr =
+        crate::arch::mm::paddr_to_vaddr(VIRT_GED_REG_ADDR + ACPI_GED_REG_SLEEP_CTL);
 
     // 构造 SLEEP_CTL 寄存器值: SLP_TYP=5 (S5), SLP_EN=1
     let sleep_value: u8 = (ACPI_GED_SLP_TYP_S5 << ACPI_GED_SLP_TYP_POS) | ACPI_GED_SLP_EN;
@@ -80,7 +81,8 @@ pub fn shutdown(_failure: bool) -> ! {
     }
 
     // 如果 SLEEP_CTL 关机失败，尝试复位
-    let reset_addr = (VIRT_GED_REG_ADDR + ACPI_GED_REG_RESET) | 0x8000_0000_0000_0000;
+    let reset_addr =
+        crate::arch::mm::paddr_to_vaddr(VIRT_GED_REG_ADDR + ACPI_GED_REG_RESET);
     unsafe {
         let reset_reg = reset_addr as *mut u8;
         reset_reg.write_volatile(ACPI_GED_RESET_VALUE);

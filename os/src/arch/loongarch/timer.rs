@@ -1,43 +1,64 @@
-//! LoongArch64 定时器模块（存根）
+//! LoongArch64 定时器模块
 
 use core::sync::atomic::{AtomicUsize, Ordering};
+
+use loongArch64::register::{tcfg, ticlr};
+use loongArch64::time::{Time, get_timer_freq};
+
+use crate::kernel::CLOCK_FREQ;
 
 /// 定时器滴答计数
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
 
-/// 时钟频率 (Hz)
-static CLOCK_FREQ: AtomicUsize = AtomicUsize::new(100_000_000); // 假设 100MHz
-
 /// 每秒滴答数
 pub const TICKS_PER_SEC: usize = 100;
+/// 每秒毫秒数
+pub const MSEC_PER_SEC: usize = 1000;
 
 /// 初始化定时器
 pub fn init() {
-    // TODO: 初始化 LoongArch 定时器
+    let freq = get_timer_freq();
+    // SAFETY: 仅在初始化阶段设置时钟频率
+    unsafe { CLOCK_FREQ = freq };
+    set_next_trigger();
+    // SAFETY: 初始化阶段配置 CSR 定时器中断
+    unsafe { crate::arch::intr::enable_timer_interrupt() };
 }
 
-/// 获取当前时间（滴答数）
+/// 获取当前时间（硬件计数器值）
+#[inline]
 pub fn get_time() -> usize {
-    // TODO: 读取 LoongArch 计数器
-    0
+    Time::read()
 }
 
 /// 获取当前滴答数
+#[inline]
 pub fn get_ticks() -> usize {
     TIMER_TICKS.load(Ordering::Relaxed)
 }
 
 /// 获取时钟频率
+#[inline]
 pub fn clock_freq() -> usize {
-    CLOCK_FREQ.load(Ordering::Relaxed)
+    // SAFETY: CLOCK_FREQ 在初始化阶段写入
+    unsafe { CLOCK_FREQ }
 }
 
 /// 设置下一次定时器中断
 pub fn set_next_trigger() {
-    // TODO: 设置 LoongArch 定时器比较值
+    let mut interval = clock_freq() / TICKS_PER_SEC;
+    if interval < 4 {
+        interval = 4;
+    }
+    interval = (interval + 3) & !3;
+    tcfg::set_init_val(interval);
+    tcfg::set_periodic(true);
+    tcfg::set_en(true);
+    ticlr::clear_timer_interrupt();
 }
 
 /// 获取当前时间（毫秒）
+#[inline]
 pub fn get_time_ms() -> usize {
-    get_ticks() * 1000 / TICKS_PER_SEC
+    (get_time() as u128 * MSEC_PER_SEC as u128 / clock_freq() as u128) as usize
 }
