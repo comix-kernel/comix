@@ -90,6 +90,16 @@ pub fn init() {
             (root_ppn.as_usize() | (8 << 60))
         );
     }
+
+    #[cfg(target_arch = "loongarch64")]
+    {
+        use alloc::sync::Arc;
+
+        use crate::{kernel::current_cpu, mm::memory_space::MemorySpace, sync::SpinLock};
+
+        let space = Arc::new(SpinLock::new(MemorySpace::new_kernel()));
+        current_cpu().lock().switch_space(space);
+    }
 }
 
 /// 激活指定的地址空间
