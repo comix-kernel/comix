@@ -1,4 +1,4 @@
-//! LoongArch64 平台模块（存根）
+//! LoongArch64 平台模块
 
 mod loongarch_virt;
 
@@ -11,5 +11,10 @@ pub mod virt {
 
 /// 初始化平台
 pub fn init() {
-    // TODO: 初始化 LoongArch QEMU virt 平台
+    crate::device::serial::uart16550::driver_init();
+    crate::device::bus::virtio_mmio::driver_init();
+    crate::device::rtc::rtc_goldfish::driver_init();
+    crate::device::device_tree::init();
+    crate::device::bus::pcie::init_virtio_pci();
+    crate::device::console::init();
 }

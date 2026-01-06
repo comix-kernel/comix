@@ -2,11 +2,24 @@
 
 use crate::{
     config::{VirtDevice, mmio_of},
-    device::device_tree::FDT,
-    mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    pr_info,
+    device::{block::virtio_blk, device_tree::FDT, net::virtio_net},
+    kernel::current_memory_space,
+    mm::{
+        address::{ConvertablePaddr, Paddr, UsizeConvert},
+        page_table::PagingError,
+    },
+    pr_info, pr_warn,
 };
 use core::ptr::{read_volatile, write_volatile};
+use virtio_drivers::{
+    transport::{
+        DeviceType,
+        pci::{PciTransport, virtio_device_type},
+    },
+    transport::pci::bus::{BarInfo, Cam, Command, MemoryBarType, MmioCam, PciRoot},
+};
+
+use crate::device::virtio_hal::VirtIOHal;
 
 /// PCIe 设备结构体
 pub struct PciDevice {}
@@ -36,7 +49,7 @@ pub struct PcieHost {
 impl PcieHost {
     /// 从设备树解析
     pub fn from_fdt() -> Option<Self> {
-        let fdt = &*FDT;
+        let fdt = FDT.as_ref()?;
 
         // 找到兼容 pci-host-ecam-generic 的节点
         let mut target = None;
@@ -63,7 +76,9 @@ impl PcieHost {
         let node = target?;
 
         // 父节点（通常是 /soc 或根）决定 reg/ranges 中 parent addr/size cells
-        let parent = node.interrupt_parent()?;
+        // fdt 0.1.5 没有公开 parent 访问，暂时使用通用默认值
+        let parent_addr_cells = 2usize;
+        let parent_size_cells = 2usize;
 
         let child_addr_cells = node
             .property("#address-cells")
@@ -77,28 +92,6 @@ impl PcieHost {
             .unwrap_or(3); // PCI 默认 3
 
         let child_size_cells = node
-            .property("#size-cells")
-            .and_then(|p| {
-                if p.value.len() >= 4 {
-                    Some(u32::from_be_bytes(p.value[0..4].try_into().unwrap()) as usize)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(2);
-
-        let parent_addr_cells = parent
-            .property("#address-cells")
-            .and_then(|p| {
-                if p.value.len() >= 4 {
-                    Some(u32::from_be_bytes(p.value[0..4].try_into().unwrap()) as usize)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(2);
-
-        let parent_size_cells = parent
             .property("#size-cells")
             .and_then(|p| {
                 if p.value.len() >= 4 {
@@ -123,7 +116,7 @@ impl PcieHost {
         };
 
         // reg: 假设 parent_addr_cells=2 parent_size_cells=2 => 4 cells = 16 字节
-        let (ecam_base, ecam_size) = if let Some(prop) = node.property("reg") {
+        let (ecam_base, ecam_size, ecam_from_fdt) = if let Some(prop) = node.property("reg") {
             let cells = parent_addr_cells + parent_size_cells;
             let need = cells * 4;
             if prop.value.len() < need {
@@ -142,7 +135,7 @@ impl PcieHost {
                     | u32::from_be_bytes(prop.value[idx..idx + 4].try_into().unwrap()) as usize;
                 idx += 4;
             }
-            (addr, size)
+            (addr, size, true)
         } else {
             return None;
         };
@@ -190,8 +183,13 @@ impl PcieHost {
                     idx += 4;
                 }
 
-                if is_mem && size != 0 && mmio.is_none() {
-                    mmio = Some((parent_addr, size));
+                if is_mem && size != 0 {
+                    match mmio {
+                        Some((_, best_size)) if best_size >= size => {}
+                        _ => {
+                            mmio = Some((parent_addr, size));
+                        }
+                    }
                 }
 
                 off += entry_bytes;
@@ -201,6 +199,57 @@ impl PcieHost {
         } else {
             mmio_of(VirtDevice::VirtPcieMmio)?
         };
+
+        let mut ecam_base = ecam_base;
+        let mut ecam_size = ecam_size;
+        let mut ecam_from_fdt = ecam_from_fdt;
+        let mut mmio_base = mmio_base;
+        let mut mmio_size = mmio_size;
+
+        if ecam_size == 0 {
+            if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieEcam) {
+                ecam_base = def_base;
+                ecam_size = def_size;
+                ecam_from_fdt = false;
+                pr_warn!("[PCIe] FDT ECAM missing, using platform defaults");
+            }
+        }
+
+        if mmio_size < 0x100000 {
+            if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieMmio) {
+                mmio_base = def_base;
+                mmio_size = def_size;
+                pr_warn!("[PCIe] FDT PCIe ranges too small, overriding MMIO window");
+            }
+        }
+
+        let ecam_end = ecam_base.saturating_add(ecam_size);
+        let mmio_end = mmio_base.saturating_add(mmio_size);
+        let overlap = ecam_size != 0
+            && mmio_size != 0
+            && ecam_base < mmio_end
+            && mmio_base < ecam_end;
+        if overlap {
+            if ecam_from_fdt {
+                if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieMmio) {
+                    mmio_base = def_base;
+                    mmio_size = def_size;
+                    pr_warn!("[PCIe] FDT ECAM overlaps MMIO, overriding MMIO window");
+                }
+            } else if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieEcam) {
+                ecam_base = def_base;
+                ecam_size = def_size;
+                pr_warn!("[PCIe] FDT ECAM overlaps MMIO, using platform defaults");
+            }
+        }
+
+        pr_info!(
+            "[PCIe] FDT ECAM base={:#x} size={:#x}, MMIO base={:#x} size={:#x}",
+            ecam_base,
+            ecam_size,
+            mmio_base,
+            mmio_size
+        );
 
         let ecam_vaddr = Paddr::to_vaddr(&Paddr::from_usize(ecam_base)).as_usize();
 
@@ -317,5 +366,150 @@ pub fn init_and_enumerate() {
         host.enumerate();
     } else {
         pr_info!("[PCIe] no host found from platform defaults");
+    }
+}
+
+/// 初始化 PCIe 并枚举 VirtIO PCI 设备
+pub fn init_virtio_pci() {
+    let host = if let Some(host) = PcieHost::from_fdt().or_else(|| PcieHost::from_platform_defaults())
+    {
+        host
+    } else {
+        pr_info!("[PCIe] no host found from platform defaults");
+        return;
+    };
+
+    let ecam_vaddr = match current_memory_space()
+        .lock()
+        .map_mmio(Paddr::from_usize(host.ecam_paddr), host.ecam_size)
+    {
+        Ok(vaddr) => vaddr.as_usize(),
+        Err(PagingError::AlreadyMapped) => {
+            crate::arch::mm::paddr_to_vaddr(host.ecam_paddr)
+        }
+        Err(e) => {
+            pr_warn!("[PCIe] failed to map ECAM: {:?}", e);
+            crate::arch::mm::paddr_to_vaddr(host.ecam_paddr)
+        }
+    };
+
+    match current_memory_space()
+        .lock()
+        .map_mmio(Paddr::from_usize(host.mmio_base), host.mmio_size)
+    {
+        Ok(_) | Err(PagingError::AlreadyMapped) => {}
+        Err(e) => {
+            pr_warn!("[PCIe] failed to map PCIe MMIO window: {:?}", e);
+        }
+    }
+
+    let cam = unsafe { MmioCam::new(ecam_vaddr as *mut u8, Cam::Ecam) };
+    let mut root = PciRoot::new(cam);
+    let mut next_mmio = host.mmio_base;
+    let mmio_end = host.mmio_base.saturating_add(host.mmio_size);
+
+    for bus in host.bus_start..=host.bus_end {
+        for (df, info) in root.enumerate_bus(bus) {
+            let dev_type = match virtio_device_type(&info) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            let (_status, command) = root.get_status_command(df);
+            let new_command = command | Command::MEMORY_SPACE | Command::BUS_MASTER;
+            if new_command != command {
+                root.set_command(df, new_command);
+            }
+
+            allocate_bars(&mut root, df, &mut next_mmio, mmio_end);
+
+            let transport = match PciTransport::new::<VirtIOHal, _>(&mut root, df) {
+                Ok(t) => t,
+                Err(e) => {
+                    pr_warn!(
+                        "[PCIe] failed to init virtio-pci {} ({:?}): {:?}",
+                        df,
+                        info,
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            match dev_type {
+                DeviceType::Block => virtio_blk::init_pci(transport),
+                DeviceType::Network => virtio_net::init_pci(transport),
+                _ => {
+                    pr_info!("[PCIe] virtio device {:?} not wired yet", dev_type);
+                }
+            }
+        }
+    }
+}
+
+fn allocate_bars(
+    root: &mut PciRoot<MmioCam<'_>>,
+    df: virtio_drivers::transport::pci::bus::DeviceFunction,
+    next_mmio: &mut usize,
+    mmio_end: usize,
+) {
+    let bars = match root.bars(df) {
+        Ok(bars) => bars,
+        Err(e) => {
+            pr_warn!("[PCIe] failed to read BARs for {}: {:?}", df, e);
+            return;
+        }
+    };
+
+    let mut bar_index = 0u8;
+    while bar_index < 6 {
+        let info = bars[usize::from(bar_index)].clone();
+        let step = info.as_ref().map_or(1, |b| if b.takes_two_entries() { 2 } else { 1 });
+
+        if let Some(BarInfo::Memory {
+            address_type,
+            address,
+            size,
+            ..
+        }) = info
+        {
+            if size == 0 || address != 0 {
+                bar_index += step;
+                continue;
+            }
+            if address_type == MemoryBarType::Below1MiB {
+                pr_warn!("[PCIe] BAR{} requires below-1MiB window, skipping", bar_index);
+                bar_index += step;
+                continue;
+            }
+            let size_usize = size as usize;
+            let align = size_usize.max(0x1000);
+            let base = align_up(*next_mmio, align);
+            if base.saturating_add(size_usize) > mmio_end {
+                pr_warn!(
+                    "[PCIe] MMIO window exhausted for BAR{} (need {:#x} bytes)",
+                    bar_index,
+                    size
+                );
+                bar_index += step;
+                continue;
+            }
+            match address_type {
+                MemoryBarType::Width64 => root.set_bar_64(df, bar_index, base as u64),
+                _ => root.set_bar_32(df, bar_index, base as u32),
+            }
+            *next_mmio = base.saturating_add(size_usize);
+        }
+
+        bar_index += step;
+    }
+}
+
+#[inline]
+fn align_up(value: usize, align: usize) -> usize {
+    if align == 0 {
+        value
+    } else {
+        (value + align - 1) & !(align - 1)
     }
 }

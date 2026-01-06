@@ -4,6 +4,7 @@
 
 # 架构选择: riscv (默认) 或 loongarch
 ARCH ?= riscv
+LOG ?=
 
 # 根据架构设置变量
 ifeq ($(ARCH),loongarch)
@@ -38,7 +39,11 @@ ifeq ($(TEST), 1)
 	@echo "TEST=1 detected. Running tests instead of 'cargo run'."
 	@cargo test --target $(TARGET)
 else
+ifeq ($(LOG),)
 	@cargo build --target $(TARGET) && $(QEMU_RUNNER) $(PROJECT_DIR) run
+else
+	@cargo build --target $(TARGET) && $(QEMU_RUNNER) $(PROJECT_DIR) run 2>&1 | tee $(LOG)
+endif
 endif
 
 # 目标 2: test (显式运行测试)

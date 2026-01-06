@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::{format, string::String};
 use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::InterruptStatus;
-use virtio_drivers::transport::mmio::MmioTransport;
+use virtio_drivers::transport::{mmio::MmioTransport, pci::PciTransport};
 
 use crate::device::virtio_hal::VirtIOHal;
 
@@ -71,6 +71,62 @@ impl BlockDriver for VirtIOBlkDriver {
     }
 }
 
+/// VirtIO 块设备驱动结构体（PCI）
+pub struct VirtIOBlkPciDriver(Mutex<VirtIOBlk<VirtIOHal, PciTransport>>);
+
+impl Driver for VirtIOBlkPciDriver {
+    fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
+        let status = self.0.lock().ack_interrupt();
+        status.contains(InterruptStatus::QUEUE_INTERRUPT)
+    }
+
+    fn device_type(&self) -> DeviceType {
+        DeviceType::Block
+    }
+
+    fn get_id(&self) -> String {
+        format!("virtio_block_pci")
+    }
+
+    fn as_block(&self) -> Option<&dyn BlockDriver> {
+        Some(self)
+    }
+
+    fn as_block_arc(self: Arc<Self>) -> Option<Arc<dyn BlockDriver>> {
+        Some(self)
+    }
+
+    fn as_net(&self) -> Option<&dyn NetDevice> {
+        None
+    }
+
+    fn as_rtc(&self) -> Option<&dyn crate::device::rtc::RtcDriver> {
+        None
+    }
+}
+
+impl BlockDriver for VirtIOBlkPciDriver {
+    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> bool {
+        self.0.lock().read_blocks(block_id, buf).is_ok()
+    }
+
+    fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
+        self.0.lock().write_blocks(block_id, buf).is_ok()
+    }
+
+    fn flush(&self) -> bool {
+        self.0.lock().flush().is_ok()
+    }
+
+    fn block_size(&self) -> usize {
+        512
+    }
+
+    fn total_blocks(&self) -> usize {
+        self.0.lock().capacity() as usize
+    }
+}
+
 /// 初始化 VirtIO 块设备驱动
 pub fn init(transport: MmioTransport<'static>) {
     let blk = VirtIOBlk::new(transport).expect("failed to init blk driver");
@@ -79,6 +135,16 @@ pub fn init(transport: MmioTransport<'static>) {
     IRQ_MANAGER.write().register_all(driver.clone());
     BLK_DRIVERS.write().push(driver);
     pr_info!("[Device] Block driver (virtio-blk) is initialized");
+}
+
+/// 初始化 VirtIO 块设备驱动（PCI）
+pub fn init_pci(transport: PciTransport) {
+    let blk = VirtIOBlk::new(transport).expect("failed to init pci blk driver");
+    let driver = Arc::new(VirtIOBlkPciDriver(Mutex::new(blk)));
+    DRIVERS.write().push(driver.clone());
+    IRQ_MANAGER.write().register_all(driver.clone());
+    BLK_DRIVERS.write().push(driver);
+    pr_info!("[Device] Block driver (virtio-blk-pci) is initialized");
 }
 
 #[cfg(test)]

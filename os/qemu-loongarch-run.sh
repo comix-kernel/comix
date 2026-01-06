@@ -1,41 +1,47 @@
 #!/bin/bash
-# LoongArch64 QEMU 运行脚本
+# LoongArch64 QEMU 运行脚本（结构对齐 RISC-V 版本）
 
 KERNEL=$1
 MODE=${2:-run}
-SMP=1
 
-# 简单的文件系统镜像（如果存在）
-FS_IMG="target/loongarch64-unknown-none/debug/simple_fs.img"
-DISK_IMG="disk-la.img"
+# 参数定义（对齐评测指令）
+mem="4G"
+smp="1"
+fs="fs.img"
+disk="disk-la.img"
 
 # 创建空磁盘镜像（如果不存在）
-if [ ! -f "$DISK_IMG" ]; then
-    dd if=/dev/zero of="$DISK_IMG" bs=1M count=32 2>/dev/null
+if [ ! -f "$disk" ]; then
+    dd if=/dev/zero of="$disk" bs=1M count=32 2>/dev/null
 fi
 
 QEMU_ARGS=(
     -machine virt
-    -smp "$SMP"
-    -nographic
     -kernel "$KERNEL"
+    -m "$mem"
+    -nographic
+    -smp "$smp"
     -no-reboot
-    -rtc base=utc
 )
 
-# 如果文件系统镜像存在，添加块设备
-if [ -f "$FS_IMG" ]; then
-    QEMU_ARGS+=(
-        -drive file="$FS_IMG",if=none,format=raw,id=x0
-        -device virtio-blk-pci,drive=x0,bus=virtio-mmio-bus.0
-    )
+# Virtio Block 设备 (fs.img)
+if [ -f "$fs" ]; then
+    QEMU_ARGS+=(-drive file="$fs",if=none,format=raw,id=x0)
+    QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
 fi
 
-# 添加网络设备 (暂时禁用，避免端口冲突)
-# QEMU_ARGS+=(
-#     -device virtio-net-pci,netdev=net0
-#     -netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
-# )
+# Virtio Network 设备
+QEMU_ARGS+=(-device virtio-net-pci,netdev=net0)
+QEMU_ARGS+=(-netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555)
+
+# RTC 设备 (基于 UTC 时间)
+QEMU_ARGS+=(-rtc base=utc)
+
+# 附加磁盘 (disk-la.img)
+if [ -f "$disk" ]; then
+    QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x1)
+    QEMU_ARGS+=(-device virtio-blk-pci,drive=x1)
+fi
 
 case $MODE in
     run)
