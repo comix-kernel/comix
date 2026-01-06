@@ -180,14 +180,6 @@ pub fn dispatch_syscall(frame: &mut TrapFrame) {
         // 获取网络接口地址列表 (非标准系统调用)
         SYS_GETIFADDRS => sys_getifaddrs(frame),
 
-        // 系统信息 (补充)
-        SYS_SYSINFO => sys_sysinfo(frame),
-
-        // POSIX 定时器 (补充)
-        SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
-        SYS_CLOCK_SETTIME => sys_clock_settime(frame),
-        SYS_CLOCK_GETRES => sys_clock_getres(frame),
-
         _ => {
             frame.set_syscall_ret((-ENOSYS) as usize);
         }

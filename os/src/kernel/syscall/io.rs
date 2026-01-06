@@ -489,8 +489,8 @@ pub fn wake_poll_waiters() {
     POLL_WAIT_QUEUE.lock().wake_up_all();
 }
 
-/// ppoll - poll 的变体，支持信号掩码
-pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
+fn poll_with_timeout(fds: usize, nfds: usize, timeout: Option<crate::uapi::time::TimeSpec>) -> isize {
+    use crate::arch::timer::{clock_freq, get_time};
     use crate::arch::trap::SumGuard;
     use crate::kernel::current_cpu;
     use crate::uapi::errno::EINVAL;
@@ -501,22 +501,16 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
 
     let task = current_cpu().lock().current_task.as_ref().unwrap().clone();
 
-    // Parse timeout: null pointer means infinite, otherwise it's a timespec
-    let timeout_trigger = if timeout == 0 {
-        None // Infinite timeout
-    } else {
-        let _guard = SumGuard::new();
-        unsafe {
-            let timespec = timeout as *const crate::uapi::time::TimeSpec;
-            if (*timespec).tv_sec < 0 {
-                None // Negative means infinite
-            } else {
-                use crate::arch::timer::{clock_freq, get_time};
-                let duration_ns =
-                    ((*timespec).tv_sec as u64 * 1_000_000_000) + (*timespec).tv_nsec as u64;
-                let duration_ticks = (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
-                Some(get_time() + duration_ticks)
+    let timeout_trigger = match timeout {
+        None => None,
+        Some(ts) => {
+            if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
+                return -(EINVAL as isize);
             }
+            let duration_ns = (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64;
+            let duration_ticks =
+                (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
+            Some(get_time() + duration_ticks)
         }
     };
 
@@ -561,7 +555,6 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             return ready_count;
         }
 
-        // Register timeout timer if needed
         if let Some(trigger) = timeout_trigger {
             use crate::kernel::timer::TIMER_QUEUE;
             let mut timer_q = TIMER_QUEUE.lock();
@@ -569,25 +562,46 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
             drop(timer_q);
         }
 
-        // Sleep atomically - WaitQueue::sleep() holds lock internally
-        // and marks task as blocked before releasing the lock
         POLL_WAIT_QUEUE.lock().sleep(task.clone());
         crate::kernel::schedule();
 
-        // Woken up - remove from timer queue if still there
         if timeout_trigger.is_some() {
             use crate::kernel::timer::TIMER_QUEUE;
             TIMER_QUEUE.lock().remove_task(&task);
         }
 
-        // Check if woken by timeout
         if let Some(trigger) = timeout_trigger {
-            use crate::arch::timer::get_time;
             if get_time() >= trigger {
-                return 0; // Timeout
+                return 0;
             }
         }
     }
+}
+
+/// ppoll - poll 的变体，支持信号掩码
+pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
+    use crate::arch::trap::SumGuard;
+    use crate::uapi::errno::EINVAL;
+
+    if nfds > 0 && fds == 0 {
+        return -(EINVAL as isize);
+    }
+
+    let timeout_spec = if timeout == 0 {
+        None
+    } else {
+        let _guard = SumGuard::new();
+        unsafe {
+            let timespec = timeout as *const crate::uapi::time::TimeSpec;
+            let ts = *timespec;
+            if ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
+                return -(EINVAL as isize);
+            }
+            Some(ts)
+        }
+    };
+
+    poll_with_timeout(fds, nfds, timeout_spec)
 }
 
 /// pselect6 - synchronous I/O multiplexing with signal mask
@@ -772,18 +786,14 @@ pub fn select(
 /// - `nfds`: 数组长度
 /// - `timeout`: 超时时间（毫秒），-1 表示无限等待，0 表示立即返回
 pub fn poll(fds: usize, nfds: usize, timeout: i32) -> isize {
-    use crate::uapi::time::TimeSpec;
-
-    let timeout_ptr = if timeout < 0 {
-        0 // 无限等待
+    let timeout_spec = if timeout < 0 {
+        None
     } else {
-        // 转换毫秒到 timespec
-        let ts = TimeSpec {
+        Some(crate::uapi::time::TimeSpec {
             tv_sec: (timeout / 1000) as i64,
             tv_nsec: ((timeout % 1000) * 1_000_000) as i64,
-        };
-        &ts as *const TimeSpec as usize
+        })
     };
 
-    ppoll(fds, nfds, timeout_ptr, 0)
+    poll_with_timeout(fds, nfds, timeout_spec)
 }
