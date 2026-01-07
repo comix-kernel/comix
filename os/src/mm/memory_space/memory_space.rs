@@ -626,14 +626,14 @@ impl MemorySpace {
                                 return Err(PagingError::InvalidAddress);
                             };
                             match symtab {
-                                Symtab64::Dyn(syms) => syms
-                                    .get(r_sym)
-                                    .ok_or(PagingError::InvalidAddress)?
-                                    .value() as usize,
-                                Symtab64::Std(syms) => syms
-                                    .get(r_sym)
-                                    .ok_or(PagingError::InvalidAddress)?
-                                    .value() as usize,
+                                Symtab64::Dyn(syms) => {
+                                    syms.get(r_sym).ok_or(PagingError::InvalidAddress)?.value()
+                                        as usize
+                                }
+                                Symtab64::Std(syms) => {
+                                    syms.get(r_sym).ok_or(PagingError::InvalidAddress)?.value()
+                                        as usize
+                                }
                             }
                         };
                         let s = load_bias + sym_val;
@@ -875,8 +875,17 @@ impl MemorySpace {
 
             // 下一段 gap 的上界是当前区域的起点（但也不能低于 heap_end）
             gap_end = core::cmp::max(area_start, heap_end);
-            if gap_end == heap_end {
+            if gap_end < heap_end + size {
                 break;
+            }
+        }
+
+        // 检查堆顶与最低 VMA 之间（或完全没有 VMA 时）的最后一个 gap：
+        // gap = [heap_end, gap_end)
+        if gap_end >= heap_end + size {
+            let candidate = align_down(gap_end - size, align);
+            if candidate >= heap_end {
+                return Some(candidate);
             }
         }
 
