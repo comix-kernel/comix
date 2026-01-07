@@ -57,17 +57,10 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
 
         FcntlCmd::SetFl => {
             // F_SETFL: 设置文件状态标志
-            // 只能修改特定标志（APPEND, NONBLOCK, ASYNC, DIRECT, NOATIME）
+            // Linux 语义：F_SETFL 只会修改少数“状态标志”，其他位（例如 O_RDWR/O_LARGEFILE）会被忽略。
+            // 因此不能因为用户传入了额外位就返回 EINVAL（iperf3 会传 O_RDWR|O_LARGEFILE|O_NONBLOCK）。
             let new_flags_raw = arg as u32;
-            let new_status_flags = match FileStatusFlags::from_bits(new_flags_raw) {
-                Some(f) => f,
-                None => return -(EINVAL as isize),
-            };
-
-            // 检查是否只修改允许修改的标志
-            if !new_status_flags.is_modifiable() {
-                return -(EINVAL as isize);
-            }
+            let new_status_flags = FileStatusFlags::from_bits_truncate(new_flags_raw);
 
             let file = match task.lock().fd_table.get(fd) {
                 Ok(f) => f,
@@ -77,18 +70,14 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             // 获取当前标志
             let current_flags = file.flags();
 
-            // 保留访问模式和其他不可修改的标志
-            let access_mode = current_flags & OpenFlags::O_ACCMODE;
-            let non_modifiable = current_flags
-                & !(OpenFlags::O_APPEND
-                    | OpenFlags::O_NONBLOCK
-                    | OpenFlags::from_bits_truncate(FileStatusFlags::ASYNC.bits())
-                    | OpenFlags::from_bits_truncate(FileStatusFlags::DIRECT.bits())
-                    | OpenFlags::from_bits_truncate(FileStatusFlags::NOATIME.bits()));
+            // 仅清除/设置可修改位，其它位保持不变
+            let mod_mask = OpenFlags::O_APPEND
+                | OpenFlags::O_NONBLOCK
+                | OpenFlags::from_bits_truncate(FileStatusFlags::ASYNC.bits())
+                | OpenFlags::from_bits_truncate(FileStatusFlags::DIRECT.bits())
+                | OpenFlags::from_bits_truncate(FileStatusFlags::NOATIME.bits());
 
-            // 构建新的标志：保留访问模式 + 保留不可修改部分 + 新的可修改标志
-            let final_flags = access_mode
-                | non_modifiable
+            let final_flags = (current_flags & !mod_mask)
                 | OpenFlags::from_bits_truncate(new_status_flags.bits());
 
             // 调用 File trait 的 set_status_flags 方法

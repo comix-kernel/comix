@@ -40,7 +40,10 @@ pub fn exit_process(task: SharedTask, code: i32) {
     {
         let mut t = TASK_MANAGER.lock();
         for thread in threads {
-            t.exit_task(thread, 0x114514);
+            // Terminate remaining threads in the same process.
+            // IMPORTANT: do not overwrite the process exit code.
+            // Use 0 here; the process exit status is carried by the thread group leader.
+            t.exit_task(thread, 0);
         }
     }
     notify_parent(task);

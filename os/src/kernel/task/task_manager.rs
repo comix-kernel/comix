@@ -89,6 +89,11 @@ pub trait TaskManagerTrait {
     /// 返回值: 所有任务的列表
     fn get_all_tasks(&self) -> Vec<SharedTask>;
 
+    /// 获取当前所有进程（线程组 leader）的 PID 快照
+    ///
+    /// 返回值按升序排列，且去重。
+    fn list_process_pids_snapshot(&self) -> Vec<u32>;
+
     #[cfg(test)]
     /// 获取当前任务数量（仅用于测试）
     /// 返回值: 当前任务数量
@@ -126,6 +131,9 @@ impl TaskManagerTrait for TaskManager {
         {
             let mut task = task.lock();
             task.exit_code = Some(code as i32);
+            // Linux 语义：线程退出时应释放其对用户地址空间的引用。
+            // 线程组共享的地址空间由 Arc 计数管理：最后一个线程退出时自动释放。
+            task.memory_space = None;
         }
         exit_task_with_block(task);
     }
@@ -179,6 +187,21 @@ impl TaskManagerTrait for TaskManager {
 
     fn get_all_tasks(&self) -> Vec<SharedTask> {
         self.tasks.values().cloned().collect()
+    }
+
+    fn list_process_pids_snapshot(&self) -> Vec<u32> {
+        // 只列出线程组 leader（进程）：pid == tid
+        let mut pids: Vec<u32> = self
+            .tasks
+            .values()
+            .filter_map(|t| {
+                let t = t.lock();
+                if t.pid == t.tid { Some(t.pid) } else { None }
+            })
+            .collect();
+        pids.sort_unstable();
+        pids.dedup();
+        pids
     }
 
     #[cfg(test)]
