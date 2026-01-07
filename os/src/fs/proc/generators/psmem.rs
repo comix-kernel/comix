@@ -15,10 +15,14 @@ impl ContentGenerator for PsmemGenerator {
         let pids = TASK_MANAGER.lock().list_process_pids_snapshot();
 
         let mut out = String::new();
-        out.push_str("PID\tVmSize(kB)\tVmRSS(kB)\tStack(kB)\tHeap+Data(kB)\tMmap(kB)\tExe(kB)\tName\n");
+        out.push_str(
+            "PID\tVmSize(kB)\tVmRSS(kB)\tStack(kB)\tHeap+Data(kB)\tMmap(kB)\tExe(kB)\tName\n",
+        );
 
         for pid in pids {
-            let Some(task) = TASK_MANAGER.lock().get_task(pid) else { continue };
+            let Some(task) = TASK_MANAGER.lock().get_task(pid) else {
+                continue;
+            };
             let (name, stats_opt) = {
                 let t = task.lock();
                 let name = t
@@ -34,7 +38,8 @@ impl ContentGenerator for PsmemGenerator {
 
             let (vm_size_kb, rss_kb, stack_kb, data_kb, mmap_kb, exe_kb) = stats_opt
                 .map(|s| {
-                    let data_bytes = s.data_bytes
+                    let data_bytes = s
+                        .data_bytes
                         .saturating_add(s.bss_bytes)
                         .saturating_add(s.heap_bytes);
                     (
@@ -57,4 +62,3 @@ impl ContentGenerator for PsmemGenerator {
         Ok(out.into_bytes())
     }
 }
-

@@ -52,16 +52,18 @@ impl ContentGenerator for MapsGenerator {
         let mut areas: alloc::vec::Vec<_> = ms
             .areas()
             .iter()
-            .filter(|a| matches!(
-                a.area_type(),
-                AreaType::UserText
-                    | AreaType::UserRodata
-                    | AreaType::UserData
-                    | AreaType::UserBss
-                    | AreaType::UserStack
-                    | AreaType::UserHeap
-                    | AreaType::UserMmap
-            ))
+            .filter(|a| {
+                matches!(
+                    a.area_type(),
+                    AreaType::UserText
+                        | AreaType::UserRodata
+                        | AreaType::UserData
+                        | AreaType::UserBss
+                        | AreaType::UserStack
+                        | AreaType::UserHeap
+                        | AreaType::UserMmap
+                )
+            })
             .collect();
 
         areas.sort_by_key(|a| a.vpn_range().start().start_addr().as_usize());
@@ -72,9 +74,21 @@ impl ContentGenerator for MapsGenerator {
             let end = a.vpn_range().end().start_addr().as_usize();
 
             let perm = a.permission();
-            let r = if perm.contains(crate::mm::page_table::UniversalPTEFlag::READABLE) { 'r' } else { '-' };
-            let w = if perm.contains(crate::mm::page_table::UniversalPTEFlag::WRITEABLE) { 'w' } else { '-' };
-            let x = if perm.contains(crate::mm::page_table::UniversalPTEFlag::EXECUTABLE) { 'x' } else { '-' };
+            let r = if perm.contains(crate::mm::page_table::UniversalPTEFlag::READABLE) {
+                'r'
+            } else {
+                '-'
+            };
+            let w = if perm.contains(crate::mm::page_table::UniversalPTEFlag::WRITEABLE) {
+                'w'
+            } else {
+                '-'
+            };
+            let x = if perm.contains(crate::mm::page_table::UniversalPTEFlag::EXECUTABLE) {
+                'x'
+            } else {
+                '-'
+            };
             let p = 'p';
             let map_type = match a.map_type() {
                 MapType::Direct => "direct",

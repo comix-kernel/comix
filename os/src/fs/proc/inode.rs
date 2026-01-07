@@ -239,7 +239,9 @@ impl ProcInode {
 
     /// 为指定 PID 创建进程目录
     fn create_process_dir(&self, pid: u32) -> Option<Arc<ProcInode>> {
-        use crate::fs::proc::generators::{CmdlineGenerator, MapsGenerator, StatGenerator, StatusGenerator};
+        use crate::fs::proc::generators::{
+            CmdlineGenerator, MapsGenerator, StatGenerator, StatusGenerator,
+        };
         use crate::kernel::{TASK_MANAGER, TaskManagerTrait};
 
         // 获取任务

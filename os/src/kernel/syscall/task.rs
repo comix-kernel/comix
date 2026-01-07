@@ -29,8 +29,8 @@ use crate::{
     sync::SpinLock,
     uapi::{
         errno::{
-            EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOSYS, EPERM, ESRCH,
-            ETIMEDOUT, ENOMEM,
+            EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOMEM, ENOSYS, EPERM,
+            ESRCH, ETIMEDOUT,
         },
         futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
@@ -144,11 +144,11 @@ fn clear_child_tid_and_wake() {
 /// # 返回值
 /// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
 pub fn clone(
-    flags: c_ulong,    // a0: clone flags
-    stack: c_ulong,    // a1: child stack pointer
-    ptid: *mut c_int,  // a2: parent_tid pointer
-    ctid: *mut c_int,  // a3: child_tid pointer
-    tls: *mut c_void,  // a4: TLS pointer
+    flags: c_ulong,   // a0: clone flags
+    stack: c_ulong,   // a1: child stack pointer
+    ptid: *mut c_int, // a2: parent_tid pointer
+    ctid: *mut c_int, // a3: child_tid pointer
+    tls: *mut c_void, // a4: TLS pointer
 ) -> c_int {
     let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(flags as usize) {
         requested_flags

@@ -25,9 +25,8 @@ pub struct NetIfaceWrapper {
 
 impl NetIfaceWrapper {
     pub fn poll(&self, sockets: &SpinLock<SocketSet<'static>>) -> bool {
-        let timestamp = smoltcp::time::Instant::from_millis(
-            crate::arch::timer::get_time_ms() as i64
-        );
+        let timestamp =
+            smoltcp::time::Instant::from_millis(crate::arch::timer::get_time_ms() as i64);
         let mut dev = self.device.lock();
 
         // 检查队列长度
@@ -117,7 +116,6 @@ lazy_static! {
     static ref PENDING_TCP_CLOSE: SpinLock<alloc::vec::Vec<SmoltcpHandle>> =
         SpinLock::new(alloc::vec::Vec::new());
 }
-
 
 use crate::uapi::fcntl::OpenFlags;
 use crate::uapi::socket::SocketOptions;
@@ -242,7 +240,9 @@ impl SocketFile {
                 SocketHandle::Tcp(h) => {
                     let s = sockets.get::<tcp::Socket>(h);
                     match s.state() {
-                        tcp::State::Established | tcp::State::CloseWait => return Some(q.remove(i)),
+                        tcp::State::Established | tcp::State::CloseWait => {
+                            return Some(q.remove(i));
+                        }
                         tcp::State::Closed => {
                             q.remove(i);
                             continue;
@@ -352,7 +352,7 @@ impl Drop for SocketFile {
                             PENDING_TCP_CLOSE.lock().push(h);
                         }
                     }
-                },
+                }
                 SocketHandle::Udp(h) => {
                     // UDP sockets may be managed by the per-port dispatcher (shared smoltcp socket).
                     // Do not remove from SocketSet here; stale logical sockets are cleaned up in the
@@ -368,8 +368,12 @@ impl Drop for SocketFile {
         }
         for handle in self.listen_sockets.lock().iter() {
             match handle {
-                SocketHandle::Tcp(h) => { sockets.remove(*h); },
-                SocketHandle::Udp(h) => { sockets.remove(*h); },
+                SocketHandle::Tcp(h) => {
+                    sockets.remove(*h);
+                }
+                SocketHandle::Udp(h) => {
+                    sockets.remove(*h);
+                }
             }
         }
     }
@@ -543,7 +547,12 @@ impl File for SocketFile {
                 let socket = sockets.get::<tcp::Socket>(*h);
                 let can_send = socket.can_send();
                 let state = socket.state();
-                crate::pr_debug!("[Socket] writable: handle={:?}, state={:?}, can_send={}", h, state, can_send);
+                crate::pr_debug!(
+                    "[Socket] writable: handle={:?}, state={:?}, can_send={}",
+                    h,
+                    state,
+                    can_send
+                );
                 can_send
             }
             Some(SocketHandle::Udp(h)) => {
@@ -566,8 +575,13 @@ impl File for SocketFile {
                 let socket = sockets.get_mut::<tcp::Socket>(*h);
                 let state = socket.state();
                 let recv_queue = socket.recv_queue();
-                crate::pr_debug!("[Socket] read: handle={:?}, state={:?}, recv_queue={}, buf.len()={}",
-                    h, state, recv_queue, buf.len());
+                crate::pr_debug!(
+                    "[Socket] read: handle={:?}, state={:?}, recv_queue={}, buf.len()={}",
+                    h,
+                    state,
+                    recv_queue,
+                    buf.len()
+                );
 
                 // Closed socket returns EOF (0 bytes)
                 if socket.state() == tcp::State::Closed {
@@ -598,11 +612,15 @@ impl File for SocketFile {
                     if socket.may_recv() {
                         // Socket can still receive data, so this is not EOF
                         // Return EAGAIN to indicate no data available
-                        crate::pr_debug!("[Socket] read: recv_slice returned 0 but may_recv=true, returning EAGAIN");
+                        crate::pr_debug!(
+                            "[Socket] read: recv_slice returned 0 but may_recv=true, returning EAGAIN"
+                        );
                         Err(FsError::WouldBlock)
                     } else {
                         // Socket cannot receive anymore, this is EOF
-                        crate::pr_debug!("[Socket] read: recv_slice returned 0 and may_recv=false, returning EOF");
+                        crate::pr_debug!(
+                            "[Socket] read: recv_slice returned 0 and may_recv=false, returning EOF"
+                        );
                         Ok(0)
                     }
                 } else {
@@ -881,7 +899,6 @@ pub fn init_network(mut smoltcp_iface: crate::net::interface::SmoltcpInterface) 
     *NET_IFACE.lock() = Some(wrapper);
 }
 
-
 /// Perform TCP connect with Context
 pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
     crate::pr_debug!("tcp_connect: start, handle={:?}", handle);
@@ -1056,9 +1073,13 @@ fn udp_dispatch_drain_locked(sockets: &mut SocketSet<'static>) -> bool {
 
             for w in entry.sockets.iter() {
                 let Some(f) = w.upgrade() else { continue };
-                let Some(sf) = f.as_any().downcast_ref::<SocketFile>() else { continue };
+                let Some(sf) = f.as_any().downcast_ref::<SocketFile>() else {
+                    continue;
+                };
 
-                let Some(local_ep) = sf.get_local_endpoint() else { continue };
+                let Some(local_ep) = sf.get_local_endpoint() else {
+                    continue;
+                };
                 if local_ep.port != *port {
                     continue;
                 }

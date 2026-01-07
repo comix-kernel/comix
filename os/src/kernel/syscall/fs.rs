@@ -37,7 +37,11 @@ pub fn close(fd: usize) -> isize {
     // If this fd is a socket, also remove the (tid, fd) -> socket handle mapping.
     // Otherwise, fd reuse can accidentally refer to a stale socket handle.
     if let Ok(file) = task_lock.fd_table.get(fd) {
-        if file.as_any().downcast_ref::<crate::net::socket::SocketFile>().is_some() {
+        if file
+            .as_any()
+            .downcast_ref::<crate::net::socket::SocketFile>()
+            .is_some()
+        {
             crate::net::socket::unregister_socket_fd(tid, fd);
         }
     }

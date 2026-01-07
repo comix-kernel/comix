@@ -152,8 +152,8 @@ impl TcpInfo {
             tcpi_snd_mss: 1460,
             tcpi_rcv_mss: 1460,
             tcpi_snd_cwnd: 10,
-            tcpi_rtt: 1_000,    // usec
-            tcpi_rttvar: 500,   // usec
+            tcpi_rtt: 1_000,  // usec
+            tcpi_rttvar: 500, // usec
             tcpi_pmtu: 1500,
             ..Default::default()
         }

@@ -1,7 +1,4 @@
-use crate::{
-    config::PAGE_SIZE,
-    mm::memory_space::MemorySpace,
-};
+use crate::{config::PAGE_SIZE, mm::memory_space::MemorySpace};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProcMemStats {
@@ -69,4 +66,3 @@ pub fn collect_user_vm_stats(space: &MemorySpace) -> ProcMemStats {
 
     s
 }
-
