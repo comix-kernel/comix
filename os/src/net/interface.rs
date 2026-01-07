@@ -354,11 +354,11 @@ impl smoltcp::phy::TxToken for NetTxToken<'_> {
                 0x0800 if buffer.len() >= 34 => {
                     // IP: check both source and destination IP (offset 26 and 30)
                     buffer[26] == 127 || buffer[30] == 127
-                },
+                }
                 0x0806 if buffer.len() >= 42 => {
                     // ARP: check both sender and target IP (offset 28 and 38)
                     buffer[28] == 127 || buffer[38] == 127
-                },
+                }
                 _ => false,
             }
         } else {

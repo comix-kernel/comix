@@ -39,8 +39,8 @@ pub enum FsError {
     NotConnected, // -ENOTCONN(107): 套接字未连接
 
     // 其他
-    NotSupported, // -ENOTSUP(95): 操作不支持
-    TooManyLinks, // -EMLINK(31): 硬链接过多
+    NotSupported,    // -ENOTSUP(95): 操作不支持
+    TooManyLinks,    // -EMLINK(31): 硬链接过多
     TooManySymlinks, // -ELOOP(40): 符号链接层级过多
 }
 

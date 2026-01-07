@@ -109,7 +109,9 @@ impl NetworkConfigManager {
 
             let dev = NullNetDevice::new(0);
             let iface = Arc::new(NetworkInterface::new(String::from("lo0"), dev));
-            NETWORK_INTERFACE_MANAGER.lock().add_interface(iface.clone());
+            NETWORK_INTERFACE_MANAGER
+                .lock()
+                .add_interface(iface.clone());
             (iface, true)
         };
 

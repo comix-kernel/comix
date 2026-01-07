@@ -30,14 +30,7 @@ impl ContentGenerator for StatusGenerator {
                 let ms = ms.lock();
                 collect_user_vm_stats(&ms)
             });
-            (
-                task.pid,
-                task.tid,
-                task.ppid,
-                task.state,
-                name,
-                mem_stats,
-            )
+            (task.pid, task.tid, task.ppid, task.state, name, mem_stats)
         };
 
         // 状态字符串映射
@@ -51,7 +44,8 @@ impl ContentGenerator for StatusGenerator {
 
         let (vm_size_kb, rss_kb, stack_kb, data_kb, exe_kb, mmap_kb) = mem_stats
             .map(|s| {
-                let data_bytes = s.data_bytes
+                let data_bytes = s
+                    .data_bytes
                     .saturating_add(s.bss_bytes)
                     .saturating_add(s.heap_bytes);
                 (

@@ -611,7 +611,11 @@ impl MappingArea {
         let mut middle_area = MappingArea::new(
             middle_range,
             self.area_type,
-            if wants_mapping { MapType::Framed } else { MapType::Reserved },
+            if wants_mapping {
+                MapType::Framed
+            } else {
+                MapType::Reserved
+            },
             new_perm,
             middle_file,
         );
@@ -679,7 +683,8 @@ impl MappingArea {
                     // Reserved -> Framed：为 middle_range 建立页表映射并分配 frames
                     TlbBatchContext::execute(|batch| {
                         for vpn in VpnRange::new(change_start, change_end) {
-                            let frame = alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
+                            let frame =
+                                alloc_frame().ok_or(page_table::PagingError::FrameAllocFailed)?;
                             let ppn = frame.ppn();
                             middle_area.frames.insert(vpn, TrackedFrames::Single(frame));
                             page_table.map_with_batch(
