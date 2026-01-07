@@ -1,6 +1,7 @@
 //! 网络相关的系统调用实现
 
 use core::ffi::{CStr, c_char};
+use core::sync::atomic::{AtomicU16, Ordering};
 
 /// ifaddrs 结构体布局 - 与 Linux libc 兼容
 #[repr(C)]
@@ -31,6 +32,24 @@ const IFF_RUNNING: u32 = 1 << 6; // 接口正在运行
 const IFF_MULTICAST: u32 = 1 << 12; // 支持多播
 
 const AF_INET: u16 = 2;
+
+const EPHEMERAL_PORT_START: u16 = 49152;
+const EPHEMERAL_PORT_END: u16 = u16::MAX;
+
+static NEXT_EPHEMERAL_PORT: AtomicU16 = AtomicU16::new(EPHEMERAL_PORT_START);
+
+fn alloc_ephemeral_port() -> u16 {
+    // Keep the counter within [EPHEMERAL_PORT_START, EPHEMERAL_PORT_END] and avoid wrapping to 0.
+    NEXT_EPHEMERAL_PORT
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+            Some(if cur == EPHEMERAL_PORT_END {
+                EPHEMERAL_PORT_START
+            } else {
+                cur + 1
+            })
+        })
+        .unwrap_or(EPHEMERAL_PORT_START)
+}
 
 macro_rules! set_sockopt_bool {
     ($optval:expr, $optlen:expr, $field:expr) => {
@@ -272,11 +291,7 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 
             // Bind port 0 => allocate an ephemeral port.
             let endpoint = if endpoint.port == 0 {
-                use core::sync::atomic::{AtomicU16, Ordering};
-                static NEXT_UDP_BIND_PORT: AtomicU16 = AtomicU16::new(49152);
-                let port = NEXT_UDP_BIND_PORT.fetch_add(1, Ordering::Relaxed);
-                let port = if port >= 65535 { 49152 } else { port };
-                IpEndpoint::new(endpoint.addr, port)
+                IpEndpoint::new(endpoint.addr, alloc_ephemeral_port())
             } else {
                 endpoint
             };
@@ -624,11 +639,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             // Allocate ephemeral port if needed
             if local_endpoint.port == 0 {
                 // Simple ephemeral port allocation (49152-65535)
-                use core::sync::atomic::{AtomicU16, Ordering};
-                static NEXT_PORT: AtomicU16 = AtomicU16::new(49152);
-                let port = NEXT_PORT.fetch_add(1, Ordering::Relaxed);
-                let port = if port >= 65535 { 49152 } else { port };
-                local_endpoint.port = port;
+                local_endpoint.port = alloc_ephemeral_port();
             }
 
             pr_debug!("connect: local_endpoint={}", local_endpoint);
@@ -691,12 +702,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 .and_then(|sf| sf.get_local_endpoint())
             {
                 Some(ep) if ep.port != 0 => ep.port,
-                _ => {
-                    use core::sync::atomic::{AtomicU16, Ordering};
-                    static NEXT_UDP_PORT: AtomicU16 = AtomicU16::new(49152);
-                    let port = NEXT_UDP_PORT.fetch_add(1, Ordering::Relaxed);
-                    if port >= 65535 { 49152 } else { port }
-                }
+                _ => alloc_ephemeral_port(),
             };
 
             if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
