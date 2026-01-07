@@ -26,10 +26,10 @@ pub const USER_STACK_TOP: usize = SV39_BOT_HALF_TOP - PAGE_SIZE; // leave anothe
 pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024; // 64MB
 
 // memory layout constants
-// temporarily set for QEMU RISC-V virt machine
-// FIXME: refactor it to arch/riscv because it's platform-dependent
-// TODO: fetch it form device tree in the future(after/while implemented devices feature)
-pub const MEMORY_END: usize = 0x88000000; // 128MB for QEMU RISC-V virt
+#[cfg(target_arch = "riscv64")]
+pub const MEMORY_END: usize = 0x8800_0000; // 128MB for QEMU RISC-V virt
+#[cfg(target_arch = "loongarch64")]
+pub const MEMORY_END: usize = crate::arch::platform::virt::MEMORY_END;
 
 pub const DEFAULT_MAX_FDS: usize = 256;
 

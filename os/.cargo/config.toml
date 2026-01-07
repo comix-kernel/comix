@@ -1,5 +1,6 @@
 [build]
 target = "riscv64gc-unknown-none-elf"
+# target = "loongarch64-unknown-none"
 
 [unstable]
 build-std = ["core", "compiler_builtins", "alloc"]
