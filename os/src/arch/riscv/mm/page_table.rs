@@ -165,7 +165,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
     // 虚拟地址到物理地址的转换 (Translate)
     fn translate(&self, vaddr: Vaddr) -> Option<Paddr> {
-        let vpn = Vpn::from_addr_ceil(vaddr);
+        // 注意：translate 必须使用 floor（页内地址应落在当前页），否则会把非对齐地址错误映射到下一页。
+        let vpn = Vpn::from_addr_floor(vaddr);
         // 页内偏移量：低 12 位
         let offset = vaddr.as_usize() & 0xfff;
 

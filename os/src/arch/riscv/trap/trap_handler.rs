@@ -229,13 +229,16 @@ pub fn user_trap(
             }
             crate::earlyprintln!("");
             crate::earlyprintln!("===============================================");
-            panic!(
-                "Unexpected trap in user mode: {:?}, sepc = {:#x}, stval = {:#x}, sstatus = {:#x}",
-                scause.cause(),
-                sepc_old,
-                stval_val,
-                sstatus_old.bits()
-            );
+            // 不要因为用户态异常让内核 panic；仿照 Linux 行为，终止当前任务即可。
+            // TODO: 进一步完善为向进程投递对应信号（SIGILL/SIGSEGV/...），并支持 core dump 等。
+            let sig = match scause.cause() {
+                Trap::Exception(2) => crate::uapi::signal::NUM_SIGILL, // Illegal Instruction
+                Trap::Exception(12) | Trap::Exception(13) | Trap::Exception(15) => {
+                    crate::uapi::signal::NUM_SIGSEGV
+                }
+                _ => crate::uapi::signal::NUM_SIGILL,
+            };
+            crate::kernel::terminate_task(128 + sig);
         }
     }
 }
@@ -316,6 +319,12 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
 /// 处理时钟中断
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+
+    // 推进网络栈，避免在仅有 loopback/null-net 且任务阻塞在 select/poll 时网络停滞。
+    // 在时钟中断里推进一次网络栈，保证即便缺少真实网卡中断也能推进 TCP 状态机/重传等。
+    crate::net::socket::poll_network_interfaces();
+    crate::kernel::syscall::io::wake_poll_waiters();
+
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_with_block(task);
     }

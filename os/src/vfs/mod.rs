@@ -176,6 +176,7 @@ pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType};
 pub use mount::{MOUNT_TABLE, MountFlags, MountPoint, MountTable, get_root_dentry};
 pub use path::{
     normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_from, vfs_lookup_no_follow,
+    vfs_lookup_no_follow_from,
 };
 
 // Re-export UAPI types used by VFS
