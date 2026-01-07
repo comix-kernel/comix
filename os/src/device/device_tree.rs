@@ -4,7 +4,7 @@ use crate::{
     device::{CMDLINE, irq::IntcDriver},
     kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
-    pr_info,
+    pr_info, pr_warn,
     sync::RwLock,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
@@ -45,21 +45,36 @@ pub fn early_init() {
     // SAFETY: 这里是在单核初始化阶段设置 CPU 数量
     unsafe { NUM_CPU = cpus };
 
-    unsafe {
-        CLOCK_FREQ = FDT
-            .cpus()
-            .next()
-            .expect("No CPU found in device tree")
-            .timebase_frequency()
-    };
+    if let Some(cpu) = FDT.cpus().next() {
+        let timebase = cpu
+            .property("timebase-frequency")
+            .or_else(|| cpu.property("clock-frequency"))
+            .and_then(|p| match p.value.len() {
+                4 => Some(u32::from_be_bytes(p.value.try_into().ok()?) as usize),
+                8 => Some(u64::from_be_bytes(p.value.try_into().ok()?) as usize),
+                _ => None,
+            });
+        if let Some(freq) = timebase {
+            unsafe {
+                CLOCK_FREQ = freq;
+            }
+        } else {
+            pr_warn!("[Device] No timebase-frequency in DTB, keeping default");
+        }
+    } else {
+        pr_warn!("[Device] No CPU found in device tree");
+    }
 }
 
 /// 初始化设备树
 pub fn init() {
-    pr_info!(
-        "[Device] devicetree of {} is initialized",
-        FDT.root().model()
-    );
+    let model = FDT
+        .root()
+        .property("model")
+        .and_then(|p| p.value.split(|b| *b == 0).next())
+        .and_then(|s| core::str::from_utf8(s).ok())
+        .unwrap_or("unknown");
+    pr_info!("[Device] devicetree of {} is initialized", model);
 
     // 设置 NUM_CPU 和 CLOCK_FREQ
     early_init();

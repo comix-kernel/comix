@@ -4,6 +4,7 @@
 
 # 架构选择: riscv (默认) 或 loongarch
 ARCH ?= riscv
+LOG ?=
 
 # 根据架构设置变量
 ifeq ($(ARCH),loongarch)
@@ -11,7 +12,7 @@ ifeq ($(ARCH),loongarch)
     TARGET_DIR := target/loongarch64-unknown-none/debug
     PROJECT_DIR := $(TARGET_DIR)/os
     QEMU_RUNNER := ./qemu-loongarch-run.sh
-    GDB_BIN := loongarch64-unknown-linux-gnu-gdb
+    GDB_BIN := loongarch64-unknown-elf-gdb
     GDB_ARCH_SETUP :=
 else
     TARGET := riscv64gc-unknown-none-elf
@@ -38,7 +39,11 @@ ifeq ($(TEST), 1)
 	@echo "TEST=1 detected. Running tests instead of 'cargo run'."
 	@cargo test --target $(TARGET)
 else
+ifeq ($(LOG),)
 	@cargo build --target $(TARGET) && $(QEMU_RUNNER) $(PROJECT_DIR) run
+else
+	@cargo build --target $(TARGET) && $(QEMU_RUNNER) $(PROJECT_DIR) run 2>&1 | tee $(LOG)
+endif
 endif
 
 # 目标 2: test (显式运行测试)
@@ -60,7 +65,7 @@ gdb:
 	$(GDB_BIN) \
 		-ex "file $(PROJECT_DIR)" \
 		-ex "target remote :1234" \
-        -ex "b *0x80200000" \
+        -ex "b _start" \
 		-ex "dir ../.ignore/busybox" \
 		-ex "dir ../.ignore/riscv-musl" \
 		-ex "add-symbol-file ../data/bin/busybox"\

@@ -33,3 +33,9 @@ user/bin/**
 
 # Test suites
 testsuits-for-oskernel/
+
+# Logs
+os/loongarch.log
+
+# Local notes
+os/可能的改进.md
