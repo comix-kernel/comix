@@ -5,13 +5,13 @@ use core::ffi::{CStr, c_char};
 /// ifaddrs 结构体布局 - 与 Linux libc 兼容
 #[repr(C)]
 struct IfAddrs {
-    ifa_next: usize,        // 下一个接口的用户虚拟地址
-    ifa_name: usize,        // 接口名称的用户虚拟地址
-    ifa_flags: u32,         // 接口标志
-    ifa_addr: usize,        // 接口地址的用户虚拟地址
-    ifa_netmask: usize,     // 网络掩码的用户虚拟地址
-    ifa_ifu: usize,         // 广播地址或目标地址的用户虚拟地址
-    ifa_data: usize,        // 统计数据的用户虚拟地址
+    ifa_next: usize,    // 下一个接口的用户虚拟地址
+    ifa_name: usize,    // 接口名称的用户虚拟地址
+    ifa_flags: u32,     // 接口标志
+    ifa_addr: usize,    // 接口地址的用户虚拟地址
+    ifa_netmask: usize, // 网络掩码的用户虚拟地址
+    ifa_ifu: usize,     // 广播地址或目标地址的用户虚拟地址
+    ifa_data: usize,    // 统计数据的用户虚拟地址
 }
 
 /// sockaddr_in 结构体 (IPv4)
@@ -24,11 +24,11 @@ struct SockAddrIn {
 }
 
 /// 接口标志 (Linux IFF_* flags)
-const IFF_UP: u32 = 1 << 0;          // 接口已启用
-const IFF_BROADCAST: u32 = 1 << 1;   // 支持广播
-const IFF_LOOPBACK: u32 = 1 << 3;    // 回环接口
-const IFF_RUNNING: u32 = 1 << 6;     // 接口正在运行
-const IFF_MULTICAST: u32 = 1 << 12;  // 支持多播
+const IFF_UP: u32 = 1 << 0; // 接口已启用
+const IFF_BROADCAST: u32 = 1 << 1; // 支持广播
+const IFF_LOOPBACK: u32 = 1 << 3; // 回环接口
+const IFF_RUNNING: u32 = 1 << 6; // 接口正在运行
+const IFF_MULTICAST: u32 = 1 << 12; // 支持多播
 
 const AF_INET: u16 = 2;
 
@@ -73,6 +73,7 @@ macro_rules! get_sockopt_int {
     };
 }
 
+use crate::vfs::File;
 use crate::{
     arch::trap::SumGuard,
     kernel::current_task,
@@ -80,9 +81,9 @@ use crate::{
         config::NetworkConfigManager,
         interface::NETWORK_INTERFACE_MANAGER,
         socket::{
-            create_tcp_socket, create_udp_socket, get_socket_handle, parse_sockaddr_in,
-            register_socket_fd, unregister_socket_fd, write_sockaddr_in, SocketFile, SocketHandle,
-            SOCKET_SET,
+            SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket,
+            get_socket_handle, parse_sockaddr_in, register_socket_fd, unregister_socket_fd,
+            write_sockaddr_in,
         },
     },
     pr_debug, pr_info, println,
@@ -91,7 +92,6 @@ use crate::{
         socket::{SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOCK_TYPE_MASK},
     },
 };
-use crate::vfs::File;
 use alloc::sync::Arc;
 use smoltcp::socket::{tcp, udp};
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
@@ -200,8 +200,14 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
                 SocketHandle::Tcp(_) => "TCP",
                 SocketHandle::Udp(_) => "UDP",
             };
-            pr_info!("[SOCKET] Created {} socket: tid={}, fd={}, domain={}, type={}",
-                handle_type, tid, fd, domain, base_type);
+            pr_info!(
+                "[SOCKET] Created {} socket: tid={}, fd={}, domain={}, type={}",
+                handle_type,
+                tid,
+                fd,
+                domain,
+                base_type
+            );
             fd as isize
         }
         Err(_) => -24, // EMFILE
@@ -223,7 +229,12 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
-    pr_debug!("bind: tid={}, sockfd={}, endpoint={}", tid, sockfd, endpoint);
+    pr_debug!(
+        "bind: tid={}, sockfd={}, endpoint={}",
+        tid,
+        sockfd,
+        endpoint
+    );
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
@@ -293,7 +304,7 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 endpoint.port,
                 bind_addr,
             )
-                .is_err()
+            .is_err()
             {
                 return -98; // EADDRINUSE / bind error
             }
@@ -332,7 +343,12 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                 None => return -22, // EINVAL - must bind first
             };
 
-            pr_debug!("listen: tid={}, sockfd={}, endpoint={}", tid, sockfd, endpoint);
+            pr_debug!(
+                "listen: tid={}, sockfd={}, endpoint={}",
+                tid,
+                sockfd,
+                endpoint
+            );
 
             use crate::net::socket::SocketFile;
             let socket_file = match file.as_any().downcast_ref::<SocketFile>() {
@@ -344,19 +360,26 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
             // If bound to 0.0.0.0 or ::, listen on all addresses (addr = None)
             use smoltcp::wire::{IpAddress, IpListenEndpoint};
             let listen_endpoint = match endpoint.addr {
-                IpAddress::Ipv4(addr) if addr.is_unspecified() => {
-                    IpListenEndpoint { addr: None, port: endpoint.port }
-                }
-                IpAddress::Ipv6(addr) if addr.is_unspecified() => {
-                    IpListenEndpoint { addr: None, port: endpoint.port }
-                }
-                _ => {
-                    IpListenEndpoint { addr: Some(endpoint.addr), port: endpoint.port }
-                }
+                IpAddress::Ipv4(addr) if addr.is_unspecified() => IpListenEndpoint {
+                    addr: None,
+                    port: endpoint.port,
+                },
+                IpAddress::Ipv6(addr) if addr.is_unspecified() => IpListenEndpoint {
+                    addr: None,
+                    port: endpoint.port,
+                },
+                _ => IpListenEndpoint {
+                    addr: Some(endpoint.addr),
+                    port: endpoint.port,
+                },
             };
 
-            pr_debug!("listen: converted endpoint={} to listen_endpoint addr={:?} port={}",
-                endpoint, listen_endpoint.addr, listen_endpoint.port);
+            pr_debug!(
+                "listen: converted endpoint={} to listen_endpoint addr={:?} port={}",
+                endpoint,
+                listen_endpoint.addr,
+                listen_endpoint.port
+            );
 
             let mut sockets = SOCKET_SET.lock();
             let socket = sockets.get_mut::<tcp::Socket>(h);
@@ -399,7 +422,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     }
 
     // Check if socket is non-blocking
-    let is_nonblock = socket_file.flags().contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
+    let is_nonblock = socket_file
+        .flags()
+        .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
     let backlog = socket_file.listen_backlog().max(1).min(128);
 
     loop {
@@ -407,7 +432,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         crate::net::socket::poll_until_empty();
 
         // 1) 先从“已排队连接”中取一个已完成握手的连接
-        if let Some(SocketHandle::Tcp(conn_handle)) = socket_file.take_established_from_listen_queue() {
+        if let Some(SocketHandle::Tcp(conn_handle)) =
+            socket_file.take_established_from_listen_queue()
+        {
             return accept_return_conn(task.clone(), tid as usize, conn_handle, addr, addrlen);
         }
 
@@ -451,7 +478,13 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
             // Established / CloseWait: this handle is ready to return right away.
             if matches!(state, tcp::State::Established | tcp::State::CloseWait) {
-                return accept_return_conn(task.clone(), tid as usize, listen_handle, addr, addrlen);
+                return accept_return_conn(
+                    task.clone(),
+                    tid as usize,
+                    listen_handle,
+                    addr,
+                    addrlen,
+                );
             }
 
             // Otherwise: keep it as pending (SynReceived, etc).
@@ -545,7 +578,11 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         SocketHandle::Tcp(h) => {
             let sockets = SOCKET_SET.lock();
             let socket = sockets.get::<tcp::Socket>(h);
-            pr_debug!("connect: socket state={:?}, is_open={}", socket.state(), socket.is_open());
+            pr_debug!(
+                "connect: socket state={:?}, is_open={}",
+                socket.state(),
+                socket.is_open()
+            );
             if socket.is_open() {
                 return -106; // EISCONN
             }
@@ -633,7 +670,11 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             }
 
             pr_debug!("connect: tcp_connect success, nonblock={}", is_nonblock);
-            crate::pr_info!("[TCP] Connection established: {} -> {}", local_endpoint, endpoint);
+            crate::pr_info!(
+                "[TCP] Connection established: {} -> {}",
+                local_endpoint,
+                endpoint
+            );
 
             if is_nonblock {
                 return -115; // EINPROGRESS
@@ -644,7 +685,11 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 
             // Ensure this fd is attached to the shared per-port UDP socket.
             // If not yet bound, implicitly bind to an ephemeral port (49152-65535).
-            let local_port = match file.as_any().downcast_ref::<SocketFile>().and_then(|sf| sf.get_local_endpoint()) {
+            let local_port = match file
+                .as_any()
+                .downcast_ref::<SocketFile>()
+                .and_then(|sf| sf.get_local_endpoint())
+            {
                 Some(ep) if ep.port != 0 => ep.port,
                 _ => {
                     use core::sync::atomic::{AtomicU16, Ordering};
@@ -673,7 +718,9 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             }
 
             let bind_addr = match endpoint.addr {
-                IpAddress::Ipv4(a) if a.octets()[0] == 127 => Some(IpAddress::Ipv4(Ipv4Address::LOCALHOST)),
+                IpAddress::Ipv4(a) if a.octets()[0] == 127 => {
+                    Some(IpAddress::Ipv4(Ipv4Address::LOCALHOST))
+                }
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(a) if a.is_loopback() => {
                     use smoltcp::wire::Ipv6Address;
@@ -690,7 +737,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 local_port,
                 bind_addr,
             )
-                .is_err()
+            .is_err()
             {
                 return -98;
             }
@@ -901,20 +948,29 @@ pub fn init_network_syscalls() {
 pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
     use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EFAULT, ENOMEM};
-    use crate::kernel::current_cpu;
 
     if ifap.is_null() {
         return -(EFAULT as isize);
     }
 
     let _guard = SumGuard::new();
-    let task = current_task();
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct IfAddrsAllocHeader {
+        magic: u64,
+        map_len: usize,
+    }
+    const IFADDRS_ALLOC_MAGIC: u64 = 0x434f4d49585f4946; // "COMIX_IF"
+    const IFADDRS_HEADER_SIZE: usize = (core::mem::size_of::<IfAddrsAllocHeader>() + 7) & !7;
 
     // 获取所有网络接口
     let interfaces = NETWORK_INTERFACE_MANAGER.lock().get_interfaces().to_vec();
 
     if interfaces.is_empty() {
-        unsafe { *ifap = core::ptr::null_mut(); }
+        unsafe {
+            *ifap = core::ptr::null_mut();
+        }
         return 0;
     }
 
@@ -931,9 +987,9 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
     let sockaddr_size = core::mem::size_of::<SockAddrIn>();
 
     for iface in interfaces.iter() {
-        total_size += ifaddrs_size;                          // IfAddrs 结构
-        total_size += sockaddr_size * 3;                     // addr + netmask + broadcast
-        total_size += iface.name().len() + 1;                // 名称 + '\0'
+        total_size += ifaddrs_size; // IfAddrs 结构
+        total_size += sockaddr_size * 3; // addr + netmask + broadcast
+        total_size += iface.name().len() + 1; // 名称 + '\0'
 
         // 每个 IP 地址都需要一套完整结构
         let ip_count = iface.ip_addresses().len().max(1);
@@ -944,13 +1000,20 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
     total_size = (total_size + 7) & !7;
 
     // 使用 mmap 在用户空间分配内存
-    let user_mem_start = {
+    let (user_mem_start, map_len) = {
+        use crate::config::PAGE_SIZE;
         use crate::kernel::syscall::mm::mmap;
         use crate::uapi::mm::{MapFlags, ProtFlags};
 
+        // 额外预留一段 header，用于 freeifaddrs 释放整块映射（Linux ABI 语义）
+        let map_len = {
+            let raw = total_size + IFADDRS_HEADER_SIZE;
+            (raw + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
+        };
+
         let addr = mmap(
-            core::ptr::null_mut(),  // 让内核选择地址
-            total_size,
+            core::ptr::null_mut(), // 让内核选择地址
+            map_len,
             (ProtFlags::READ | ProtFlags::WRITE).bits(),
             (MapFlags::ANONYMOUS | MapFlags::PRIVATE).bits(),
             -1, // 匿名映射
@@ -961,8 +1024,17 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
             return -(ENOMEM as isize);
         }
 
-        addr as usize
+        (addr as usize + IFADDRS_HEADER_SIZE, map_len)
     };
+
+    // 写入 header（位于 ifa 链表之前）
+    unsafe {
+        let header_ptr = (user_mem_start - IFADDRS_HEADER_SIZE) as *mut IfAddrsAllocHeader;
+        header_ptr.write(IfAddrsAllocHeader {
+            magic: IFADDRS_ALLOC_MAGIC,
+            map_len,
+        });
+    }
 
     // 现在开始在用户内存中构建扁平化的数据结构
     let mut current_offset = 0usize;
@@ -976,7 +1048,10 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
                 // 即使没有 IP，也创建一个条目
                 alloc::vec![None]
             } else {
-                ip_addrs.iter().map(|ip| Some(*ip)).collect::<alloc::vec::Vec<_>>()
+                ip_addrs
+                    .iter()
+                    .map(|ip| Some(*ip))
+                    .collect::<alloc::vec::Vec<_>>()
             };
 
             for ip_cidr_opt in ip_list.iter() {
@@ -1162,6 +1237,7 @@ unsafe fn fill_sockaddr_broadcast(addr: *mut SockAddrIn, ip_cidr: &smoltcp::wire
 // 释放获取网络接口列表分配的内存
 pub fn freeifaddrs(ifa: *mut u8) -> isize {
     use crate::arch::trap::SumGuard;
+    use crate::kernel::syscall::mm::munmap;
     use crate::uapi::errno::EINVAL;
 
     if ifa.is_null() {
@@ -1170,27 +1246,28 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
 
     let _guard = SumGuard::new();
 
-    // 我们需要找到整个 mmap 分配的起始地址和大小
-    // 由于我们在 getifaddrs 中使用了扁平化布局，所有数据都在一块连续的内存中
-    // 我们只需要 munmap 这块内存即可
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct IfAddrsAllocHeader {
+        magic: u64,
+        map_len: usize,
+    }
+    const IFADDRS_ALLOC_MAGIC: u64 = 0x434f4d49585f4946; // "COMIX_IF"
+    const IFADDRS_HEADER_SIZE: usize = (core::mem::size_of::<IfAddrsAllocHeader>() + 7) & !7;
 
-    // 但问题是：我们如何知道这块内存的大小？
-    // 方案1：在第一个 ifaddrs 结构之前存储大小（需要修改 getifaddrs）
-    // 方案2：遍历链表计算（复杂且容易出错）
-    // 方案3：让 munmap 自己处理（依赖页表信息）
+    let ifa_addr = ifa as usize;
+    let header_addr = match ifa_addr.checked_sub(IFADDRS_HEADER_SIZE) {
+        Some(v) => v,
+        None => return -(EINVAL as isize),
+    };
 
-    // 这里我们采用方案3：munmap 会根据 VMA 信息自动找到完整的映射区域
     unsafe {
-        use crate::kernel::syscall::mm::munmap;
+        let header = (header_addr as *const IfAddrsAllocHeader).read();
+        if header.magic != IFADDRS_ALLOC_MAGIC || header.map_len < IFADDRS_HEADER_SIZE {
+            return -(EINVAL as isize);
+        }
 
-        // ifa 指向第一个 IfAddrs 结构，这个地址就是 mmap 的起始地址
-        // munmap 只需要起始地址，它会从 VMA 中查找完整的映射大小
-
-        // 我们需要传递一个合理的 length
-        // 由于 munmap 实现会查找 VMA，我们传递一个较小的值即可
-        // （实际的 munmap 会使用 VMA 中记录的完整大小）
-        let result = munmap(ifa as *mut core::ffi::c_void, 1);
-
+        let result = munmap(header_addr as *mut core::ffi::c_void, header.map_len);
         if result < 0 {
             return -(EINVAL as isize);
         }
@@ -1238,7 +1315,7 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
                     // smoltcp uses fixed-size buffers allocated at socket creation time
                     SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
                     SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
-                    SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ },
+                    SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ }
                     _ => return -(ENOPROTOOPT as isize),
                 },
                 IPPROTO_TCP => match optname {
@@ -1431,11 +1508,23 @@ pub fn sendto(
     };
     match result {
         Ok(n) => {
-            pr_debug!("sendto: sockfd={}, len={}, endpoint={} -> sent={}", sockfd, len, endpoint, n);
+            pr_debug!(
+                "sendto: sockfd={}, len={}, endpoint={} -> sent={}",
+                sockfd,
+                len,
+                endpoint,
+                n
+            );
             n as isize
         }
         Err(e) => {
-            pr_debug!("sendto: sockfd={}, len={}, endpoint={} -> error={:?}", sockfd, len, endpoint, e);
+            pr_debug!(
+                "sendto: sockfd={}, len={}, endpoint={} -> error={:?}",
+                sockfd,
+                len,
+                endpoint,
+                e
+            );
             e.to_errno()
         }
     }
