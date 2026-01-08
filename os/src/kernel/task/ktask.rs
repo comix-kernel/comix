@@ -231,12 +231,17 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     #[cfg(target_arch = "loongarch64")]
     {
         use crate::mm::address::{UsizeConvert, Vaddr};
+        use crate::mm::address::PageNum;
         let tlbrent: usize;
         let crmd: usize;
         let pgdl: usize;
         let pgdh: usize;
         let ecfg: usize;
         let ks0: usize;
+        let asid: usize;
+        let tlbrehi: usize;
+        let tlbrelo0: usize;
+        let tlbrelo1: usize;
         unsafe {
             core::arch::asm!(
                 "csrrd {0}, 0x88",
@@ -268,15 +273,63 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
                 out(reg) ks0,
                 options(nostack, preserves_flags)
             );
+            core::arch::asm!(
+                "csrrd {0}, 0x18",
+                out(reg) asid,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x8e",
+                out(reg) tlbrehi,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x8c",
+                out(reg) tlbrelo0,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x8d",
+                out(reg) tlbrelo1,
+                options(nostack, preserves_flags)
+            );
         }
         let space = crate::kernel::current_memory_space();
         let space = space.lock();
+        let root_ppn = space.root_ppn();
+        let root_paddr = root_ppn.start_addr().as_usize();
         let entry_va = <Vaddr as UsizeConvert>::from_usize(entry);
         let sp_va = <Vaddr as UsizeConvert>::from_usize(sp);
+        unsafe extern "C" {
+            fn tlb_refill_entry();
+        }
+        let tlbr_entry_vaddr = tlb_refill_entry as usize;
+        let tlbr_entry_paddr =
+            unsafe { crate::arch::mm::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
+        let tlbr_entry_dm_vaddr = crate::arch::mm::paddr_to_vaddr(tlbr_entry_paddr);
         crate::pr_info!(
             "[kernel_execve] va translate: entry={:?}, sp={:?}",
             space.translate(entry_va),
             space.translate(sp_va)
+        );
+        // 检查页表项内容
+        use crate::mm::address::Vpn;
+        use crate::mm::page_table::PageTableInner;
+        let entry_vpn = Vpn::from_addr_floor(entry_va);
+        if let Ok((ppn, _, flags)) = space.page_table().walk(entry_vpn) {
+            crate::pr_info!(
+                "[kernel_execve] entry PTE: vpn={:#x}, ppn={:#x}, flags={:?}",
+                entry_vpn.0,
+                ppn.0,
+                flags
+            );
+        } else {
+            crate::pr_err!("[kernel_execve] entry page not mapped!");
+        }
+        crate::pr_info!(
+            "[kernel_execve] root_ppn={:#x}, root_paddr={:#x}",
+            root_ppn.0,
+            root_paddr
         );
         crate::pr_info!(
             "[kernel_execve] tlbrent={:#x}, crmd={:#x}, pgdl={:#x}, pgdh={:#x}, ecfg={:#x}, ks0={:#x}",
@@ -286,6 +339,20 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
             pgdh,
             ecfg,
             ks0
+        );
+        crate::pr_info!(
+            "[kernel_execve] asid={:#x} (full_csr={:#x}), tlbrehi={:#x}, tlbrelo0={:#x}, tlbrelo1={:#x}",
+            asid & 0x3ff,
+            asid,
+            tlbrehi,
+            tlbrelo0,
+            tlbrelo1
+        );
+        crate::pr_info!(
+            "[kernel_execve] tlb_refill_entry: vaddr={:#x}, paddr={:#x}, dm_vaddr={:#x}",
+            tlbr_entry_vaddr,
+            tlbr_entry_paddr,
+            tlbr_entry_dm_vaddr
         );
         // TLB refill 运行在直接地址翻译模式，无法安全访问全局变量做统计
     }

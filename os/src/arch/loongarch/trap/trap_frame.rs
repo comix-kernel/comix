@@ -131,9 +131,11 @@ impl TrapFrame {
         self.regs[5] = argv; // a1
         self.regs[6] = envp; // a2
         self.kernel_sp = kernel_sp;
-        // 设置返回用户态的 PRMD，并保留当前内核 CRMD 配置
+        // 设置返回用户态的 PRMD 和 CRMD
         self.prmd = (PRMD_PPLV_USER & PRMD_PPLV_MASK) | PRMD_PIE;
-        self.crmd = read_crmd() & !CSR_CRMD_PLV_MASK;
+        // CRMD: 清除 PLV 和 DA，设置 PG（映射模式）
+        use crate::arch::constant::{CSR_CRMD_DA, CSR_CRMD_PG};
+        self.crmd = (read_crmd() & !CSR_CRMD_PLV_MASK & !CSR_CRMD_DA) | CSR_CRMD_PG;
         crate::pr_info!(
             "[exec_trap_frame] era={:#x}, sp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
             self.era,
