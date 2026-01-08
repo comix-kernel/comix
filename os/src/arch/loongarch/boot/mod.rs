@@ -135,12 +135,14 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
-    // // 挂载 /dev 并创建设备节点
-    // if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
-    //     pr_err!("[Init] Failed to mount /dev: {:?}", e);
-    // } else if let Err(e) = crate::fs::init_dev() {
-    //     pr_err!("[Init] Failed to create devices: {:?}", e);
-    // }
+    // 挂载 /dev 并创建设备节点（与 RISC-V 路径对齐）
+    if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
+        pr_err!("[Init] Failed to mount /dev: {:?}", e);
+    } else if let Err(e) = crate::fs::init_dev() {
+        pr_err!("[Init] Failed to create devices: {:?}", e);
+    } else {
+        pr_info!("[Init] /dev mounted and device nodes created (console, ttyS0, null, etc.)");
+    }
 
     // LoongArch 目录目前为脚手架：用户态与块设备引导可能尚未就绪。
     // 若 /sbin/init 可用则尝试进入用户态，否则保持在内核中运行。

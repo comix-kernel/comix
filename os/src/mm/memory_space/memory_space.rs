@@ -430,8 +430,22 @@ impl MemorySpace {
         let elf = ElfFile::new(elf_data).map_err(|_| PagingError::InvalidAddress)?;
 
         // 检查架构
-        if elf.header.pt2.machine().as_machine() != xmas_elf::header::Machine::RISC_V {
+        let machine = elf.header.pt2.machine().as_machine();
+        #[cfg(target_arch = "riscv64")]
+        if machine != xmas_elf::header::Machine::RISC_V {
+            crate::pr_err!("[from_elf] machine mismatch: expected RISC-V, got {:?}", machine);
             return Err(PagingError::InvalidAddress);
+        }
+        #[cfg(target_arch = "loongarch64")]
+        {
+            const EM_LOONGARCH: u16 = 258;
+            if machine != xmas_elf::header::Machine::Other(EM_LOONGARCH) {
+                crate::pr_err!(
+                    "[from_elf] machine mismatch: expected LoongArch (EM=258), got {:?}",
+                    machine
+                );
+                return Err(PagingError::InvalidAddress);
+            }
         }
 
         // 创建新的内存空间，只复制内核映射（不复制用户空间数据）
@@ -475,6 +489,12 @@ impl MemorySpace {
 
             // 检查段是否与栈/陷阱区域重叠
             if start_va >= USER_STACK_TOP - USER_STACK_SIZE {
+                crate::pr_err!(
+                    "[from_elf] segment overlaps stack: start=0x{:x}, end=0x{:x}, stack_bottom=0x{:x}",
+                    start_va,
+                    end_va,
+                    USER_STACK_TOP - USER_STACK_SIZE
+                );
                 return Err(PagingError::InvalidAddress);
             }
 
@@ -517,14 +537,23 @@ impl MemorySpace {
             };
 
             // 插入区域（将在内部检查重叠）
-            space.insert_framed_area_with_offset(
+            if let Err(err) = space.insert_framed_area_with_offset(
                 vpn_range,
                 area_type,
                 flags,
                 data,
                 start_va % PAGE_SIZE, // Use page offset, not file offset
                 None,                 // 非文件映射
-            )?;
+            ) {
+                crate::pr_err!(
+                    "[from_elf] map segment failed: start=0x{:x}, end=0x{:x}, flags={:?}, err={:?}",
+                    start_va,
+                    end_va,
+                    flags,
+                    err
+                );
+                return Err(err);
+            }
         }
 
         // 2. 初始化堆（从 ELF 结束地址开始，页对齐）

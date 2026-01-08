@@ -1,5 +1,8 @@
 //! LoongArch64 陷阱帧定义
 
+use crate::arch::constant::{
+    CSR_CRMD_PLV_MASK, PRMD_PIE, PRMD_PPLV_MASK, PRMD_PPLV_USER,
+};
 use crate::uapi::signal::MContextT;
 
 /// 陷阱帧结构
@@ -19,6 +22,8 @@ pub struct TrapFrame {
     pub prmd: usize,
     /// 内核栈指针
     pub kernel_sp: usize,
+    /// 当前 CPU 结构体指针（供 trap_entry 设置 tp）
+    pub cpu_ptr: usize,
 }
 
 impl TrapFrame {
@@ -31,6 +36,7 @@ impl TrapFrame {
             crmd: 0,
             prmd: 0,
             kernel_sp: 0,
+            cpu_ptr: 0,
         }
     }
 
@@ -127,7 +133,19 @@ impl TrapFrame {
         self.regs[5] = argv; // a1
         self.regs[6] = envp; // a2
         self.kernel_sp = kernel_sp;
-        // TODO: 设置 PRMD 为用户态
+        // 设置返回用户态的 PRMD，并保留当前内核 CRMD 配置
+        self.prmd = (PRMD_PPLV_USER & PRMD_PPLV_MASK) | PRMD_PIE;
+        self.crmd = read_crmd() & !CSR_CRMD_PLV_MASK;
+        crate::pr_info!(
+            "[exec_trap_frame] era={:#x}, sp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
+            self.era,
+            self.regs[3],
+            self.prmd,
+            self.crmd,
+            self.regs[4],
+            self.regs[5],
+            self.regs[6],
+        );
     }
 
     /// 设置克隆线程的 TrapFrame
@@ -181,6 +199,19 @@ impl TrapFrame {
             self.regs[i] = mcontext.gregs[i] as usize;
         }
     }
+}
+
+#[inline(always)]
+fn read_crmd() -> usize {
+    let value: usize;
+    unsafe {
+        core::arch::asm!(
+            "csrrd {value}, 0x0",
+            value = out(reg) value,
+            options(nostack, preserves_flags)
+        );
+    }
+    value
 }
 
 impl Default for TrapFrame {

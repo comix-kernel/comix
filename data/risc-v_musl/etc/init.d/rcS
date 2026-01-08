@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# Minimal System Initialization Script for BusyBox
+
+# 打印信息，确认脚本已启动
+echo "--- Starting Minimal BusyBox System ---"
+
+# --- 1. 挂载伪文件系统 ---
+# procfs: 进程信息
+/bin/mount -t proc none /proc
+# sysfs: 内核设备信息
+/bin/mount -t sysfs none /sys
+# tmpfs/devtmpfs: 临时文件系统和设备文件
+/bin/mount -t tmpfs none /tmp
+# /dev 已由内核在 early init 阶段挂载并自动创建设备节点，避免在此处覆盖已有的 /dev 挂载
+# /bin/mount -t tmpfs none /dev
+
+# --- 2. 处理设备文件 ---
+# mdev 是 BusyBox 中用于创建设备文件 (/dev/null, /dev/console 等) 的工具
+# -s 选项扫描 /sys/class 和 /sys/block 并创建相应的设备文件
+
+# 现在转为由mount中进行特判，自动创建设备文件
+# echo "Populating /dev via mdev..."
+# /sbin/mdev -s
+
+# --- 3. 系统配置 ---
+
+# 设置默认主机名
+DEFAULT_HOSTNAME="comix"
+
+# 检查 /etc/hostname 文件是否存在
+if [ -f /etc/hostname ]; then
+    # 如果文件存在，从文件中读取并设置主机名
+    /bin/hostname -F /etc/hostname
+    echo "Hostname set from /etc/hostname."
+else
+    # 如果文件不存在，使用默认值 comix 设置主机名
+    /bin/hostname "$DEFAULT_HOSTNAME"
+    echo "Warning: /etc/hostname not found. Hostname set to default: $DEFAULT_HOSTNAME"
+fi
+
+# 执行 /etc/fstab 中定义的挂载
+echo "Mounting file systems via fstab..."
+/bin/mount -a
+
+# 启动日志服务 (可选，如果配置了 syslogd)
+# /sbin/syslogd
+# /sbin/klogd
+
+echo "System initialization finished."
+
+echo "rcS finished; spawning shell on ttyS0 via inittab"
+exit 0

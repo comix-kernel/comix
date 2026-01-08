@@ -7,7 +7,8 @@ MODE=${2:-run}
 # 参数定义（对齐评测指令）
 mem="4G"
 smp="1"
-fs="fs.img"
+arch="${ARCH:-loongarch}"
+fs="fs-${arch}.img"
 disk="disk-la.img"
 
 # 创建空磁盘镜像（如果不存在）
@@ -28,6 +29,14 @@ QEMU_ARGS=(
 if [ -f "$fs" ]; then
     QEMU_ARGS+=(-drive file="$fs",if=none,format=raw,id=x0)
     QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
+elif [ -f "fs.img" ]; then
+    fs="fs.img"
+    QEMU_ARGS+=(-drive file="$fs",if=none,format=raw,id=x0)
+    QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
+else
+    echo "Error: ${fs} not found!"
+    echo "Please run 'cargo build' first to generate the filesystem image."
+    exit 1
 fi
 
 # Virtio Network 设备

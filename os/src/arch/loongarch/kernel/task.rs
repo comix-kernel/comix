@@ -4,7 +4,15 @@ use alloc::vec::Vec;
 use core::{mem::size_of, ptr};
 
 use super::context::TaskContext;
-use crate::{arch::constant::STACK_ALIGN_MASK, mm::frame_allocator::FrameTracker};
+use crate::{
+    arch::{constant::STACK_ALIGN_MASK, mm::paddr_to_vaddr},
+    config::PAGE_SIZE,
+    mm::{
+        address::{UsizeConvert, Vaddr},
+        frame_allocator::FrameTracker,
+        memory_space::MemorySpace,
+    },
+};
 
 /// 初始化内核任务上下文
 pub fn init_kernel_task_context(context: &mut TaskContext, entry: usize, kstack: usize) {
@@ -25,6 +33,7 @@ pub fn init_fork_context(
 /// 为新任务设置用户栈布局，包含命令行参数和环境变量
 /// 返回新的栈指针位置，以及 argc, argv, envp 的地址
 pub fn setup_stack_layout(
+    space: &MemorySpace,
     sp: usize,
     argv: &[&str],
     envp: &[&str],
@@ -34,16 +43,20 @@ pub fn setup_stack_layout(
     entry_point: usize,
 ) -> (usize, usize, usize, usize) {
     let mut sp = sp;
+    crate::pr_info!(
+        "[setup_stack_layout] sp_top=0x{:x}, phdr=0x{:x}, entry=0x{:x}",
+        sp,
+        phdr_addr,
+        entry_point
+    );
     let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
     let mut env_ptrs: Vec<usize> = Vec::with_capacity(envp.len());
 
     for &env in envp.iter().rev() {
         let bytes = env.as_bytes();
         sp -= bytes.len() + 1; // 预留 NUL
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), sp as *mut u8, bytes.len());
-            (sp as *mut u8).add(bytes.len()).write(0); // NUL 终止符
-        }
+        write_user_bytes(&space, sp, bytes);
+        write_user_bytes(&space, sp + bytes.len(), &[0]); // NUL 终止符
         env_ptrs.push(sp); // 存储字符串的地址
     }
 
@@ -51,10 +64,8 @@ pub fn setup_stack_layout(
     for &arg in argv.iter().rev() {
         let bytes = arg.as_bytes();
         sp -= bytes.len() + 1; // 预留 NUL
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), sp as *mut u8, bytes.len());
-            (sp as *mut u8).add(bytes.len()).write(0); // NUL 终止符
-        }
+        write_user_bytes(&space, sp, bytes);
+        write_user_bytes(&space, sp + bytes.len(), &[0]); // NUL 终止符
         arg_ptrs.push(sp); // 存储字符串的地址
     }
 
@@ -69,14 +80,14 @@ pub fn setup_stack_layout(
         0x67,
     ];
     let random_ptr = sp - 16;
-    unsafe { ptr::copy_nonoverlapping(random_bytes.as_ptr(), random_ptr as *mut u8, 16) };
+    write_user_bytes(&space, random_ptr, &random_bytes);
     sp = random_ptr;
 
     // platform string
     let platform = "loongarch64\0";
     let platform_len = platform.len();
     sp -= platform_len;
-    unsafe { ptr::copy_nonoverlapping(platform.as_ptr(), sp as *mut u8, platform_len) };
+    write_user_bytes(&space, sp, platform.as_bytes());
     let platform_ptr = sp;
 
     // 16 字节对齐（auxv 要求）
@@ -129,34 +140,67 @@ pub fn setup_stack_layout(
 
     for (type_, val) in auxv.iter().rev() {
         sp -= size_of::<usize>();
-        unsafe { ptr::write(sp as *mut usize, *val) };
+        write_user_usize(&space, sp, *val);
         sp -= size_of::<usize>();
-        unsafe { ptr::write(sp as *mut usize, *type_) };
+        write_user_usize(&space, sp, *type_);
     }
 
     // envp NULL
     sp -= size_of::<usize>();
-    unsafe { ptr::write(sp as *mut usize, 0) };
+    write_user_usize(&space, sp, 0);
 
     for &p in env_ptrs.iter() {
         sp -= size_of::<usize>();
-        unsafe { ptr::write(sp as *mut usize, p) };
+        write_user_usize(&space, sp, p);
     }
     let envp_vec_ptr = sp;
 
     // argv NULL
     sp -= size_of::<usize>();
-    unsafe { ptr::write(sp as *mut usize, 0) };
+    write_user_usize(&space, sp, 0);
 
     for &p in arg_ptrs.iter() {
         sp -= size_of::<usize>();
-        unsafe { ptr::write(sp as *mut usize, p) };
+        write_user_usize(&space, sp, p);
     }
     let argv_vec_ptr = sp;
 
     let argc = argv.len();
     sp -= size_of::<usize>();
-    unsafe { ptr::write(sp as *mut usize, argc) };
+    write_user_usize(&space, sp, argc);
 
+    crate::pr_info!(
+        "[setup_stack_layout] sp_final=0x{:x}, argc={}, argv=0x{:x}, envp=0x{:x}",
+        sp,
+        argc,
+        argv_vec_ptr,
+        envp_vec_ptr
+    );
     (sp, argc, argv_vec_ptr, envp_vec_ptr)
+}
+
+fn write_user_usize(space: &MemorySpace, dst: usize, val: usize) {
+    let bytes = val.to_ne_bytes();
+    write_user_bytes(space, dst, &bytes);
+}
+
+fn write_user_bytes(space: &MemorySpace, dst: usize, data: &[u8]) {
+    let mut offset = 0usize;
+    while offset < data.len() {
+        let vaddr = <Vaddr as UsizeConvert>::from_usize(dst + offset);
+        let paddr = space
+            .translate(vaddr)
+            .expect("write_user_bytes: translate failed");
+        let page_off = (dst + offset) & (PAGE_SIZE - 1);
+        let chunk = core::cmp::min(PAGE_SIZE - page_off, data.len() - offset);
+        unsafe {
+            let dst_va = paddr_to_vaddr(paddr.as_usize());
+            let dst_ptr = dst_va as *mut u8;
+            let src_ptr = data.as_ptr().add(offset);
+            for i in 0..chunk {
+                ptr::write(dst_ptr.add(i), ptr::read(src_ptr.add(i)));
+            }
+        }
+        offset += chunk;
+    }
 }

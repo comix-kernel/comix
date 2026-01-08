@@ -6,7 +6,8 @@ BIN_FILE="${ELF_FILE%.*}.bin"
 os_file="$BIN_FILE"
 mem="4G"
 smp="${SMP:-1}"  # 从环境变量读取，默认为 1
-fs="fs.img"
+arch="${ARCH:-riscv}"
+fs="fs-${arch}.img"
 disk="disk.img"
 
 # 1. 转换为纯二进制
@@ -14,13 +15,17 @@ rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
 
 # 2. 检查 fs.img (1GB Ext4 文件系统)
 # 镜像应该由 build.rs 在编译时创建
-if [ ! -f "fs.img" ]; then
-    echo "Error: fs.img not found!"
-    echo "Please run 'cargo build' first to generate the filesystem image."
-    exit 1
+if [ ! -f "$fs" ]; then
+    if [ -f "fs.img" ]; then
+        fs="fs.img"
+    else
+        echo "Error: ${fs} not found!"
+        echo "Please run 'cargo build' first to generate the filesystem image."
+        exit 1
+    fi
 fi
 
-echo "Using existing fs.img (1GB Ext4 filesystem)"
+echo "Using existing ${fs} (1GB Ext4 filesystem)"
 
 # 3. 运行 QEMU
 QEMU_ARGS="-machine virt \

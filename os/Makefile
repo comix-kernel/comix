@@ -4,6 +4,7 @@
 
 # 架构选择: riscv (默认) 或 loongarch
 ARCH ?= riscv
+export ARCH
 LOG ?=
 
 # 根据架构设置变量
@@ -22,6 +23,7 @@ else
     GDB_BIN := riscv64-unknown-elf-gdb
     GDB_ARCH_SETUP := -ex "set arch riscv:rv64"
 endif
+
 
 # ===============================================
 # 核心目标
