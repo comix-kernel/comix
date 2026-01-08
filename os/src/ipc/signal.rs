@@ -357,3 +357,47 @@ pub fn signal_pending(task: &SharedTask) -> bool {
     t.pending.has_deliverable_signal(t.blocked)
         || t.shared_pending.lock().has_deliverable_signal(t.blocked)
 }
+
+/// Whether a pending signal should interrupt a blocking syscall (i.e. return EINTR).
+///
+/// We intentionally **do not** treat all pending signals as syscall-interrupting:
+/// - Signals with disposition `SIG_IGN` should not interrupt.
+/// - Signals with disposition `SIG_DFL` whose default action is "ignore" (e.g. SIGCHLD)
+///   should not interrupt. Otherwise daemons like `netserver` can see spurious EINTR and exit.
+pub fn signal_interrupts_syscall(task: &SharedTask) -> bool {
+    let t = task.lock();
+    let pending = t.pending.signals | t.shared_pending.lock().signals;
+    let deliverable = pending.difference(t.blocked);
+    if deliverable.is_empty() {
+        return false;
+    }
+
+    let handlers = t.signal_handlers.lock();
+    for sig_num in 1..=NSIG {
+        // Practical Linux-compat behavior:
+        // netserver/netperf often rely on SIGCHLD for child reaping; on Linux this usually does
+        // not surface as EINTR to select()/poll() because handlers are installed with SA_RESTART.
+        // We don't fully implement SA_RESTART yet, so never use SIGCHLD to interrupt syscalls.
+        if sig_num == NUM_SIGCHLD {
+            continue;
+        }
+        let Some(flag) = SignalFlags::from_signal_num(sig_num) else {
+            continue;
+        };
+        if !deliverable.contains(flag) {
+            continue;
+        }
+
+        let action = handlers.actions[sig_num];
+        match unsafe { action.sa_handler() } as isize {
+            SIG_IGN => continue,
+            SIG_DFL => match sig_num {
+                NUM_SIGCHLD | NUM_SIGURG | NUM_SIGWINCH | NUM_SIGIO => continue, // default ignore
+                _ => return true,
+            },
+            _ => return true, // caught
+        }
+    }
+
+    false
+}
