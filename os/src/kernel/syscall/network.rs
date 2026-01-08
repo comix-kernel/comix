@@ -271,6 +271,22 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     match handle {
         SocketHandle::Tcp(_) => {
             use crate::net::socket::set_socket_local_endpoint;
+            // Linux behavior: bind(..., port=0) asks the kernel to choose an ephemeral port.
+            let endpoint = if endpoint.port == 0 {
+                IpEndpoint::new(endpoint.addr, alloc_ephemeral_port())
+            } else {
+                endpoint
+            };
+
+            // Linux behavior: binding an already-bound TCP socket is invalid.
+            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
+                if let Some(old) = sf.get_local_endpoint() {
+                    if old.port != 0 {
+                        return -22; // EINVAL
+                    }
+                }
+            }
+
             if set_socket_local_endpoint(&file, endpoint).is_err() {
                 return -22; // EINVAL
             }
@@ -352,56 +368,76 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
 
     match handle {
         SocketHandle::Tcp(h) => {
-            use crate::net::socket::get_socket_local_endpoint;
-            let endpoint = match get_socket_local_endpoint(&file) {
-                Some(ep) => ep,
-                None => return -22, // EINVAL - must bind first
-            };
-
-            pr_debug!(
-                "listen: tid={}, sockfd={}, endpoint={}",
-                tid,
-                sockfd,
-                endpoint
-            );
-
             use crate::net::socket::SocketFile;
             let socket_file = match file.as_any().downcast_ref::<SocketFile>() {
                 Some(sf) => sf,
                 None => return -88, // ENOTSOCK
             };
 
-            // Convert endpoint to listen endpoint
-            // If bound to 0.0.0.0 or ::, listen on all addresses (addr = None)
-            use smoltcp::wire::{IpAddress, IpListenEndpoint};
-            let listen_endpoint = match endpoint.addr {
-                IpAddress::Ipv4(addr) if addr.is_unspecified() => IpListenEndpoint {
-                    addr: None,
-                    port: endpoint.port,
-                },
-                IpAddress::Ipv6(addr) if addr.is_unspecified() => IpListenEndpoint {
-                    addr: None,
-                    port: endpoint.port,
-                },
-                _ => IpListenEndpoint {
-                    addr: Some(endpoint.addr),
-                    port: endpoint.port,
-                },
-            };
+            // Linux behavior: listen() on an unbound TCP socket implicitly binds it to
+            // INADDR_ANY:ephemeral. Also, if the socket was bound with port=0, the kernel must
+            // choose a non-zero port before starting to listen.
+            use crate::net::socket::get_socket_local_endpoint;
+            let mut endpoint = get_socket_local_endpoint(&file).unwrap_or_else(|| {
+                IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0)
+            });
 
             pr_debug!(
-                "listen: converted endpoint={} to listen_endpoint addr={:?} port={}",
-                endpoint,
-                listen_endpoint.addr,
-                listen_endpoint.port
+                "listen: tid={}, sockfd={}, endpoint(before)={}",
+                tid,
+                sockfd,
+                endpoint
             );
 
-            let mut sockets = SOCKET_SET.lock();
-            let socket = sockets.get_mut::<tcp::Socket>(h);
-            if socket.listen(listen_endpoint).is_err() {
-                return -98; // EADDRINUSE
+            let mut attempts_left: usize = if endpoint.port == 0 { 32 } else { 1 };
+            loop {
+                if endpoint.port == 0 {
+                    endpoint.port = alloc_ephemeral_port();
+                }
+
+                // Persist so that getsockname() can report the chosen port even if smoltcp
+                // doesn't expose it until after listen/connect.
+                socket_file.set_local_endpoint(endpoint);
+
+                // Convert endpoint to listen endpoint
+                // If bound to 0.0.0.0 or ::, listen on all addresses (addr = None)
+                use smoltcp::wire::{IpAddress, IpListenEndpoint};
+                let listen_endpoint = match endpoint.addr {
+                    IpAddress::Ipv4(addr) if addr.is_unspecified() => IpListenEndpoint {
+                        addr: None,
+                        port: endpoint.port,
+                    },
+                    IpAddress::Ipv6(addr) if addr.is_unspecified() => IpListenEndpoint {
+                        addr: None,
+                        port: endpoint.port,
+                    },
+                    _ => IpListenEndpoint {
+                        addr: Some(endpoint.addr),
+                        port: endpoint.port,
+                    },
+                };
+
+                pr_debug!(
+                    "listen: converted endpoint={} to listen_endpoint addr={:?} port={}",
+                    endpoint,
+                    listen_endpoint.addr,
+                    listen_endpoint.port
+                );
+
+                let mut sockets = SOCKET_SET.lock();
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                if socket.listen(listen_endpoint).is_err() {
+                    drop(sockets);
+                    attempts_left = attempts_left.saturating_sub(1);
+                    if attempts_left == 0 {
+                        return -98; // EADDRINUSE
+                    }
+                    endpoint.port = 0;
+                    continue;
+                }
+                drop(sockets);
+                break;
             }
-            drop(sockets);
 
             socket_file.set_listener(true);
             socket_file.clear_listen_sockets();
@@ -511,6 +547,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             return -11; // EAGAIN
         }
         crate::kernel::yield_task();
+        if crate::ipc::signal_interrupts_syscall(&task) {
+            return -(crate::uapi::errno::EINTR as isize);
+        }
     }
 }
 
@@ -644,6 +683,13 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             }
 
             pr_debug!("connect: local_endpoint={}", local_endpoint);
+            // Persist local endpoint for getsockname() even if smoltcp doesn't expose it yet.
+            if let Some(sf) = file
+                .as_any()
+                .downcast_ref::<crate::net::socket::SocketFile>()
+            {
+                sf.set_local_endpoint(local_endpoint);
+            }
             drop(sockets);
 
             use crate::net::socket::tcp_connect;
@@ -678,6 +724,9 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                     }
 
                     crate::kernel::yield_task();
+                    if crate::ipc::signal_interrupts_syscall(&task) {
+                        return -(crate::uapi::errno::EINTR as isize);
+                    }
                 }
             }
 
@@ -760,12 +809,17 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
     loop {
         let task = current_task();
-        let file = match task.lock().fd_table.get(sockfd as usize) {
-            Ok(f) => f,
-            Err(_) => {
-                pr_debug!("send: sockfd={} -> EBADF", sockfd);
-                return -9;
-            }
+        let (_tid, file) = {
+            let task_lock = task.lock();
+            let tid = task_lock.tid;
+            let file = match task_lock.fd_table.get(sockfd as usize) {
+                Ok(f) => f,
+                Err(_) => {
+                    crate::pr_warn!("send: EBADF tid={}, sockfd={}", tid, sockfd);
+                    return -9;
+                }
+            };
+            (tid, file)
         };
 
         let result = {
@@ -785,9 +839,11 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
                     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
                         if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
                             drop(file);
-                            drop(task);
                             crate::net::socket::poll_network_and_dispatch();
                             crate::kernel::yield_task();
+                            if crate::ipc::signal_interrupts_syscall(&task) {
+                                return -(crate::uapi::errno::EINTR as isize);
+                            }
                             continue;
                         }
                     }
@@ -802,12 +858,17 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
 pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
     loop {
         let task = current_task();
-        let file = match task.lock().fd_table.get(sockfd as usize) {
-            Ok(f) => f,
-            Err(_) => {
-                pr_debug!("recv: sockfd={} -> EBADF", sockfd);
-                return -9;
-            }
+        let (_tid, file) = {
+            let task_lock = task.lock();
+            let tid = task_lock.tid;
+            let file = match task_lock.fd_table.get(sockfd as usize) {
+                Ok(f) => f,
+                Err(_) => {
+                    crate::pr_warn!("recv: EBADF tid={}, sockfd={}", tid, sockfd);
+                    return -9;
+                }
+            };
+            (tid, file)
         };
 
         let result = {
@@ -827,9 +888,11 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
                     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
                         if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
                             drop(file);
-                            drop(task);
                             crate::net::socket::poll_network_and_dispatch();
                             crate::kernel::yield_task();
+                            if crate::ipc::signal_interrupts_syscall(&task) {
+                                return -(crate::uapi::errno::EINTR as isize);
+                            }
                             continue;
                         }
                     }
@@ -860,7 +923,7 @@ unsafe fn get_c_str_safe(ptr: *const c_char) -> Option<&'static str> {
         return None;
     }
 
-    match CStr::from_ptr(ptr).to_str() {
+    match unsafe { CStr::from_ptr(ptr) }.to_str() {
         Ok(s) => Some(s),
         Err(_) => None,
     }
@@ -1166,7 +1229,7 @@ fn get_interface_flags(iface_name: &str) -> u32 {
 unsafe fn fill_sockaddr_from_ip(addr: *mut SockAddrIn, ip: smoltcp::wire::IpAddress) {
     use smoltcp::wire::IpAddress;
 
-    let sockaddr = &mut *addr;
+    let sockaddr = unsafe { &mut *addr };
     sockaddr.sin_family = AF_INET;
     sockaddr.sin_port = 0;
     sockaddr.sin_zero = [0; 8];
@@ -1188,7 +1251,7 @@ unsafe fn fill_sockaddr_from_ip(addr: *mut SockAddrIn, ip: smoltcp::wire::IpAddr
 
 /// 从前缀长度填充 netmask
 unsafe fn fill_sockaddr_from_netmask(addr: *mut SockAddrIn, prefix_len: u8) {
-    let sockaddr = &mut *addr;
+    let sockaddr = unsafe { &mut *addr };
     sockaddr.sin_family = AF_INET;
     sockaddr.sin_port = 0;
     sockaddr.sin_zero = [0; 8];
@@ -1214,7 +1277,7 @@ unsafe fn fill_sockaddr_from_netmask(addr: *mut SockAddrIn, prefix_len: u8) {
 unsafe fn fill_sockaddr_broadcast(addr: *mut SockAddrIn, ip_cidr: &smoltcp::wire::IpCidr) {
     use smoltcp::wire::IpAddress;
 
-    let sockaddr = &mut *addr;
+    let sockaddr = unsafe { &mut *addr };
     sockaddr.sin_family = AF_INET;
     sockaddr.sin_port = 0;
     sockaddr.sin_zero = [0; 8];
@@ -1318,11 +1381,19 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
                     SO_REUSEADDR => set_sockopt_bool!(optval, optlen, opts.reuse_addr),
                     SO_REUSEPORT => set_sockopt_bool!(optval, optlen, opts.reuse_port),
                     SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
+                    // netperf uses these; smoltcp doesn't implement them, accept for Linux ABI compatibility.
+                    SO_DONTROUTE | SO_BROADCAST | SO_OOBINLINE => { /* ignore */ }
                     // Note: SO_SNDBUF/SO_RCVBUF are stored but not applied to smoltcp sockets
                     // smoltcp uses fixed-size buffers allocated at socket creation time
                     SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
                     SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
+                    SO_RCVLOWAT | SO_SNDLOWAT => { /* ignore */ }
                     SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ }
+                    _ => return -(ENOPROTOOPT as isize),
+                },
+                IPPROTO_IP => match optname {
+                    // Commonly touched by tools; we currently treat them as no-ops.
+                    IP_TOS | IP_TTL | IP_PKTINFO | IP_MTU_DISCOVER | IP_RECVERR => { /* ignore */ }
                     _ => return -(ENOPROTOOPT as isize),
                 },
                 IPPROTO_TCP => match optname {
@@ -1597,9 +1668,11 @@ pub fn recvfrom(
                             .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
                         {
                             drop(file);
-                            drop(task);
                             crate::net::socket::poll_network_and_dispatch();
                             crate::kernel::yield_task();
+                            if crate::ipc::signal_interrupts_syscall(&task) {
+                                return -(crate::uapi::errno::EINTR as isize);
+                            }
                             continue;
                         }
                     }
@@ -1666,12 +1739,18 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
 // 获取套接字地址
 pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task = current_task();
-    let tid = task.lock().tid as usize;
+    let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    drop(task_lock);
 
     let sockets = SOCKET_SET.lock();
     let local_endpoint = match handle {
@@ -1693,19 +1772,24 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 
     drop(sockets);
 
-    if let Some(ep) = local_endpoint {
-        {
-            let _guard = SumGuard::new();
-            unsafe {
-                if write_sockaddr_in(addr, addrlen, ep).is_err() {
-                    return -22; // EINVAL
-                }
-            }
+    // Linux behavior: getsockname() on an unbound socket typically returns success and
+    // fills a sockaddr with AF_INET and port 0.
+    let ep = match local_endpoint {
+        Some(ep) => ep,
+        None => {
+            use crate::net::socket::get_socket_local_endpoint;
+            get_socket_local_endpoint(&file)
+                .unwrap_or_else(|| IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0))
         }
-        0
-    } else {
-        -22 // EINVAL
+    };
+
+    let _guard = SumGuard::new();
+    unsafe {
+        if write_sockaddr_in(addr, addrlen, ep).is_err() {
+            return -22; // EINVAL
+        }
     }
+    0
 }
 
 // 获取对端套接字地址

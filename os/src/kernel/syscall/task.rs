@@ -110,27 +110,29 @@ fn clear_child_tid_and_wake() {
         return;
     }
 
-    // 1) 写 0 到用户地址
+    // If the task has already dropped its user address space (e.g. forced exit paths),
+    // we cannot touch userspace or translate the address. Best-effort: just skip.
+    let memory_space = {
+        let t = task.lock();
+        t.memory_space.clone()
+    };
+    let Some(memory_space) = memory_space else {
+        return;
+    };
+
+    // 1) write 0 to userspace tid address
     unsafe {
         let _guard = SumGuard::new();
         write_to_user(clear_addr as *mut c_int, 0);
     }
 
     // 2) futex wake
-    let paddr = {
-        let memory_space = current_task()
-            .lock()
-            .memory_space
-            .as_ref()
-            .expect("clear_child_tid: current task has no memory space.")
-            .clone();
-        match memory_space
-            .lock()
-            .translate(Vaddr::from_usize(clear_addr as usize))
-        {
-            Some(p) => p.as_usize(),
-            None => return,
-        }
+    let Some(paddr) = memory_space
+        .lock()
+        .translate(Vaddr::from_usize(clear_addr as usize))
+        .map(|p| p.as_usize())
+    else {
+        return;
     };
     FUTEX_MANAGER.lock().get_wait_queue(paddr).wake_up_all();
 }
@@ -899,8 +901,14 @@ pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
         ITIMER_PROF => NUM_SIGPROF,
         _ => unreachable!("getitimer: unreachable which case."),
     };
+    // Linux semantics: ITIMER_* are per-process (thread group), not per-thread.
+    // Use the thread-group leader (pid) as the timer owner.
+    let owner = {
+        let pid = current_task().lock().pid;
+        TASK_MANAGER.lock().get_task(pid).unwrap_or_else(current_task)
+    };
     let mut val = Itimerval::zero();
-    if let Some(timer) = TIMER.lock().find_entry(&current_task(), sig) {
+    if let Some(timer) = TIMER.lock().find_entry(&owner, sig) {
         let now = get_time();
         let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
         let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
@@ -935,32 +943,44 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
         _ => unreachable!("setitimer: unreachable which case."),
     };
 
+    // Linux semantics: ITIMER_* are per-process (thread group), not per-thread.
+    let owner = {
+        let pid = current_task().lock().pid;
+        TASK_MANAGER.lock().get_task(pid).unwrap_or_else(current_task)
+    };
+
     let mut binding = TIMER.lock();
+
+    // Linux semantics: return the previous timer value, then replace it with the new one.
+    let mut old = Itimerval::zero();
+    if let Some(timer) = binding.find_entry(&owner, sig) {
+        let now = get_time();
+        let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
+        let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
+        let it_interval = timer.1.it_interval.to_timeval();
+        old = Itimerval {
+            it_value,
+            it_interval,
+        };
+    }
+
+    // Disarm any existing timers for this (task, sig) so we don't accumulate duplicates.
+    while binding.remove_entry(&owner, sig).is_some() {}
+
     let new_itimer = unsafe { read_from_user(new_value) };
     if !new_itimer.it_value.is_zero() {
         let trigger = get_time() + new_itimer.it_value.into_freq(clock_freq());
         let interval = new_itimer.it_interval.to_timespec();
         let entry = TimerEntry {
-            task: current_task(),
+            task: owner,
             sig,
             it_interval: interval,
         };
         binding.push(trigger, entry);
     }
     if !old_value.is_null() {
-        let mut val = Itimerval::zero();
-        if let Some(timer) = binding.find_entry(&current_task(), sig) {
-            let now = get_time();
-            let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
-            let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
-            let it_interval = timer.1.it_interval.to_timeval();
-            val = Itimerval {
-                it_value,
-                it_interval,
-            };
-        }
         unsafe {
-            write_to_user(old_value, val);
+            write_to_user(old_value, old);
         }
     }
 

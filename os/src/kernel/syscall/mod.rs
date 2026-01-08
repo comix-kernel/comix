@@ -256,6 +256,7 @@ impl_syscall!(
 
 // 网络/I/O (续)
 impl_syscall!(sys_accept4, accept4, (i32, *mut u8, *mut u32, i32));
+impl_syscall!(sys_shutdown, shutdown, (i32, i32));
 
 // 进程与控制 (续)
 impl_syscall!(sys_wait4, wait4, (c_int, *mut c_int, c_int, *mut Rusage));
