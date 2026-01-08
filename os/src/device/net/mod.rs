@@ -7,6 +7,7 @@ use crate::sync::SpinLock;
 use alloc::{sync::Arc, vec::Vec};
 
 pub mod net_device;
+pub mod null_net;
 pub mod virtio_net;
 
 use lazy_static::lazy_static;

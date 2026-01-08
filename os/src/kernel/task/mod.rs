@@ -106,15 +106,69 @@ pub(crate) fn terminate_task(code: usize) -> ! {
         cpu.current_task.as_ref().unwrap().clone()
     };
 
-    {
-        let mut t = task.lock();
-        // 不必将task移出cpu,在schedule时会处理
-        t.state = TaskState::Zombie;
-        t.exit_code = Some(code as i32);
+    // 该函数目前仅用于处理“用户态致命异常”，默认行为应与 Linux 类似：
+    // 终止整个进程（线程组），并唤醒父进程的 wait。
+    let exit_code = code as i32;
+    let (pid, is_process) = {
+        let t = task.lock();
+        (t.pid, t.is_process())
+    };
+    if is_process {
+        cleanup_current_process_resources_on_exit();
+        exit_process(task, exit_code);
+    } else {
+        // 当前为线程：找到线程组 leader（pid==tid）并终止整个进程
+        let leader = TASK_MANAGER.lock().get_task(pid);
+        if let Some(leader) = leader {
+            if leader.lock().is_process() {
+                exit_process(leader, exit_code);
+            } else {
+                TASK_MANAGER.lock().exit_task(task, exit_code);
+            }
+        } else {
+            TASK_MANAGER.lock().exit_task(task, exit_code);
+        }
     }
-    drop(task);
     schedule();
     unreachable!("terminate_task: should not return after scheduled out terminated task");
+}
+
+/// 进程退出时的资源清理（Linux 语义子集）：
+/// - 释放用户地址空间（页表 + 用户映射）
+/// - 关闭打开文件描述符（包括 socket fd）
+///
+/// 说明：
+/// - 仅对“进程/线程组 leader”执行（`task.is_process()`），避免误伤线程共享资源。
+/// - 必须先切换到内核页表，再释放当前进程页表资源。
+pub fn cleanup_current_process_resources_on_exit() {
+    let task = current_task();
+    if !task.lock().is_process() {
+        return;
+    }
+
+    // 1) 先切换到全局内核页表，避免释放“正在使用的 satp”。
+    if let Some(kernel_space) = crate::mm::get_global_kernel_space() {
+        let _guard = crate::sync::PreemptGuard::new();
+        current_cpu().switch_space(kernel_space);
+    }
+
+    // 2) 关闭所有 fd，并清理 socket 的 (tid,fd)->handle 映射，避免 fd 复用指向陈旧 handle。
+    let tid = { task.lock().tid as usize };
+    let fd_table = { task.lock().fd_table.clone() };
+    let open = fd_table.take_all();
+    for (fd, file) in open {
+        if file
+            .as_any()
+            .downcast_ref::<crate::net::socket::SocketFile>()
+            .is_some()
+        {
+            crate::net::socket::unregister_socket_fd(tid, fd);
+        }
+        drop(file);
+    }
+
+    // 3) 释放用户地址空间。
+    task.lock().memory_space = None;
 }
 
 /// 尝试获取当前task
