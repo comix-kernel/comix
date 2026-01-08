@@ -98,13 +98,7 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
         SIG_IGN => sig_ignore(sig_num),
         handler_addr => {
             // 自定义处理器：构造用户栈上下文并跳转
-            // **将 action.mask 传递给安装跳板函数**
-            install_user_signal_trap_frame(
-                task,
-                sig_num,
-                handler_addr,
-                SignalFlags::from_sigset_t(action.sa_mask),
-            );
+            install_user_signal_trap_frame(task, sig_num, handler_addr, action);
         }
     }
 }
@@ -177,13 +171,14 @@ fn install_user_signal_trap_frame(
     task: &SharedTask,
     sig_num: usize,
     entry: isize,
-    action_mask: SignalFlags,
+    action: SignalAction,
 ) {
     let mut t = task.lock();
     let tp = t.trap_frame_ptr.load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
         let tf = &mut *tp;
         let siginfo = create_siginfo_for_signal(SignalFlags::from_signal_num(sig_num).unwrap());
+        let sa_flags = SaFlags::from_bits_truncate(action.sa_flags as u32);
         let uc = UContextT::new(
             0,           // TODO: flags未实现
             0 as *mut _, // TODO: link未实现
@@ -191,48 +186,41 @@ fn install_user_signal_trap_frame(
             t.blocked.to_sigset_t(),
             MContextT::from_trap_frame(tf),
         );
-        // 构建用户栈帧
-        // TODO: 处理备用信号栈
-        // 内核决定是否使用备用信号栈取决于:
-        // 1. 备用栈已分配和启用
-        // 2. 信号处理动作明确要求使用备用栈
-        // 3. 当前线程不在备用栈上 (防止递归溢出)
-        let mut current_sp = tf.get_sp();
+        // Linux ABI: build rt_sigframe { siginfo, ucontext } on the user stack.
+        let frame_size = core::mem::size_of::<RtSigFrame>();
+        let mut sp = align_down(tf.get_sp(), 16);
+        sp = align_down(sp - frame_size, 16);
 
-        current_sp = align_down(current_sp, align_of::<SigInfoT>());
-        let sig_info_addr = current_sp - size_of::<SigInfoT>();
-        current_sp = sig_info_addr;
-
-        current_sp = align_down(current_sp, align_of::<UContextT>());
-        let ucontext_addr = current_sp - size_of::<UContextT>();
-        current_sp = ucontext_addr;
-
-        current_sp = align_down(current_sp, align_of::<usize>()) - size_of::<usize>();
-        let return_addr_slot = current_sp;
-
-        // HACK: 保证返回地址和 ucontext_t 结构体地址之间没有间隙
-        //       以便于在 rt_sigreturn 直接读取 ucontext_t
-        let ucontext_addr = current_sp + size_of::<usize>();
-
-        let final_sp = current_sp;
+        let sig_info_addr = sp + core::mem::offset_of!(RtSigFrame, info);
+        let ucontext_addr = sp + core::mem::offset_of!(RtSigFrame, uc);
 
         write_to_user(sig_info_addr as *mut SigInfoT, siginfo);
         write_to_user(ucontext_addr as *mut UContextT, uc);
-        write_to_user(
-            return_addr_slot as *mut usize,
-            sigreturn_trampoline_address(),
-        );
 
         // 更新 blocked（跳过不可屏蔽信号）
         if sig_num != NUM_SIGKILL && sig_num != NUM_SIGSTOP {
             let self_flag = SignalFlags::from_bits(1 << (sig_num - 1)).unwrap();
-            t.blocked |= action_mask | self_flag;
+            let action_mask = SignalFlags::from_sigset_t(action.sa_mask);
+            t.blocked |= action_mask;
+            if !sa_flags.contains(SaFlags::NODEFER) {
+                t.blocked |= self_flag;
+            }
         }
+
+        // Set userspace return address (restorer). Executing a kernel address in U-mode will fault.
+        let restorer = if sa_flags.contains(SaFlags::RESTORER) && !action.sa_restorer.is_null() {
+            action.sa_restorer as usize
+        } else {
+            sigreturn_trampoline_address()
+        };
+        tf.set_ra(restorer);
 
         // 设置用户处理器入口
         tf.set_sepc(entry as usize);
         tf.set_a0(sig_num);
-        tf.set_sp(final_sp);
+        tf.set_a1(sig_info_addr);
+        tf.set_a2(ucontext_addr);
+        tf.set_sp(sp);
     }
 }
 
