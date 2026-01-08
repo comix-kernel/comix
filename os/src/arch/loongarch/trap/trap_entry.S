@@ -142,12 +142,35 @@ tlb_refill_entry:
     # Get BADV
     csrrd   $t0, 0x89          # TLBRBADV
 
+    # Debug: print BADV bit 63
+    srli.d  $t2, $t0, 63
+    andi    $t2, $t2, 1
+    li.d    $a0, 0x1fe001e0
+    addi.w  $t2, $t2, 0x30     # Convert 0/1 to '0'/'1'
+    st.b    $t2, $a0, 0
+
     # Get PGD base (CSR.PGD auto-selects PGDL/PGDH based on BADV)
     csrrd   $t1, 0x1b          # CSR.PGD
 
+    # Debug: mark after PGD read
+    li.d    $t2, 0x1fe001e0
+    li.w    $a0, 0x31          # '1'
+    st.b    $a0, $t2, 0
+
     # 3-level page table walk: level=1, level=2, then ldpte
     lddir   $t1, $t1, 1        # t1 = dir1 base (next level)
+
+    # Debug: mark after lddir level=1
+    li.d    $t2, 0x1fe001e0
+    li.w    $a0, 0x32          # '2'
+    st.b    $a0, $t2, 0
+
     lddir   $t1, $t1, 2        # t1 = PTE table base
+
+    # Debug: mark after lddir level=2
+    li.d    $t2, 0x1fe001e0
+    li.w    $a0, 0x33          # '3'
+    st.b    $a0, $t2, 0
 
     # seq = BADV[12] (even/odd page) - must branch for immediate
     srli.d  $t2, $t0, 12
@@ -155,15 +178,28 @@ tlb_refill_entry:
     beqz    $t2, 1f
     # odd page: seq=1
     ldpte   $t1, 1
+    # Debug: mark after ldpte odd
+    li.d    $t2, 0x1fe001e0
+    li.w    $a0, 0x34          # '4'
+    st.b    $a0, $t2, 0
     # Check TLBRELO1.V
     csrrd   $t1, 0x8d
     b       2f
 1:
     # even page: seq=0
     ldpte   $t1, 0
+    # Debug: mark after ldpte even
+    li.d    $t2, 0x1fe001e0
+    li.w    $a0, 0x35          # '5'
+    st.b    $a0, $t2, 0
     # Check TLBRELO0.V
     csrrd   $t1, 0x8c
 2:
+    # Debug: mark after V check
+    li.d    $t2, 0x1fe001e0
+    li.w    $a0, 0x36          # '6'
+    st.b    $a0, $t2, 0
+
     # Check V bit (bit 0)
     andi    $t2, $t1, 0x1
     beqz    $t2, tlb_refill_invalid
@@ -176,12 +212,21 @@ tlb_refill_entry:
 
     # Set TLBIDX PS
     csrrd   $t0, 0x10
-    li.w    $t1, ~0x3f
-    and     $t0, $t0, $t1
-    ori     $t0, $t0, 12
+    li.w    $t1, 12
+    bstrins.d $t0, $t1, 5, 0   # Insert PS=12 into bits 5:0
     csrwr   $t0, 0x10
 
+    # Debug: mark before tlbfill
+    li.d    $t0, 0x1fe001e0
+    li.w    $t1, 0x37          # '7'
+    st.b    $t1, $t0, 0
+
     tlbfill
+
+    # Debug: mark after tlbfill
+    li.d    $t0, 0x1fe001e0
+    li.w    $t1, 0x38          # '8'
+    st.b    $t1, $t0, 0
 
     # Debug: mark done
     li.d    $t0, 0x1fe001e0
@@ -195,17 +240,23 @@ tlb_refill_entry:
     ertn
 
 tlb_refill_invalid:
+    # Debug: mark invalid entry
+    li.d    $t0, 0x1fe001e0
+    li.w    $t1, 0x49          # 'I'
+    st.b    $t1, $t0, 0
+
     # Fill invalid entry to trigger page fault
-    li.d    $t1, 0             # 'I'
-    csrwr   $t1, 0x8c   
+    csrrd   $t0, 0x89          # Restore BADV
+    li.d    $t1, 0
+    csrwr   $t1, 0x8c
     csrwr   $t1, 0x8d
     srli.d  $t2, $t0, 13
     slli.d  $t2, $t2, 13
     ori     $t2, $t2, 12
     csrwr   $t2, 0x8e
     csrrd   $t0, 0x10
-    li.w    $t1, ~0x3f
-    and     $t0, $t0, $t1
+    srli.d  $t0, $t0, 6
+    slli.d  $t0, $t0, 6
     ori     $t0, $t0, 12
     csrwr   $t0, 0x10
     tlbfill
