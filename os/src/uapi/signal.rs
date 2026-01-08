@@ -44,17 +44,19 @@ pub struct SignalAction {
     /// 包含单参数或三参数信号处理函数指针。
     pub __sa_handler: __SaHandler,
 
-    /// C: `sigset_t sa_mask`
-    /// 信号屏蔽字，在执行处理函数时将被自动添加到线程的阻塞集中。
-    pub sa_mask: SigSetT,
+    /// C: `unsigned long sa_flags`
+    ///
+    /// On 64-bit Linux, sa_flags is `unsigned long` (not `int`), and appears before
+    /// sa_restorer/sa_mask in the kernel ABI.
+    pub sa_flags: c_ulong,
 
-    /// C: `int sa_flags`
-    /// 信号处理行为标志 (如 SA_SIGINFO, SA_RESETHAND)。
-    /// 注意：这里使用 i32 或 c_int 更符合 C 的 int 类型。
-    pub sa_flags: c_int,
     /// C: `void (*sa_restorer)(void)`
     /// 信号恢复函数指针。通常由 C 库设置，用于从信号处理器返回。
     pub sa_restorer: SaRestorerPtr,
+
+    /// C: `sigset_t sa_mask`
+    /// 信号屏蔽字，在执行处理函数时将被自动添加到线程的阻塞集中。
+    pub sa_mask: SigSetT,
 }
 
 impl SignalAction {
@@ -87,9 +89,9 @@ impl SignalAction {
             __sa_handler: __SaHandler {
                 sa_handler: handler,
             },
-            sa_mask: mask.bits() as SigSetT,
-            sa_flags: flags.bits() as c_int,
             sa_restorer: core::ptr::null_mut(),
+            sa_flags: flags.bits() as c_ulong,
+            sa_mask: mask.bits() as SigSetT,
         }
     }
 }
@@ -196,7 +198,9 @@ impl SignalFlags {
     }
 
     pub fn from_sigset_t(set: SigSetT) -> Self {
-        SignalFlags::from_bits(set as usize).unwrap()
+        // Userspace may pass a full-width sigset_t with reserved/high bits set.
+        // For Linux ABI compatibility, ignore unknown bits instead of panicking.
+        SignalFlags::from_bits_truncate(set as usize)
     }
 
     pub fn to_sigset_t(&self) -> SigSetT {
@@ -237,6 +241,11 @@ bitflags! {
         /// 标志，使得被中断的慢速系统调用在信号处理函数返回后自动重新启动。
         const RESTART = 0x1000_0000;
 
+        /// 使用用户提供的 sa_restorer（架构相关的历史标志）。
+        ///
+        /// musl 在调用 rt_sigaction 时常携带该标志；为了 Linux ABI 兼容性需要接受它。
+        const RESTORER = 0x0400_0000;
+
         /// 防止当前信号在处理函数执行期间被自动阻塞 (即，不自动添加到屏蔽字)。
         const NODEFER = 0x4000_0000;
 
@@ -260,7 +269,9 @@ bitflags! {
 
 const ALL_KNOWN_FLAGS: SaFlags = SaFlags::all();
 
-const NOW_SUPPORTED_FLAGS: SaFlags = SaFlags::UNSUPPORTED;
+// Best-effort: accept all known flags for Linux ABI compatibility.
+// Individual semantics can be implemented incrementally.
+const NOW_SUPPORTED_FLAGS: SaFlags = ALL_KNOWN_FLAGS;
 
 impl SaFlags {
     /// 检查标志位是否在当前内核支持的范围内
@@ -447,6 +458,15 @@ pub struct UContextT {
     pub uc_sigmask: SigSetT,
     /// 机器上下文
     pub uc_mcontext: MContextT,
+}
+
+/// Linux rt_sigreturn frame layout (rt_sigframe):
+/// userspace restorer expects siginfo followed by ucontext on the stack.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RtSigFrame {
+    pub info: SigInfoT,
+    pub uc: UContextT,
 }
 
 impl UContextT {

@@ -533,6 +533,7 @@ fn accept_return_conn(
     if !addr.is_null() && !addrlen.is_null() {
         let _guard = SumGuard::new();
         unsafe {
+            // accept(): Linux truncates if addrlen is too small; our helper implements that.
             let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
         }
     }
@@ -1696,7 +1697,9 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         {
             let _guard = SumGuard::new();
             unsafe {
-                let _ = write_sockaddr_in(addr, addrlen, ep);
+                if write_sockaddr_in(addr, addrlen, ep).is_err() {
+                    return -22; // EINVAL
+                }
             }
         }
         0
@@ -1737,7 +1740,9 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         {
             let _guard = SumGuard::new();
             unsafe {
-                let _ = write_sockaddr_in(addr, addrlen, ep);
+                if write_sockaddr_in(addr, addrlen, ep).is_err() {
+                    return -22; // EINVAL
+                }
             }
         }
         0

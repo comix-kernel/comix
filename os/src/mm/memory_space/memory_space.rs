@@ -1,7 +1,10 @@
 use core::cmp::Ordering;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
-use crate::config::{MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{
+    MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
+    USER_STACK_TOP,
+};
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
@@ -141,6 +144,9 @@ impl MemorySpace {
             space.areas.push(new_area);
         }
 
+        // Userspace rt_sigreturn trampoline (Linux ABI).
+        space.map_user_sigreturn_trampoline()?;
+
         Ok(space)
     }
 
@@ -149,6 +155,37 @@ impl MemorySpace {
     /// 注意：这里只设置固定的 heap_start，不会创建/扩展 UserHeap 映射区域。
     pub fn set_heap_start(&mut self, heap_start: Vpn) {
         self.heap_start = Some(heap_start);
+    }
+
+    fn map_user_sigreturn_trampoline(&mut self) -> Result<(), PagingError> {
+        let start = USER_SIGRETURN_TRAMPOLINE;
+        let end = start
+            .checked_add(PAGE_SIZE)
+            .ok_or(PagingError::InvalidAddress)?;
+        let vpn_range = VpnRange::new(
+            Vpn::from_addr_floor(Vaddr::from_usize(start)),
+            Vpn::from_addr_ceil(Vaddr::from_usize(end)),
+        );
+
+        // If already mapped (layout differences), don't fail hard.
+        if self
+            .areas
+            .iter()
+            .any(|a| a.vpn_range().overlaps(&vpn_range))
+        {
+            return Ok(());
+        }
+
+        let code = crate::arch::trap::kernel_sigreturn_trampoline_bytes();
+        self.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rx(),
+            Some(code),
+            None,
+        )?;
+
+        Ok(())
     }
 
     /// 从当前地址空间中向指定虚拟地址写入字节序列（跨页安全）。
@@ -772,6 +809,9 @@ impl MemorySpace {
             None,
             None, // 非文件映射
         )?;
+
+        // Userspace rt_sigreturn trampoline (Linux ABI).
+        space.map_user_sigreturn_trampoline()?;
 
         let entry_point = load_bias + elf.header.pt2.entry_point() as usize;
         let ph_off = elf.header.pt2.ph_offset() as usize;
