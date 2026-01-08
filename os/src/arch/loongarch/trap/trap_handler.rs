@@ -107,12 +107,12 @@ fn install_trap_entry() {
             options(nostack, preserves_flags)
         );
         // TLB refill 入口使用独立处理，进行软件页表遍历与 tlbfill
+        // TLBRENT 必须使用物理地址，因为 TLB refill 时 CPU 处于直接地址翻译模式
         let tlbr_entry_paddr =
             unsafe { crate::arch::mm::vaddr_to_paddr(tlb_refill_entry as usize) } & !0xfff;
-        let tlbr_entry_vaddr = crate::arch::mm::paddr_to_vaddr(tlbr_entry_paddr);
         core::arch::asm!(
             "csrwr {val}, {csr}",
-            val = in(reg) tlbr_entry_vaddr,
+            val = in(reg) tlbr_entry_paddr,
             csr = const CSR_TLBRENT,
             options(nostack, preserves_flags)
         );
@@ -125,10 +125,9 @@ fn install_trap_entry() {
             options(nostack, preserves_flags)
         );
         crate::pr_info!(
-            "[trap_init] tlbrent={:#x}, tlbr_paddr={:#x}, tlbr_vaddr={:#x}",
+            "[trap_init] tlbrent={:#x}, tlbr_paddr={:#x}",
             tlbrent,
-            tlbr_entry_paddr,
-            tlbr_entry_vaddr
+            tlbr_entry_paddr
         );
     }
 }

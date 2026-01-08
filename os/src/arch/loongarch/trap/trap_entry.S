@@ -138,11 +138,15 @@ tlb_refill_entry:
     csrrd   $t0, 0x89
 
     # Select PGD base: low half -> PGDL, high half -> PGDH
-    csrrd   $t1, 0x19          # PGDL
+    csrrd   $t1, 0x19          # PGDL (physical address)
     srai.d  $t2, $t0, 63
     beqz    $t2, 1f
-    csrrd   $t1, 0x1a          # PGDH
+    csrrd   $t1, 0x1a          # PGDH (physical address)
 1:
+    # Convert physical address to direct-mapped virtual address
+    # LoongArch direct mapping: vaddr = 0x9000_0000_0000_0000 + paddr
+    li.d    $t2, 0x9000000000000000
+    add.d   $t1, $t1, $t2      # t1 = direct-mapped vaddr of page table
     # Level 2 index: (va >> 30) & 0x1ff
     srai.d  $t2, $t0, 30
     andi    $t2, $t2, 0x1ff
@@ -152,7 +156,10 @@ tlb_refill_entry:
     andi    $t2, $t1, 0x1
     beqz    $t2, tlb_refill_invalid
     li.d    $t2, -4096
-    and     $t1, $t1, $t2     # next table base
+    and     $t1, $t1, $t2     # next table base (physical address)
+    # Convert to direct-mapped address
+    li.d    $t2, 0x9000000000000000
+    add.d   $t1, $t1, $t2
 
     # Level 1 index: (va >> 21) & 0x1ff
     srai.d  $t2, $t0, 21
@@ -163,7 +170,10 @@ tlb_refill_entry:
     andi    $t2, $t1, 0x1
     beqz    $t2, tlb_refill_invalid
     li.d    $t2, -4096
-    and     $t1, $t1, $t2     # next table base
+    and     $t1, $t1, $t2     # next table base (physical address)
+    # Convert to direct-mapped address
+    li.d    $t2, 0x9000000000000000
+    add.d   $t1, $t1, $t2
 
     # Level 0 index: (va >> 12) & 0x1ff
     srai.d  $t2, $t0, 12
