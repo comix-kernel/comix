@@ -79,6 +79,32 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     fn activate(ppn: Ppn) {
         let pgd_paddr = ppn.start_addr().as_usize();
         unsafe {
+            // 设置 STLBPS (CSR 0x1E) - STLB 页大小为 4KB (PS=12)
+            core::arch::asm!(
+                "csrwr {0}, 0x1E",
+                in(reg) 12,
+                options(nostack, preserves_flags)
+            );
+            // 配置 PWCL (CSR 0x1C) - 3级页表: dir1@21, dir2@30, pte@12
+            let pwcl = 12 | (9 << 5) | (21 << 10) | (9 << 15) | (30 << 20) | (9 << 25);
+            core::arch::asm!(
+                "csrwr {0}, 0x1C",
+                in(reg) pwcl,
+                options(nostack, preserves_flags)
+            );
+            // 配置 PWCH (CSR 0x1D) - 无 dir3/dir4
+            core::arch::asm!(
+                "csrwr {0}, 0x1D",
+                in(reg) 0,
+                options(nostack, preserves_flags)
+            );
+            // 设置 ASID (CSR 0x18)
+            let asid = ppn.as_usize() & 0x3ff;
+            core::arch::asm!(
+                "csrwr {0}, 0x18",
+                in(reg) asid,
+                options(nostack, preserves_flags)
+            );
             // 设置 PGDL (CSR 0x19) - 低半地址空间页全局目录基址
             core::arch::asm!(
                 "csrwr {0}, 0x19",

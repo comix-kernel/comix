@@ -126,85 +126,67 @@ __restore:
     # 结束陷阱，返回异常前上下文
     ertn
 
-# TLB refill entry (software walk + tlbfill)
+# TLB refill entry (hardware-assisted walk with LDDIR/LDPTE)
     .align 12
 tlb_refill_entry:
-    # Save temporary registers (t0-t2) without touching KScratch0 (trap frame ptr)
+    # Save temporary registers
     csrwr   $t0, 0x49          # KScratch1 <- t0
     csrwr   $t1, 0x4a          # KScratch2 <- t1
     csrwr   $t2, 0x4b          # KScratch3 <- t2
 
-    # t0 = badv from TLBRBADV
-    csrrd   $t0, 0x89
+    # Debug: mark TLB refill entry
+    li.d    $t0, 0x1fe001e0
+    li.d    $t1, 0x52          # 'R'
+    st.b    $t1, $t0, 0
 
-    # Select PGD base: low half -> PGDL, high half -> PGDH
-    csrrd   $t1, 0x19          # PGDL (physical address)
-    srai.d  $t2, $t0, 63
+    # Get BADV
+    csrrd   $t0, 0x89          # TLBRBADV
+
+    # Get PGD base (CSR.PGD auto-selects PGDL/PGDH based on BADV)
+    csrrd   $t1, 0x1b          # CSR.PGD
+
+    # 3-level page table walk: level=1, level=2, then ldpte
+    lddir   $t1, $t1, 1        # t1 = dir1 base (next level)
+    lddir   $t1, $t1, 2        # t1 = PTE table base
+
+    # seq = BADV[12] (even/odd page) - must branch for immediate
+    srli.d  $t2, $t0, 12
+    andi    $t2, $t2, 1
     beqz    $t2, 1f
-    csrrd   $t1, 0x1a          # PGDH (physical address)
+    # odd page: seq=1
+    ldpte   $t1, 1
+    # Check TLBRELO1.V
+    csrrd   $t1, 0x8d
+    b       2f
 1:
-    # Convert physical address to direct-mapped virtual address
-    # LoongArch direct mapping: vaddr = 0x9000_0000_0000_0000 + paddr
-    li.d    $t2, 0x9000000000000000
-    add.d   $t1, $t1, $t2      # t1 = direct-mapped vaddr of page table
-    # Level 2 index: (va >> 30) & 0x1ff
-    srai.d  $t2, $t0, 30
-    andi    $t2, $t2, 0x1ff
-    slli.d  $t2, $t2, 3
-    add.d   $t2, $t1, $t2
-    ld.d    $t1, $t2, 0
-    andi    $t2, $t1, 0x1
-    beqz    $t2, tlb_refill_invalid
-    li.d    $t2, -4096
-    and     $t1, $t1, $t2     # next table base (physical address)
-    # Convert to direct-mapped address
-    li.d    $t2, 0x9000000000000000
-    add.d   $t1, $t1, $t2
-
-    # Level 1 index: (va >> 21) & 0x1ff
-    srai.d  $t2, $t0, 21
-    andi    $t2, $t2, 0x1ff
-    slli.d  $t2, $t2, 3
-    add.d   $t2, $t1, $t2
-    ld.d    $t1, $t2, 0
-    andi    $t2, $t1, 0x1
-    beqz    $t2, tlb_refill_invalid
-    li.d    $t2, -4096
-    and     $t1, $t1, $t2     # next table base (physical address)
-    # Convert to direct-mapped address
-    li.d    $t2, 0x9000000000000000
-    add.d   $t1, $t1, $t2
-
-    # Level 0 index: (va >> 12) & 0x1ff
-    srai.d  $t2, $t0, 12
-    andi    $t2, $t2, 0x1ff
-    slli.d  $t2, $t2, 3
-    add.d   $t2, $t1, $t2
-    ld.d    $t1, $t2, 0        # t1 = PTE
+    # even page: seq=0
+    ldpte   $t1, 0
+    # Check TLBRELO0.V
+    csrrd   $t1, 0x8c
+2:
+    # Check V bit (bit 0)
     andi    $t2, $t1, 0x1
     beqz    $t2, tlb_refill_invalid
 
-tlb_refill_fill:
-    # TLBREHI: set VPPN and PS=12 (4KB)
-    srai.d  $t2, $t0, 13
+    # Set TLBREHI (VPPN + PS)
+    srli.d  $t2, $t0, 13
     slli.d  $t2, $t2, 13
     ori     $t2, $t2, 12
-    csrwr   $t2, 0x8e
+    csrwr   $t2, 0x8e          # TLBREHI
 
-    # Decide even/odd page by VA bit 12
-    srai.d  $t2, $t0, 12
-    andi    $t2, $t2, 0x1
-    beqz    $t2, 2f
-    # odd page -> TLBRELO1
-    csrwr   $zero, 0x8c
-    csrwr   $t1, 0x8d
-    b       3f
-2:
-    # even page -> TLBRELO0
-    csrwr   $t1, 0x8c
-    csrwr   $zero, 0x8d
-3:
+    # Set TLBIDX PS
+    csrrd   $t0, 0x10
+    li.w    $t1, ~0x3f
+    and     $t0, $t0, $t1
+    ori     $t0, $t0, 12
+    csrwr   $t0, 0x10
+
     tlbfill
+
+    # Debug: mark done
+    li.d    $t0, 0x1fe001e0
+    li.d    $t1, 0x46          # 'F'
+    st.b    $t1, $t0, 0
 
     # Restore temporaries
     csrrd   $t0, 0x49
@@ -213,6 +195,21 @@ tlb_refill_fill:
     ertn
 
 tlb_refill_invalid:
-    # Fill invalid entry to trigger a normal page exception later
-    li.d    $t1, 0
-    b       tlb_refill_fill
+    # Fill invalid entry to trigger page fault
+    li.d    $t1, 0             # 'I'
+    csrwr   $t1, 0x8c   
+    csrwr   $t1, 0x8d
+    srli.d  $t2, $t0, 13
+    slli.d  $t2, $t2, 13
+    ori     $t2, $t2, 12
+    csrwr   $t2, 0x8e
+    csrrd   $t0, 0x10
+    li.w    $t1, ~0x3f
+    and     $t0, $t0, $t1
+    ori     $t0, $t0, 12
+    csrwr   $t0, 0x10
+    tlbfill
+    csrrd   $t0, 0x49
+    csrrd   $t1, 0x4a
+    csrrd   $t2, 0x4b
+    ertn
