@@ -1,8 +1,10 @@
 //! LoongArch64 陷阱处理实现（与 RISC-V 路径一致的接口）。
 
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::arch::constant::{CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK};
+use crate::arch::constant::{
+    CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK, CSR_TLBRENT,
+};
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::{
     TIMER_TICKS, ack_timer_interrupt, clock_freq, get_time, set_next_trigger,
@@ -18,12 +20,15 @@ use super::TrapFrame;
 #[unsafe(no_mangle)]
 pub static mut BOOT_TRAP_FRAME: TrapFrame = TrapFrame::empty();
 
+static FIRST_TRAP_LOGGED: AtomicBool = AtomicBool::new(false);
+
 const ECODE_SYSCALL: usize = 0xb; // LoongArch syscall 异常码
 const TIMER_INT_BIT: usize = 1 << 11; // ESTAT.IS 中的本地定时器位
 
 unsafe extern "C" {
     unsafe fn __restore(tf: &TrapFrame);
     unsafe fn trap_entry();
+    unsafe fn tlb_refill_entry();
 }
 
 /// 汇编入口调用的陷阱处理函数。
@@ -33,6 +38,30 @@ pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     let estat = trap_frame.estat;
     let era = trap_frame.era;
 
+    if !FIRST_TRAP_LOGGED.swap(true, Ordering::Relaxed) {
+        let badv: usize;
+        let badi: usize;
+        let pgdl: usize;
+        let pgdh: usize;
+        unsafe {
+            core::arch::asm!("csrrd {0}, {csr}", out(reg) badv, csr = const CSR_BADV, options(nostack, preserves_flags));
+            core::arch::asm!("csrrd {0}, {csr}", out(reg) badi, csr = const CSR_BADI, options(nostack, preserves_flags));
+            core::arch::asm!("csrrd {0}, 0x19", out(reg) pgdl, options(nostack, preserves_flags));
+            core::arch::asm!("csrrd {0}, 0x1a", out(reg) pgdh, options(nostack, preserves_flags));
+        }
+        crate::pr_info!(
+            "[trap_handler] first trap: estat={:#x}, era={:#x}, prmd={:#x}, crmd={:#x}, badv={:#x}, badi={:#x}, pgdl={:#x}, pgdh={:#x}",
+            estat,
+            era,
+            prmd,
+            trap_frame.crmd,
+            badv,
+            badi,
+            pgdl,
+            pgdh
+        );
+    }
+
     if (prmd & CSR_CRMD_PLV_MASK) != 0 {
         user_trap(estat, era, trap_frame);
     } else {
@@ -41,8 +70,12 @@ pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
 
     check_signal();
 
-    // Safety: __restore 会恢复全部寄存器并执行 ertn
-    unsafe { restore(trap_frame) };
+    // 恢复“当前任务”的陷阱帧；若没有当前任务，回退到入口参数。
+    let tf_ptr = crate::kernel::try_current_task()
+        .map(|t| t.lock().trap_frame_ptr.load(Ordering::SeqCst) as usize)
+        .unwrap_or(trap_frame as *mut _ as usize);
+    // Safety: 指针来源于当前任务保存的 trap_frame_ptr 或回退到入口参数。
+    unsafe { restore(&*(tf_ptr as *const TrapFrame)) };
 }
 
 /// 安装启动阶段的陷阱入口
@@ -62,6 +95,7 @@ fn install_trap_entry() {
         let sp: usize;
         core::arch::asm!("addi.d {0}, $sp, 0", out(reg) sp, options(nostack, preserves_flags));
         BOOT_TRAP_FRAME.kernel_sp = sp;
+        BOOT_TRAP_FRAME.cpu_ptr = crate::kernel::current_cpu() as *const _ as usize;
 
         // KScratch0 <- TrapFrame 指针
         core::arch::asm!("csrwr {0}, 0x48", in(reg) (&raw mut BOOT_TRAP_FRAME as *mut TrapFrame as usize), options(nostack, preserves_flags));
@@ -71,6 +105,30 @@ fn install_trap_entry() {
             val = in(reg) trap_entry as usize,
             csr = const CSR_EENTRY,
             options(nostack, preserves_flags)
+        );
+        // TLB refill 入口使用独立处理，进行软件页表遍历与 tlbfill
+        let tlbr_entry_paddr =
+            unsafe { crate::arch::mm::vaddr_to_paddr(tlb_refill_entry as usize) } & !0xfff;
+        let tlbr_entry_vaddr = crate::arch::mm::paddr_to_vaddr(tlbr_entry_paddr);
+        core::arch::asm!(
+            "csrwr {val}, {csr}",
+            val = in(reg) tlbr_entry_vaddr,
+            csr = const CSR_TLBRENT,
+            options(nostack, preserves_flags)
+        );
+
+        let tlbrent: usize;
+        core::arch::asm!(
+            "csrrd {0}, {csr}",
+            out(reg) tlbrent,
+            csr = const CSR_TLBRENT,
+            options(nostack, preserves_flags)
+        );
+        crate::pr_info!(
+            "[trap_init] tlbrent={:#x}, tlbr_paddr={:#x}, tlbr_vaddr={:#x}",
+            tlbrent,
+            tlbr_entry_paddr,
+            tlbr_entry_vaddr
         );
     }
 }
@@ -84,6 +142,11 @@ fn user_trap(estat: usize, era: usize, trap_frame: &mut TrapFrame) {
     let ecode = (estat >> 16) & 0x3f;
     match ecode {
         ECODE_SYSCALL => {
+            crate::pr_info!(
+                "[user_trap] syscall id={}, era={:#x}",
+                trap_frame.syscall_id(),
+                era
+            );
             trap_frame.era = era.wrapping_add(4);
             dispatch_syscall(trap_frame);
         }
@@ -124,7 +187,6 @@ fn handle_interrupt(estat: usize) {
         set_next_trigger();
         check_timer();
     }
-    // 其他中断交给中断控制器驱动
 }
 
 fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {

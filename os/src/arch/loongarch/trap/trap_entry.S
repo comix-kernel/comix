@@ -1,6 +1,7 @@
 # LoongArch64 trap entry and context restore
 .text
 .globl trap_entry
+.globl tlb_refill_entry
 .globl boot_trap_entry
 .globl __restore
 .globl trap_handler
@@ -19,6 +20,7 @@ boot_trap_entry:
     st.d    $r0,  $a0, 0       # r0 (zero)
     st.d    $ra,  $a0, 8       # r1
     st.d    $tp,  $a0, 16      # r2
+    ld.d    $tp,  $a0, 296     # tp <- cpu_ptr (kernel per-CPU 指针)
     st.d    $sp,  $a0, 24      # r3
     st.d    $a1,  $a0, 40      # r5
     st.d    $a2,  $a0, 48      # r6
@@ -123,3 +125,84 @@ __restore:
 
     # 结束陷阱，返回异常前上下文
     ertn
+
+# TLB refill entry (software walk + tlbfill)
+    .align 12
+tlb_refill_entry:
+    # Save temporary registers (t0-t2) without touching KScratch0 (trap frame ptr)
+    csrwr   $t0, 0x49          # KScratch1 <- t0
+    csrwr   $t1, 0x4a          # KScratch2 <- t1
+    csrwr   $t2, 0x4b          # KScratch3 <- t2
+
+    # t0 = badv from TLBRBADV
+    csrrd   $t0, 0x89
+
+    # Select PGD base: low half -> PGDL, high half -> PGDH
+    csrrd   $t1, 0x19          # PGDL
+    srai.d  $t2, $t0, 63
+    beqz    $t2, 1f
+    csrrd   $t1, 0x1a          # PGDH
+1:
+    # Level 2 index: (va >> 30) & 0x1ff
+    srai.d  $t2, $t0, 30
+    andi    $t2, $t2, 0x1ff
+    slli.d  $t2, $t2, 3
+    add.d   $t2, $t1, $t2
+    ld.d    $t1, $t2, 0
+    andi    $t2, $t1, 0x1
+    beqz    $t2, tlb_refill_invalid
+    li.d    $t2, -4096
+    and     $t1, $t1, $t2     # next table base
+
+    # Level 1 index: (va >> 21) & 0x1ff
+    srai.d  $t2, $t0, 21
+    andi    $t2, $t2, 0x1ff
+    slli.d  $t2, $t2, 3
+    add.d   $t2, $t1, $t2
+    ld.d    $t1, $t2, 0
+    andi    $t2, $t1, 0x1
+    beqz    $t2, tlb_refill_invalid
+    li.d    $t2, -4096
+    and     $t1, $t1, $t2     # next table base
+
+    # Level 0 index: (va >> 12) & 0x1ff
+    srai.d  $t2, $t0, 12
+    andi    $t2, $t2, 0x1ff
+    slli.d  $t2, $t2, 3
+    add.d   $t2, $t1, $t2
+    ld.d    $t1, $t2, 0        # t1 = PTE
+    andi    $t2, $t1, 0x1
+    beqz    $t2, tlb_refill_invalid
+
+tlb_refill_fill:
+    # TLBREHI: set VPPN and PS=12 (4KB)
+    srai.d  $t2, $t0, 13
+    slli.d  $t2, $t2, 13
+    ori     $t2, $t2, 12
+    csrwr   $t2, 0x8e
+
+    # Decide even/odd page by VA bit 12
+    srai.d  $t2, $t0, 12
+    andi    $t2, $t2, 0x1
+    beqz    $t2, 2f
+    # odd page -> TLBRELO1
+    csrwr   $zero, 0x8c
+    csrwr   $t1, 0x8d
+    b       3f
+2:
+    # even page -> TLBRELO0
+    csrwr   $t1, 0x8c
+    csrwr   $zero, 0x8d
+3:
+    tlbfill
+
+    # Restore temporaries
+    csrrd   $t0, 0x49
+    csrrd   $t1, 0x4a
+    csrrd   $t2, 0x4b
+    ertn
+
+tlb_refill_invalid:
+    # Fill invalid entry to trigger a normal page exception later
+    li.d    $t1, 0
+    b       tlb_refill_fill

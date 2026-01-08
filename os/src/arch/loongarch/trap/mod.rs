@@ -37,9 +37,10 @@ unsafe extern "C" {
     fn __sigreturn_trampoline();
 }
 
-/// 设置 TrapFrame 中与当前 CPU 相关的字段（占位符）。
-///
-/// LoongArch 端 TrapFrame 当前不携带类似 RISC-V 的 `cpu_ptr` 字段；
-/// 为了让通用任务初始化/迁移逻辑保持无条件编译，这里提供 no-op 接口。
+/// 设置 TrapFrame 中与当前 CPU 相关的字段。
 #[inline]
-pub unsafe fn set_trap_frame_cpu_ptr(_trap_frame_ptr: *mut TrapFrame, _cpu_ptr: usize) {}
+pub unsafe fn set_trap_frame_cpu_ptr(trap_frame_ptr: *mut TrapFrame, cpu_ptr: usize) {
+    if let Some(tf) = trap_frame_ptr.as_mut() {
+        tf.cpu_ptr = cpu_ptr;
+    }
+}

@@ -21,13 +21,47 @@ pub mod cpu {
 
     /// 获取 CPU ID（别名）
     pub fn cpu_id() -> usize {
-        hart_id()
+        let cpu_ptr: usize;
+        unsafe {
+            core::arch::asm!(
+                "addi.d {0}, $tp, 0",
+                out(reg) cpu_ptr,
+                options(nostack, preserves_flags)
+            );
+        }
+        if cpu_ptr == 0 {
+            return 0;
+        }
+        // Safety: tp 指向 Cpu 结构体，首字段为 cpu_id
+        unsafe { *(cpu_ptr as *const usize) }
     }
 
     /// 在切换到指定任务后执行的架构相关收尾工作。
     ///
-    /// LoongArch 目前尚未实现 trap/上下文切换，因此此处为 no-op。
-    pub fn on_task_switch(_trap_frame_ptr: usize, _cpu_ptr: usize) {}
+    /// LoongArch 使用 KScratch0 保存当前任务的 TrapFrame 指针，
+    /// 供 trap_entry 保存/恢复寄存器时使用。
+    pub fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
+        if trap_frame_ptr == 0 {
+            return;
+        }
+        unsafe {
+            let tf = (trap_frame_ptr as *mut crate::arch::trap::TrapFrame)
+                .as_mut()
+                .expect("on_task_switch: null TrapFrame");
+            tf.cpu_ptr = cpu_ptr;
+            core::arch::asm!(
+                "addi.d $tp, {0}, 0",
+                in(reg) cpu_ptr,
+                options(nostack, preserves_flags)
+            );
+            // KScratch0 作为 trap_entry 的 TrapFrame 指针。
+            core::arch::asm!(
+                "csrwr {0}, 0x48",
+                in(reg) trap_frame_ptr,
+                options(nostack, preserves_flags)
+            );
+        }
+    }
 }
 
 pub use context::TaskContext;

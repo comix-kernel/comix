@@ -10,7 +10,7 @@ pub use softirq::*;
 
 use crate::{
     arch::{
-        constant::{IRQ_MIN, SSTATUS_SIE},
+        constant::{IRQ_MIN, SSTATUS_SIE, SUPERVISOR_EXTERNAL},
         mm::paddr_to_vaddr,
     },
     println,
@@ -116,5 +116,7 @@ pub unsafe fn restore_interrupts(flags: usize) {
 
 /// 启用指定的中断号
 pub fn enable_irq(irq: usize) {
-    // Handled in PLIC driver
+    if irq == SUPERVISOR_EXTERNAL {
+        unsafe { sie::set_sext() };
+    }
 }

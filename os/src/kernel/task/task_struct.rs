@@ -271,7 +271,7 @@ impl Task {
         phent: usize,
     ) {
         // 1. 切换任务的地址空间对象
-        self.memory_space = Some(new_memory_space);
+        self.memory_space = Some(new_memory_space.clone());
 
         // 2. 处理文件描述符：取消共享并关闭 CLOEXEC 文件
         // execve 应该让当前进程拥有独立的 FD 表（如果之前是共享的）
@@ -286,8 +286,30 @@ impl Task {
         //      也就是说，new_memory_space 已经被激活（切换 satp）
         //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
         // 3. 设置用户栈布局，包含命令行参数和环境变量
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) =
-            setup_stack_layout(sp_high, argv, envp, phdr_addr, phnum, phent, entry_point);
+        #[cfg(target_arch = "loongarch64")]
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = {
+            let space = new_memory_space.lock();
+            setup_stack_layout(
+                &space,
+                sp_high,
+                argv,
+                envp,
+                phdr_addr,
+                phnum,
+                phent,
+                entry_point,
+            )
+        };
+        #[cfg(target_arch = "riscv64")]
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(
+            sp_high,
+            argv,
+            envp,
+            phdr_addr,
+            phnum,
+            phent,
+            entry_point,
+        );
 
         // 4. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有

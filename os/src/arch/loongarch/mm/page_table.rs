@@ -1,11 +1,10 @@
 //! LoongArch64 页表管理
 //!
-//! 实现 4 级页表结构，使用 `loongArch64` crate 进行 CSR 操作。
+//! 实现 3 级页表结构，使用 `loongArch64` crate 进行 CSR 操作。
 //!
 //! # 页表结构
 //!
-//! LoongArch64 使用 4 级页表（48 位虚拟地址）：
-//! - Level 3 (Dir4/PGD): 虚拟地址 bits [47:39]，9 位索引
+//! LoongArch64 使用 3 级页表（39 位虚拟地址）：
 //! - Level 2 (Dir3/PUD): 虚拟地址 bits [38:30]，9 位索引
 //! - Level 1 (Dir2/PMD): 虚拟地址 bits [29:21]，9 位索引
 //! - Level 0 (Dir1/PT):  虚拟地址 bits [20:12]，9 位索引
@@ -33,10 +32,10 @@ pub struct PageTableInner {
 }
 
 impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
-    /// LoongArch64 使用 4 级页表
-    const LEVELS: usize = 4;
-    /// 48 位虚拟地址
-    const MAX_VA_BITS: usize = 48;
+    /// LoongArch64 使用 3 级页表
+    const LEVELS: usize = 3;
+    /// 39 位虚拟地址
+    const MAX_VA_BITS: usize = 39;
     /// 48 位物理地址
     const MAX_PA_BITS: usize = 48;
 
@@ -90,6 +89,25 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             core::arch::asm!(
                 "csrwr {0}, 0x1A",
                 in(reg) pgd_paddr,
+                options(nostack, preserves_flags)
+            );
+            // 启用分页并关闭直接地址翻译
+            let mut crmd: usize;
+            core::arch::asm!(
+                "csrrd {0}, 0x0",
+                out(reg) crmd,
+                options(nostack, preserves_flags)
+            );
+            crmd |= crate::arch::constant::CSR_CRMD_PG;
+            crmd &= !crate::arch::constant::CSR_CRMD_DA;
+            // 软件 TLB refill 时必须将 DATF/DATM 设置为 CC
+            crmd &= !(crate::arch::constant::CSR_CRMD_DATF_MASK
+                | crate::arch::constant::CSR_CRMD_DATM_MASK);
+            crmd |= crate::arch::constant::CSR_CRMD_DAT_CC << 5;
+            crmd |= crate::arch::constant::CSR_CRMD_DAT_CC << 7;
+            core::arch::asm!(
+                "csrwr {0}, 0x0",
+                in(reg) crmd,
                 options(nostack, preserves_flags)
             );
             // 刷新 TLB
