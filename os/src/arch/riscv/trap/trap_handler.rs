@@ -10,10 +10,10 @@ use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
 
+use crate::arch::constant::SUPERVISOR_EXTERNAL;
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::{TIMER_TICKS, clock_freq, get_time};
 use crate::arch::trap::restore;
-use crate::arch::constant::SUPERVISOR_EXTERNAL;
 use crate::device::IRQ_MANAGER;
 use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
 

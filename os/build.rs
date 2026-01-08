@@ -189,10 +189,10 @@ fn main() {
                 fs_img_path.display()
             );
         } else {
-        println!(
-            "cargo:warning=[build.rs] {} is up to date, skipping regeneration.",
-            fs_img_name
-        );
+            println!(
+                "cargo:warning=[build.rs] {} is up to date, skipping regeneration.",
+                fs_img_name
+            );
         }
     }
 }
