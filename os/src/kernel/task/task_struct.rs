@@ -305,15 +305,8 @@ impl Task {
             )
         };
         #[cfg(target_arch = "riscv64")]
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(
-            sp_high,
-            argv,
-            envp,
-            phdr_addr,
-            phnum,
-            phent,
-            entry_point,
-        );
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) =
+            setup_stack_layout(sp_high, argv, envp, phdr_addr, phnum, phent, entry_point);
 
         // 4. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有

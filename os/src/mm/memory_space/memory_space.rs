@@ -451,7 +451,10 @@ impl MemorySpace {
         let machine = elf.header.pt2.machine().as_machine();
         #[cfg(target_arch = "riscv64")]
         if machine != xmas_elf::header::Machine::RISC_V {
-            crate::pr_err!("[from_elf] machine mismatch: expected RISC-V, got {:?}", machine);
+            crate::pr_err!(
+                "[from_elf] machine mismatch: expected RISC-V, got {:?}",
+                machine
+            );
             return Err(PagingError::InvalidAddress);
         }
         #[cfg(target_arch = "loongarch64")]

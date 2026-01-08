@@ -1,8 +1,6 @@
 //! LoongArch64 陷阱帧定义
 
-use crate::arch::constant::{
-    CSR_CRMD_PLV_MASK, PRMD_PIE, PRMD_PPLV_MASK, PRMD_PPLV_USER,
-};
+use crate::arch::constant::{CSR_CRMD_PLV_MASK, PRMD_PIE, PRMD_PPLV_MASK, PRMD_PPLV_USER};
 use crate::uapi::signal::MContextT;
 
 /// 陷阱帧结构
