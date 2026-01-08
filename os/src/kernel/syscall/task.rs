@@ -360,39 +360,68 @@ pub fn execve(
         (path_str, argv_strings, envp_strings)
     };
 
-    let data = match crate::vfs::vfs_load_elf(&path_str) {
-        Ok(data) => data,
-        Err(FsError::NotFound) => return -ENOENT,
-        Err(FsError::IsDirectory) => return -EISDIR,
-        Err(_) => return -EIO,
-    };
-
     let mut exec_path_str = path_str.clone();
-    let (data, argv_strings, envp_strings, exec_path_str) =
-        if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
-            if let Ok((path, args)) = parse_hashbang(&data) {
+    let (argv_strings, envp_strings, exec_path_str) = {
+        // 只读取文件头部用于 hashbang 判断，避免一次性把整个 ELF 读入内存。
+        let dentry = match crate::vfs::vfs_lookup(&path_str) {
+            Ok(d) => d,
+            Err(FsError::NotFound) => return -ENOENT,
+            Err(FsError::IsDirectory) => return -EISDIR,
+            Err(_) => return -EIO,
+        };
+        let inode = dentry.inode.clone();
+        let meta = match inode.metadata() {
+            Ok(m) => m,
+            Err(FsError::NotFound) => return -ENOENT,
+            Err(FsError::IsDirectory) => return -EISDIR,
+            Err(_) => return -EIO,
+        };
+        if meta.inode_type != crate::vfs::InodeType::File {
+            return -EISDIR;
+        }
+
+        let prefix_len = core::cmp::min(meta.size, 256);
+        if prefix_len == 0 {
+            return -ENOEXEC;
+        }
+        let mut prefix = alloc::vec![0u8; prefix_len];
+        let mut read_total = 0usize;
+        while read_total < prefix.len() {
+            let n = match inode.read_at(read_total, &mut prefix[read_total..]) {
+                Ok(n) => n,
+                Err(FsError::NotFound) => return -ENOENT,
+                Err(FsError::IsDirectory) => return -EISDIR,
+                Err(_) => return -EIO,
+            };
+            if n == 0 {
+                break;
+            }
+            read_total += n;
+        }
+        if read_total == 0 {
+            return -ENOEXEC;
+        }
+        prefix.truncate(read_total);
+
+        if prefix.len() >= 2 && prefix[0] == b'#' && prefix[1] == b'!' {
+            if let Ok((path, args)) = parse_hashbang(&prefix) {
                 let mut new_argv = Vec::new();
                 new_argv.push(path.to_string());
                 // XXX: 目前仅支持单个参数
                 if let Some(arg) = args {
                     new_argv.push(arg.to_string());
                 }
-                new_argv.push(path_str.clone()); // Clone path_str instead of moving
+                new_argv.push(path_str.clone());
                 new_argv.extend(argv_strings.iter().skip(1).cloned());
-                let data = match crate::vfs::vfs_load_elf(path) {
-                    Ok(d) => d,
-                    Err(FsError::NotFound) => return -ENOENT,
-                    Err(FsError::IsDirectory) => return -EISDIR,
-                    Err(_) => return -EIO,
-                };
                 exec_path_str = path.to_string();
-                (data, new_argv, envp_strings, exec_path_str)
+                (new_argv, envp_strings, exec_path_str)
             } else {
                 return -EINVAL;
             }
         } else {
-            (data, argv_strings, envp_strings, exec_path_str)
-        };
+            (argv_strings, envp_strings, exec_path_str)
+        }
+    };
 
     // // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     // let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
@@ -405,25 +434,18 @@ pub fn execve(
     };
 
     // 解析 ELF 并准备新的地址空间（但不切换）
-    let (space, entry, sp, phdr_addr, phnum, phent) = match do_execve_prepare(&data) {
-        Ok(res) => res,
-        Err(e) => return e,
-    };
+    let (space, initial_pc, sp, phdr_addr, phnum, phent, at_base, at_entry) =
+        match do_execve_prepare(&exec_path_str) {
+            Ok(res) => res,
+            Err(e) => return e,
+        };
 
-    // 显式释放 data 缓冲区，避免内存泄漏
-    crate::pr_debug!(
-        "[execve] Dropping {} byte ELF buffer before switching to user space",
-        data.len()
-    );
-    drop(data);
-
-    // Explicitly drop other stack resources
     drop(path_str);
 
     // 切换到新的地址空间并恢复到用户态（此函数不会返回）
     do_execve_switch(
         space,
-        entry,
+        initial_pc,
         sp,
         exe_path,
         argv_strings, // Pass ownership
@@ -431,6 +453,8 @@ pub fn execve(
         phdr_addr,
         phnum,
         phent,
+        at_base,
+        at_entry,
     )
 }
 
@@ -1177,7 +1201,7 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
 
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
 fn do_execve_prepare(
-    data: &[u8],
+    path: &str,
 ) -> Result<
     (
         Arc<SpinLock<MemorySpace>>,
@@ -1186,23 +1210,40 @@ fn do_execve_prepare(
         usize,
         usize,
         usize,
+        usize,
+        usize,
     ),
     c_int,
 > {
-    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
-        Ok(res) => res,
+    let prepared = match crate::kernel::task::prepare_exec_image_from_path(path) {
+        Ok(p) => p,
+        Err(crate::kernel::task::ExecImageError::Fs(FsError::NotFound)) => return Err(-ENOENT),
+        Err(crate::kernel::task::ExecImageError::Fs(FsError::IsDirectory)) => return Err(-EISDIR),
+        Err(crate::kernel::task::ExecImageError::Fs(_)) => return Err(-EIO),
+        Err(crate::kernel::task::ExecImageError::Paging(
+            crate::mm::page_table::PagingError::OutOfMemory,
+        )) => return Err(-ENOMEM),
         Err(_) => return Err(-ENOEXEC),
     };
 
-    let space = Arc::new(SpinLock::new(space));
-    Ok((space, entry, sp, phdr_addr, phnum, phent))
+    let space = Arc::new(SpinLock::new(prepared.space));
+    Ok((
+        space,
+        prepared.initial_pc,
+        prepared.user_sp_high,
+        prepared.phdr_addr,
+        prepared.phnum,
+        prepared.phent,
+        prepared.at_base,
+        prepared.at_entry,
+    ))
 }
 
 /// 执行一个新程序（execve）的切换阶段：切换地址空间并恢复到用户态
 /// 注意：此函数不会返回！
 fn do_execve_switch(
     space: Arc<SpinLock<MemorySpace>>,
-    entry: usize,
+    initial_pc: usize,
     sp: usize,
     exe_path: alloc::string::String,
     argv: Vec<alloc::string::String>,
@@ -1210,6 +1251,8 @@ fn do_execve_switch(
     phdr_addr: usize,
     phnum: usize,
     phent: usize,
+    at_base: usize,
+    at_entry: usize,
 ) -> c_int {
     let task = current_task();
 
@@ -1232,13 +1275,15 @@ fn do_execve_switch(
         t.exe_path = Some(exe_path);
         t.execve(
             space.clone(),
-            entry,
+            initial_pc,
             sp,
             argv_refs.as_slice(),
             envp_refs.as_slice(),
             phdr_addr,
             phnum,
             phent,
+            at_base,
+            at_entry,
         );
     } // argv_refs/envp_refs dropped here, ending borrow of argv/envp
 
