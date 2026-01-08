@@ -194,6 +194,29 @@ impl FDTable {
         }
     }
 
+    /// 取走并清空所有已打开的文件描述符。
+    ///
+    /// 返回的列表包含 (fd, file)；调用方 drop 这些 Arc 即可完成“关闭”语义。
+    ///
+    /// 说明：
+    /// - 这不会做任何“按类型”的额外清理（例如 socket fd 的 (tid,fd)->handle 映射），
+    ///   需要调用方在 drop 前自行处理。
+    pub fn take_all(&self) -> Vec<(usize, Arc<dyn File>)> {
+        let mut files = self.files.lock();
+        let mut fd_flags = self.fd_flags.lock();
+
+        let mut out = Vec::new();
+        for (fd, slot) in files.iter_mut().enumerate() {
+            if let Some(file) = slot.take() {
+                out.push((fd, file));
+            }
+        }
+        for f in fd_flags.iter_mut() {
+            *f = FdFlags::empty();
+        }
+        out
+    }
+
     /// 分配一个新的文件描述符（默认无 FD 标志）
     pub fn alloc(&self, file: Arc<dyn File>) -> Result<usize, FsError> {
         self.alloc_with_flags(file, FdFlags::empty())

@@ -1,4 +1,7 @@
-use crate::{earlyprintln, net::interface::NETWORK_INTERFACE_MANAGER};
+use crate::{
+    earlyprintln,
+    net::interface::{NETWORK_INTERFACE_MANAGER, NetworkInterface},
+};
 use alloc::string::String;
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address};
 
@@ -88,35 +91,75 @@ impl NetworkConfigManager {
         earlyprintln!("Initializing default network configuration...");
 
         // 先获取接口的Arc，然后释放全局锁
-        // 避免在持有NETWORK_INTERFACE_MANAGER锁时操作接口字段锁
+        // 避免在持有 NETWORK_INTERFACE_MANAGER 锁时操作接口字段锁
         let interface = {
             let binding = NETWORK_INTERFACE_MANAGER.lock();
             binding.get_interfaces().first().cloned()
         }; // NETWORK_INTERFACE_MANAGER锁已释放
 
-        if let Some(interface) = interface {
+        let (interface, is_null_loopback_only) = if let Some(interface) = interface {
+            (interface, false)
+        } else {
+            // 没有任何真实网卡（例如 QEMU 没挂 virtio-net）时，创建一个“空设备接口”，
+            // 让 smoltcp/套接字栈至少能在 loopback(127.0.0.1) 场景工作。
+            use crate::device::net::null_net::NullNetDevice;
+            use alloc::sync::Arc;
+
+            earlyprintln!("No net interfaces found; creating null loopback-only interface");
+
+            let dev = NullNetDevice::new(0);
+            let iface = Arc::new(NetworkInterface::new(String::from("lo0"), dev));
+            NETWORK_INTERFACE_MANAGER
+                .lock()
+                .add_interface(iface.clone());
+            (iface, true)
+        };
+
+        {
             earlyprintln!("Configuring interface: {}", interface.name());
 
-            // 设置默认IP地址
-            let ip_cidr = IpCidr::new(IpAddress::v4(192, 168, 1, 100), 24);
-            interface.add_ip_address(ip_cidr);
-            earlyprintln!("Set IP address: 192.168.1.100/24");
+            if is_null_loopback_only {
+                // NullNetDevice 只有 loopback 场景可用：不要配置非 127/8 的地址和网关，
+                // 否则 smoltcp 可能会为 127.0.0.1 选择错误的源地址/路由，导致 UDP/TCP 行为异常。
+                let loopback_cidr = IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8);
+                interface.add_ip_address(loopback_cidr);
+                earlyprintln!("Set loopback address: 127.0.0.1/8");
+                interface.set_ipv4_gateway(None);
+                earlyprintln!("No default gateway (loopback-only)");
+            } else {
+                // 设置默认IP地址
+                let ip_cidr = IpCidr::new(IpAddress::v4(192, 168, 1, 100), 24);
+                interface.add_ip_address(ip_cidr);
+                earlyprintln!("Set IP address: 192.168.1.100/24");
 
-            // 设置默认网关
-            let gateway = Ipv4Address::new(192, 168, 1, 1);
-            interface.set_ipv4_gateway(Some(gateway));
-            earlyprintln!("Set default gateway: 192.168.1.1");
+                // 添加loopback地址到同一接口
+                let loopback_cidr = IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8);
+                interface.add_ip_address(loopback_cidr);
+                earlyprintln!("Set loopback address: 127.0.0.1/8");
+
+                // 设置默认网关
+                let gateway = Ipv4Address::new(192, 168, 1, 1);
+                interface.set_ipv4_gateway(Some(gateway));
+                earlyprintln!("Set default gateway: 192.168.1.1");
+            }
 
             // Initialize global interface for socket operations
-            let smoltcp_iface = interface.create_smoltcp_interface();
-            use crate::net::socket::init_global_interface;
-            init_global_interface(smoltcp_iface.into_interface());
+            let mut smoltcp_iface = interface.create_smoltcp_interface();
+            {
+                use smoltcp::phy::Device as _;
+                let caps = smoltcp_iface.device_adapter_mut().capabilities();
+                earlyprintln!(
+                    "smoltcp caps: medium={:?}, max_transmission_unit={}, ip_mtu={}",
+                    caps.medium,
+                    caps.max_transmission_unit,
+                    caps.ip_mtu()
+                );
+            }
+            use crate::net::socket::init_network;
+            init_network(smoltcp_iface);
             earlyprintln!("Initialized global network interface");
 
             Ok(())
-        } else {
-            earlyprintln!("No network interfaces found to configure");
-            Err(NetworkConfigError::InterfaceNotFound)
         }
     }
 

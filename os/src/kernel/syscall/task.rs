@@ -29,8 +29,8 @@ use crate::{
     sync::SpinLock,
     uapi::{
         errno::{
-            EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOSYS, EPERM, ESRCH,
-            ETIMEDOUT,
+            EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOMEM, ENOSYS, EPERM,
+            ESRCH, ETIMEDOUT,
         },
         futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
         resource::{RLIM_NLIMITS, Rlimit, Rusage},
@@ -63,8 +63,11 @@ use crate::{
 /// - `code`: 退出代码
 pub fn exit(code: c_int) -> c_int {
     // TODO: 处理 tid_addr 和 robust_list
-    // TODO: clear_child_tid 的处理
+    clear_child_tid_and_wake();
     let task = current_task();
+    // Linux 语义：退出时释放用户地址空间并关闭打开文件。
+    // 注意：必须先切换到内核页表，再释放当前进程页表资源，避免释放“正在使用的 satp”。
+    crate::kernel::task::cleanup_current_process_resources_on_exit();
     if task.lock().is_process() {
         exit_process(task, code & 0xFF);
     } else {
@@ -86,9 +89,50 @@ pub fn exit(code: c_int) -> c_int {
 /// - `code`: 退出代码
 pub fn exit_group(code: c_int) -> ! {
     // TODO: 处理 tid_addr 和 robust_list
+    clear_child_tid_and_wake();
+    crate::kernel::task::cleanup_current_process_resources_on_exit();
     exit_process(current_task(), code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
+}
+
+fn clear_child_tid_and_wake() {
+    let task = current_task();
+    let clear_addr = {
+        let mut t = task.lock();
+        let addr = t.clear_child_tid;
+        // 避免重复清理
+        t.clear_child_tid = 0;
+        addr
+    };
+
+    if clear_addr == 0 {
+        return;
+    }
+
+    // 1) 写 0 到用户地址
+    unsafe {
+        let _guard = SumGuard::new();
+        write_to_user(clear_addr as *mut c_int, 0);
+    }
+
+    // 2) futex wake
+    let paddr = {
+        let memory_space = current_task()
+            .lock()
+            .memory_space
+            .as_ref()
+            .expect("clear_child_tid: current task has no memory space.")
+            .clone();
+        match memory_space
+            .lock()
+            .translate(Vaddr::from_usize(clear_addr as usize))
+        {
+            Some(p) => p.as_usize(),
+            None => return,
+        }
+    };
+    FUTEX_MANAGER.lock().get_wait_queue(paddr).wake_up_all();
 }
 
 /// 克隆当前任务（线程或进程）
@@ -100,11 +144,11 @@ pub fn exit_group(code: c_int) -> ! {
 /// # 返回值
 /// - 成功返回新任务的线程 ID (TID)，失败返回负错误码
 pub fn clone(
-    flags: c_ulong,    // a0: clone flags
-    stack: c_ulong,    // a1: child stack pointer
-    ptid: *mut c_int,  // a2: parent_tid pointer
-    _tls: *mut c_void, // a3: TLS pointer
-    ctid: *mut c_int,  // a4: child_tid pointer
+    flags: c_ulong,   // a0: clone flags
+    stack: c_ulong,   // a1: child stack pointer
+    ptid: *mut c_int, // a2: parent_tid pointer
+    ctid: *mut c_int, // a3: child_tid pointer
+    tls: *mut c_void, // a4: TLS pointer
 ) -> c_int {
     let requested_flags = if let Some(requested_flags) = CloneFlags::from_bits(flags as usize) {
         requested_flags
@@ -163,12 +207,14 @@ pub fn clone(
     let space = if requested_flags.contains(CloneFlags::VM) {
         space
     } else {
-        Arc::new(SpinLock::new(
-            space
-                .lock()
-                .clone_for_fork()
-                .expect("fork: clone memory space failed."),
-        ))
+        let cloned = match space.lock().clone_for_fork() {
+            Ok(s) => s,
+            Err(_) => {
+                // 语义：fork/clone(不带 CLONE_VM) 内存不足时返回 ENOMEM，而不是 panic。
+                return -ENOMEM;
+            }
+        };
+        Arc::new(SpinLock::new(cloned))
     };
     let fd_table = if requested_flags.contains(CloneFlags::FILES) {
         fd_table
@@ -202,7 +248,7 @@ pub fn clone(
 
     let kstack_tracker = alloc_contig_frames(4).expect("fork: alloc kstack failed.");
     let trap_frame_tracker = alloc_frame().expect("fork: alloc trap frame failed");
-    let child_task = TaskStruct::utask_create(
+    let mut child_task = TaskStruct::utask_create(
         tid,
         pid,
         ppid,
@@ -236,6 +282,16 @@ pub fn clone(
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
         (*tf).set_clone_trap_frame(&*ptf, child_task.kstack_base, stack as usize);
+        if requested_flags.contains(CloneFlags::SETTLS) {
+            // RISC-V userspace uses tp register as thread pointer (TLS base)
+            (*tf).x4_tp = tls as usize;
+        }
+    }
+    if requested_flags.contains(CloneFlags::CHILD_SETTID) {
+        child_task.set_child_tid = ctid as usize;
+    }
+    if requested_flags.contains(CloneFlags::CHILD_CLEARTID) {
+        child_task.clear_child_tid = ctid as usize;
     }
     let child_task = child_task.into_shared();
     current_task()
@@ -311,7 +367,8 @@ pub fn execve(
         Err(_) => return -EIO,
     };
 
-    let (data, argv_strings, envp_strings) =
+    let mut exec_path_str = path_str.clone();
+    let (data, argv_strings, envp_strings, exec_path_str) =
         if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
             if let Ok((path, args)) = parse_hashbang(&data) {
                 let mut new_argv = Vec::new();
@@ -328,17 +385,24 @@ pub fn execve(
                     Err(FsError::IsDirectory) => return -EISDIR,
                     Err(_) => return -EIO,
                 };
-                (data, new_argv, envp_strings)
+                exec_path_str = path.to_string();
+                (data, new_argv, envp_strings, exec_path_str)
             } else {
                 return -EINVAL;
             }
         } else {
-            (data, argv_strings, envp_strings)
+            (data, argv_strings, envp_strings, exec_path_str)
         };
 
     // // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     // let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
     // let envp_refs: Vec<&str> = envp_strings.iter().map(|s| s.as_str()).collect();
+
+    // /proc/[pid]/exe 使用尽量稳定的绝对路径
+    let exe_path = match crate::vfs::vfs_lookup(&exec_path_str) {
+        Ok(d) => d.full_path(),
+        Err(_) => exec_path_str.clone(),
+    };
 
     // 解析 ELF 并准备新的地址空间（但不切换）
     let (space, entry, sp, phdr_addr, phnum, phent) = match do_execve_prepare(&data) {
@@ -361,6 +425,7 @@ pub fn execve(
         space,
         entry,
         sp,
+        exe_path,
         argv_strings, // Pass ownership
         envp_strings, // Pass ownership
         phdr_addr,
@@ -1139,6 +1204,7 @@ fn do_execve_switch(
     space: Arc<SpinLock<MemorySpace>>,
     entry: usize,
     sp: usize,
+    exe_path: alloc::string::String,
     argv: Vec<alloc::string::String>,
     envp: Vec<alloc::string::String>,
     phdr_addr: usize,
@@ -1163,6 +1229,7 @@ fn do_execve_switch(
         let envp_refs: Vec<&str> = envp.iter().map(|s| s.as_str()).collect();
 
         let mut t = task.lock();
+        t.exe_path = Some(exe_path);
         t.execve(
             space.clone(),
             entry,

@@ -82,6 +82,7 @@ impl_syscall!(sys_close, close, (usize));
 impl_syscall!(sys_pipe2, pipe2, (*mut i32, u32));
 impl_syscall!(sys_getdents64, getdents64, (usize, *mut u8, usize));
 impl_syscall!(sys_lseek, lseek, (usize, isize, usize));
+impl_syscall!(sys_ftruncate, ftruncate, (usize, i64));
 
 // I/O 操作 (Input/Output Operations)
 impl_syscall!(sys_read, read, (usize, *mut u8, usize));
@@ -243,8 +244,8 @@ impl_syscall!(
         c_ulong,     // flags (a0)
         c_ulong,     // stack (a1)
         *mut c_int,  // parent_tid (a2)
-        *mut c_void, // tls (a3)
-        *mut c_int   // child_tid (a4)
+        *mut c_int,  // child_tid (a3)
+        *mut c_void  // tls (a4)
     )
 );
 impl_syscall!(
