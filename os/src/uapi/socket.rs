@@ -15,13 +15,25 @@ pub const SOCK_TYPE_MASK: i32 = 0x0f;
 
 // SOL_SOCKET options
 pub const SO_REUSEADDR: i32 = 2;
+pub const SO_DONTROUTE: i32 = 5;
+pub const SO_BROADCAST: i32 = 6;
 pub const SO_KEEPALIVE: i32 = 9;
+pub const SO_OOBINLINE: i32 = 10;
 pub const SO_SNDBUF: i32 = 7;
 pub const SO_RCVBUF: i32 = 8;
 pub const SO_LINGER: i32 = 13;
 pub const SO_REUSEPORT: i32 = 15;
+pub const SO_RCVLOWAT: i32 = 18;
+pub const SO_SNDLOWAT: i32 = 19;
 pub const SO_RCVTIMEO_OLD: i32 = 20;
 pub const SO_SNDTIMEO_OLD: i32 = 21;
+
+// IPPROTO_IP options (subset; enough for common tools/tests)
+pub const IP_TOS: i32 = 1;
+pub const IP_TTL: i32 = 2;
+pub const IP_PKTINFO: i32 = 8;
+pub const IP_MTU_DISCOVER: i32 = 10;
+pub const IP_RECVERR: i32 = 11;
 
 // IPPROTO_TCP options
 pub const TCP_NODELAY: i32 = 1;

@@ -30,11 +30,22 @@ pub fn restore(tf: &TrapFrame) {
 
 /// 获取信号返回 trampoline 地址
 pub fn sigreturn_trampoline_address() -> usize {
-    __sigreturn_trampoline as usize
+    crate::config::USER_SIGRETURN_TRAMPOLINE
 }
 
 unsafe extern "C" {
     fn __sigreturn_trampoline();
+    fn __sigreturn_trampoline_end();
+}
+
+/// Kernel-side instruction bytes for the rt_sigreturn trampoline.
+///
+/// These bytes are copied into a userspace RX page at `sigreturn_trampoline_address()`.
+pub fn kernel_sigreturn_trampoline_bytes() -> &'static [u8] {
+    let start = __sigreturn_trampoline as usize;
+    let end = __sigreturn_trampoline_end as usize;
+    let len = end.saturating_sub(start);
+    unsafe { core::slice::from_raw_parts(start as *const u8, len) }
 }
 
 /// 设置 TrapFrame 中与当前 CPU 相关的字段（占位符）。

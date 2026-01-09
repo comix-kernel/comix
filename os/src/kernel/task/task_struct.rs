@@ -266,13 +266,15 @@ impl Task {
     pub fn execve(
         &mut self,
         new_memory_space: Arc<SpinLock<MemorySpace>>,
-        entry_point: usize,
+        initial_pc: usize,
         sp_high: usize,
         argv: &[&str],
         envp: &[&str],
         phdr_addr: usize,
         phnum: usize,
         phent: usize,
+        at_base: usize,
+        at_entry: usize,
     ) {
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
@@ -290,8 +292,9 @@ impl Task {
         //      也就是说，new_memory_space 已经被激活（切换 satp）
         //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
         // 3. 设置用户栈布局，包含命令行参数和环境变量
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) =
-            setup_stack_layout(sp_high, argv, envp, phdr_addr, phnum, phent, entry_point);
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(
+            sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
+        );
 
         // 4. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
@@ -299,7 +302,7 @@ impl Task {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
             (*tf_ptr).set_exec_trap_frame(
-                entry_point,
+                initial_pc,
                 new_sp,
                 self.kstack_base,
                 argc,
