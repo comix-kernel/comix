@@ -905,7 +905,10 @@ pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
     // Use the thread-group leader (pid) as the timer owner.
     let owner = {
         let pid = current_task().lock().pid;
-        TASK_MANAGER.lock().get_task(pid).unwrap_or_else(current_task)
+        TASK_MANAGER
+            .lock()
+            .get_task(pid)
+            .unwrap_or_else(current_task)
     };
     let mut val = Itimerval::zero();
     if let Some(timer) = TIMER.lock().find_entry(&owner, sig) {
@@ -946,7 +949,10 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
     // Linux semantics: ITIMER_* are per-process (thread group), not per-thread.
     let owner = {
         let pid = current_task().lock().pid;
-        TASK_MANAGER.lock().get_task(pid).unwrap_or_else(current_task)
+        TASK_MANAGER
+            .lock()
+            .get_task(pid)
+            .unwrap_or_else(current_task)
     };
 
     let mut binding = TIMER.lock();

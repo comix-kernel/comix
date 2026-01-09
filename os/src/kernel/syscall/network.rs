@@ -378,9 +378,8 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
             // INADDR_ANY:ephemeral. Also, if the socket was bound with port=0, the kernel must
             // choose a non-zero port before starting to listen.
             use crate::net::socket::get_socket_local_endpoint;
-            let mut endpoint = get_socket_local_endpoint(&file).unwrap_or_else(|| {
-                IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0)
-            });
+            let mut endpoint = get_socket_local_endpoint(&file)
+                .unwrap_or_else(|| IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0));
 
             pr_debug!(
                 "listen: tid={}, sockfd={}, endpoint(before)={}",
