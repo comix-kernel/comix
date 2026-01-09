@@ -146,6 +146,7 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         syscall_number::SYS_RECVFROM => sys_recvfrom(frame),
         syscall_number::SYS_SETSOCKOPT => sys_setsockopt(frame),
         syscall_number::SYS_GETSOCKOPT => sys_getsockopt(frame),
+        syscall_number::SYS_SHUTDOWN => sys_shutdown(frame),
 
         // 进程创建/执行 (Process Creation/Execution)
         syscall_number::SYS_CLONE => sys_clone(frame),

@@ -6,6 +6,7 @@ use core::sync::atomic::Ordering;
 
 mod cap;
 mod cred;
+mod exec_loader;
 mod futex;
 mod ktask;
 mod process;
@@ -17,6 +18,7 @@ mod work_queue;
 
 pub use cap::*;
 pub use cred::*;
+pub use exec_loader::*;
 pub use futex::*;
 pub use ktask::*;
 pub use process::*;

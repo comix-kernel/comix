@@ -16,7 +16,8 @@ pub fn setup_stack_layout(
     phdr_addr: usize,
     phnum: usize,
     phent: usize,
-    entry_point: usize,
+    at_base: usize,
+    at_entry: usize,
 ) -> (usize, usize, usize, usize) {
     let mut sp = sp;
     let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
@@ -74,16 +75,16 @@ pub fn setup_stack_layout(
     sp &= !(size_of::<usize>() * 2 - 1); // Align to 16 bytes
 
     // 4. AT_EXECFN (use argv[0] if available)
-    let execfn = if !arg_ptrs.is_empty() { arg_ptrs[0] } else { 0 };
+    let execfn = arg_ptrs.last().copied().unwrap_or(0);
 
     let auxv = [
         (3, phdr_addr),     // AT_PHDR
         (4, phent),         // AT_PHENT
         (5, phnum),         // AT_PHNUM
         (6, 4096),          // AT_PAGESZ
-        (7, 0),             // AT_BASE
+        (7, at_base),       // AT_BASE
         (8, 0),             // AT_FLAGS
-        (9, entry_point),   // AT_ENTRY
+        (9, at_entry),      // AT_ENTRY
         (11, 0),            // AT_UID
         (12, 0),            // AT_EUID
         (13, 0),            // AT_GID
@@ -106,7 +107,7 @@ pub fn setup_stack_layout(
         sp,
         random_ptr,
         phdr_addr,
-        entry_point
+        at_entry
     );
 
     // Calculate total size of the pointer block to ensure final sp is 16-byte aligned

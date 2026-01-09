@@ -97,6 +97,24 @@ impl TrapFrame {
         self.regs[4] = val;
     }
 
+    /// 设置第二个参数寄存器 (a1)
+    #[inline]
+    pub fn set_a1(&mut self, val: usize) {
+        self.regs[5] = val;
+    }
+
+    /// 设置第三个参数寄存器 (a2)
+    #[inline]
+    pub fn set_a2(&mut self, val: usize) {
+        self.regs[6] = val;
+    }
+
+    /// 设置返回地址寄存器 (ra)
+    #[inline]
+    pub fn set_ra(&mut self, val: usize) {
+        self.regs[1] = val;
+    }
+
     /// 获取程序计数器
     #[inline]
     pub fn get_sepc(&self) -> usize {

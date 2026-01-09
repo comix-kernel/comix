@@ -1,7 +1,10 @@
 use core::cmp::Ordering;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
-use crate::config::{MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{
+    MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
+    USER_STACK_TOP,
+};
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
@@ -112,6 +115,148 @@ impl MemorySpace {
             .find(|a| a.area_type() == AreaType::UserHeap)
             .map(|a| a.vpn_range().end().start_addr().as_usize())
             .or_else(|| self.heap_start.map(|vpn| vpn.start_addr().as_usize()))
+    }
+
+    /// 创建一个新的用户地址空间，并克隆当前地址空间的内核映射。
+    ///
+    /// 语义与 `from_elf()` 内部“只复制内核区域”的逻辑一致，便于在 execve 等路径中复用。
+    pub fn new_user_with_kernel_mappings() -> Result<Self, PagingError> {
+        let current_space = crate::kernel::current_memory_space();
+        let current_locked = current_space.lock();
+
+        let mut space = MemorySpace::new();
+        for area in current_locked.areas.iter() {
+            let is_kernel = matches!(
+                area.area_type(),
+                AreaType::KernelText
+                    | AreaType::KernelRodata
+                    | AreaType::KernelData
+                    | AreaType::KernelBss
+                    | AreaType::KernelStack
+                    | AreaType::KernelHeap
+                    | AreaType::KernelMmio
+            );
+            if !is_kernel {
+                continue;
+            }
+            let mut new_area = area.clone_metadata();
+            new_area.map(&mut space.page_table)?;
+            space.areas.push(new_area);
+        }
+
+        // Userspace rt_sigreturn trampoline (Linux ABI).
+        space.map_user_sigreturn_trampoline()?;
+
+        Ok(space)
+    }
+
+    /// 设置用户堆的起始地址（brk 的下界）。
+    ///
+    /// 注意：这里只设置固定的 heap_start，不会创建/扩展 UserHeap 映射区域。
+    pub fn set_heap_start(&mut self, heap_start: Vpn) {
+        self.heap_start = Some(heap_start);
+    }
+
+    fn map_user_sigreturn_trampoline(&mut self) -> Result<(), PagingError> {
+        let start = USER_SIGRETURN_TRAMPOLINE;
+        let end = start
+            .checked_add(PAGE_SIZE)
+            .ok_or(PagingError::InvalidAddress)?;
+        let vpn_range = VpnRange::new(
+            Vpn::from_addr_floor(Vaddr::from_usize(start)),
+            Vpn::from_addr_ceil(Vaddr::from_usize(end)),
+        );
+
+        // If already mapped (layout differences), don't fail hard.
+        if self
+            .areas
+            .iter()
+            .any(|a| a.vpn_range().overlaps(&vpn_range))
+        {
+            return Ok(());
+        }
+
+        let code = crate::arch::trap::kernel_sigreturn_trampoline_bytes();
+        self.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rx(),
+            Some(code),
+            None,
+        )?;
+
+        Ok(())
+    }
+
+    /// 从当前地址空间中向指定虚拟地址写入字节序列（跨页安全）。
+    pub fn write_bytes_at(&mut self, va: usize, bytes: &[u8]) -> Result<(), PagingError> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        let mut written = 0usize;
+        while written < bytes.len() {
+            let cur_va = va.checked_add(written).ok_or(PagingError::InvalidAddress)?;
+            let paddr = self
+                .page_table
+                .translate(Vaddr::from_usize(cur_va))
+                .ok_or(PagingError::InvalidAddress)?;
+            let paddr_usize = paddr.as_usize();
+            let page_base = paddr_usize & !(PAGE_SIZE - 1);
+            let page_off = paddr_usize & (PAGE_SIZE - 1);
+
+            let take = core::cmp::min(bytes.len() - written, PAGE_SIZE - page_off);
+            let dst = (paddr_to_vaddr(page_base) + page_off) as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(bytes[written..].as_ptr(), dst, take);
+            }
+            written += take;
+        }
+
+        Ok(())
+    }
+
+    /// 从指定虚拟地址读取字节序列（跨页安全）。
+    pub fn read_bytes_at(&self, va: usize, out: &mut [u8]) -> Result<(), PagingError> {
+        if out.is_empty() {
+            return Ok(());
+        }
+
+        let mut read = 0usize;
+        while read < out.len() {
+            let cur_va = va.checked_add(read).ok_or(PagingError::InvalidAddress)?;
+            let paddr = self
+                .page_table
+                .translate(Vaddr::from_usize(cur_va))
+                .ok_or(PagingError::InvalidAddress)?;
+            let paddr_usize = paddr.as_usize();
+            let page_base = paddr_usize & !(PAGE_SIZE - 1);
+            let page_off = paddr_usize & (PAGE_SIZE - 1);
+
+            let take = core::cmp::min(out.len() - read, PAGE_SIZE - page_off);
+            let src = (paddr_to_vaddr(page_base) + page_off) as *const u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(src, out[read..].as_mut_ptr(), take);
+            }
+            read += take;
+        }
+        Ok(())
+    }
+
+    pub fn read_u64_at(&self, va: usize) -> Result<u64, PagingError> {
+        let mut buf = [0u8; 8];
+        self.read_bytes_at(va, &mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+
+    pub fn read_i64_at(&self, va: usize) -> Result<i64, PagingError> {
+        let mut buf = [0u8; 8];
+        self.read_bytes_at(va, &mut buf)?;
+        Ok(i64::from_le_bytes(buf))
+    }
+
+    pub fn write_usize_at(&mut self, va: usize, value: usize) -> Result<(), PagingError> {
+        self.write_bytes_at(va, &value.to_ne_bytes())
     }
 
     /// 映射内核空间（所有地址空间共享）
@@ -664,6 +809,9 @@ impl MemorySpace {
             None,
             None, // 非文件映射
         )?;
+
+        // Userspace rt_sigreturn trampoline (Linux ABI).
+        space.map_user_sigreturn_trampoline()?;
 
         let entry_point = load_bias + elf.header.pt2.entry_point() as usize;
         let ph_off = elf.header.pt2.ph_offset() as usize;

@@ -12,3 +12,6 @@ __sigreturn_trampoline:
     
     // 执行环境调用，陷入内核
     ecall
+
+    .globl __sigreturn_trampoline_end
+__sigreturn_trampoline_end:
