@@ -152,26 +152,25 @@ tlb_refill_entry:
     # Get PGD base (CSR.PGD auto-selects PGDL/PGDH based on BADV)
     csrrd   $t1, 0x1b          # CSR.PGD
 
-    # Debug: mark after PGD read
-    li.d    $t2, 0x1fe001e0
-    li.w    $a0, 0x31          # '1'
-    st.b    $a0, $t2, 0
+    # 1. 第一跳：使用 VPN2 (Level 2) 查 PGD，得到 PMD 基址
+    # 对应 Rust 配置中的 (30 << 20)
+    lddir   $t1, $t1, 2
 
-    # 3-level page table walk: level=1, level=2, then ldpte
-    lddir   $t1, $t1, 1        # t1 = dir1 base (next level)
-
-    # Debug: mark after lddir level=1
+    # Debug: mark after lddir level=2
     li.d    $t2, 0x1fe001e0
     li.w    $a0, 0x32          # '2'
     st.b    $a0, $t2, 0
 
-    lddir   $t1, $t1, 2        # t1 = PTE table base
+    # 2. 第二跳：使用 VPN1 (Level 1) 查 PMD，得到 PT 基址
+    # 对应 Rust 配置中的 (21 << 10)
+    lddir   $t1, $t1, 1
 
-    # Debug: mark after lddir level=2
+    # Debug: mark after lddir level=1
     li.d    $t2, 0x1fe001e0
     li.w    $a0, 0x33          # '3'
     st.b    $a0, $t2, 0
 
+    # 3. 第三跳：使用 VPN0 取 PTE
     # seq = BADV[12] (even/odd page) - must branch for immediate
     srli.d  $t2, $t0, 12
     andi    $t2, $t2, 1
