@@ -237,9 +237,7 @@ pub fn rt_sigreturn() -> ! {
     {
         let task = current_task();
         let mut t = task.lock();
-        if let Some(flags) = SignalFlags::from_bits(ucontext.uc_sigmask as usize) {
-            t.blocked = flags;
-        }
+        t.blocked = SignalFlags::from_bits_truncate(ucontext.uc_sigmask as usize);
     }
 
     tf.restore_from_mcontext(&ucontext.uc_mcontext);
