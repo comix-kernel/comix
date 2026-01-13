@@ -35,6 +35,7 @@ const ELFDATA2LSB: u8 = 1;
 const ET_DYN: u16 = 3;
 
 const EM_RISCV: u16 = 243;
+const EM_LOONGARCH: u16 = 258;
 
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
@@ -55,6 +56,10 @@ const DT_SYMENT: i64 = 11;
 // riscv64 relocations
 const R_RISCV_64: u32 = 2;
 const R_RISCV_RELATIVE: u32 = 3;
+
+// loongarch64 relocations
+const R_LARCH_64: u32 = 2;
+const R_LARCH_RELATIVE: u32 = 3;
 
 #[derive(Clone, Copy, Debug)]
 struct ElfHdr {
@@ -118,7 +123,12 @@ fn parse_elf_header(inode: &dyn Inode) -> Result<ElfHdr, ExecImageError> {
     let e_phentsize = le_u16(&hdr[54..56]);
     let e_phnum = le_u16(&hdr[56..58]);
 
+    #[cfg(target_arch = "riscv64")]
     if e_machine != EM_RISCV {
+        return Err(ExecImageError::InvalidElf);
+    }
+    #[cfg(target_arch = "loongarch64")]
+    if e_machine != EM_LOONGARCH {
         return Err(ExecImageError::InvalidElf);
     }
     if e_phentsize as usize != 56 {
@@ -407,9 +417,26 @@ fn apply_static_pie_relocs(
         let r_sym = (r_info >> 32) as usize;
 
         let target_va = load_bias + r_offset;
+        #[cfg(target_arch = "riscv64")]
         let value = match r_type {
             R_RISCV_RELATIVE => (load_bias as isize + r_addend) as usize,
             R_RISCV_64 => {
+                if dt_symtab == 0 {
+                    return Err(ExecImageError::InvalidElf);
+                }
+                let sym_addr = load_bias + dt_symtab + r_sym * dt_syment;
+                let st_value = space
+                    .read_u64_at(sym_addr + 8)
+                    .map_err(ExecImageError::Paging)? as usize;
+                let s = load_bias + st_value;
+                (s as isize + r_addend) as usize
+            }
+            _ => return Err(ExecImageError::InvalidElf),
+        };
+        #[cfg(target_arch = "loongarch64")]
+        let value = match r_type {
+            R_LARCH_RELATIVE => (load_bias as isize + r_addend) as usize,
+            R_LARCH_64 => {
                 if dt_symtab == 0 {
                     return Err(ExecImageError::InvalidElf);
                 }
