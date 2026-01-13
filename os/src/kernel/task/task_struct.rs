@@ -291,7 +291,7 @@ impl Task {
         //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
         // 3. 设置用户栈布局，包含命令行参数和环境变量
         #[cfg(target_arch = "loongarch64")]
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = {
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp) = {
             let space = new_memory_space.lock();
             setup_stack_layout(
                 &space,
@@ -313,6 +313,17 @@ impl Task {
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
+            #[cfg(target_arch = "loongarch64")]
+            (*tf_ptr).set_exec_trap_frame(
+                entry_point,
+                new_sp,
+                self.kstack_base,
+                argc,
+                argv_vec_ptr,
+                envp_vec_ptr,
+                tls_tp,
+            );
+            #[cfg(target_arch = "riscv64")]
             (*tf_ptr).set_exec_trap_frame(
                 entry_point,
                 new_sp,

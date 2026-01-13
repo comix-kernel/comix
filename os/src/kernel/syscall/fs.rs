@@ -1184,27 +1184,61 @@ pub fn mount(
         fstype_str
     );
 
+    fn ensure_dir_exists(path: &str) -> Result<(), FsError> {
+        use crate::vfs::{FileMode, split_path, vfs_lookup};
+
+        match vfs_lookup(path) {
+            Ok(dentry) => {
+                let meta = dentry.inode.metadata()?;
+                if meta.inode_type != InodeType::Directory {
+                    return Err(FsError::NotDirectory);
+                }
+                Ok(())
+            }
+            Err(FsError::NotFound) => {
+                let (parent_path, name) = split_path(path)?;
+                let parent = vfs_lookup(&parent_path)?;
+                let dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o755);
+                parent.inode.mkdir(&name, dir_mode)?;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     // 特殊挂载点处理
     match target_str.as_str() {
         "/proc" => {
+            if let Err(e) = ensure_dir_exists("/proc") {
+                return e.to_errno();
+            }
             return match init_procfs() {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/sys" => {
+            if let Err(e) = ensure_dir_exists("/sys") {
+                return e.to_errno();
+            }
             return match init_sysfs() {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/tmp" => {
+            if let Err(e) = ensure_dir_exists("/tmp") {
+                return e.to_errno();
+            }
             return match mount_tmpfs("/tmp", 0) {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/dev" => {
+            if let Err(e) = ensure_dir_exists("/dev") {
+                return e.to_errno();
+            }
             // 先挂载 tmpfs 到 /dev
             if let Err(e) = mount_tmpfs("/dev", 0) {
                 return e.to_errno();

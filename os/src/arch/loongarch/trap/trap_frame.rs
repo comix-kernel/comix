@@ -123,9 +123,11 @@ impl TrapFrame {
         argc: usize,
         argv: usize,
         envp: usize,
+        tls_tp: usize,
     ) {
         *self = Self::zero_init();
         self.era = entry;
+        self.regs[2] = tls_tp; // tp (thread pointer / TLS)
         self.regs[3] = user_sp; // sp
         self.regs[4] = argc; // a0
         self.regs[5] = argv; // a1
@@ -137,9 +139,10 @@ impl TrapFrame {
         use crate::arch::constant::{CSR_CRMD_DA, CSR_CRMD_PG};
         self.crmd = (read_crmd() & !CSR_CRMD_PLV_MASK & !CSR_CRMD_DA) | CSR_CRMD_PG;
         crate::pr_info!(
-            "[exec_trap_frame] era={:#x}, sp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
+            "[exec_trap_frame] era={:#x}, sp={:#x}, tp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
             self.era,
             self.regs[3],
+            self.regs[2],
             self.prmd,
             self.crmd,
             self.regs[4],

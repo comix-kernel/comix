@@ -41,8 +41,22 @@ pub fn setup_stack_layout(
     phnum: usize,
     phent: usize,
     entry_point: usize,
-) -> (usize, usize, usize, usize) {
-    let mut sp = sp;
+) -> (usize, usize, usize, usize, usize) {
+    // Reserve one page at the top of the user stack for TLS/TCB, and set $tp to
+    // a stable address inside that page. This is required by many Linux-ABI user
+    // programs on LoongArch which rely on $tp for TLS.
+    // TLS lives in the top stack page: [tls_base, tls_base + PAGE_SIZE).
+    let tls_page_size = PAGE_SIZE;
+    let tls_base = (sp - 1) & !(tls_page_size - 1);
+    // Place tp near the top of that page, 16-byte aligned, and within the mapping.
+    let tls_tp = (sp & !0xf).wrapping_sub(0x10);
+
+    // Ensure the TLS page is mapped (it should be within the mapped user stack range),
+    // and initialize a minimal self-pointer at tp for libc expectations.
+    write_user_usize(space, tls_tp, tls_tp);
+
+    // Start placing argv/envp/auxv below the TLS page.
+    let mut sp = tls_base;
     crate::pr_info!(
         "[setup_stack_layout] sp_top=0x{:x}, phdr=0x{:x}, entry=0x{:x}",
         sp,
@@ -176,7 +190,7 @@ pub fn setup_stack_layout(
         argv_vec_ptr,
         envp_vec_ptr
     );
-    (sp, argc, argv_vec_ptr, envp_vec_ptr)
+    (sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp)
 }
 
 fn write_user_usize(space: &MemorySpace, dst: usize, val: usize) {

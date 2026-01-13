@@ -269,7 +269,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
                 options(nostack, preserves_flags)
             );
             core::arch::asm!(
-                "csrrd {0}, 0x48",
+                "csrrd {0}, 0x30",
                 out(reg) ks0,
                 options(nostack, preserves_flags)
             );
@@ -360,10 +360,13 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     unsafe {
         // Ensure KScratch0 points to the current task's trap frame before returning to user mode.
         core::arch::asm!(
-            "csrwr {0}, 0x48",
+            "csrwr {0}, 0x30",
             in(reg) tfp as usize,
             options(nostack, preserves_flags)
         );
+        // Reset TLB refill debug counter (CSR.TLBRSAVE) so we can observe the first refill after
+        // entering user mode.
+        core::arch::asm!("csrwr $zero, 0x8b", options(nostack, preserves_flags));
     }
     #[cfg(target_arch = "riscv64")]
     unsafe {
