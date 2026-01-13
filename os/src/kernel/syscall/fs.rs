@@ -1177,7 +1177,7 @@ pub fn mount(
         String::new()
     };
 
-    crate::pr_info!(
+    crate::pr_debug!(
         "[SYSCALL] mount: source='{}', target='{}', type='{}'",
         source_str,
         target_str,
@@ -1335,14 +1335,14 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
         }
     };
 
-    crate::pr_info!("[SYSCALL] umount2: unmounting '{}'", target_str);
+    crate::pr_debug!("[SYSCALL] umount2: unmounting '{}'", target_str);
 
     // 卸载文件系统
 
     // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
     match MOUNT_TABLE.umount(&target_str) {
         Ok(()) => {
-            crate::pr_info!("[SYSCALL] umount2: successfully unmounted '{}'", target_str);
+            crate::pr_debug!("[SYSCALL] umount2: successfully unmounted '{}'", target_str);
             0
         }
         Err(e) => {

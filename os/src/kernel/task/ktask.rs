@@ -213,11 +213,11 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
             crate::pr_err!("[kernel_execve] trap_frame_ptr is null");
             panic!("kernel_execve: null trap_frame_ptr");
         }
-        crate::pr_info!("[kernel_execve] trap_frame_ptr={:#x}", tfp as usize);
+        crate::pr_debug!("[kernel_execve] trap_frame_ptr={:#x}", tfp as usize);
     }
     #[cfg(target_arch = "loongarch64")]
     unsafe {
-        crate::pr_info!(
+        crate::pr_debug!(
             "[kernel_execve] trapframe: era={:#x}, sp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
             (*tfp).get_sepc(),
             (*tfp).get_sp(),
@@ -307,7 +307,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         let tlbr_entry_paddr =
             unsafe { crate::arch::mm::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
         let tlbr_entry_dm_vaddr = crate::arch::mm::paddr_to_vaddr(tlbr_entry_paddr);
-        crate::pr_info!(
+        crate::pr_debug!(
             "[kernel_execve] va translate: entry={:?}, sp={:?}",
             space.translate(entry_va),
             space.translate(sp_va)
@@ -317,7 +317,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         use crate::mm::page_table::PageTableInner;
         let entry_vpn = Vpn::from_addr_floor(entry_va);
         if let Ok((ppn, _, flags)) = space.page_table().walk(entry_vpn) {
-            crate::pr_info!(
+            crate::pr_debug!(
                 "[kernel_execve] entry PTE: vpn={:#x}, ppn={:#x}, flags={:?}",
                 entry_vpn.0,
                 ppn.0,
@@ -326,12 +326,12 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         } else {
             crate::pr_err!("[kernel_execve] entry page not mapped!");
         }
-        crate::pr_info!(
+        crate::pr_debug!(
             "[kernel_execve] root_ppn={:#x}, root_paddr={:#x}",
             root_ppn.0,
             root_paddr
         );
-        crate::pr_info!(
+        crate::pr_debug!(
             "[kernel_execve] tlbrent={:#x}, crmd={:#x}, pgdl={:#x}, pgdh={:#x}, ecfg={:#x}, ks0={:#x}",
             tlbrent,
             crmd,
@@ -340,7 +340,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
             ecfg,
             ks0
         );
-        crate::pr_info!(
+        crate::pr_debug!(
             "[kernel_execve] asid={:#x} (full_csr={:#x}), tlbrehi={:#x}, tlbrelo0={:#x}, tlbrelo1={:#x}",
             asid & 0x3ff,
             asid,
@@ -348,7 +348,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
             tlbrelo0,
             tlbrelo1
         );
-        crate::pr_info!(
+        crate::pr_debug!(
             "[kernel_execve] tlb_refill_entry: vaddr={:#x}, paddr={:#x}, dm_vaddr={:#x}",
             tlbr_entry_vaddr,
             tlbr_entry_paddr,

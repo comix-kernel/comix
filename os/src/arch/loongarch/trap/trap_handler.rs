@@ -1,6 +1,6 @@
 //! LoongArch64 陷阱处理实现（与 RISC-V 路径一致的接口）。
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::arch::constant::{
     CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK, CSR_TLBRENT,
@@ -22,6 +22,7 @@ pub static mut BOOT_TRAP_FRAME: TrapFrame = TrapFrame::empty();
 
 static FIRST_TRAP_LOGGED: AtomicBool = AtomicBool::new(false);
 static FIRST_USER_TIMER_LOGGED: AtomicBool = AtomicBool::new(false);
+static USER_SYSCALL_LOG_BUDGET: AtomicUsize = AtomicUsize::new(16);
 
 const ECODE_SYSCALL: usize = 0xb; // LoongArch syscall 异常码
 const TIMER_INT_BIT: usize = 1 << 11; // ESTAT.IS 中的本地定时器位
@@ -50,7 +51,7 @@ pub extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             core::arch::asm!("csrrd {0}, 0x19", out(reg) pgdl, options(nostack, preserves_flags));
             core::arch::asm!("csrrd {0}, 0x1a", out(reg) pgdh, options(nostack, preserves_flags));
         }
-        crate::pr_info!(
+        crate::pr_debug!(
             "[trap_handler] first trap: estat={:#x}, era={:#x}, prmd={:#x}, crmd={:#x}, badv={:#x}, badi={:#x}, pgdl={:#x}, pgdh={:#x}",
             estat,
             era,
@@ -164,7 +165,7 @@ fn install_trap_entry() {
 fn user_trap(estat: usize, era: usize, trap_frame: &mut TrapFrame) {
     if estat & CSR_ESTAT_IS_MASK != 0 {
         if (estat & TIMER_INT_BIT) != 0 && !FIRST_USER_TIMER_LOGGED.swap(true, Ordering::Relaxed) {
-            crate::pr_info!("[user_trap] first user timer interrupt, era={:#x}", era);
+            crate::pr_debug!("[user_trap] first user timer interrupt, era={:#x}", era);
         }
         handle_interrupt(estat);
         return;
@@ -173,11 +174,15 @@ fn user_trap(estat: usize, era: usize, trap_frame: &mut TrapFrame) {
     let ecode = (estat >> 16) & 0x3f;
     match ecode {
         ECODE_SYSCALL => {
-            crate::pr_info!(
-                "[user_trap] syscall id={}, era={:#x}",
-                trap_frame.syscall_id(),
-                era
-            );
+            let syscall_id = trap_frame.syscall_id();
+            let log_now = USER_SYSCALL_LOG_BUDGET
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+                .is_ok();
+            if log_now {
+                crate::pr_info!("[user_trap] syscall id={}, era={:#x}", syscall_id, era);
+            } else {
+                crate::pr_debug!("[user_trap] syscall id={}, era={:#x}", syscall_id, era);
+            }
             trap_frame.era = era.wrapping_add(4);
             dispatch_syscall(trap_frame);
         }

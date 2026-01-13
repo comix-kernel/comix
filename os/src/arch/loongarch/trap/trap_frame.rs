@@ -138,7 +138,7 @@ impl TrapFrame {
         // CRMD: 清除 PLV 和 DA，设置 PG（映射模式）
         use crate::arch::constant::{CSR_CRMD_DA, CSR_CRMD_PG};
         self.crmd = (read_crmd() & !CSR_CRMD_PLV_MASK & !CSR_CRMD_DA) | CSR_CRMD_PG;
-        crate::pr_info!(
+        crate::pr_debug!(
             "[exec_trap_frame] era={:#x}, sp={:#x}, tp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
             self.era,
             self.regs[3],

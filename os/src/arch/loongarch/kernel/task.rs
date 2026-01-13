@@ -57,7 +57,7 @@ pub fn setup_stack_layout(
 
     // Start placing argv/envp/auxv below the TLS page.
     let mut sp = tls_base;
-    crate::pr_info!(
+    crate::pr_debug!(
         "[setup_stack_layout] sp_top=0x{:x}, phdr=0x{:x}, entry=0x{:x}",
         sp,
         phdr_addr,
@@ -183,7 +183,7 @@ pub fn setup_stack_layout(
     sp -= size_of::<usize>();
     write_user_usize(&space, sp, argc);
 
-    crate::pr_info!(
+    crate::pr_debug!(
         "[setup_stack_layout] sp_final=0x{:x}, argc={}, argv=0x{:x}, envp=0x{:x}",
         sp,
         argc,
