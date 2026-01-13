@@ -21,6 +21,7 @@ use super::TrapFrame;
 pub static mut BOOT_TRAP_FRAME: TrapFrame = TrapFrame::empty();
 
 static FIRST_TRAP_LOGGED: AtomicBool = AtomicBool::new(false);
+static FIRST_USER_TIMER_LOGGED: AtomicBool = AtomicBool::new(false);
 
 const ECODE_SYSCALL: usize = 0xb; // LoongArch syscall 异常码
 const TIMER_INT_BIT: usize = 1 << 11; // ESTAT.IS 中的本地定时器位
@@ -98,7 +99,11 @@ fn install_trap_entry() {
         BOOT_TRAP_FRAME.cpu_ptr = crate::kernel::current_cpu() as *const _ as usize;
 
         // KScratch0 <- TrapFrame 指针
-        core::arch::asm!("csrwr {0}, 0x48", in(reg) (&raw mut BOOT_TRAP_FRAME as *mut TrapFrame as usize), options(nostack, preserves_flags));
+        core::arch::asm!(
+            "csrwr {0}, 0x30",
+            in(reg) (&raw mut BOOT_TRAP_FRAME as *mut TrapFrame as usize),
+            options(nostack, preserves_flags)
+        );
         // EENTRY <- trap_entry（注意 CSR 编号为 0xc）
         core::arch::asm!(
             "csrwr {val}, {csr}",
@@ -115,6 +120,30 @@ fn install_trap_entry() {
             val = in(reg) tlbr_entry_paddr,
             csr = const CSR_TLBRENT,
             options(nostack, preserves_flags)
+        );
+
+        // 设置 TLBIDX.PS = 12 (4KB 页)
+        // TLBIDX 的 PS 字段在 bits [29:24]
+        core::arch::asm!(
+            "csrrd $t0, 0x10",
+            "li.w $t1, 12",
+            "bstrins.d $t0, $t1, 29, 24",
+            "csrwr $t0, 0x10",
+            out("$t0") _,
+            out("$t1") _,
+            options(nostack)
+        );
+
+        // 设置 TLBREHI.PS = 12 (4KB 页)
+        // TLBREHI 的 PS 字段在 bits [5:0]
+        core::arch::asm!(
+            "csrrd $t0, 0x8e",
+            "li.w $t1, 12",
+            "bstrins.d $t0, $t1, 5, 0",
+            "csrwr $t0, 0x8e",
+            out("$t0") _,
+            out("$t1") _,
+            options(nostack)
         );
 
         let tlbrent: usize;
@@ -134,6 +163,9 @@ fn install_trap_entry() {
 
 fn user_trap(estat: usize, era: usize, trap_frame: &mut TrapFrame) {
     if estat & CSR_ESTAT_IS_MASK != 0 {
+        if (estat & TIMER_INT_BIT) != 0 && !FIRST_USER_TIMER_LOGGED.swap(true, Ordering::Relaxed) {
+            crate::pr_info!("[user_trap] first user timer interrupt, era={:#x}", era);
+        }
         handle_interrupt(estat);
         return;
     }

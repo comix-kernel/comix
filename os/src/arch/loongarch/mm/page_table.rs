@@ -32,10 +32,10 @@ pub struct PageTableInner {
 }
 
 impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
-    /// LoongArch64 使用 3 级页表
-    const LEVELS: usize = 3;
-    /// 39 位虚拟地址
-    const MAX_VA_BITS: usize = 39;
+    /// LoongArch64 使用 4 级页表（匹配 48 位虚拟地址）
+    const LEVELS: usize = 4;
+    /// 48 位虚拟地址
+    const MAX_VA_BITS: usize = 48;
     /// 48 位物理地址
     const MAX_PA_BITS: usize = 48;
 
@@ -85,17 +85,18 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 in(reg) 12,
                 options(nostack, preserves_flags)
             );
-            // 配置 PWCL (CSR 0x1C) - 3级页表: dir1@21, dir2@30, pte@12
+            // 配置 PWCL (CSR 0x1C) - 4级页表: pte@12, dir1@21, dir2@30
             let pwcl = 12 | (9 << 5) | (21 << 10) | (9 << 15) | (30 << 20) | (9 << 25);
             core::arch::asm!(
                 "csrwr {0}, 0x1C",
                 in(reg) pwcl,
                 options(nostack, preserves_flags)
             );
-            // 配置 PWCH (CSR 0x1D) - 无 dir3/dir4
+            // 配置 PWCH (CSR 0x1D) - dir3@39
+            let pwch = 39 | (9 << 6);
             core::arch::asm!(
                 "csrwr {0}, 0x1D",
-                in(reg) 0,
+                in(reg) pwch,
                 options(nostack, preserves_flags)
             );
             // 设置 ASID (CSR 0x18)
@@ -214,7 +215,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, current_level);
             let pte = Self::read_pte(ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return None;
             }
 
@@ -283,8 +284,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 Self::tlb_flush(vpn);
                 return Ok(());
             } else {
-                // 中间级别
-                if !pte.is_valid() {
+                // 中间级别：检查目录项是否为空
+                if pte.is_empty() {
                     // 分配新的页表
                     let new_frame = alloc_frame().ok_or(PagingError::FrameAllocFailed)?;
                     let new_ppn = new_frame.ppn();
@@ -318,7 +319,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, level);
             let pte = Self::read_pte(current_ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return Err(PagingError::NotMapped);
             }
 
@@ -356,7 +357,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, level);
             let mut pte = Self::read_pte(current_ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return Err(PagingError::NotMapped);
             }
 
@@ -382,7 +383,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, level);
             let pte = Self::read_pte(ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return Err(PagingError::NotMapped);
             }
 

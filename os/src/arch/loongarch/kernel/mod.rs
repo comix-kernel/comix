@@ -56,7 +56,7 @@ pub mod cpu {
             );
             // KScratch0 作为 trap_entry 的 TrapFrame 指针。
             core::arch::asm!(
-                "csrwr {0}, 0x48",
+                "csrwr {0}, 0x30",
                 in(reg) trap_frame_ptr,
                 options(nostack, preserves_flags)
             );

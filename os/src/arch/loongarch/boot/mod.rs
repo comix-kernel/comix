@@ -40,7 +40,8 @@ global_asm!(include_str!("entry.S"));
 /// 并且当这个函数结束时，应该切换到第一个任务的上下文
 pub fn rest_init() {
     earlyprintln!("[Boot] rest_init: creating init task");
-    let tid = TASK_MANAGER.lock().allocate_tid();
+    // init 进程必须使用 TID/PID 1，不从分配器获取（分配器从 2 开始）。
+    let tid = 1;
     let kstack_tracker = alloc_contig_frames(4).expect("kthread_spawn: failed to alloc kstack");
     let trap_frame_tracker = alloc_frame().expect("kthread_spawn: failed to alloc trap_frame");
     let fd_table = fd_table::FDTable::new();
@@ -86,9 +87,20 @@ pub fn rest_init() {
     // init 任务运行在 CPU 0
     task.on_cpu = Some(0);
     let task = task.into_shared();
+
+    // 为 CPU0 创建 idle 任务，避免调度器在 runqueue 为空时 panic。
+    // idle 任务不加入运行队列，但会作为兜底任务被切换运行。
+    {
+        let _guard = crate::sync::PreemptGuard::new();
+        let cpu = current_cpu();
+        if cpu.idle_task.is_none() {
+            cpu.idle_task = Some(create_idle_task(0));
+        }
+    }
+
     unsafe {
         // KScratch0 <- TrapFrame 指针
-        asm!("csrwr {0}, 0x48", in(reg) ptr as usize, options(nostack, preserves_flags));
+        asm!("csrwr {0}, 0x30", in(reg) ptr as usize, options(nostack, preserves_flags));
     }
     TASK_MANAGER.lock().add_task(task.clone());
     {
@@ -109,6 +121,62 @@ pub fn rest_init() {
             options(noreturn)
         );
     }
+}
+
+/// Idle 循环：等待中断；被定时器中断唤醒后由 trap/scheduler 决定是否调度。
+fn idle_loop() -> ! {
+    loop {
+        if !crate::arch::intr::are_interrupts_enabled() {
+            unsafe { crate::arch::intr::enable_interrupts() };
+        }
+        unsafe {
+            core::arch::asm!("idle 0");
+        }
+    }
+}
+
+/// 为指定 CPU 创建 idle 任务（LoongArch 版本）
+fn create_idle_task(cpu_id: usize) -> crate::kernel::SharedTask {
+    use crate::arch::trap::TrapFrame;
+    use crate::mm::frame_allocator::alloc_contig_frames;
+    use crate::vfs::fd_table::FDTable;
+
+    // idle 任务从 TID 分配器正常分配（从 2 开始）
+    let tid = TASK_MANAGER.lock().allocate_tid();
+
+    // 分配最小资源
+    let kstack_tracker =
+        alloc_contig_frames(1).expect("Failed to allocate kernel stack for idle task");
+    let trap_frame_tracker = alloc_frame().expect("Failed to allocate trap frame for idle task");
+
+    // 创建最小化的内核线程
+    let mut task = TaskStruct::ktask_create(
+        tid,
+        tid, // pid = tid
+        0,   // ppid = 0 (no parent)
+        TaskStruct::empty_children(),
+        kstack_tracker,
+        trap_frame_tracker,
+        Arc::new(SpinLock::new(SignalHandlerTable::new())),
+        SignalFlags::empty(),
+        Arc::new(SpinLock::new(SignalPending::empty())),
+        Arc::new(SpinLock::new(UtsNamespace::default())),
+        Arc::new(SpinLock::new(RlimitStruct::new(INIT_RLIMITS))),
+        Arc::new(FDTable::new()),
+        Arc::new(SpinLock::new(FsStruct::new(None, None))),
+    );
+
+    // 设置 TrapFrame 指向 idle_loop
+    let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
+    unsafe {
+        core::ptr::write(tf, TrapFrame::zero_init());
+        (*tf).set_kernel_trap_frame(idle_loop as usize, 0, task.kstack_base);
+    }
+
+    task.on_cpu = Some(cpu_id);
+    let task = task.into_shared();
+    TASK_MANAGER.lock().add_task(task.clone());
+    task
 }
 
 /// 内核的第一个任务
@@ -135,25 +203,10 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
-    // 挂载 /dev 并创建设备节点（与 RISC-V 路径对齐）
-    if let Err(e) = crate::fs::mount_tmpfs("/dev", 0) {
-        pr_err!("[Init] Failed to mount /dev: {:?}", e);
-    } else if let Err(e) = crate::fs::init_dev() {
-        pr_err!("[Init] Failed to create devices: {:?}", e);
-    } else {
-        pr_info!("[Init] /dev mounted and device nodes created (console, ttyS0, null, etc.)");
-    }
-
-    // LoongArch 目录目前为脚手架：用户态与块设备引导可能尚未就绪。
-    // 若 /sbin/init 可用则尝试进入用户态，否则保持在内核中运行。
-    if crate::vfs::vfs_lookup("/sbin/init").is_ok() {
-        kernel_execve("/sbin/init", &["/sbin/init"], &[]);
-    }
-
-    pr_info!("[Init] /sbin/init not found; staying in kernel loop");
-    loop {
-        yield_task();
-    }
+    // /dev(/proc,/sys,/tmp) 的挂载交给用户态 rcS：
+    // - rcS 会执行 `mount -t tmpfs none /dev` 等
+    // - 内核在 mount("/dev") 的系统调用里会自动 init_dev() 创建设备节点
+    kernel_execve("/sbin/init", &["/sbin/init"], &[]);
 }
 
 /// 内核守护线程
@@ -213,6 +266,11 @@ fn create_kthreadd() {
 
 pub fn main(hartid: usize) {
     clear_bss();
+
+    // Enable base floating-point instructions (EUEN.FPE). Many LoongArch Linux-ABI
+    // user programs are built with floating-point enabled and may execute FP
+    // instructions very early during startup.
+    loongArch64::register::euen::set_fpe(true);
 
     run_early_tests();
 

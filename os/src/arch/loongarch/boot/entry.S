@@ -11,7 +11,7 @@
 # - DMW0: VSEG=0x8, VA 0x8xxx -> PA 0x0xxx (Uncached, MMIO)
 # - DMW1: VSEG=0x9, VA 0x9xxx -> PA 0x0xxx (Cached, 内存)
 #
-_start:
+	_start:
     # ==========================================
     # 1. 配置 DMW (Direct Mapping Window)
     # ==========================================
@@ -25,23 +25,63 @@ _start:
     li.d        $t0, (0x9 << 60) | (1 << 4) | 0x1
     csrwr       $t0, 0x181          # CSR_DMW1
 
-    # ==========================================
-    # 2. 保存设备树地址
-    # LoongArch virt: a0=UEFI 标志(1), a2=EFI system table
-    # FDT 固定放在 0x0010_0000
-    # ==========================================
-    la.global   $t1, DTP
-    beqz        $a0, 1f
-    li.d        $t0, 0x00100000
-    st.d        $t0, $t1, 0
-    b           2f
-1:
-    st.d        $a0, $t1, 0
-2:
+	    # ==========================================
+	    # 2. 保存设备树地址 (DTP: physical address)
+	    #
+	    # QEMU/firmware 传入的 DTB 指针在不同环境下可能位于不同参数寄存器。
+	    # 为避免写入错误指针导致 FDT::from_ptr 解析失败，这里通过检查
+	    # DTB magic (0xd00dfeed) 来选择有效地址。
+	    #
+	    # 约定：
+	    #   - 优先尝试 a1 / a2（常见固件约定）
+	    #   - 其次尝试 0x0010_0000（部分固件会固定放置）
+	    #   - DTP 存储“物理地址”，Rust 侧再转换为直映虚拟地址
+	    # ==========================================
+	    la.global   $t1, DTP
 
-    # ==========================================
-    # 3. 设置栈指针
-    # ==========================================
+	    li.d        $t4, 0x0000ffffffffffff     # PHYS_ADDR_MASK
+	    li.d        $t5, 0x9000000000000000     # DMW1 base (cached)
+	    # DTB magic is stored big-endian on disk/memory; on little-endian CPU a plain
+	    # 32-bit load observes the byte-swapped value 0xedfe0dd0.
+	    li.d        $t6, 0xedfe0dd0             # FDT_MAGIC (as observed by ld.wu)
+
+	    # Try a1 (if non-zero and aligned)
+	    beqz        $a1, 1f
+	    andi        $t7, $a1, 0x7
+	    bnez        $t7, 1f
+	    and         $t0, $a1, $t4               # candidate physical
+	    or          $t2, $t0, $t5               # direct-mapped virtual
+	    ld.wu       $t3, $t2, 0
+	    beq         $t3, $t6, 3f
+	1:
+
+	    # Try a2 (if non-zero and aligned)
+	    beqz        $a2, 2f
+	    andi        $t7, $a2, 0x7
+	    bnez        $t7, 2f
+	    and         $t0, $a2, $t4
+	    or          $t2, $t0, $t5
+	    ld.wu       $t3, $t2, 0
+	    beq         $t3, $t6, 3f
+	2:
+
+	    # Try fixed 0x0010_0000
+	    li.d        $t0, 0x00100000
+	    or          $t2, $t0, $t5
+	    ld.wu       $t3, $t2, 0
+	    beq         $t3, $t6, 3f
+
+	    # Fallback: keep 0 (device tree disabled)
+	    move        $t0, $zero
+	    b           4f
+	3:
+	    # $t0 already holds candidate physical
+	4:
+	    st.d        $t0, $t1, 0
+
+	    # ==========================================
+	    # 3. 设置栈指针
+	    # ==========================================
     la.global   $sp, boot_stack_top
 
     # ==========================================

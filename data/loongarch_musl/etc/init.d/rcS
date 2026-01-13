@@ -12,8 +12,8 @@ echo "--- Starting Minimal BusyBox System ---"
 /bin/mount -t sysfs none /sys
 # tmpfs/devtmpfs: 临时文件系统和设备文件
 /bin/mount -t tmpfs none /tmp
-# /dev 已由内核在 early init 阶段挂载并自动创建设备节点，避免在此处覆盖已有的 /dev 挂载
-# /bin/mount -t tmpfs none /dev
+# /dev 挂载由用户态完成：内核会在 mount("/dev") 时自动创建设备节点（init_dev）
+/bin/mount -t tmpfs none /dev
 
 # --- 2. 处理设备文件 ---
 # mdev 是 BusyBox 中用于创建设备文件 (/dev/null, /dev/console 等) 的工具
