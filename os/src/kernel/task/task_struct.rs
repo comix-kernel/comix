@@ -266,13 +266,15 @@ impl Task {
     pub fn execve(
         &mut self,
         new_memory_space: Arc<SpinLock<MemorySpace>>,
-        entry_point: usize,
+        initial_pc: usize,
         sp_high: usize,
         argv: &[&str],
         envp: &[&str],
         phdr_addr: usize,
         phnum: usize,
         phent: usize,
+        at_base: usize,
+        at_entry: usize,
     ) {
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space.clone());
@@ -301,12 +303,14 @@ impl Task {
                 phdr_addr,
                 phnum,
                 phent,
-                entry_point,
+                at_base,
+                at_entry,
             )
         };
         #[cfg(target_arch = "riscv64")]
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) =
-            setup_stack_layout(sp_high, argv, envp, phdr_addr, phnum, phent, entry_point);
+        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(
+            sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
+        );
 
         // 4. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
@@ -315,7 +319,7 @@ impl Task {
             core::ptr::write_bytes(tf_ptr, 0, 1);
             #[cfg(target_arch = "loongarch64")]
             (*tf_ptr).set_exec_trap_frame(
-                entry_point,
+                initial_pc,
                 new_sp,
                 self.kstack_base,
                 argc,
@@ -325,7 +329,7 @@ impl Task {
             );
             #[cfg(target_arch = "riscv64")]
             (*tf_ptr).set_exec_trap_frame(
-                entry_point,
+                initial_pc,
                 new_sp,
                 self.kstack_base,
                 argc,

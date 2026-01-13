@@ -2,8 +2,6 @@
 //!
 //! 该模块实现了一个简单的定时器队列，用于管理和调度定时任务。
 
-use core::ptr;
-
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 
 use crate::{kernel::SharedTask, sync::SpinLock, vfs::TimeSpec};
@@ -113,7 +111,10 @@ impl TimerEntries {
     /// # 参数:
     /// - `trigger_time`: 触发时间点
     /// - `entry`: 定时器条目
-    pub fn push(&mut self, trigger_time: usize, entry: TimerEntry) {
+    pub fn push(&mut self, mut trigger_time: usize, entry: TimerEntry) {
+        while self.entries.contains_key(&trigger_time) {
+            trigger_time += 1;
+        }
         self.entries.insert(trigger_time, entry);
     }
 
@@ -138,7 +139,7 @@ impl TimerEntries {
     /// - 关联的定时器条目（如果存在）
     pub fn find_entry(&self, task: &SharedTask, sig: usize) -> Option<(&usize, &TimerEntry)> {
         for (time, entry) in self.entries.iter() {
-            if ptr::eq(task, &entry.task) && entry.sig == sig {
+            if Arc::ptr_eq(task, &entry.task) && entry.sig == sig {
                 return Some((time, entry));
             }
         }

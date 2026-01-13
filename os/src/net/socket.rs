@@ -340,7 +340,7 @@ impl Drop for SocketFile {
                     // otherwise the peer may observe an abortive close and user programs (iperf3)
                     // can treat it as "unexpectedly closed".
                     match state {
-                        tcp::State::Closed | tcp::State::TimeWait => {
+                        tcp::State::Closed | tcp::State::TimeWait | tcp::State::Listen => {
                             // Fully closed, safe to remove now.
                             sockets.remove(h);
                         }
@@ -877,14 +877,18 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
 
     unsafe {
         let len = *addrlen as usize;
-        if len < SOCKADDR_IN_SIZE {
-            return Err(());
+
+        // Linux behavior: truncate the stored address if the provided buffer is too small.
+        // Still report the full required length back to user space.
+        *addrlen = SOCKADDR_IN_SIZE as u32;
+        if len == 0 {
+            return Ok(());
         }
 
-        let buf = core::slice::from_raw_parts_mut(addr, SOCKADDR_IN_SIZE);
-        write_sockaddr_in_to_buf(buf, endpoint)?;
-
-        *addrlen = SOCKADDR_IN_SIZE as u32;
+        let mut tmp = [0u8; SOCKADDR_IN_SIZE];
+        write_sockaddr_in_to_buf(&mut tmp, endpoint)?;
+        let n = core::cmp::min(len, SOCKADDR_IN_SIZE);
+        core::ptr::copy_nonoverlapping(tmp.as_ptr(), addr, n);
     }
 
     Ok(())

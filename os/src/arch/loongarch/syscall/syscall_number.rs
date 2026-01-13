@@ -233,6 +233,7 @@ pub const SYS_SENDTO: usize = 206;
 pub const SYS_RECVFROM: usize = 207;
 pub const SYS_SETSOCKOPT: usize = 208;
 pub const SYS_GETSOCKOPT: usize = 209;
+pub const SYS_SHUTDOWN: usize = 210;
 
 /// 进程创建/执行 (Process Creation/Execution)
 pub const SYS_CLONE: usize = 220;
