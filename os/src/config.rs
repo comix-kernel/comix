@@ -22,6 +22,12 @@ pub const MAX_ARGV: usize = 256;
 
 pub const USER_STACK_TOP: usize = SV39_BOT_HALF_TOP - PAGE_SIZE; // leave another guard page
 
+/// Userspace rt_sigreturn trampoline address (one RX page).
+///
+/// Must not overlap with the user stack mapping. With the current (non page-aligned) `USER_STACK_TOP`,
+/// the stack mapping ends at `align_down(SV39_BOT_HALF_TOP, PAGE_SIZE)`, so we place the trampoline there.
+pub const USER_SIGRETURN_TRAMPOLINE: usize = SV39_BOT_HALF_TOP & !(PAGE_SIZE - 1);
+
 /// Maximum heap size (prevent OOM)
 pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024; // 64MB
 

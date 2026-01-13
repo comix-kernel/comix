@@ -16,10 +16,7 @@ use crate::{
         scheduler::Scheduler,
         task::{TASK_MANAGER, TaskStruct, task_manager::TaskManagerTrait},
     },
-    mm::{
-        frame_allocator::{alloc_contig_frames, alloc_frame},
-        memory_space::MemorySpace,
-    },
+    mm::frame_allocator::{alloc_contig_frames, alloc_frame},
     sync::SpinLock,
 };
 
@@ -165,23 +162,20 @@ pub unsafe fn kthread_join(tid: u32, return_value_ptr: Option<usize>) -> i32 {
 /// * `argv`: 传递给新程序的参数列表
 /// * `envp`: 传递给新程序的环境变量列表
 pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
-    // 1. 加载 ELF 文件
+    // 1. 加载并准备可执行映像（支持 PT_INTERP）
     crate::pr_info!("[kernel_execve] Loading: {}", path);
-    let data = crate::vfs::vfs_load_elf(path).expect("kernel_execve: file not found");
-    crate::pr_info!("[kernel_execve] Loaded {} bytes", data.len());
-
-    // 2. 从 ELF 创建内存空间
-    let (space, entry, sp, phdr_addr, phnum, phent) = MemorySpace::from_elf(&data)
-        .expect("kernel_execve: failed to create memory space from ELF");
+    let prepared =
+        super::prepare_exec_image_from_path(path).expect("kernel_execve: failed to prepare image");
     crate::pr_info!(
-        "[kernel_execve] Created memory space, entry=0x{:x}, user_sp_top=0x{:x}",
-        entry,
-        sp
+        "[kernel_execve] Prepared image, pc=0x{:x}, at_base=0x{:x}, at_entry=0x{:x}",
+        prepared.initial_pc,
+        prepared.at_base,
+        prepared.at_entry
     );
 
-    // 3. 包装内存空间
-    let space = Arc::new(SpinLock::new(space));
-
+    // 2. 包装内存空间
+    let space = Arc::new(SpinLock::new(prepared.space));
+    // 换掉当前任务的地址空间，e.g. 切换 satp
     {
         // 先切换到新地址空间，再写入用户栈布局
         let _guard = crate::sync::PreemptGuard::new();
@@ -201,7 +195,18 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     {
         let mut t = task.lock();
         t.exe_path = Some(path.to_string());
-        t.execve(space, entry, sp, argv, envp, phdr_addr, phnum, phent);
+        t.execve(
+            space,
+            prepared.initial_pc,
+            prepared.user_sp_high,
+            argv,
+            envp,
+            prepared.phdr_addr,
+            prepared.phnum,
+            prepared.phent,
+            prepared.at_base,
+            prepared.at_entry,
+        );
     }
     // 地址空间已在 execve 之前切换
     crate::pr_info!("[kernel_execve] Switching to user mode");
@@ -298,8 +303,8 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         let space = space.lock();
         let root_ppn = space.root_ppn();
         let root_paddr = root_ppn.start_addr().as_usize();
-        let entry_va = <Vaddr as UsizeConvert>::from_usize(entry);
-        let sp_va = <Vaddr as UsizeConvert>::from_usize(sp);
+        let entry_va = <Vaddr as UsizeConvert>::from_usize(prepared.initial_pc);
+        let sp_va = <Vaddr as UsizeConvert>::from_usize(prepared.user_sp_high);
         unsafe extern "C" {
             fn tlb_refill_entry();
         }

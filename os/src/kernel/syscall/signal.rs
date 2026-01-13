@@ -18,8 +18,9 @@ use crate::{
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
-            MINSIGSTKSZ, NSIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE, SS_AUTODISARM,
-            SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags, UContextT,
+            MINSIGSTKSZ, NSIG, RtSigFrame, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE,
+            SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
+            UContextT,
         },
         time::TimeSpec,
         types::{SigSetT, StackT},
@@ -119,18 +120,16 @@ pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut Signal
     }
 
     if !act.is_null() {
-        let new_action = unsafe { read_from_user(act) };
-        let flag = if let Some(flag) = SaFlags::from_bits(new_action.sa_flags as u32) {
-            flag
-        } else {
-            return -EINVAL;
-        };
-        if !flag.is_known() {
-            return -EINVAL;
-        }
+        let mut new_action = unsafe { read_from_user(act) };
+        // Linux ABI compatibility:
+        // - libc may pass SA_RESTORER and/or reserved bits.
+        // - Rejecting unknown bits causes musl netperf to fail with EINVAL.
+        // Keep only known bits and proceed.
+        let flag = SaFlags::from_bits_truncate(new_action.sa_flags as u32);
         if !flag.is_supported() {
             return -ENOSYS;
         }
+        new_action.sa_flags = flag.bits() as c_ulong;
         t.signal_handlers
             .lock()
             .set_action(signum as usize, new_action);
@@ -229,8 +228,18 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
 pub fn rt_sigreturn() -> ! {
     let tfp = current_task().lock().trap_frame_ptr.load(Ordering::SeqCst);
     let tf = unsafe { &mut *tfp };
-    let ucontext_addr = tf.get_sp();
+    // Linux ABI: SP points to rt_sigframe { siginfo, ucontext }.
+    let frame_addr = tf.get_sp();
+    let ucontext_addr = frame_addr + core::mem::offset_of!(RtSigFrame, uc);
     let ucontext: UContextT = unsafe { read_from_user(ucontext_addr as *const UContextT) };
+
+    // Restore blocked mask from saved ucontext.
+    {
+        let task = current_task();
+        let mut t = task.lock();
+        t.blocked = SignalFlags::from_bits_truncate(ucontext.uc_sigmask as usize);
+    }
+
     tf.restore_from_mcontext(&ucontext.uc_mcontext);
     unsafe { restore(tf) }
     unreachable!("rt_sigreturn should not return");

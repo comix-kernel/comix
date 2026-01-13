@@ -110,27 +110,29 @@ fn clear_child_tid_and_wake() {
         return;
     }
 
-    // 1) 写 0 到用户地址
+    // If the task has already dropped its user address space (e.g. forced exit paths),
+    // we cannot touch userspace or translate the address. Best-effort: just skip.
+    let memory_space = {
+        let t = task.lock();
+        t.memory_space.clone()
+    };
+    let Some(memory_space) = memory_space else {
+        return;
+    };
+
+    // 1) write 0 to userspace tid address
     unsafe {
         let _guard = SumGuard::new();
         write_to_user(clear_addr as *mut c_int, 0);
     }
 
     // 2) futex wake
-    let paddr = {
-        let memory_space = current_task()
-            .lock()
-            .memory_space
-            .as_ref()
-            .expect("clear_child_tid: current task has no memory space.")
-            .clone();
-        match memory_space
-            .lock()
-            .translate(Vaddr::from_usize(clear_addr as usize))
-        {
-            Some(p) => p.as_usize(),
-            None => return,
-        }
+    let Some(paddr) = memory_space
+        .lock()
+        .translate(Vaddr::from_usize(clear_addr as usize))
+        .map(|p| p.as_usize())
+    else {
+        return;
     };
     FUTEX_MANAGER.lock().get_wait_queue(paddr).wake_up_all();
 }
@@ -368,39 +370,68 @@ pub fn execve(
         (path_str, argv_strings, envp_strings)
     };
 
-    let data = match crate::vfs::vfs_load_elf(&path_str) {
-        Ok(data) => data,
-        Err(FsError::NotFound) => return -ENOENT,
-        Err(FsError::IsDirectory) => return -EISDIR,
-        Err(_) => return -EIO,
-    };
-
     let mut exec_path_str = path_str.clone();
-    let (data, argv_strings, envp_strings, exec_path_str) =
-        if data.len() >= 2 && data[0] == b'#' && data[1] == b'!' {
-            if let Ok((path, args)) = parse_hashbang(&data) {
+    let (argv_strings, envp_strings, exec_path_str) = {
+        // 只读取文件头部用于 hashbang 判断，避免一次性把整个 ELF 读入内存。
+        let dentry = match crate::vfs::vfs_lookup(&path_str) {
+            Ok(d) => d,
+            Err(FsError::NotFound) => return -ENOENT,
+            Err(FsError::IsDirectory) => return -EISDIR,
+            Err(_) => return -EIO,
+        };
+        let inode = dentry.inode.clone();
+        let meta = match inode.metadata() {
+            Ok(m) => m,
+            Err(FsError::NotFound) => return -ENOENT,
+            Err(FsError::IsDirectory) => return -EISDIR,
+            Err(_) => return -EIO,
+        };
+        if meta.inode_type != crate::vfs::InodeType::File {
+            return -EISDIR;
+        }
+
+        let prefix_len = core::cmp::min(meta.size, 256);
+        if prefix_len == 0 {
+            return -ENOEXEC;
+        }
+        let mut prefix = alloc::vec![0u8; prefix_len];
+        let mut read_total = 0usize;
+        while read_total < prefix.len() {
+            let n = match inode.read_at(read_total, &mut prefix[read_total..]) {
+                Ok(n) => n,
+                Err(FsError::NotFound) => return -ENOENT,
+                Err(FsError::IsDirectory) => return -EISDIR,
+                Err(_) => return -EIO,
+            };
+            if n == 0 {
+                break;
+            }
+            read_total += n;
+        }
+        if read_total == 0 {
+            return -ENOEXEC;
+        }
+        prefix.truncate(read_total);
+
+        if prefix.len() >= 2 && prefix[0] == b'#' && prefix[1] == b'!' {
+            if let Ok((path, args)) = parse_hashbang(&prefix) {
                 let mut new_argv = Vec::new();
                 new_argv.push(path.to_string());
                 // XXX: 目前仅支持单个参数
                 if let Some(arg) = args {
                     new_argv.push(arg.to_string());
                 }
-                new_argv.push(path_str.clone()); // Clone path_str instead of moving
+                new_argv.push(path_str.clone());
                 new_argv.extend(argv_strings.iter().skip(1).cloned());
-                let data = match crate::vfs::vfs_load_elf(path) {
-                    Ok(d) => d,
-                    Err(FsError::NotFound) => return -ENOENT,
-                    Err(FsError::IsDirectory) => return -EISDIR,
-                    Err(_) => return -EIO,
-                };
                 exec_path_str = path.to_string();
-                (data, new_argv, envp_strings, exec_path_str)
+                (new_argv, envp_strings, exec_path_str)
             } else {
                 return -EINVAL;
             }
         } else {
-            (data, argv_strings, envp_strings, exec_path_str)
-        };
+            (argv_strings, envp_strings, exec_path_str)
+        }
+    };
 
     // // 构造 &str 切片（String 的所有权在本函数内，切片在调用 t.execve 时仍然有效）
     // let argv_refs: Vec<&str> = argv_strings.iter().map(|s| s.as_str()).collect();
@@ -413,25 +444,18 @@ pub fn execve(
     };
 
     // 解析 ELF 并准备新的地址空间（但不切换）
-    let (space, entry, sp, phdr_addr, phnum, phent) = match do_execve_prepare(&data) {
-        Ok(res) => res,
-        Err(e) => return e,
-    };
+    let (space, initial_pc, sp, phdr_addr, phnum, phent, at_base, at_entry) =
+        match do_execve_prepare(&exec_path_str) {
+            Ok(res) => res,
+            Err(e) => return e,
+        };
 
-    // 显式释放 data 缓冲区，避免内存泄漏
-    crate::pr_debug!(
-        "[execve] Dropping {} byte ELF buffer before switching to user space",
-        data.len()
-    );
-    drop(data);
-
-    // Explicitly drop other stack resources
     drop(path_str);
 
     // 切换到新的地址空间并恢复到用户态（此函数不会返回）
     do_execve_switch(
         space,
-        entry,
+        initial_pc,
         sp,
         exe_path,
         argv_strings, // Pass ownership
@@ -439,6 +463,8 @@ pub fn execve(
         phdr_addr,
         phnum,
         phent,
+        at_base,
+        at_entry,
     )
 }
 
@@ -883,8 +909,17 @@ pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
         ITIMER_PROF => NUM_SIGPROF,
         _ => unreachable!("getitimer: unreachable which case."),
     };
+    // Linux semantics: ITIMER_* are per-process (thread group), not per-thread.
+    // Use the thread-group leader (pid) as the timer owner.
+    let owner = {
+        let pid = current_task().lock().pid;
+        TASK_MANAGER
+            .lock()
+            .get_task(pid)
+            .unwrap_or_else(current_task)
+    };
     let mut val = Itimerval::zero();
-    if let Some(timer) = TIMER.lock().find_entry(&current_task(), sig) {
+    if let Some(timer) = TIMER.lock().find_entry(&owner, sig) {
         let now = get_time();
         let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
         let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
@@ -919,32 +954,47 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
         _ => unreachable!("setitimer: unreachable which case."),
     };
 
+    // Linux semantics: ITIMER_* are per-process (thread group), not per-thread.
+    let owner = {
+        let pid = current_task().lock().pid;
+        TASK_MANAGER
+            .lock()
+            .get_task(pid)
+            .unwrap_or_else(current_task)
+    };
+
     let mut binding = TIMER.lock();
+
+    // Linux semantics: return the previous timer value, then replace it with the new one.
+    let mut old = Itimerval::zero();
+    if let Some(timer) = binding.find_entry(&owner, sig) {
+        let now = get_time();
+        let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
+        let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
+        let it_interval = timer.1.it_interval.to_timeval();
+        old = Itimerval {
+            it_value,
+            it_interval,
+        };
+    }
+
+    // Disarm any existing timers for this (task, sig) so we don't accumulate duplicates.
+    while binding.remove_entry(&owner, sig).is_some() {}
+
     let new_itimer = unsafe { read_from_user(new_value) };
     if !new_itimer.it_value.is_zero() {
         let trigger = get_time() + new_itimer.it_value.into_freq(clock_freq());
         let interval = new_itimer.it_interval.to_timespec();
         let entry = TimerEntry {
-            task: current_task(),
+            task: owner,
             sig,
             it_interval: interval,
         };
         binding.push(trigger, entry);
     }
     if !old_value.is_null() {
-        let mut val = Itimerval::zero();
-        if let Some(timer) = binding.find_entry(&current_task(), sig) {
-            let now = get_time();
-            let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
-            let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
-            let it_interval = timer.1.it_interval.to_timeval();
-            val = Itimerval {
-                it_value,
-                it_interval,
-            };
-        }
         unsafe {
-            write_to_user(old_value, val);
+            write_to_user(old_value, old);
         }
     }
 
@@ -1185,7 +1235,7 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
 
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
 fn do_execve_prepare(
-    data: &[u8],
+    path: &str,
 ) -> Result<
     (
         Arc<SpinLock<MemorySpace>>,
@@ -1194,23 +1244,40 @@ fn do_execve_prepare(
         usize,
         usize,
         usize,
+        usize,
+        usize,
     ),
     c_int,
 > {
-    let (space, entry, sp, phdr_addr, phnum, phent) = match MemorySpace::from_elf(data) {
-        Ok(res) => res,
+    let prepared = match crate::kernel::task::prepare_exec_image_from_path(path) {
+        Ok(p) => p,
+        Err(crate::kernel::task::ExecImageError::Fs(FsError::NotFound)) => return Err(-ENOENT),
+        Err(crate::kernel::task::ExecImageError::Fs(FsError::IsDirectory)) => return Err(-EISDIR),
+        Err(crate::kernel::task::ExecImageError::Fs(_)) => return Err(-EIO),
+        Err(crate::kernel::task::ExecImageError::Paging(
+            crate::mm::page_table::PagingError::OutOfMemory,
+        )) => return Err(-ENOMEM),
         Err(_) => return Err(-ENOEXEC),
     };
 
-    let space = Arc::new(SpinLock::new(space));
-    Ok((space, entry, sp, phdr_addr, phnum, phent))
+    let space = Arc::new(SpinLock::new(prepared.space));
+    Ok((
+        space,
+        prepared.initial_pc,
+        prepared.user_sp_high,
+        prepared.phdr_addr,
+        prepared.phnum,
+        prepared.phent,
+        prepared.at_base,
+        prepared.at_entry,
+    ))
 }
 
 /// 执行一个新程序（execve）的切换阶段：切换地址空间并恢复到用户态
 /// 注意：此函数不会返回！
 fn do_execve_switch(
     space: Arc<SpinLock<MemorySpace>>,
-    entry: usize,
+    initial_pc: usize,
     sp: usize,
     exe_path: alloc::string::String,
     argv: Vec<alloc::string::String>,
@@ -1218,6 +1285,8 @@ fn do_execve_switch(
     phdr_addr: usize,
     phnum: usize,
     phent: usize,
+    at_base: usize,
+    at_entry: usize,
 ) -> c_int {
     let task = current_task();
 
@@ -1240,13 +1309,15 @@ fn do_execve_switch(
         t.exe_path = Some(exe_path);
         t.execve(
             space.clone(),
-            entry,
+            initial_pc,
             sp,
             argv_refs.as_slice(),
             envp_refs.as_slice(),
             phdr_addr,
             phnum,
             phent,
+            at_base,
+            at_entry,
         );
     } // argv_refs/envp_refs dropped here, ending borrow of argv/envp
 

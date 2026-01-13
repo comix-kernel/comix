@@ -4,7 +4,9 @@
 //! 故此模块变得相对简单，主要负责适配传统的进程概念与内核任务之间的关系。
 
 use crate::{
-    kernel::{SharedTask, TASK_MANAGER, TaskManagerTrait, notify_parent},
+    kernel::{
+        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, notify_parent, wake_up_with_block,
+    },
     uapi::signal::SignalFlags,
 };
 
@@ -54,9 +56,29 @@ pub fn exit_process(task: SharedTask, code: i32) {
 /// * `task` - 目标进程对应的任务
 /// * `sig` - 要发送的信号编号
 pub fn send_signal_process(task: &SharedTask, sig: usize) {
-    task.lock()
-        .shared_pending
-        .lock()
-        .signals
-        .insert(SignalFlags::from_signal_num(sig).unwrap());
+    let Some(flag) = SignalFlags::from_signal_num(sig) else {
+        return;
+    };
+
+    // Insert into the (possibly shared) pending set first.
+    let pid = {
+        let t = task.lock();
+        t.shared_pending.lock().signals.insert(flag);
+        t.pid
+    };
+
+    // Choose one thread in the thread group to wake (Linux will pick a suitable thread).
+    // Without this, delivering a process-wide signal to the leader may not wake the thread
+    // currently blocked in select/poll/recv, causing signals to be processed late.
+    let candidates = TASK_MANAGER.lock().get_task_cond(|t| t.lock().pid == pid);
+    for thr in candidates {
+        let should_wake = {
+            let t = thr.lock();
+            t.state == TaskState::Interruptible && !t.blocked.contains(flag)
+        };
+        if should_wake {
+            wake_up_with_block(thr);
+            break;
+        }
+    }
 }
