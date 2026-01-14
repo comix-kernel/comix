@@ -12,7 +12,9 @@ echo "--- Starting Minimal BusyBox System ---"
 /bin/mount -t sysfs none /sys
 # tmpfs/devtmpfs: 临时文件系统和设备文件
 /bin/mount -t tmpfs none /tmp
-# /dev 挂载由用户态完成：内核会在 mount("/dev") 时自动创建设备节点（init_dev）
+# /dev: 设备节点
+# 说明：即使内核已经提前挂载 /dev，这里再次 mount 也不会影响后续流程；
+# 且内核对 mount("/dev") 做了特殊处理：会在挂载 tmpfs 后自动 init_dev() 重建设备节点。
 /bin/mount -t tmpfs none /dev
 
 # --- 2. 处理设备文件 ---
