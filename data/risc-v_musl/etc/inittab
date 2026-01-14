@@ -1,0 +1,23 @@
+# 格式: <id>::<action>:<process>
+
+# 1. SYSINIT: 系统启动时执行的第一个脚本
+# 通常是 rcS 脚本，负责挂载 /proc, /sys 等
+::sysinit:/etc/init.d/rcS
+
+# 2. ASKFIRST: 启动第一个控制台的 shell
+# tty1 是标准的虚拟控制台，如果连接了显示器和键盘，就会在这里启动 shell。
+# Disabled on headless QEMU. Use ttyS0 only.
+# tty1::askfirst:-/bin/sh
+
+# 3. RESPAWN: 启动串行控制台的 shell
+# ttyS0 是第一个串行端口，常用于嵌入式系统的调试终端。
+# respawn 意味着如果 shell 意外退出，init 会自动重启它。
+# 将 BusyBox /bin/sh 的 stdin/stdout/stderr 显式绑定到 ttyS0，避免 stdio/console 混淆
+ttyS0::respawn:/bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
+
+# 4. CTRLALTDEL: 响应 Ctrl-Alt-Del 组合键
+::ctrlaltdel:/sbin/reboot
+
+# 5. SHUTDOWN: 系统关机前执行的脚本
+::shutdown:/bin/umount -a -r
+::shutdown:/sbin/swapoff -a

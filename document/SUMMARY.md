@@ -102,6 +102,11 @@
 - [多核启动](arch/riscv/smp_boot.md)
 - [核间中断 (IPI)](arch/riscv/ipi.md)
 
+## LoongArch64
+
+- [LoongArch64](arch/loongarch/README.md)
+  - [启动与用户态运行修复总结（comix-1 当前分支）](arch/loongarch/bringup_userland.md)
+
 
 ---
 

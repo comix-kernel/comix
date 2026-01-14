@@ -4,9 +4,13 @@ mod syscall_number;
 
 pub use syscall_number::*;
 
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::arch::trap::TrapFrame;
 use crate::kernel::syscall::*;
 use crate::uapi::errno::ENOSYS;
+
+static UNKNOWN_SYSCALL_LOG_BUDGET: AtomicUsize = AtomicUsize::new(16);
 
 /// 分发系统调用
 pub fn dispatch_syscall(frame: &mut TrapFrame) {
@@ -178,10 +182,21 @@ pub fn dispatch_syscall(frame: &mut TrapFrame) {
         // 随机数与内存文件
         SYS_GETRANDOM => sys_getrandom(frame),
 
+        // 扩展文件元数据
+        SYS_STATX => sys_statx(frame),
+
         // 获取网络接口地址列表 (非标准系统调用)
         SYS_GETIFADDRS => sys_getifaddrs(frame),
 
         _ => {
+            let log_now = UNKNOWN_SYSCALL_LOG_BUDGET
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+                .is_ok();
+            if log_now {
+                crate::pr_warn!("[syscall] unknown syscall id={}", syscall_id);
+            } else {
+                crate::pr_debug!("[syscall] unknown syscall id={}", syscall_id);
+            }
             frame.set_syscall_ret((-ENOSYS) as usize);
         }
     }

@@ -261,5 +261,8 @@ pub const SYS_RENAMEAT2: usize = 276;
 /// 随机数与内存文件
 pub const SYS_GETRANDOM: usize = 278;
 
+/// 扩展文件元数据 (Extended File Attributes)
+pub const SYS_STATX: usize = 291;
+
 /// 获取网络接口地址列表 (非标准系统调用)
 pub const SYS_GETIFADDRS: usize = 1000;

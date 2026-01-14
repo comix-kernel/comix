@@ -1,11 +1,10 @@
 //! LoongArch64 页表管理
 //!
-//! 实现 4 级页表结构，使用 `loongArch64` crate 进行 CSR 操作。
+//! 实现 3 级页表结构，使用 `loongArch64` crate 进行 CSR 操作。
 //!
 //! # 页表结构
 //!
-//! LoongArch64 使用 4 级页表（48 位虚拟地址）：
-//! - Level 3 (Dir4/PGD): 虚拟地址 bits [47:39]，9 位索引
+//! LoongArch64 使用 3 级页表（39 位虚拟地址）：
 //! - Level 2 (Dir3/PUD): 虚拟地址 bits [38:30]，9 位索引
 //! - Level 1 (Dir2/PMD): 虚拟地址 bits [29:21]，9 位索引
 //! - Level 0 (Dir1/PT):  虚拟地址 bits [20:12]，9 位索引
@@ -33,7 +32,7 @@ pub struct PageTableInner {
 }
 
 impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
-    /// LoongArch64 使用 4 级页表
+    /// LoongArch64 使用 4 级页表（匹配 48 位虚拟地址）
     const LEVELS: usize = 4;
     /// 48 位虚拟地址
     const MAX_VA_BITS: usize = 48;
@@ -80,6 +79,33 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     fn activate(ppn: Ppn) {
         let pgd_paddr = ppn.start_addr().as_usize();
         unsafe {
+            // 设置 STLBPS (CSR 0x1E) - STLB 页大小为 4KB (PS=12)
+            core::arch::asm!(
+                "csrwr {0}, 0x1E",
+                in(reg) 12,
+                options(nostack, preserves_flags)
+            );
+            // 配置 PWCL (CSR 0x1C) - 4级页表: pte@12, dir1@21, dir2@30
+            let pwcl = 12 | (9 << 5) | (21 << 10) | (9 << 15) | (30 << 20) | (9 << 25);
+            core::arch::asm!(
+                "csrwr {0}, 0x1C",
+                in(reg) pwcl,
+                options(nostack, preserves_flags)
+            );
+            // 配置 PWCH (CSR 0x1D) - dir3@39
+            let pwch = 39 | (9 << 6);
+            core::arch::asm!(
+                "csrwr {0}, 0x1D",
+                in(reg) pwch,
+                options(nostack, preserves_flags)
+            );
+            // 设置 ASID (CSR 0x18)
+            let asid = ppn.as_usize() & 0x3ff;
+            core::arch::asm!(
+                "csrwr {0}, 0x18",
+                in(reg) asid,
+                options(nostack, preserves_flags)
+            );
             // 设置 PGDL (CSR 0x19) - 低半地址空间页全局目录基址
             core::arch::asm!(
                 "csrwr {0}, 0x19",
@@ -90,6 +116,25 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             core::arch::asm!(
                 "csrwr {0}, 0x1A",
                 in(reg) pgd_paddr,
+                options(nostack, preserves_flags)
+            );
+            // 启用分页并关闭直接地址翻译
+            let mut crmd: usize;
+            core::arch::asm!(
+                "csrrd {0}, 0x0",
+                out(reg) crmd,
+                options(nostack, preserves_flags)
+            );
+            crmd |= crate::arch::constant::CSR_CRMD_PG;
+            crmd &= !crate::arch::constant::CSR_CRMD_DA;
+            // 软件 TLB refill 时必须将 DATF/DATM 设置为 CC
+            crmd &= !(crate::arch::constant::CSR_CRMD_DATF_MASK
+                | crate::arch::constant::CSR_CRMD_DATM_MASK);
+            crmd |= crate::arch::constant::CSR_CRMD_DAT_CC << 5;
+            crmd |= crate::arch::constant::CSR_CRMD_DAT_CC << 7;
+            core::arch::asm!(
+                "csrwr {0}, 0x0",
+                in(reg) crmd,
                 options(nostack, preserves_flags)
             );
             // 刷新 TLB
@@ -170,7 +215,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, current_level);
             let pte = Self::read_pte(ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return None;
             }
 
@@ -239,8 +284,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 Self::tlb_flush(vpn);
                 return Ok(());
             } else {
-                // 中间级别
-                if !pte.is_valid() {
+                // 中间级别：检查目录项是否为空
+                if pte.is_empty() {
                     // 分配新的页表
                     let new_frame = alloc_frame().ok_or(PagingError::FrameAllocFailed)?;
                     let new_ppn = new_frame.ppn();
@@ -274,7 +319,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, level);
             let pte = Self::read_pte(current_ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return Err(PagingError::NotMapped);
             }
 
@@ -312,7 +357,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, level);
             let mut pte = Self::read_pte(current_ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return Err(PagingError::NotMapped);
             }
 
@@ -338,7 +383,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             let idx = Self::vpn_index(vpn_value, level);
             let pte = Self::read_pte(ppn, idx);
 
-            if !pte.is_valid() {
+            if pte.is_empty() {
                 return Err(PagingError::NotMapped);
             }
 

@@ -11,10 +11,10 @@ pub const UART_BASE: usize = 0x1fe001e0;
 pub const STACK_ALIGN_MASK: usize = 0xF;
 
 /// LoongArch64 地址空间常量
-/// 用户空间: 0x0000_0000_0000_0000 - 0x0000_ffff_ffff_ffff
+/// 用户空间: 0x0000_0000_0000_0000 - 0x0000_003f_ffff_ffff (39-bit)
 /// 内核空间: 0x9000_0000_0000_0000 - 0xffff_ffff_ffff_ffff
 pub const USER_BASE: usize = 0x0000_0000_0000_0000;
-pub const USER_TOP: usize = 0x0000_ffff_ffff_ffff;
+pub const USER_TOP: usize = 0x0000_003f_ffff_ffff;
 pub const KERNEL_BASE: usize = 0x9000_0000_0000_0000;
 
 /// 兼容 RISC-V 的地址空间常量
@@ -36,12 +36,22 @@ pub const CSR_CRMD_PLV_MASK: usize = 0b11; // 特权级掩码
 pub const CSR_CRMD_IE: usize = 1 << 2; // 全局中断使能
 pub const CSR_CRMD_DA: usize = 1 << 3; // 直接地址翻译模式
 pub const CSR_CRMD_PG: usize = 1 << 4; // 分页使能
+pub const CSR_CRMD_DATF_MASK: usize = 0b11 << 5; // 取指访问类型
+pub const CSR_CRMD_DATM_MASK: usize = 0b11 << 7; // 读写访问类型
+pub const CSR_CRMD_DAT_CC: usize = 0b01; // Coherent Cached
+
+/// PRMD (异常前模式信息)
+pub const PRMD_PPLV_MASK: usize = 0b11;
+pub const PRMD_PIE: usize = 1 << 2;
+pub const PRMD_PPLV_USER: usize = 0b11;
 
 /// ECFG (异常配置)
 pub const CSR_ECFG_LIE_MASK: usize = 0x1fff; // 局部中断使能掩码
 
 /// EENTRY (异常入口地址)
 pub const CSR_EENTRY: u32 = 0xc;
+/// TLBRENT (TLB refill 入口地址)
+pub const CSR_TLBRENT: u32 = 0x88;
 
 /// BADV (错误地址寄存器)
 pub const CSR_BADV: u32 = 0x7;

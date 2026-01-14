@@ -64,6 +64,7 @@ use crate::pr_info;
 use crate::sync::Mutex;
 use crate::vfs::{FileSystem, FsError, Inode, StatFs};
 use alloc::sync::Arc;
+use ext4_rs::BlockDevice;
 
 /// Ext4 文件系统
 pub struct Ext4FileSystem {
@@ -113,6 +114,11 @@ impl Ext4FileSystem {
         // 创建适配器
         let adapter = Arc::new(BlockDeviceAdapter::new(device.clone(), block_size));
 
+        // 预检 superblock，避免 ext4_rs 在坏镜像/错误读取时 panic
+        if let Err(e) = validate_superblock(&adapter) {
+            return Err(e);
+        }
+
         // 使用 ext4_rs 打开文件系统
         // 注意：ext4_rs::Ext4::open 直接返回 Ext4，不返回 Result
         pr_info!("[Ext4] Calling ext4_rs::Ext4::open...");
@@ -136,6 +142,35 @@ impl Ext4FileSystem {
         pr_info!("[Ext4] Filesystem opened successfully");
         Ok(fs)
     }
+}
+
+fn validate_superblock(adapter: &BlockDeviceAdapter) -> Result<(), FsError> {
+    const SUPERBLOCK_OFFSET: usize = 1024;
+    const MAGIC_OFFSET: usize = 0x38;
+    const BLOCKS_PER_GROUP_OFFSET: usize = 0x20;
+    const EXT4_MAGIC: u16 = 0xEF53;
+
+    let buf = adapter.read_offset(SUPERBLOCK_OFFSET);
+    if buf.len() < MAGIC_OFFSET + 2 {
+        crate::pr_err!("[Ext4] Superblock read too small: {}", buf.len());
+        return Err(FsError::IoError);
+    }
+    let magic = u16::from_le_bytes([buf[MAGIC_OFFSET], buf[MAGIC_OFFSET + 1]]);
+    if magic != EXT4_MAGIC {
+        crate::pr_err!("[Ext4] Invalid ext4 magic: {:#x}", magic);
+        return Err(FsError::InvalidArgument);
+    }
+    let blocks_per_group = u32::from_le_bytes([
+        buf[BLOCKS_PER_GROUP_OFFSET],
+        buf[BLOCKS_PER_GROUP_OFFSET + 1],
+        buf[BLOCKS_PER_GROUP_OFFSET + 2],
+        buf[BLOCKS_PER_GROUP_OFFSET + 3],
+    ]);
+    if blocks_per_group == 0 {
+        crate::pr_err!("[Ext4] Invalid superblock: blocks_per_group=0");
+        return Err(FsError::InvalidArgument);
+    }
+    Ok(())
 }
 
 impl FileSystem for Ext4FileSystem {

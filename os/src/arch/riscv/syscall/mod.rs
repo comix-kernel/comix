@@ -174,6 +174,9 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
         // 随机数与内存文件
         syscall_number::SYS_GETRANDOM => sys_getrandom(frame),
 
+        // 扩展文件元数据
+        syscall_number::SYS_STATX => sys_statx(frame),
+
         // 获取网络接口地址列表 (非标准系统调用)
         syscall_number::SYS_GETIFADDRS => sys_getifaddrs(frame),
 

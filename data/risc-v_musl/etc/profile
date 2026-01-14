@@ -1,0 +1,13 @@
+#!/bin/sh
+# BusyBox login shell profile for comix
+# Ensure we always show a clear root prompt and sane TTY modes on ttyS0
+
+# Minimal, deterministic prompt
+export PS1="/ # "
+
+# Make sure CR/LF and echo are sane when running on UART
+stty onlcr icrnl echo icanon 2>/dev/null || true
+
+# PATH
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+

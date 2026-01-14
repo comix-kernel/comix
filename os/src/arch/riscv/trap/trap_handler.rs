@@ -10,9 +10,11 @@ use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
 
+use crate::arch::constant::SUPERVISOR_EXTERNAL;
 use crate::arch::syscall::dispatch_syscall;
 use crate::arch::timer::{TIMER_TICKS, clock_freq, get_time};
 use crate::arch::trap::restore;
+use crate::device::IRQ_MANAGER;
 use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
 
 /// 陷阱处理程序
@@ -89,6 +91,10 @@ pub fn user_trap(
             if need_sched {
                 schedule();
             }
+        }
+        Trap::Interrupt(9) => {
+            // 外部中断（设备）
+            check_device();
         }
         _ => {
             // 立即读取相关寄存器的当前值
@@ -286,6 +292,10 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
                 schedule();
             }
         }
+        Trap::Interrupt(9) => {
+            // 外部中断（设备）
+            check_device();
+        }
         // 中断处理时发生异常一般是致命的
         Trap::Exception(e) => {
             // 立即读取 sscratch 和 stval 寄存器的当前值
@@ -346,5 +356,9 @@ pub fn check_timer() {
 }
 
 #[allow(dead_code)]
-/// TODO: 处理设备中断
-pub fn check_device() {}
+/// 处理设备中断
+pub fn check_device() {
+    IRQ_MANAGER
+        .read()
+        .try_handle_interrupt(Some(SUPERVISOR_EXTERNAL));
+}
