@@ -235,9 +235,9 @@ const LA64_PTE_PPN_OFFSET: u32 = 12;
 /// PPN 掩码 (bits 12-47，支持 48 位物理地址)
 const LA64_PTE_PPN_MASK: u64 = 0x0000_FFFF_FFFF_F000;
 
-    /// 标志位掩码 (bits 0-11 + 61-63)
-    const LA64_PTE_FLAG_MASK_LOW: u64 = 0x0FFF; // bits 0-11
-    const LA64_PTE_FLAG_MASK_HIGH: u64 = 0xE000_0000_0000_0000; // bits 61-63
+/// 标志位掩码 (bits 0-11 + 61-63)
+const LA64_PTE_FLAG_MASK_LOW: u64 = 0x0FFF; // bits 0-11
+const LA64_PTE_FLAG_MASK_HIGH: u64 = 0xE000_0000_0000_0000; // bits 61-63
 
 /// LoongArch 页表项
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

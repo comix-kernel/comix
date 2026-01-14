@@ -3,7 +3,7 @@
 //! 用于处理数据结构之间的转换
 
 use super::{InodeMetadata, InodeType};
-use crate::uapi::fs::{LinuxDirent64, Stat, Statx, StatxTimestamp, STATX_BASIC_STATS};
+use crate::uapi::fs::{LinuxDirent64, STATX_BASIC_STATS, Stat, Statx, StatxTimestamp};
 
 /// Stat 结构适配方法
 impl Stat {

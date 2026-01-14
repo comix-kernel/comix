@@ -296,15 +296,7 @@ impl Task {
         let (new_sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp) = {
             let space = new_memory_space.lock();
             setup_stack_layout(
-                &space,
-                sp_high,
-                argv,
-                envp,
-                phdr_addr,
-                phnum,
-                phent,
-                at_base,
-                at_entry,
+                &space, sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
             )
         };
         #[cfg(target_arch = "riscv64")]
