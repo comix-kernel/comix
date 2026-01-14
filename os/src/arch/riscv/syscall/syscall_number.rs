@@ -372,6 +372,7 @@ pub const SYS_PWRITEV2: usize = 287;
 pub const SYS_PKEY_MPROTECT: usize = 288;
 pub const SYS_PKEY_ALLOC: usize = 289;
 pub const SYS_PKEY_FREE: usize = 290;
+pub const SYS_STATX: usize = 291;
 
 /// RISC-V 架构特定系统调用
 pub const SYS_SYSRISCV: usize = SYS_ARCH_SPECIFIC_SYSCALL; // 244

@@ -353,6 +353,104 @@ pub struct Stat {
     pub __unused: [i32; 2],
 }
 
+/// Linux statx timestamp (与 Linux UAPI struct statx_timestamp 对齐)
+///
+/// 参考：include/uapi/linux/stat.h
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct StatxTimestamp {
+    pub tv_sec: i64,
+    pub tv_nsec: u32,
+    pub __reserved: i32,
+}
+
+impl StatxTimestamp {
+    pub const fn zeroed() -> Self {
+        Self {
+            tv_sec: 0,
+            tv_nsec: 0,
+            __reserved: 0,
+        }
+    }
+}
+
+/// Linux statx 结构 (与 Linux UAPI struct statx 对齐)
+///
+/// 参考：include/uapi/linux/stat.h
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Statx {
+    pub stx_mask: u32,
+    pub stx_blksize: u32,
+    pub stx_attributes: u64,
+    pub stx_nlink: u32,
+    pub stx_uid: u32,
+    pub stx_gid: u32,
+    pub stx_mode: u16,
+    pub __spare0: [u16; 1],
+    pub stx_ino: u64,
+    pub stx_size: u64,
+    pub stx_blocks: u64,
+    pub stx_attributes_mask: u64,
+    pub stx_atime: StatxTimestamp,
+    pub stx_btime: StatxTimestamp,
+    pub stx_ctime: StatxTimestamp,
+    pub stx_mtime: StatxTimestamp,
+    pub stx_rdev_major: u32,
+    pub stx_rdev_minor: u32,
+    pub stx_dev_major: u32,
+    pub stx_dev_minor: u32,
+    pub stx_mnt_id: u64,
+    pub stx_dio_mem_align: u32,
+    pub stx_dio_offset_align: u32,
+    pub __spare3: [u64; 12],
+}
+
+impl Statx {
+    pub const fn zeroed() -> Self {
+        Self {
+            stx_mask: 0,
+            stx_blksize: 0,
+            stx_attributes: 0,
+            stx_nlink: 0,
+            stx_uid: 0,
+            stx_gid: 0,
+            stx_mode: 0,
+            __spare0: [0; 1],
+            stx_ino: 0,
+            stx_size: 0,
+            stx_blocks: 0,
+            stx_attributes_mask: 0,
+            stx_atime: StatxTimestamp::zeroed(),
+            stx_btime: StatxTimestamp::zeroed(),
+            stx_ctime: StatxTimestamp::zeroed(),
+            stx_mtime: StatxTimestamp::zeroed(),
+            stx_rdev_major: 0,
+            stx_rdev_minor: 0,
+            stx_dev_major: 0,
+            stx_dev_minor: 0,
+            stx_mnt_id: 0,
+            stx_dio_mem_align: 0,
+            stx_dio_offset_align: 0,
+            __spare3: [0; 12],
+        }
+    }
+}
+
+// statx mask bits (参考 include/uapi/linux/stat.h)
+pub const STATX_TYPE: u32 = 0x0000_0001;
+pub const STATX_MODE: u32 = 0x0000_0002;
+pub const STATX_NLINK: u32 = 0x0000_0004;
+pub const STATX_UID: u32 = 0x0000_0008;
+pub const STATX_GID: u32 = 0x0000_0010;
+pub const STATX_ATIME: u32 = 0x0000_0020;
+pub const STATX_MTIME: u32 = 0x0000_0040;
+pub const STATX_CTIME: u32 = 0x0000_0080;
+pub const STATX_INO: u32 = 0x0000_0100;
+pub const STATX_SIZE: u32 = 0x0000_0200;
+pub const STATX_BLOCKS: u32 = 0x0000_0400;
+pub const STATX_BASIC_STATS: u32 = 0x0000_07ff;
+
 /// Linux dirent64 结构
 ///
 /// 用于getdents64系统调用

@@ -31,7 +31,7 @@ use crate::{
         types::{SigSetT, SizeT, StackT},
         uts_namespace::UtsNamespace,
     },
-    vfs::Stat,
+    vfs::{Stat, Statx},
 };
 use cred::*;
 use fcntl::*;
@@ -112,6 +112,11 @@ impl_syscall!(
     sys_newfstatat,
     newfstatat,
     (i32, *const c_char, *mut Stat, u32)
+);
+impl_syscall!(
+    sys_statx,
+    statx,
+    (i32, *const c_char, u32, u32, *mut Statx)
 );
 impl_syscall!(sys_fstat, fstat, (usize, *mut Stat));
 impl_syscall!(sys_sync, sync, ());
