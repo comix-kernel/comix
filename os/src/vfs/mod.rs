@@ -181,7 +181,7 @@ pub use path::{
 
 // Re-export UAPI types used by VFS
 pub use crate::uapi::fcntl::{FdFlags, OpenFlags, SeekWhence};
-pub use crate::uapi::fs::{LinuxDirent64, Stat};
+pub use crate::uapi::fs::{LinuxDirent64, Stat, Statx};
 pub use crate::uapi::time::TimeSpec;
 
 use alloc::{vec, vec::Vec};

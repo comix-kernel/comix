@@ -135,25 +135,64 @@ fn main() {
 
     // 3.2: 非测试模式下创建完整的运行时镜像
     if !is_test {
-        let fs_img_path = PathBuf::from(&manifest_dir).join("fs.img");
-        let data_dir = project_root.join("data");
+        let target = env::var("TARGET").unwrap_or_default();
+        let arch_key = match env::var("ARCH") {
+            Ok(val) if !val.is_empty() => {
+                if val.contains("loongarch") {
+                    "loongarch"
+                } else {
+                    "riscv"
+                }
+            }
+            _ => {
+                if target.contains("loongarch") {
+                    "loongarch"
+                } else {
+                    "riscv"
+                }
+            }
+        };
+        let fs_img_name = format!("fs-{}.img", arch_key);
+        let fs_img_path = PathBuf::from(&manifest_dir).join(&fs_img_name);
+        let data_dir = if arch_key == "loongarch" {
+            project_root.join("data").join("loongarch_musl")
+        } else {
+            project_root.join("data").join("risc-v_musl")
+        };
         // user_bin_dir 已经在上面通过 user_dir 引用了, user/bin
         let user_bin_dir = user_dir.join("bin");
+        let arch_stamp = PathBuf::from(&out_dir).join(format!("fs_img_arch_{}.txt", arch_key));
 
         // 检查依赖
-        let dependencies = vec![data_dir, user_bin_dir];
+        println!("cargo:rerun-if-changed={}", data_dir.display());
+        let dependencies = vec![data_dir.clone(), user_bin_dir];
 
-        if should_rebuild(&fs_img_path, &dependencies) {
+        let force_rebuild = match fs::read_to_string(&arch_stamp) {
+            Ok(saved) => saved.trim() != arch_key,
+            Err(_) => true,
+        };
+        if force_rebuild {
+            println!(
+                "cargo:warning=[build.rs] Arch changed ({}), forcing fs.img rebuild.",
+                arch_key
+            );
+        }
+
+        if force_rebuild || should_rebuild(&fs_img_path, &dependencies) {
             println!(
                 "cargo:warning=[build.rs] Creating full ext4 runtime image (4GB) at fs.img..."
             );
-            create_full_ext4_image(&fs_img_path, &project_root);
+            create_full_ext4_image(&fs_img_path, &data_dir, &project_root);
+            let _ = fs::write(&arch_stamp, format!("{}\n", arch_key));
             println!(
                 "cargo:warning=[build.rs] Runtime image created: {}",
                 fs_img_path.display()
             );
         } else {
-            println!("cargo:warning=[build.rs] fs.img is up to date, skipping regeneration.");
+            println!(
+                "cargo:warning=[build.rs] {} is up to date, skipping regeneration.",
+                fs_img_name
+            );
         }
     }
 }
@@ -312,7 +351,7 @@ fn create_empty_ext4_image(path: &PathBuf, size_mb: usize) {
 }
 
 /// 创建完整的 ext4 镜像 (包含 data/ 和 user/bin/)
-fn create_full_ext4_image(path: &PathBuf, project_root: &Path) {
+fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) {
     const IMG_SIZE_MB: usize = 4096; // 4GB
     const BLOCK_SIZE: usize = 1024 * 1024;
 
@@ -329,11 +368,14 @@ fn create_full_ext4_image(path: &PathBuf, project_root: &Path) {
     }
     fs::create_dir_all(&temp_root).expect("Failed to create temp directory");
 
-    // 2. 复制 data/ 目录的内容到临时根目录
-    let data_dir = project_root.join("data");
+    // 2. 复制 data 目录的内容到临时根目录
     if data_dir.exists() {
-        copy_dir_recursive(&data_dir, &temp_root).expect("Failed to copy data directory");
-        println!("cargo:warning=[build.rs] Copied data/ to temp root");
+        copy_dir_recursive(&data_dir.to_path_buf(), &temp_root)
+            .expect("Failed to copy data directory");
+        println!(
+            "cargo:warning=[build.rs] Copied {} to temp root",
+            data_dir.display()
+        );
     }
 
     // 3. 创建 /home/user/bin 目录并复制 user/bin

@@ -20,7 +20,7 @@ use crate::{
     },
     vfs::{
         DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, RegFile, SeekWhence, Stat,
-        split_path, vfs_lookup,
+        Statx, split_path, vfs_lookup,
     },
 };
 
@@ -718,6 +718,75 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     0
 }
 
+pub fn statx(
+    dirfd: i32,
+    pathname: *const c_char,
+    flags: u32,
+    _mask: u32,
+    statxbuf: *mut Statx,
+) -> isize {
+    if statxbuf.is_null() {
+        return -(EINVAL as isize);
+    }
+
+    // 解析路径
+    let _guard = SumGuard::new();
+    let path_str = match get_path_safe(pathname) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            return -(EINVAL as isize);
+        }
+    };
+
+    let at_flags = AtFlags::from_bits_truncate(flags);
+
+    // 处理 AT_EMPTY_PATH 标志：pathname 为空时，对 dirfd 指向的文件执行 statx
+    if path_str.is_empty() && at_flags.contains(AtFlags::EMPTY_PATH) {
+        if dirfd == AT_FDCWD {
+            return -(EINVAL as isize);
+        }
+
+        let task = current_task();
+        let file = match task.lock().fd_table.get(dirfd as usize) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
+        let metadata = match file.metadata() {
+            Ok(m) => m,
+            Err(e) => return e.to_errno(),
+        };
+
+        let stx = crate::vfs::Statx::from_metadata(&metadata);
+        let _guard = SumGuard::new();
+        unsafe {
+            core::ptr::write(statxbuf, stx);
+        }
+        return 0;
+    }
+
+    // 查找文件
+    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => d,
+        Err(e) => return e.to_errno(),
+    };
+
+    let metadata = match dentry.inode.metadata() {
+        Ok(m) => m,
+        Err(e) => return e.to_errno(),
+    };
+
+    let stx = crate::vfs::Statx::from_metadata(&metadata);
+
+    // 写回用户空间
+    let _guard = SumGuard::new();
+    unsafe {
+        core::ptr::write(statxbuf, stx);
+    }
+
+    0
+}
+
 pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, flags: u32) -> isize {
     // 解析路径
     let _guard = SumGuard::new();
@@ -1177,34 +1246,68 @@ pub fn mount(
         String::new()
     };
 
-    crate::pr_info!(
+    crate::pr_debug!(
         "[SYSCALL] mount: source='{}', target='{}', type='{}'",
         source_str,
         target_str,
         fstype_str
     );
 
+    fn ensure_dir_exists(path: &str) -> Result<(), FsError> {
+        use crate::vfs::{FileMode, split_path, vfs_lookup};
+
+        match vfs_lookup(path) {
+            Ok(dentry) => {
+                let meta = dentry.inode.metadata()?;
+                if meta.inode_type != InodeType::Directory {
+                    return Err(FsError::NotDirectory);
+                }
+                Ok(())
+            }
+            Err(FsError::NotFound) => {
+                let (parent_path, name) = split_path(path)?;
+                let parent = vfs_lookup(&parent_path)?;
+                let dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o755);
+                parent.inode.mkdir(&name, dir_mode)?;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     // 特殊挂载点处理
     match target_str.as_str() {
         "/proc" => {
+            if let Err(e) = ensure_dir_exists("/proc") {
+                return e.to_errno();
+            }
             return match init_procfs() {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/sys" => {
+            if let Err(e) = ensure_dir_exists("/sys") {
+                return e.to_errno();
+            }
             return match init_sysfs() {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/tmp" => {
+            if let Err(e) = ensure_dir_exists("/tmp") {
+                return e.to_errno();
+            }
             return match mount_tmpfs("/tmp", 0) {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/dev" => {
+            if let Err(e) = ensure_dir_exists("/dev") {
+                return e.to_errno();
+            }
             // 先挂载 tmpfs 到 /dev
             if let Err(e) = mount_tmpfs("/dev", 0) {
                 return e.to_errno();
@@ -1301,14 +1404,14 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
         }
     };
 
-    crate::pr_info!("[SYSCALL] umount2: unmounting '{}'", target_str);
+    crate::pr_debug!("[SYSCALL] umount2: unmounting '{}'", target_str);
 
     // 卸载文件系统
 
     // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
     match MOUNT_TABLE.umount(&target_str) {
         Ok(()) => {
-            crate::pr_info!("[SYSCALL] umount2: successfully unmounted '{}'", target_str);
+            crate::pr_debug!("[SYSCALL] umount2: successfully unmounted '{}'", target_str);
             0
         }
         Err(e) => {

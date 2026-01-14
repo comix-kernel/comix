@@ -3,7 +3,7 @@
 //! 用于处理数据结构之间的转换
 
 use super::{InodeMetadata, InodeType};
-use crate::uapi::fs::{LinuxDirent64, Stat};
+use crate::uapi::fs::{LinuxDirent64, STATX_BASIC_STATS, Stat, Statx, StatxTimestamp};
 
 /// Stat 结构适配方法
 impl Stat {
@@ -29,6 +29,45 @@ impl Stat {
             st_ctime_sec: meta.ctime.tv_sec,
             st_ctime_nsec: meta.ctime.tv_nsec,
             __unused: [0; 2],
+        }
+    }
+}
+
+/// Statx 结构适配方法
+impl Statx {
+    /// 从 InodeMetadata 创建 Statx 结构
+    pub fn from_metadata(meta: &InodeMetadata) -> Self {
+        let ts = |t: crate::uapi::time::TimeSpec| StatxTimestamp {
+            tv_sec: t.tv_sec as i64,
+            tv_nsec: t.tv_nsec as u32,
+            __reserved: 0,
+        };
+
+        Self {
+            stx_mask: STATX_BASIC_STATS,
+            stx_blksize: 512,
+            stx_attributes: 0,
+            stx_nlink: meta.nlinks as u32,
+            stx_uid: meta.uid,
+            stx_gid: meta.gid,
+            stx_mode: meta.mode.bits() as u16,
+            __spare0: [0; 1],
+            stx_ino: meta.inode_no as u64,
+            stx_size: meta.size as u64,
+            stx_blocks: meta.blocks as u64,
+            stx_attributes_mask: 0,
+            stx_atime: ts(meta.atime),
+            stx_btime: StatxTimestamp::zeroed(),
+            stx_ctime: ts(meta.ctime),
+            stx_mtime: ts(meta.mtime),
+            stx_rdev_major: 0,
+            stx_rdev_minor: 0,
+            stx_dev_major: 0,
+            stx_dev_minor: 0,
+            stx_mnt_id: 0,
+            stx_dio_mem_align: 0,
+            stx_dio_offset_align: 0,
+            __spare3: [0; 12],
         }
     }
 }

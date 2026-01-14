@@ -177,6 +177,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     let space = Arc::new(SpinLock::new(prepared.space));
     // 换掉当前任务的地址空间，e.g. 切换 satp
     {
+        // 先切换到新地址空间，再写入用户栈布局
         let _guard = crate::sync::PreemptGuard::new();
         current_cpu().switch_space(space.clone());
     }
@@ -207,9 +208,183 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
             prepared.at_entry,
         );
     }
+    // 地址空间已在 execve 之前切换
     crate::pr_info!("[kernel_execve] Switching to user mode");
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
+    #[cfg(target_arch = "loongarch64")]
+    {
+        if tfp.is_null() {
+            crate::pr_err!("[kernel_execve] trap_frame_ptr is null");
+            panic!("kernel_execve: null trap_frame_ptr");
+        }
+        crate::pr_debug!("[kernel_execve] trap_frame_ptr={:#x}", tfp as usize);
+    }
+    #[cfg(target_arch = "loongarch64")]
+    unsafe {
+        crate::pr_debug!(
+            "[kernel_execve] trapframe: era={:#x}, sp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
+            (*tfp).get_sepc(),
+            (*tfp).get_sp(),
+            (*tfp).prmd,
+            (*tfp).crmd,
+            (*tfp).get_a0(),
+            (*tfp).regs[5],
+            (*tfp).regs[6],
+        );
+    }
+    #[cfg(target_arch = "loongarch64")]
+    {
+        use crate::mm::address::PageNum;
+        use crate::mm::address::{UsizeConvert, Vaddr};
+        let tlbrent: usize;
+        let crmd: usize;
+        let pgdl: usize;
+        let pgdh: usize;
+        let ecfg: usize;
+        let ks0: usize;
+        let asid: usize;
+        let tlbrehi: usize;
+        let tlbrelo0: usize;
+        let tlbrelo1: usize;
+        unsafe {
+            core::arch::asm!(
+                "csrrd {0}, 0x88",
+                out(reg) tlbrent,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x0",
+                out(reg) crmd,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x19",
+                out(reg) pgdl,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x1a",
+                out(reg) pgdh,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x4",
+                out(reg) ecfg,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x30",
+                out(reg) ks0,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x18",
+                out(reg) asid,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x8e",
+                out(reg) tlbrehi,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x8c",
+                out(reg) tlbrelo0,
+                options(nostack, preserves_flags)
+            );
+            core::arch::asm!(
+                "csrrd {0}, 0x8d",
+                out(reg) tlbrelo1,
+                options(nostack, preserves_flags)
+            );
+        }
+        let space = crate::kernel::current_memory_space();
+        let space = space.lock();
+        let root_ppn = space.root_ppn();
+        let root_paddr = root_ppn.start_addr().as_usize();
+        let entry_va = <Vaddr as UsizeConvert>::from_usize(prepared.initial_pc);
+        let sp_va = <Vaddr as UsizeConvert>::from_usize(prepared.user_sp_high);
+        unsafe extern "C" {
+            fn tlb_refill_entry();
+        }
+        let tlbr_entry_vaddr = tlb_refill_entry as usize;
+        let tlbr_entry_paddr =
+            unsafe { crate::arch::mm::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
+        let tlbr_entry_dm_vaddr = crate::arch::mm::paddr_to_vaddr(tlbr_entry_paddr);
+        crate::pr_debug!(
+            "[kernel_execve] va translate: entry={:?}, sp={:?}",
+            space.translate(entry_va),
+            space.translate(sp_va)
+        );
+        // 检查页表项内容
+        use crate::mm::address::Vpn;
+        use crate::mm::page_table::PageTableInner;
+        let entry_vpn = Vpn::from_addr_floor(entry_va);
+        if let Ok((ppn, _, flags)) = space.page_table().walk(entry_vpn) {
+            crate::pr_debug!(
+                "[kernel_execve] entry PTE: vpn={:#x}, ppn={:#x}, flags={:?}",
+                entry_vpn.0,
+                ppn.0,
+                flags
+            );
+        } else {
+            crate::pr_err!("[kernel_execve] entry page not mapped!");
+        }
+        crate::pr_debug!(
+            "[kernel_execve] root_ppn={:#x}, root_paddr={:#x}",
+            root_ppn.0,
+            root_paddr
+        );
+        crate::pr_debug!(
+            "[kernel_execve] tlbrent={:#x}, crmd={:#x}, pgdl={:#x}, pgdh={:#x}, ecfg={:#x}, ks0={:#x}",
+            tlbrent,
+            crmd,
+            pgdl,
+            pgdh,
+            ecfg,
+            ks0
+        );
+        crate::pr_debug!(
+            "[kernel_execve] asid={:#x} (full_csr={:#x}), tlbrehi={:#x}, tlbrelo0={:#x}, tlbrelo1={:#x}",
+            asid & 0x3ff,
+            asid,
+            tlbrehi,
+            tlbrelo0,
+            tlbrelo1
+        );
+        crate::pr_debug!(
+            "[kernel_execve] tlb_refill_entry: vaddr={:#x}, paddr={:#x}, dm_vaddr={:#x}",
+            tlbr_entry_vaddr,
+            tlbr_entry_paddr,
+            tlbr_entry_dm_vaddr
+        );
+        // TLB refill 运行在直接地址翻译模式，无法安全访问全局变量做统计
+    }
+    #[cfg(target_arch = "loongarch64")]
+    unsafe {
+        // Ensure KScratch0 points to the current task's trap frame before returning to user mode.
+        core::arch::asm!(
+            "csrwr {0}, 0x30",
+            in(reg) tfp as usize,
+            options(nostack, preserves_flags)
+        );
+        // Reset TLB refill debug counter (CSR.TLBRSAVE) so we can observe the first refill after
+        // entering user mode.
+        core::arch::asm!("csrwr $zero, 0x8b", options(nostack, preserves_flags));
+    }
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        crate::pr_info!(
+            "[kernel_execve] trapframe: sepc={:#x}, sp={:#x}, sstatus={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
+            (*tfp).sepc,
+            (*tfp).x2_sp,
+            (*tfp).sstatus,
+            (*tfp).x10_a0,
+            (*tfp).x11_a1,
+            (*tfp).x12_a2,
+        );
+    }
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态
     unsafe {

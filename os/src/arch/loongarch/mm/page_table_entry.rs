@@ -6,12 +6,16 @@
 //!
 //! | 位 | 字段 | 说明 |
 //! |----|------|------|
-//! | 0 | V | Valid - 有效位 |
-//! | 1 | D | Dirty - 脏位（同时控制写权限） |
+//! | 0 | V | Valid/Accessed - 有效/访问位 |
+//! | 1 | D | Dirty - 脏位 |
 //! | 3:2 | PLV | Privilege Level (0=内核, 3=用户) |
 //! | 5:4 | MAT | Memory Access Type |
 //! | 6 | G | Global - 全局位 |
-//! | 11:7 | 保留 | 必须为 0 |
+//! | 7 | P | Present - 软件 present 位 |
+//! | 8 | W | Write - 软件写权限位 |
+//! | 9 | M | Modified - 软件 modified 位 |
+//! | 10 | PROTNONE | 软件 PROT_NONE 位 |
+//! | 11 | SPECIAL | 软件 special 位 |
 //! | 47:12 | PPN | 物理页号 (PALEN-1:12) |
 //! | 60:48 | 保留 | 必须为 0 |
 //! | 61 | NR | Non-Readable (0=可读，1=不可读) |
@@ -29,11 +33,10 @@ bitflags::bitflags! {
     /// 注意：LoongArch 使用 NR/NX 表示不可读/不可执行（反逻辑）
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LAPTEFlags: u64 {
-        /// 有效位 (bit 0)
+        /// 有效/访问位 (bit 0)
         const VALID = 1 << 0;
 
-        /// 脏位 (bit 1) - 同时控制写权限
-        /// D=1 表示页面可写且已被修改
+        /// 脏位 (bit 1)
         const DIRTY = 1 << 1;
 
         /// 特权级位 0 (bit 2)
@@ -61,7 +64,20 @@ bitflags::bitflags! {
         /// 全局位 (bit 6)
         const GLOBAL = 1 << 6;
 
-        // bits 7-11 保留，必须为 0
+        /// 软件 present 位 (bit 7)
+        const PRESENT = 1 << 7;
+
+        /// 软件写权限位 (bit 8)
+        const WRITE = 1 << 8;
+
+        /// 软件 modified 位 (bit 9)
+        const MODIFIED = 1 << 9;
+
+        /// 软件 PROT_NONE 位 (bit 10)
+        const PROTNONE = 1 << 10;
+
+        /// 软件 special 位 (bit 11)
+        const SPECIAL = 1 << 11;
 
         /// 不可读位 (bit 61) - 0=可读，1=不可读
         /// 仅 LA64 支持
@@ -128,8 +144,9 @@ impl UniversalConvertableFlag for LAPTEFlags {
         let mut result = LAPTEFlags::empty();
 
         if flag.contains(UniversalPTEFlag::VALID) {
-            // 有效页面启用一致性缓存
-            result |= LAPTEFlags::VALID | LAPTEFlags::MAT_CC;
+            // 标记软件 present，并启用一致性缓存。
+            // 这里同时设置 VALID 位（不做 accessed/dirty 跟踪）。
+            result |= LAPTEFlags::PRESENT | LAPTEFlags::VALID | LAPTEFlags::MAT_CC;
         }
 
         // READABLE: 不设置 NR 位（默认 NR=0 表示可读）
@@ -139,8 +156,9 @@ impl UniversalConvertableFlag for LAPTEFlags {
         }
 
         if flag.contains(UniversalPTEFlag::WRITEABLE) {
-            // D 位同时表示可写权限
-            result |= LAPTEFlags::DIRTY;
+            // LoongArch Linux 软件约定：WRITE 控制写权限，DIRTY 用于脏页标记。
+            // 为简化实现，这里对可写页同时置位 WRITE + DIRTY。
+            result |= LAPTEFlags::WRITE | LAPTEFlags::DIRTY;
         }
 
         // EXECUTABLE: 不设置 NX 位（默认 NX=0 表示可执行）
@@ -177,7 +195,7 @@ impl UniversalConvertableFlag for LAPTEFlags {
     fn to_universal(&self) -> UniversalPTEFlag {
         let mut result = UniversalPTEFlag::empty();
 
-        if self.contains(LAPTEFlags::VALID) {
+        if self.contains(LAPTEFlags::PRESENT) {
             result |= UniversalPTEFlag::VALID;
         }
 
@@ -186,10 +204,11 @@ impl UniversalConvertableFlag for LAPTEFlags {
             result |= UniversalPTEFlag::READABLE;
         }
 
-        // D 位表示可写（同时也是脏位）
-        // 为支持脏页跟踪，同时设置 WRITEABLE 和 DIRTY
+        if self.contains(LAPTEFlags::WRITE) {
+            result |= UniversalPTEFlag::WRITEABLE;
+        }
         if self.contains(LAPTEFlags::DIRTY) {
-            result |= UniversalPTEFlag::WRITEABLE | UniversalPTEFlag::DIRTY;
+            result |= UniversalPTEFlag::DIRTY;
         }
 
         // NX=0 表示可执行
@@ -216,8 +235,8 @@ const LA64_PTE_PPN_OFFSET: u32 = 12;
 /// PPN 掩码 (bits 12-47，支持 48 位物理地址)
 const LA64_PTE_PPN_MASK: u64 = 0x0000_FFFF_FFFF_F000;
 
-/// 标志位掩码 (bits 0-6 + 61-63)
-const LA64_PTE_FLAG_MASK_LOW: u64 = 0x7F; // bits 0-6
+/// 标志位掩码 (bits 0-11 + 61-63)
+const LA64_PTE_FLAG_MASK_LOW: u64 = 0x0FFF; // bits 0-11
 const LA64_PTE_FLAG_MASK_HIGH: u64 = 0xE000_0000_0000_0000; // bits 61-63
 
 /// LoongArch 页表项
@@ -249,16 +268,16 @@ impl PageTableEntryTrait for PageTableEntry {
 
     /// 创建表节点（指向下一级页表）
     ///
-    /// 表节点只需设置 VALID 位，不设置 NR/NX（保持可访问）
+    /// LoongArch 目录项不设置 V 位，只存储物理地址。
+    /// LDDIR 指令会直接使用目录项中的地址作为下一级页表基址。
     fn new_table(ppn: Ppn) -> Self {
         let ppn_bits: u64 = ppn.as_usize() as u64;
-        // 表节点：VALID + MAT_CC，不设置权限位
-        let flags = LAPTEFlags::VALID | LAPTEFlags::MAT_CC;
-        PageTableEntry((ppn_bits << LA64_PTE_PPN_OFFSET) | flags.bits())
+        // 目录项只存储物理地址，不设置任何标志位
+        PageTableEntry(ppn_bits << LA64_PTE_PPN_OFFSET)
     }
 
     fn is_valid(&self) -> bool {
-        (self.0 & LAPTEFlags::VALID.bits()) != 0
+        (self.0 & LAPTEFlags::PRESENT.bits()) != 0
     }
 
     /// 检查是否为巨页（Huge Page）

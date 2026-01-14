@@ -285,8 +285,16 @@ pub fn clone(
     unsafe {
         (*tf).set_clone_trap_frame(&*ptf, child_task.kstack_base, stack as usize);
         if requested_flags.contains(CloneFlags::SETTLS) {
-            // RISC-V userspace uses tp register as thread pointer (TLS base)
-            (*tf).x4_tp = tls as usize;
+            #[cfg(target_arch = "riscv64")]
+            {
+                // RISC-V userspace uses tp register as thread pointer (TLS base)
+                (*tf).x4_tp = tls as usize;
+            }
+            #[cfg(target_arch = "loongarch64")]
+            {
+                // LoongArch userspace uses r2 (tp) register as thread pointer (TLS base)
+                (*tf).regs[2] = tls as usize;
+            }
         }
     }
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
