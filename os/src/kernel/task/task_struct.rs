@@ -277,7 +277,7 @@ impl Task {
         at_entry: usize,
     ) {
         // 1. 切换任务的地址空间对象
-        self.memory_space = Some(new_memory_space.clone());
+        self.memory_space = Some(new_memory_space);
 
         // 2. 处理文件描述符：取消共享并关闭 CLOEXEC 文件
         // execve 应该让当前进程拥有独立的 FD 表（如果之前是共享的）
@@ -294,7 +294,11 @@ impl Task {
         // 3. 设置用户栈布局，包含命令行参数和环境变量
         #[cfg(target_arch = "loongarch64")]
         let (new_sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp) = {
-            let space = new_memory_space.lock();
+            let space = self
+                .memory_space
+                .as_ref()
+                .expect("execve: memory_space not set")
+                .lock();
             setup_stack_layout(
                 &space, sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
             )
