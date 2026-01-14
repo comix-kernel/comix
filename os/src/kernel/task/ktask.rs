@@ -235,8 +235,8 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     }
     #[cfg(target_arch = "loongarch64")]
     {
-        use crate::mm::address::{UsizeConvert, Vaddr};
         use crate::mm::address::PageNum;
+        use crate::mm::address::{UsizeConvert, Vaddr};
         let tlbrent: usize;
         let crmd: usize;
         let pgdl: usize;
