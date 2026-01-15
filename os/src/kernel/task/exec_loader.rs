@@ -29,6 +29,38 @@ pub struct PreparedExecImage {
     pub phent: usize,
 }
 
+/// PreparedExecImage 的类型安全版本（使用 UA 类型）
+pub struct PreparedExecImageUA {
+    pub space: MemorySpace,
+    /// 初始 PC：无动态链接器时为程序入口；有 PT_INTERP 时为动态链接器入口
+    pub initial_pc: crate::mm::address::UA,
+    pub user_sp_high: crate::mm::address::UA,
+    /// auxv AT_BASE：动态链接器 load bias（无动态链接器时为 0）
+    pub at_base: crate::mm::address::UA,
+    /// auxv AT_ENTRY：主程序入口（非动态链接器入口）
+    pub at_entry: crate::mm::address::UA,
+    pub phdr_addr: crate::mm::address::UA,
+    pub phnum: usize,
+    pub phent: usize,
+}
+
+impl PreparedExecImage {
+    /// 转换为类型安全版本
+    pub fn to_ua(self) -> PreparedExecImageUA {
+        use crate::mm::address::UA;
+        PreparedExecImageUA {
+            space: self.space,
+            initial_pc: UA::from_usize(self.initial_pc),
+            user_sp_high: UA::from_usize(self.user_sp_high),
+            at_base: UA::from_usize(self.at_base),
+            at_entry: UA::from_usize(self.at_entry),
+            phdr_addr: UA::from_usize(self.phdr_addr),
+            phnum: self.phnum,
+            phent: self.phent,
+        }
+    }
+}
+
 const ELFCLASS64: u8 = 2;
 const ELFDATA2LSB: u8 = 1;
 
