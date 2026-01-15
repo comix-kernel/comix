@@ -154,3 +154,33 @@
 - 测试框架正常工作
 
 ---
+
+### 2026-01-15 - Step 1.1 提交 ✅
+
+**Commit**: `49e7b60`
+
+**Commit 信息**:
+```
+refactor(mm): 添加 UA 用户地址类型和 PA/VA/UA 类型别名
+
+- 新增 Uaddr (UA) 类型用于语义区分用户虚拟地址
+- 添加 PA/VA/UA 类型别名简化使用
+- 实现 VA <-> UA 双向转换方法
+- 添加地址范围类型 UARange
+- 创建地址类型使用指南文档
+- 所有类型零运行时开销 (#[repr(transparent)])
+- 向后兼容，现有代码无需修改
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改统计**:
+- 4 个文件修改
+- +502 行，-1 行
+- 新增文档：REFACTOR_LOG.md, document/mm/address_types_guide.md
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+---
