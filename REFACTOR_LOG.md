@@ -666,3 +666,104 @@ impl PreparedExecImage {
 - [ ] os/src/kernel/task/ - 其他进程内存布局相关代码
 
 ---
+
+### 2026-01-15 - Step 1.2 继续：添加 TaskStruct 线程 ID 地址类型安全访问方法 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 添加 TaskStruct 中线程 ID 地址字段的类型安全访问方法
+
+**Commit**: `890a596`
+
+**Commit 信息**:
+```
+refactor(task): 添加 TaskStruct 线程 ID 地址的类型安全访问方法
+
+- 添加 set_child_tid_ua() 获取 set_child_tid 地址
+- 添加 set_set_child_tid_ua() 设置 set_child_tid 地址
+- 添加 clear_child_tid_ua() 获取 clear_child_tid 地址
+- 添加 set_clear_child_tid_ua() 设置 clear_child_tid 地址
+- 所有方法使用 UA 类型表示用户地址
+- 保持原有字段不变，确保向后兼容
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改内容**:
+
+#### 1. 添加 `set_child_tid_ua()` 方法
+- 文件：`os/src/kernel/task/task_struct.rs`
+- 获取 set_child_tid 地址的类型安全版本
+- 返回：`UA` - 用户地址类型
+
+#### 2. 添加 `set_set_child_tid_ua()` 方法
+- 文件：`os/src/kernel/task/task_struct.rs`
+- 设置 set_child_tid 地址的类型安全版本
+- 参数：`addr: UA` - 用户地址类型
+
+#### 3. 添加 `clear_child_tid_ua()` 方法
+- 文件：`os/src/kernel/task/task_struct.rs`
+- 获取 clear_child_tid 地址的类型安全版本
+- 返回：`UA` - 用户地址类型
+
+#### 4. 添加 `set_clear_child_tid_ua()` 方法
+- 文件：`os/src/kernel/task/task_struct.rs`
+- 设置 clear_child_tid 地址的类型安全版本
+- 参数：`addr: UA` - 用户地址类型
+
+**代码示例**:
+```rust
+/// 获取 set_child_tid 地址（类型安全版本）
+pub fn set_child_tid_ua(&self) -> crate::mm::address::UA {
+    crate::mm::address::UA::from_usize(self.set_child_tid)
+}
+
+/// 设置 set_child_tid 地址（类型安全版本）
+pub fn set_set_child_tid_ua(&mut self, addr: crate::mm::address::UA) {
+    self.set_child_tid = addr.as_usize();
+}
+
+/// 获取 clear_child_tid 地址（类型安全版本）
+pub fn clear_child_tid_ua(&self) -> crate::mm::address::UA {
+    crate::mm::address::UA::from_usize(self.clear_child_tid)
+}
+
+/// 设置 clear_child_tid 地址（类型安全版本）
+pub fn set_clear_child_tid_ua(&mut self, addr: crate::mm::address::UA) {
+    self.clear_child_tid = addr.as_usize();
+}
+```
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/kernel/task/task_struct.rs`: +20 行
+- 新增方法：4 个（getter 和 setter 各 2 个）
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新方法仅是类型转换包装
+- ✅ 类型安全增强：线程 ID 地址现在有明确的类型标记
+- ✅ 线程同步支持：为 clone/futex 等系统调用提供类型安全接口
+
+**技术说明**:
+- `set_child_tid` 和 `clear_child_tid` 用于线程创建和退出时的同步
+- 这些地址指向用户空间的 tid 变量
+- 类型安全版本确保不会混淆用户地址和其他 usize 值
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+**下一步**: 继续 Step 1.2 - 迁移其他模块
+- [x] os/src/arch/riscv64/mm/ - 架构相关内存操作 ✅
+- [x] os/src/kernel/task/exec_loader.rs - ELF 加载结果 ✅
+- [x] os/src/kernel/task/task_struct.rs - 线程 ID 地址 ✅
+- [ ] os/src/mm/page_table/ - 页表操作
+- [ ] os/src/kernel/task/ - 其他进程内存布局相关代码
+
+---
