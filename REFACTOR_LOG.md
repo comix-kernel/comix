@@ -184,3 +184,53 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 - ✅ 所有修改已保存
 
 ---
+
+### 2026-01-15 - Step 1.2 完成 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 在关键模块中逐步使用新类型（memory_space.rs）
+
+**修改内容**:
+
+#### 1. 添加类型安全的 brk 函数
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 新增 `current_brk_ua()` 函数：返回 `Option<UA>` 而不是 `Option<usize>`
+- 新增 `brk_ua()` 函数：接受和返回 `UA` 类型而不是 `usize`
+- 保留原有的 `current_brk()` 和 `brk()` 函数以保持向后兼容
+
+**代码示例**:
+```rust
+// 新增的类型安全函数
+pub fn current_brk_ua(&self) -> Option<UA> {
+    self.current_brk().map(UA::from_usize)
+}
+
+pub fn brk_ua(&mut self, new_brk: UA) -> Result<UA, PagingError> {
+    self.brk(new_brk.as_usize()).map(UA::from_usize)
+}
+```
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/mm/memory_space/memory_space.rs`: +13 行
+- 新增函数：2 个类型安全版本
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新函数仅是类型转换包装
+- ✅ 类型安全增强：新代码可以使用 UA 类型标记用户地址
+
+**迁移策略**:
+- 采用渐进式迁移：添加新函数而不是修改现有函数
+- 新代码优先使用类型安全版本（`*_ua()` 后缀）
+- 旧代码保持不变，逐步迁移
+
+**下一步**: 继续迁移其他模块或提交当前进度
+
+---

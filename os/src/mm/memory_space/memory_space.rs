@@ -117,6 +117,17 @@ impl MemorySpace {
             .or_else(|| self.heap_start.map(|vpn| vpn.start_addr().as_usize()))
     }
 
+    /// 获取当前的 brk 值（堆的当前结束地址），返回类型安全的用户地址
+    ///
+    /// # 返回值
+    /// - 如果堆区域存在，返回堆的结束地址（current brk）
+    /// - 如果堆区域不存在，返回堆的起始地址
+    /// - 如果堆未初始化，返回 None
+    pub fn current_brk_ua(&self) -> Option<crate::mm::address::UA> {
+        use crate::mm::address::UA;
+        self.current_brk().map(UA::from_usize)
+    }
+
     /// 创建一个新的用户地址空间，并克隆当前地址空间的内核映射。
     ///
     /// 语义与 `from_elf()` 内部“只复制内核区域”的逻辑一致，便于在 execve 等路径中复用。
@@ -966,6 +977,17 @@ impl MemorySpace {
         }
 
         Ok(new_brk)
+    }
+
+    /// 扩展或收缩堆区域 (brk 系统调用)，类型安全版本
+    ///
+    /// # 错误
+    /// - 堆未初始化
+    /// - 新的 brk 会超出 MAX_USER_HEAP_SIZE
+    /// - 新的 brk 会与现有区域重叠
+    pub fn brk_ua(&mut self, new_brk: crate::mm::address::UA) -> Result<crate::mm::address::UA, PagingError> {
+        use crate::mm::address::UA;
+        self.brk(new_brk.as_usize()).map(UA::from_usize)
     }
 
     /// 查找足够大的空闲地址区域
