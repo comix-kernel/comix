@@ -150,6 +150,7 @@ pub trait ConvertablePaddr {
 /// [Paddr] (Physical Address)
 /// ---------------------
 /// 物理内存地址，对应于内存芯片上的实际位置。
+#[must_use = "物理地址不应被忽略"]
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Paddr(pub *const ());
@@ -181,6 +182,7 @@ pub trait ConvertableVaddr {
 /// [Vaddr] (Virtual Address)
 /// ---------------------
 /// 虚拟内存地址，对应于进程或内核的页表映射空间中的位置。
+#[must_use = "虚拟地址不应被忽略"]
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Vaddr(pub *const ());
@@ -265,6 +267,7 @@ impl Vaddr {
 /// ---------------------
 /// 用户虚拟地址，特指用户进程地址空间中的虚拟地址。
 /// 与 `Vaddr` 的区别在于语义上的区分，防止内核地址和用户地址混淆。
+#[must_use = "用户地址不应被忽略"]
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Uaddr(pub *const ());
