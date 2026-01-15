@@ -234,3 +234,30 @@ pub fn brk_ua(&mut self, new_brk: UA) -> Result<UA, PagingError> {
 **下一步**: 继续迁移其他模块或提交当前进度
 
 ---
+
+### 2026-01-15 - Step 1.2 提交 ✅
+
+**Commit**: `d9432fb`
+
+**Commit 信息**:
+```
+refactor(mm): 添加类型安全的 brk 函数（UA 类型）
+
+- 新增 current_brk_ua() 返回 Option<UA>
+- 新增 brk_ua() 接受和返回 UA 类型
+- 保留原有函数以保持向后兼容
+- 采用渐进式迁移策略
+- 零性能开销，仅类型转换包装
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改统计**:
+- 2 个文件修改
+- +72 行
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+---
