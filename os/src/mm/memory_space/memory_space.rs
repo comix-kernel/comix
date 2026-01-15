@@ -14,6 +14,22 @@ use crate::{pr_err, pr_warn};
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 
+/// ELF 加载结果（类型安全版本）
+pub struct ElfLoadResult {
+    /// 包含用户 + 内核映射的内存空间
+    pub space: MemorySpace,
+    /// 程序入口地址
+    pub entry_point: crate::mm::address::UA,
+    /// 用户栈的顶部地址
+    pub user_stack_top: crate::mm::address::UA,
+    /// 程序头地址
+    pub phdr_addr: crate::mm::address::UA,
+    /// 程序头数量
+    pub ph_num: usize,
+    /// 程序头条目大小
+    pub ph_ent: usize,
+}
+
 // 内核链接器符号
 unsafe extern "C" {
     fn stext(); // .text (代码段) 的起始地址
@@ -43,6 +59,12 @@ pub fn kernel_token() -> usize {
 /// 返回内核根页表的物理页号 (PPN)
 pub fn kernel_root_ppn() -> Ppn {
     KERNEL_SPACE.lock().root_ppn()
+}
+
+/// 返回用户栈顶地址（类型安全版本）
+pub fn user_stack_top_ua() -> crate::mm::address::UA {
+    use crate::mm::address::UA;
+    UA::from_usize(USER_STACK_TOP)
 }
 
 /// 以独占方式访问内核空间并执行闭包
@@ -573,6 +595,32 @@ impl MemorySpace {
         area.map(&mut self.page_table)?;
         self.areas.push(area);
         Ok(())
+    }
+
+    /// 从 ELF 文件创建用户内存空间（类型安全版本）
+    ///
+    /// 此方法通过创建一个包含用户空间映射（进程私有）和内核空间映射（所有进程共享）的页表，
+    /// 实现了方案 2（共享页表）。
+    ///
+    /// # 返回
+    /// 成功时返回 `Ok(ElfLoadResult)`，包含类型安全的用户地址
+    ///
+    /// # 错误
+    /// - ELF 解析失败
+    /// - 架构不匹配（非 RISC-V）
+    /// - 段与保留区域重叠
+    pub fn from_elf_ua(elf_data: &[u8]) -> Result<ElfLoadResult, PagingError> {
+        use crate::mm::address::UA;
+        let (space, entry_point, user_stack_top, phdr_addr, ph_num, ph_ent) =
+            Self::from_elf(elf_data)?;
+        Ok(ElfLoadResult {
+            space,
+            entry_point: UA::from_usize(entry_point),
+            user_stack_top: UA::from_usize(user_stack_top),
+            phdr_addr: UA::from_usize(phdr_addr),
+            ph_num,
+            ph_ent,
+        })
     }
 
     /// 从 ELF 文件创建用户内存空间
