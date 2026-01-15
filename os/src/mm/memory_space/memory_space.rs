@@ -1217,6 +1217,27 @@ impl MemorySpace {
         Ok(start)
     }
 
+    /// 映射一个匿名区域（类型安全版本）
+    ///
+    /// # 参数
+    /// - `hint`: 建议的起始地址（None = 由内核选择）
+    /// - `len`: 长度（字节）
+    /// - `pte_flags`: 页表项标志（应包含 VALID 和 USER_ACCESSIBLE）
+    ///
+    /// # 返回值
+    /// - `Ok(UA)`: 映射的起始地址
+    /// - `Err(PagingError)`: 映射失败
+    pub fn mmap_ua(
+        &mut self,
+        hint: Option<crate::mm::address::UA>,
+        len: usize,
+        pte_flags: UniversalPTEFlag,
+    ) -> Result<crate::mm::address::UA, PagingError> {
+        use crate::mm::address::UA;
+        let hint_usize = hint.map(|h| h.as_usize()).unwrap_or(0);
+        self.mmap(hint_usize, len, pte_flags).map(UA::from_usize)
+    }
+
     /// 解除映射一个区域（munmap 系统调用）
     ///
     /// # 参数
@@ -1298,6 +1319,19 @@ impl MemorySpace {
         }
 
         Ok(())
+    }
+
+    /// 解除映射一个区域（类型安全版本）
+    ///
+    /// # 参数
+    /// - `start`: 起始地址
+    /// - `len`: 长度（字节）
+    ///
+    /// # 返回值
+    /// - `Ok(())`: 成功
+    /// - `Err(PagingError)`: 失败
+    pub fn munmap_ua(&mut self, start: crate::mm::address::UA, len: usize) -> Result<(), PagingError> {
+        self.munmap(start.as_usize(), len)
     }
 
     /// 修改内存区域的保护权限（mprotect 系统调用）
