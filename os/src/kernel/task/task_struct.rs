@@ -378,6 +378,26 @@ impl Task {
         self.pid == self.tid
     }
 
+    /// 获取 set_child_tid 地址（类型安全版本）
+    pub fn set_child_tid_ua(&self) -> crate::mm::address::UA {
+        crate::mm::address::UA::from_usize(self.set_child_tid)
+    }
+
+    /// 设置 set_child_tid 地址（类型安全版本）
+    pub fn set_set_child_tid_ua(&mut self, addr: crate::mm::address::UA) {
+        self.set_child_tid = addr.as_usize();
+    }
+
+    /// 获取 clear_child_tid 地址（类型安全版本）
+    pub fn clear_child_tid_ua(&self) -> crate::mm::address::UA {
+        crate::mm::address::UA::from_usize(self.clear_child_tid)
+    }
+
+    /// 设置 clear_child_tid 地址（类型安全版本）
+    pub fn set_clear_child_tid_ua(&mut self, addr: crate::mm::address::UA) {
+        self.clear_child_tid = addr.as_usize();
+    }
+
     /// 把已初始化的 TaskStruct 包装为共享任务句柄
     /// 返回值: 包装后的 SharedTask
     pub fn into_shared(self) -> SharedTask {
