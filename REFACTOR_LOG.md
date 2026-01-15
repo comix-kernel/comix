@@ -568,3 +568,101 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 - [ ] os/src/kernel/task/ - 进程内存布局
 
 ---
+
+### 2026-01-15 - Step 1.2 继续：添加 PreparedExecImage 类型安全版本 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 添加 PreparedExecImage 结构体的类型安全版本
+
+**Commit**: `a2a9ed9`
+
+**Commit 信息**:
+```
+refactor(task): 添加 PreparedExecImage 的类型安全版本
+
+- 添加 PreparedExecImageUA 结构体，使用 UA 类型表示用户地址
+- 添加 PreparedExecImage::to_ua() 转换方法
+- 保持原有 PreparedExecImage 结构体不变，确保向后兼容
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改内容**:
+
+#### 1. 添加 `PreparedExecImageUA` 结构体
+- 文件：`os/src/kernel/task/exec_loader.rs`
+- 类型安全版本的 ELF 加载结果
+- 字段：
+  - `space: MemorySpace` - 内存空间
+  - `initial_pc: UA` - 初始 PC（程序入口或动态链接器入口）
+  - `user_sp_high: UA` - 用户栈顶地址
+  - `at_base: UA` - auxv AT_BASE（动态链接器 load bias）
+  - `at_entry: UA` - auxv AT_ENTRY（主程序入口）
+  - `phdr_addr: UA` - 程序头地址
+  - `phnum: usize` - 程序头数量（非地址）
+  - `phent: usize` - 程序头条目大小（非地址）
+
+#### 2. 添加 `PreparedExecImage::to_ua()` 方法
+- 文件：`os/src/kernel/task/exec_loader.rs`
+- 将原始结构体转换为类型安全版本
+- 消耗原结构体（`self`），返回 `PreparedExecImageUA`
+
+**代码示例**:
+```rust
+pub struct PreparedExecImageUA {
+    pub space: MemorySpace,
+    pub initial_pc: crate::mm::address::UA,
+    pub user_sp_high: crate::mm::address::UA,
+    pub at_base: crate::mm::address::UA,
+    pub at_entry: crate::mm::address::UA,
+    pub phdr_addr: crate::mm::address::UA,
+    pub phnum: usize,
+    pub phent: usize,
+}
+
+impl PreparedExecImage {
+    pub fn to_ua(self) -> PreparedExecImageUA {
+        use crate::mm::address::UA;
+        PreparedExecImageUA {
+            space: self.space,
+            initial_pc: UA::from_usize(self.initial_pc),
+            user_sp_high: UA::from_usize(self.user_sp_high),
+            at_base: UA::from_usize(self.at_base),
+            at_entry: UA::from_usize(self.at_entry),
+            phdr_addr: UA::from_usize(self.phdr_addr),
+            phnum: self.phnum,
+            phent: self.phent,
+        }
+    }
+}
+```
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/kernel/task/exec_loader.rs`: +32 行
+- 新增结构体：`PreparedExecImageUA`
+- 新增方法：`PreparedExecImage::to_ua()`
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新结构体仅是类型转换包装
+- ✅ 类型安全增强：ELF 加载结果中的用户地址现在有明确的类型标记
+- ✅ 语义清晰：区分地址字段（UA）和非地址字段（usize）
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+**下一步**: 继续 Step 1.2 - 迁移其他模块
+- [x] os/src/arch/riscv64/mm/ - 架构相关内存操作 ✅
+- [x] os/src/kernel/task/exec_loader.rs - ELF 加载结果 ✅
+- [ ] os/src/mm/page_table/ - 页表操作
+- [ ] os/src/kernel/task/ - 其他进程内存布局相关代码
+
+---
