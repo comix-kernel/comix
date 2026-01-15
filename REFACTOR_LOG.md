@@ -334,3 +334,71 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 **下一步**: 继续 Step 1.2 - 迁移其他关键模块
 
 ---
+
+### 2026-01-15 - Step 1.2 继续：添加 mmap/munmap 类型安全版本 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 添加 mmap 和 munmap 的类型安全版本
+
+**Commit**: `b7e4ac8`
+
+**Commit 信息**:
+```
+refactor(mm): 添加 mmap/munmap 的类型安全版本
+
+- 新增 mmap_ua() 接受 Option<UA> hint，返回 UA
+- 新增 munmap_ua() 接受 UA 起始地址
+- 保留原有函数以保持向后兼容
+- 零性能开销，仅类型转换包装
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改内容**:
+
+#### 1. 添加 `mmap_ua()` 方法
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 类型安全版本的 mmap 函数
+- 参数：
+  - `hint: Option<UA>` - 建议的起始地址（None = 由内核选择）
+  - `len: usize` - 长度（字节）
+  - `pte_flags: UniversalPTEFlag` - 页表项标志
+- 返回：`Result<UA, PagingError>` - 映射的起始地址
+
+#### 2. 添加 `munmap_ua()` 方法
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 类型安全版本的 munmap 函数
+- 参数：
+  - `start: UA` - 起始地址
+  - `len: usize` - 长度（字节）
+- 返回：`Result<(), PagingError>`
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/mm/memory_space/memory_space.rs`: +34 行
+- 新增函数：`mmap_ua()`, `munmap_ua()`
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新函数仅是类型转换包装
+- ✅ 类型安全增强：新代码可以使用 UA 类型标记用户地址
+- ✅ API 改进：mmap_ua 使用 Option<UA> 更符合 Rust 习惯
+
+**迁移策略**:
+- 采用渐进式迁移：添加新函数而不是修改现有函数
+- 新代码优先使用类型安全版本（`mmap_ua()`, `munmap_ua()`）
+- 旧代码保持不变，逐步迁移
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+**下一步**: 继续 Step 1.2 - 迁移其他关键模块（page_table, arch/mm, kernel/task）
+
+---
