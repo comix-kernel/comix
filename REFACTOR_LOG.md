@@ -402,3 +402,97 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 **下一步**: 继续 Step 1.2 - 迁移其他关键模块（page_table, arch/mm, kernel/task）
 
 ---
+
+### 2026-01-15 - Step 1.2 继续：添加 mprotect 类型安全版本 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 添加 mprotect 的类型安全版本
+
+**Commit**: `33cba2b`
+
+**Commit 信息**:
+```
+refactor(mm): 添加 mprotect 的类型安全版本
+
+- 新增 mprotect_ua() 接受 UA 起始地址
+- 保留原有函数以保持向后兼容
+- 零性能开销，仅类型转换包装
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改内容**:
+
+#### 添加 `mprotect_ua()` 方法
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 类型安全版本的 mprotect 函数
+- 参数：
+  - `start: UA` - 起始地址（必须页对齐）
+  - `len: usize` - 长度（字节）
+  - `prot: UniversalPTEFlag` - 新的保护标志
+- 返回：`Result<(), PagingError>`
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/mm/memory_space/memory_space.rs`: +19 行
+- 新增函数：`mprotect_ua()`
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新函数仅是类型转换包装
+- ✅ 类型安全增强：新代码可以使用 UA 类型标记用户地址
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+---
+
+### 2026-01-15 - Step 1.2 memory_space.rs 迁移总结 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 完成 memory_space.rs 中主要用户地址函数的类型安全迁移
+
+**已完成的类型安全函数**:
+
+1. **堆管理**:
+   - `current_brk_ua()` - 返回 `Option<UA>`
+   - `brk_ua()` - 接受和返回 `UA`
+
+2. **栈管理**:
+   - `user_stack_top_ua()` - 返回 `UA`
+
+3. **ELF 加载**:
+   - `ElfLoadResult` 结构体 - 封装所有用户地址为 `UA`
+   - `from_elf_ua()` - 返回 `ElfLoadResult`
+
+4. **内存映射**:
+   - `mmap_ua()` - 接受 `Option<UA>` hint，返回 `UA`
+   - `munmap_ua()` - 接受 `UA` 起始地址
+   - `mprotect_ua()` - 接受 `UA` 起始地址
+
+**总计**:
+- 新增结构体：1 个（`ElfLoadResult`）
+- 新增函数：7 个（所有带 `_ua` 后缀）
+- 修改行数：约 +155 行
+- 提交次数：4 次
+
+**迁移策略验证**:
+- ✅ 渐进式迁移成功：所有新函数与旧函数并存
+- ✅ 零破坏性：现有代码无需修改
+- ✅ 零性能开销：所有类型转换在编译时完成
+- ✅ 类型安全增强：用户地址现在有明确的类型标记
+
+**下一步**: 继续 Step 1.2 - 迁移其他模块
+- [ ] os/src/mm/page_table/ - 页表操作
+- [ ] os/src/arch/riscv64/mm/ - 架构相关内存操作
+- [ ] os/src/kernel/task/ - 进程内存布局
+
+---
