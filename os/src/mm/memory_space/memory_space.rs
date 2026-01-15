@@ -1423,6 +1423,25 @@ impl MemorySpace {
         Ok(())
     }
 
+    /// 修改内存区域的保护权限（类型安全版本）
+    ///
+    /// # 参数
+    /// - `start`: 起始地址，必须页对齐
+    /// - `len`: 长度（字节）
+    /// - `prot`: 新的保护标志
+    ///
+    /// # 返回值
+    /// - 成功: 返回 Ok(())
+    /// - 失败: 返回 PagingError
+    pub fn mprotect_ua(
+        &mut self,
+        start: crate::mm::address::UA,
+        len: usize,
+        prot: UniversalPTEFlag,
+    ) -> Result<(), PagingError> {
+        self.mprotect(start.as_usize(), len, prot)
+    }
+
     /// 克隆内存空间（用于 fork 系统调用）
     ///
     /// # 注意
