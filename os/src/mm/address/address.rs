@@ -243,6 +243,98 @@ impl Vaddr {
     pub unsafe fn as_mut_ptr<T>(&mut self) -> *mut T {
         self.as_usize() as *mut T
     }
+
+    /// 从用户地址创建虚拟地址
+    ///
+    /// # Safety
+    /// 调用者必须确保用户地址是有效的
+    pub unsafe fn from_uaddr(uaddr: Uaddr) -> Self {
+        Self::from_usize(uaddr.as_usize())
+    }
+
+    /// 将虚拟地址转换为用户地址
+    ///
+    /// # Safety
+    /// 调用者必须确保地址在用户地址空间范围内
+    pub unsafe fn to_uaddr(self) -> Uaddr {
+        Uaddr::from_usize(self.as_usize())
+    }
+}
+
+/// [Uaddr] (User Address)
+/// ---------------------
+/// 用户虚拟地址，特指用户进程地址空间中的虚拟地址。
+/// 与 `Vaddr` 的区别在于语义上的区分，防止内核地址和用户地址混淆。
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Uaddr(pub *const ());
+
+impl_address!(Uaddr);
+
+impl Uaddr {
+    /// 从虚拟地址创建用户地址
+    ///
+    /// # Safety
+    /// 调用者必须确保虚拟地址在用户地址空间范围内
+    pub unsafe fn from_vaddr(vaddr: Vaddr) -> Self {
+        Self::from_usize(vaddr.as_usize())
+    }
+
+    /// 将用户地址转换为虚拟地址
+    pub fn to_vaddr(self) -> Vaddr {
+        Vaddr::from_usize(self.as_usize())
+    }
+
+    /// 从一个不可变引用创建用户地址
+    ///
+    /// # Safety
+    /// 调用者必须确保引用指向用户地址空间的内存
+    pub unsafe fn from_ref<T>(r: &T) -> Self {
+        unsafe { Self::from_ptr(r as *const T) }
+    }
+
+    /// 从一个常量指针创建用户地址
+    ///
+    /// # Safety
+    /// 调用者必须确保指针指向用户地址空间的内存
+    pub unsafe fn from_ptr<T>(p: *const T) -> Self {
+        Self::from_usize(p as usize)
+    }
+
+    /// 将用户地址转换为一个不可变引用
+    ///
+    /// # Safety
+    /// 调用者必须确保：
+    /// 1. 地址指向用户地址空间的有效内存
+    /// 2. 内存是已初始化的 `T` 类型数据
+    /// 3. 内存在引用的生命周期内不会被修改
+    pub unsafe fn as_ref<T>(&self) -> &T {
+        unsafe { &*(self.as_usize() as *const T) }
+    }
+
+    /// 将用户地址转换为一个可变引用
+    ///
+    /// # Safety
+    /// 调用者必须确保：
+    /// 1. 地址指向用户地址空间的有效内存
+    /// 2. 内存是已初始化的 `T` 类型数据
+    /// 3. 内存是独占的（没有其他活跃的引用）
+    pub unsafe fn as_mut<T>(&mut self) -> &mut T {
+        unsafe { &mut *(self.as_usize() as *mut T) }
+    }
+
+    /// 将用户地址转换为一个常量指针
+    pub fn as_ptr<T>(&self) -> *const T {
+        self.as_usize() as *const T
+    }
+
+    /// 将用户地址转换为一个可变指针
+    ///
+    /// # Safety
+    /// 调用者必须确保地址在被解引用时是有效的
+    pub unsafe fn as_mut_ptr<T>(&mut self) -> *mut T {
+        self.as_usize() as *mut T
+    }
 }
 
 /// [AddressRange]
@@ -426,6 +518,9 @@ pub type PaddrRange = AddressRange<Paddr>;
 
 /// 虚拟地址范围的类型别名
 pub type VaddrRange = AddressRange<Vaddr>;
+
+/// 用户地址范围的类型别名
+pub type UaddrRange = AddressRange<Uaddr>;
 
 #[cfg(test)]
 mod address_basic_tests {

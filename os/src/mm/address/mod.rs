@@ -45,6 +45,19 @@ mod address;
 mod operations;
 mod page_num;
 
-pub use address::{ConvertablePaddr, Paddr, Vaddr};
+pub use address::{ConvertablePaddr, Paddr, PaddrRange, Uaddr, UaddrRange, Vaddr, VaddrRange};
 pub use operations::UsizeConvert;
 pub use page_num::{PageNum, Ppn, PpnRange, Vpn, VpnRange};
+
+/// 类型别名：简化使用
+/// PA = Physical Address (物理地址)
+/// VA = Virtual Address (虚拟地址)
+/// UA = User Address (用户地址)
+pub use Paddr as PA;
+pub use Vaddr as VA;
+pub use Uaddr as UA;
+
+/// 地址范围类型别名
+pub use PaddrRange as PARange;
+pub use UaddrRange as UARange;
+pub use VaddrRange as VARange;
