@@ -261,3 +261,76 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 - ✅ 所有修改已保存
 
 ---
+
+### 2026-01-15 - Step 1.2 继续：添加 ELF 加载类型安全版本 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 添加 from_elf 的类型安全版本
+
+**Commit**: `87fb6ab`
+
+**Commit 信息**:
+```
+refactor(mm): 添加 ELF 加载的类型安全版本 (from_elf_ua)
+
+- 新增 ElfLoadResult 结构体封装 from_elf 返回值
+- 新增 from_elf_ua() 方法返回类型安全的 UA 地址
+- 新增 user_stack_top_ua() 辅助函数
+- 保留原有 from_elf() 函数以保持向后兼容
+- 零性能开销,仅类型转换包装
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改内容**:
+
+#### 1. 添加 `ElfLoadResult` 结构体
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 封装 from_elf 的返回值，使用类型安全的 UA 地址
+- 字段：
+  - `space: MemorySpace` - 内存空间
+  - `entry_point: UA` - 程序入口地址
+  - `user_stack_top: UA` - 用户栈顶地址
+  - `phdr_addr: UA` - 程序头地址
+  - `ph_num: usize` - 程序头数量
+  - `ph_ent: usize` - 程序头条目大小
+
+#### 2. 添加 `from_elf_ua()` 方法
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 类型安全版本的 ELF 加载函数
+- 返回 `Result<ElfLoadResult, PagingError>`
+- 内部调用原有的 `from_elf()` 并转换返回值
+
+#### 3. 添加 `user_stack_top_ua()` 辅助函数
+- 文件：`os/src/mm/memory_space/memory_space.rs`
+- 返回类型安全的用户栈顶地址 `UA`
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/mm/memory_space/memory_space.rs`: +48 行
+- 新增结构体：`ElfLoadResult`
+- 新增函数：`from_elf_ua()`, `user_stack_top_ua()`
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新函数仅是类型转换包装
+- ✅ 类型安全增强：新代码可以使用 UA 类型标记用户地址
+
+**迁移策略**:
+- 采用渐进式迁移：添加新函数而不是修改现有函数
+- 新代码优先使用类型安全版本（`from_elf_ua()`）
+- 旧代码保持不变，逐步迁移
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+**下一步**: 继续 Step 1.2 - 迁移其他关键模块
+
+---
