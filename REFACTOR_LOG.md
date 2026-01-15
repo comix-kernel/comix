@@ -496,3 +496,75 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 - [ ] os/src/kernel/task/ - 进程内存布局
 
 ---
+
+### 2026-01-15 - Step 1.2 继续：添加架构层地址转换类型安全版本 ✅
+
+**状态**: ✅ 完成
+
+**任务**: 添加 RISC-V 架构层地址转换函数的类型安全版本
+
+**Commit**: `32e7d17`
+
+**Commit 信息**:
+```
+refactor(arch/riscv/mm): 添加地址转换的类型安全版本
+
+- 新增 vaddr_to_paddr_typed() 接受 VA，返回 PA
+- 新增 paddr_to_vaddr_typed() 接受 PA，返回 VA
+- 保留原有函数以保持向后兼容
+- 零性能开销，仅类型转换包装
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**修改内容**:
+
+#### 1. 添加 `vaddr_to_paddr_typed()` 函数
+- 文件：`os/src/arch/riscv/mm/mod.rs`
+- 类型安全版本的虚拟地址到物理地址转换
+- 参数：`vaddr: VA` - 虚拟地址
+- 返回：`PA` - 物理地址
+- 标记为 `unsafe`（与原函数一致）
+
+#### 2. 添加 `paddr_to_vaddr_typed()` 函数
+- 文件：`os/src/arch/riscv/mm/mod.rs`
+- 类型安全版本的物理地址到虚拟地址转换
+- 参数：`paddr: PA` - 物理地址
+- 返回：`VA` - 虚拟地址
+
+#### 3. 导入 `UsizeConvert` trait
+- 文件：`os/src/arch/riscv/mm/mod.rs`
+- 添加 `use crate::mm::address::UsizeConvert;`
+- 使 `as_usize()` 和 `from_usize()` 方法可用
+
+**验证结果**:
+- ✅ 编译成功：`cargo build --target riscv64gc-unknown-none-elf`
+- ✅ 无编译错误
+- ✅ 向后兼容：旧代码继续工作
+
+**代码统计**:
+- 修改文件：1
+  - `os/src/arch/riscv/mm/mod.rs`: +28 行
+- 新增函数：`vaddr_to_paddr_typed()`, `paddr_to_vaddr_typed()`
+
+**影响分析**:
+- ✅ 向后兼容：所有现有代码继续工作
+- ✅ 零性能开销：新函数仅是类型转换包装
+- ✅ 类型安全增强：地址转换现在有明确的类型标记
+- ✅ 架构层基础：为上层代码提供类型安全的地址转换
+
+**技术说明**:
+- 原函数是 `const fn`，但类型安全版本不是 `const`
+- 原因：`UsizeConvert` trait 的方法不是 `const`
+- 影响：类型安全版本不能在编译时常量中使用，但这不影响运行时使用
+
+**Git 状态**:
+- ✅ 已提交到 branch `refactor/momix`
+- ✅ 所有修改已保存
+
+**下一步**: 继续 Step 1.2 - 迁移其他模块
+- [x] os/src/arch/riscv64/mm/ - 架构相关内存操作 ✅
+- [ ] os/src/mm/page_table/ - 页表操作
+- [ ] os/src/kernel/task/ - 进程内存布局
+
+---
