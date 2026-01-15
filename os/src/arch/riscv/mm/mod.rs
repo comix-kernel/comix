@@ -23,6 +23,8 @@ mod page_table_entry; // 模块：页表项
 pub use page_table::{PageTableInner, TlbBatchContext}; // 导出：页表内部结构和TLB批处理上下文
 pub use page_table_entry::PageTableEntry; // 导出：页表项结构体
 
+use crate::mm::address::UsizeConvert; // 导入：地址类型转换 trait
+
 /// SV39 中虚拟地址空间的起始地址
 ///
 /// 此常量定义了内核高位虚拟地址空间的起始位置。
@@ -67,4 +69,30 @@ pub const unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
 /// 此函数必须在所有架构特定的内存管理模块中实现。
 pub const fn paddr_to_vaddr(paddr: usize) -> usize {
     paddr | VADDR_START
+}
+
+/// 转换虚拟地址到物理地址（类型安全版本）
+///
+/// # 参数
+///
+/// * `vaddr` - 虚拟地址
+///
+/// # 返回
+///
+/// 对应的物理地址
+pub unsafe fn vaddr_to_paddr_typed(vaddr: crate::mm::address::VA) -> crate::mm::address::PA {
+    crate::mm::address::PA::from_usize(vaddr.as_usize() & PADDR_MASK)
+}
+
+/// 转换物理地址到虚拟地址（类型安全版本）
+///
+/// # 参数
+///
+/// * `paddr` - 物理地址
+///
+/// # 返回
+///
+/// 对应的虚拟地址
+pub fn paddr_to_vaddr_typed(paddr: crate::mm::address::PA) -> crate::mm::address::VA {
+    crate::mm::address::VA::from_usize(paddr.as_usize() | VADDR_START)
 }
