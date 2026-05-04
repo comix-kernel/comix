@@ -90,11 +90,11 @@ impl UserBuffer {
     /// TODO: 运行时做一次“粗略”范围校验（不保证已映射，仅做地址区间与溢出检查）
     /// 建议在 syscall 层或结合 MemorySpace 做页表级校验。
     pub fn range_sane(&self) -> bool {
-        unimplemented!();
         let start = self.data as usize;
-        let end = start.checked_add(self.len).unwrap_or(usize::MAX);
-        // start < USER_BASE && end <= USER_TOP;
-        true
+        let Some(end) = start.checked_add(self.len) else {
+            return false;
+        };
+        start >= USER_BASE && end <= USER_TOP
     }
 
     /// 返回用户缓冲区长度

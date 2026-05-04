@@ -9,17 +9,6 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner)]
 #![reexport_test_harness_main = "test_main"]
-#![allow(
-    dead_code,
-    unreachable_code,
-    unreachable_patterns,
-    unused_assignments,
-    unused_doc_comments,
-    unused_imports,
-    unused_mut,
-    unused_unsafe,
-    unused_variables
-)]
 
 extern crate alloc;
 
