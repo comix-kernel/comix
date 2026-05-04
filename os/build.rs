@@ -5,6 +5,8 @@
 //! 2. Packs them into an init_simple_fs image
 //! 3. Embeds the image into the kernel binary
 
+#![allow(dead_code)]
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
