@@ -97,22 +97,22 @@ use crate::{
     arch::trap::SumGuard,
     kernel::current_task,
     net::{
-        config::NetworkConfigManager,
+        config::{NetworkConfigError, NetworkConfigManager},
         interface::NETWORK_INTERFACE_MANAGER,
         socket::{
-            SOCKET_SET, SocketFile, SocketHandle, create_tcp_socket, create_udp_socket,
-            get_socket_handle, parse_sockaddr_in, register_socket_fd, unregister_socket_fd,
-            write_sockaddr_in,
+            SocketFile, SocketHandle, create_tcp_socket, create_udp_socket, get_socket_handle,
+            parse_sockaddr_in, register_socket_fd, unregister_socket_fd, write_sockaddr_in,
         },
+        stack::{TcpConnectionState, TcpListenState, network_stack},
     },
     pr_debug, pr_info, println,
     uapi::{
+        errno,
         fcntl::{FdFlags, OpenFlags},
         socket::{SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOCK_TYPE_MASK},
     },
 };
 use alloc::sync::Arc;
-use smoltcp::socket::{tcp, udp};
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
 /// 获取网络接口列表
@@ -134,28 +134,28 @@ pub fn set_network_interface_config(
         let ifname_str = match get_c_str_safe(ifname) {
             Some(s) => s,
             None => {
-                return -1;
+                return -(errno::EFAULT as isize);
             }
         };
 
         let ip_str = match get_c_str_safe(ip) {
             Some(s) => s,
             None => {
-                return -2;
+                return -(errno::EFAULT as isize);
             }
         };
 
         let gateway_str = match get_c_str_safe(gateway) {
             Some(s) => s,
             None => {
-                return -3;
+                return -(errno::EFAULT as isize);
             }
         };
 
         let mask_str = match get_c_str_safe(mask) {
             Some(s) => s,
             None => {
-                return -4;
+                return -(errno::EFAULT as isize);
             }
         };
 
@@ -165,7 +165,14 @@ pub fn set_network_interface_config(
             Ok(_) => 0,
             Err(e) => {
                 println!("Network config error: {:?}", e);
-                -5
+                let errno = match e {
+                    NetworkConfigError::InterfaceNotFound => errno::ENODEV,
+                    NetworkConfigError::InvalidAddress
+                    | NetworkConfigError::InvalidSubnet
+                    | NetworkConfigError::InvalidGateway => errno::EINVAL,
+                    NetworkConfigError::ConfigFailed => errno::EIO,
+                };
+                -(errno as isize)
             }
         }
     }
@@ -423,10 +430,11 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                     listen_endpoint.port
                 );
 
-                let mut sockets = SOCKET_SET.lock();
-                let socket = sockets.get_mut::<tcp::Socket>(h);
-                if socket.listen(listen_endpoint).is_err() {
-                    drop(sockets);
+                if network_stack()
+                    .lock()
+                    .tcp_listen(h, listen_endpoint)
+                    .is_err()
+                {
                     attempts_left = attempts_left.saturating_sub(1);
                     if attempts_left == 0 {
                         return -98; // EADDRINUSE
@@ -434,7 +442,6 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                     endpoint.port = 0;
                     continue;
                 }
-                drop(sockets);
                 break;
             }
 
@@ -497,26 +504,29 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             None => return -88,                       // ENOTSOCK
         };
 
-        let (state, listen_endpoint) = {
-            let sockets = SOCKET_SET.lock();
-            let s = sockets.get::<tcp::Socket>(listen_handle);
-            (s.state(), s.listen_endpoint())
+        let (state, listen_endpoint) = match network_stack()
+            .lock()
+            .tcp_listener_state_endpoint(listen_handle)
+        {
+            Some(v) => v,
+            None => return -88, // ENOTSOCK
         };
 
-        if state != tcp::State::Listen && socket_file.listen_sockets_len() < backlog {
+        if state != TcpListenState::Listen && socket_file.listen_sockets_len() < backlog {
             // detach current listen socket immediately
             let new_listen_handle = match create_tcp_socket() {
                 Ok(SocketHandle::Tcp(h)) => h,
                 _ => return -12, // ENOMEM
             };
 
-            let mut sockets = SOCKET_SET.lock();
-            let new_listen_socket = sockets.get_mut::<tcp::Socket>(new_listen_handle);
-            if new_listen_socket.listen(listen_endpoint).is_err() {
-                sockets.remove(new_listen_handle);
+            if network_stack()
+                .lock()
+                .tcp_listen(new_listen_handle, listen_endpoint)
+                .is_err()
+            {
+                network_stack().lock().remove_tcp_socket(new_listen_handle);
                 return -12; // ENOMEM or other error
             }
-            drop(sockets);
 
             use crate::net::socket::{update_socket_file_handle, update_socket_handle};
             update_socket_handle(
@@ -527,7 +537,10 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
 
             // Established / CloseWait: this handle is ready to return right away.
-            if matches!(state, tcp::State::Established | tcp::State::CloseWait) {
+            if matches!(
+                state,
+                TcpListenState::Established | TcpListenState::CloseWait
+            ) {
                 return accept_return_conn(
                     task.clone(),
                     tid as usize,
@@ -561,12 +574,11 @@ fn accept_return_conn(
 ) -> isize {
     use crate::net::socket::SocketFile;
 
-    let sockets = SOCKET_SET.lock();
-    let conn_socket = sockets.get::<tcp::Socket>(conn_handle);
-    let remote_endpoint = match conn_socket.remote_endpoint() {
-        Some(ep) => ep,
-        None => return -11, // EAGAIN
-    };
+    let (remote_endpoint, local_endpoint) =
+        match network_stack().lock().tcp_accept_endpoints(conn_handle) {
+            Some(v) => v,
+            None => return -11, // EAGAIN
+        };
 
     if !addr.is_null() && !addrlen.is_null() {
         let _guard = SumGuard::new();
@@ -577,11 +589,10 @@ fn accept_return_conn(
     }
 
     let conn = Arc::new(SocketFile::new(SocketHandle::Tcp(conn_handle)));
-    if let Some(local_ep) = conn_socket.local_endpoint() {
+    if let Some(local_ep) = local_endpoint {
         conn.set_local_endpoint(local_ep);
     }
     conn.set_remote_endpoint(remote_endpoint);
-    drop(sockets);
 
     match task.lock().fd_table.alloc(conn) {
         Ok(fd) => {
@@ -630,14 +641,12 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 
     match handle {
         SocketHandle::Tcp(h) => {
-            let sockets = SOCKET_SET.lock();
-            let socket = sockets.get::<tcp::Socket>(h);
-            pr_debug!(
-                "connect: socket state={:?}, is_open={}",
-                socket.state(),
-                socket.is_open()
-            );
-            if socket.is_open() {
+            let (_state, is_open) = network_stack()
+                .lock()
+                .tcp_debug_state(h)
+                .unwrap_or((TcpConnectionState::Closed, false));
+            pr_debug!("connect: socket state={:?}, is_open={}", _state, is_open);
+            if is_open {
                 return -106; // EISCONN
             }
 
@@ -649,31 +658,33 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 _ => false,
             };
 
-            let mut local_endpoint = socket.local_endpoint().unwrap_or_else(|| {
-                // Choose local address based on remote address
-                use smoltcp::wire::IpAddress;
-                let local_addr = match endpoint.addr {
-                    IpAddress::Ipv4(_) => {
-                        if is_loopback {
-                            IpAddress::Ipv4(Ipv4Address::LOCALHOST)
-                        } else {
-                            IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))
+            let mut local_endpoint = network_stack()
+                .lock()
+                .socket_local_endpoint(handle)
+                .unwrap_or_else(|| {
+                    // Choose local address based on remote address.
+                    use smoltcp::wire::IpAddress;
+                    let local_addr = match endpoint.addr {
+                        IpAddress::Ipv4(_) => {
+                            if is_loopback {
+                                IpAddress::Ipv4(Ipv4Address::LOCALHOST)
+                            } else {
+                                IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15))
+                            }
                         }
-                    }
-                    #[cfg(feature = "proto-ipv6")]
-                    IpAddress::Ipv6(_) => {
-                        use smoltcp::wire::Ipv6Address;
-                        if is_loopback {
-                            IpAddress::Ipv6(Ipv6Address::LOOPBACK)
-                        } else {
-                            // Use unspecified address, let the interface choose
-                            IpAddress::Ipv6(Ipv6Address::UNSPECIFIED)
+                        #[cfg(feature = "proto-ipv6")]
+                        IpAddress::Ipv6(_) => {
+                            use smoltcp::wire::Ipv6Address;
+                            if is_loopback {
+                                IpAddress::Ipv6(Ipv6Address::LOOPBACK)
+                            } else {
+                                IpAddress::Ipv6(Ipv6Address::UNSPECIFIED)
+                            }
                         }
-                    }
-                    _ => IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15)),
-                };
-                IpEndpoint::new(local_addr, 0)
-            });
+                        _ => IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15)),
+                    };
+                    IpEndpoint::new(local_addr, 0)
+                });
 
             // Allocate ephemeral port if needed
             if local_endpoint.port == 0 {
@@ -689,8 +700,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             {
                 sf.set_local_endpoint(local_endpoint);
             }
-            drop(sockets);
-
             use crate::net::socket::tcp_connect;
             if let Err(e) = tcp_connect(h, endpoint, local_endpoint) {
                 pr_debug!("connect: tcp_connect failed: {:?}", e);
@@ -699,7 +708,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
 
             // For blocking sockets, wait until connection is established
             if !is_nonblock {
-                use crate::net::socket::SOCKET_SET;
                 pr_debug!("connect: handle={:?}, entering wait loop", h);
                 loop {
                     // Poll until all loopback packets are processed
@@ -707,17 +715,17 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                         crate::net::socket::poll_until_empty();
                     }
 
-                    let sockets = SOCKET_SET.lock();
-                    let socket = sockets.get::<smoltcp::socket::tcp::Socket>(h);
-                    let state = socket.state();
+                    let state = network_stack()
+                        .lock()
+                        .tcp_connection_state(h)
+                        .unwrap_or(TcpConnectionState::Closed);
                     pr_debug!("connect: loop, handle={:?}, state={:?}", h, state);
-                    drop(sockets);
 
-                    if state == smoltcp::socket::tcp::State::Established {
+                    if state == TcpConnectionState::Established {
                         pr_debug!("connect: established");
                         break;
                     }
-                    if state == smoltcp::socket::tcp::State::Closed {
+                    if state == TcpConnectionState::Closed {
                         pr_debug!("connect: socket closed, returning ECONNREFUSED");
                         return -111; // ECONNREFUSED
                     }
@@ -811,11 +819,15 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
         let (_tid, file) = {
             let task_lock = task.lock();
             let tid = task_lock.tid;
+            if sockfd < 0 {
+                pr_debug!("send: EBADF tid={}, sockfd={}", tid, sockfd);
+                return -(crate::uapi::errno::EBADF as isize);
+            }
             let file = match task_lock.fd_table.get(sockfd as usize) {
                 Ok(f) => f,
                 Err(_) => {
-                    crate::pr_warn!("send: EBADF tid={}, sockfd={}", tid, sockfd);
-                    return -9;
+                    pr_debug!("send: EBADF tid={}, sockfd={}", tid, sockfd);
+                    return -(crate::uapi::errno::EBADF as isize);
                 }
             };
             (tid, file)
@@ -860,11 +872,15 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
         let (_tid, file) = {
             let task_lock = task.lock();
             let tid = task_lock.tid;
+            if sockfd < 0 {
+                pr_debug!("recv: EBADF tid={}, sockfd={}", tid, sockfd);
+                return -(crate::uapi::errno::EBADF as isize);
+            }
             let file = match task_lock.fd_table.get(sockfd as usize) {
                 Ok(f) => f,
                 Err(_) => {
-                    crate::pr_warn!("recv: EBADF tid={}, sockfd={}", tid, sockfd);
-                    return -9;
+                    pr_debug!("recv: EBADF tid={}, sockfd={}", tid, sockfd);
+                    return -(crate::uapi::errno::EBADF as isize);
                 }
             };
             (tid, file)
@@ -1726,9 +1742,7 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
 
     if should_close_tcp {
         if let SocketHandle::Tcp(h) = handle {
-            let mut sockets = SOCKET_SET.lock();
-            let socket = sockets.get_mut::<tcp::Socket>(h);
-            socket.close();
+            network_stack().lock().tcp_close(h);
         }
     }
 
@@ -1751,25 +1765,7 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
     drop(task_lock);
 
-    let sockets = SOCKET_SET.lock();
-    let local_endpoint = match handle {
-        SocketHandle::Tcp(h) => {
-            let socket = sockets.get::<tcp::Socket>(h);
-            socket.local_endpoint()
-        }
-        SocketHandle::Udp(h) => {
-            let socket = sockets.get::<udp::Socket>(h);
-            let listen_ep = socket.endpoint();
-            Some(IpEndpoint::new(
-                listen_ep
-                    .addr
-                    .unwrap_or(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED)),
-                listen_ep.port,
-            ))
-        }
-    };
-
-    drop(sockets);
+    let local_endpoint = network_stack().lock().socket_local_endpoint(handle);
 
     // Linux behavior: getsockname() on an unbound socket typically returns success and
     // fills a sockaddr with AF_INET and port 0.
@@ -1801,15 +1797,10 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         None => return -88, // ENOTSOCK
     };
 
-    let sockets = SOCKET_SET.lock();
     let remote_endpoint = match handle {
-        SocketHandle::Tcp(h) => {
-            let socket = sockets.get::<tcp::Socket>(h);
-            socket.remote_endpoint()
-        }
+        SocketHandle::Tcp(_) => network_stack().lock().socket_remote_endpoint(handle),
         SocketHandle::Udp(_) => {
             // UDP doesn't have a peer, use stored endpoint
-            drop(sockets);
             let file = match task.lock().fd_table.get(sockfd as usize) {
                 Ok(f) => f,
                 Err(_) => return -9, // EBADF

@@ -19,7 +19,7 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 
 pub struct NetIfaceWrapper {
-    device: SpinLock<crate::net::interface::NetDeviceAdapter>,
+    device: SpinLock<crate::net::stack::NetDeviceAdapter>,
     interface: SpinLock<Interface>,
 }
 
@@ -103,9 +103,7 @@ impl NetIfaceWrapper {
 }
 
 lazy_static! {
-    pub static ref SOCKET_SET: SpinLock<SocketSet<'static>> = SpinLock::new(SocketSet::new(vec![]));
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> = SpinLock::new(BTreeMap::new());
-    pub static ref NET_IFACE: SpinLock<Option<NetIfaceWrapper>> = SpinLock::new(None);
     // UDP port dispatcher: one smoltcp UDP socket per local port, plus multiple "logical" sockets
     // (per fd) that receive datagrams based on their connected remote endpoint.
     static ref UDP_PORTS: SpinLock<BTreeMap<u16, UdpPortEntry>> = SpinLock::new(BTreeMap::new());
@@ -116,6 +114,8 @@ lazy_static! {
     static ref PENDING_TCP_CLOSE: SpinLock<alloc::vec::Vec<SmoltcpHandle>> =
         SpinLock::new(alloc::vec::Vec::new());
 }
+
+use crate::net::stack::{NET_IFACE, SOCKET_SET};
 
 use crate::uapi::fcntl::OpenFlags;
 use crate::uapi::socket::SocketOptions;
@@ -232,32 +232,9 @@ impl SocketFile {
     /// This is used to provide a minimal accept/backlog behavior on top of smoltcp's
     /// single-socket listen model.
     pub fn take_established_from_listen_queue(&self) -> Option<SocketHandle> {
-        let sockets = SOCKET_SET.lock();
-        let mut q = self.listen_sockets.lock();
-        let mut i = 0;
-        while i < q.len() {
-            match q[i] {
-                SocketHandle::Tcp(h) => {
-                    let s = sockets.get::<tcp::Socket>(h);
-                    match s.state() {
-                        tcp::State::Established | tcp::State::CloseWait => {
-                            return Some(q.remove(i));
-                        }
-                        tcp::State::Closed => {
-                            q.remove(i);
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-                SocketHandle::Udp(_) => {
-                    q.remove(i);
-                    continue;
-                }
-            }
-            i += 1;
-        }
-        None
+        crate::net::stack::network_stack()
+            .lock()
+            .take_established_from_listen_queue(self)
     }
 
     pub fn set_handle(&self, new_handle: SocketHandle) {
@@ -314,68 +291,17 @@ impl SocketFile {
     }
 
     pub fn is_closed(&self) -> bool {
-        let sockets = SOCKET_SET.lock();
-        match self.handle.lock().as_ref() {
-            Some(SocketHandle::Tcp(h)) => {
-                let socket = sockets.get::<tcp::Socket>(*h);
-                socket.state() == tcp::State::Closed
-            }
-            _ => false,
-        }
+        crate::net::stack::network_stack()
+            .lock()
+            .socket_is_closed(self)
     }
 }
 
 impl Drop for SocketFile {
     fn drop(&mut self) {
-        let mut sockets = SOCKET_SET.lock();
-        if let Some(handle) = *self.handle.lock() {
-            match handle {
-                SocketHandle::Tcp(h) => {
-                    let socket = sockets.get_mut::<tcp::Socket>(h);
-                    let state = socket.state();
-                    crate::pr_debug!("[Socket] Drop: handle={:?}, state={:?}", h, state);
-                    // Check if we need to close the socket.
-                    //
-                    // For active connections, do NOT remove from SocketSet immediately after close(),
-                    // otherwise the peer may observe an abortive close and user programs (iperf3)
-                    // can treat it as "unexpectedly closed".
-                    match state {
-                        tcp::State::Closed | tcp::State::TimeWait | tcp::State::Listen => {
-                            // Fully closed, safe to remove now.
-                            sockets.remove(h);
-                        }
-                        _ => {
-                            // Initiate/continue graceful close, and defer removal until the stack
-                            // transitions to Closed/TimeWait (requires polling).
-                            crate::pr_debug!("[Socket] Drop: closing socket handle={:?}", h);
-                            socket.close();
-                            PENDING_TCP_CLOSE.lock().push(h);
-                        }
-                    }
-                }
-                SocketHandle::Udp(h) => {
-                    // UDP sockets may be managed by the per-port dispatcher (shared smoltcp socket).
-                    // Do not remove from SocketSet here; stale logical sockets are cleaned up in the
-                    // dispatcher, which will remove the shared socket when no logical sockets remain.
-                    let ports = UDP_PORTS.lock();
-                    let is_shared = ports.values().any(|e| e.handle == h);
-                    drop(ports);
-                    if !is_shared {
-                        sockets.remove(h);
-                    }
-                }
-            }
-        }
-        for handle in self.listen_sockets.lock().iter() {
-            match handle {
-                SocketHandle::Tcp(h) => {
-                    sockets.remove(*h);
-                }
-                SocketHandle::Udp(h) => {
-                    sockets.remove(*h);
-                }
-            }
-        }
+        crate::net::stack::network_stack()
+            .lock()
+            .drop_socket_file(self);
     }
 }
 
@@ -475,223 +401,33 @@ pub fn socket_sendto(
     buf: &[u8],
     endpoint: IpEndpoint,
 ) -> Result<usize, FsError> {
-    let result = {
-        let mut sockets = SOCKET_SET.lock();
-        match handle {
-            SocketHandle::Tcp(_) => Err(FsError::NotSupported), // TCP doesn't support sendto
-            SocketHandle::Udp(h) => {
-                let socket = sockets.get_mut::<udp::Socket>(h);
-                socket
-                    .send_slice(buf, endpoint)
-                    .map_err(|_| FsError::WouldBlock)?;
-                Ok(buf.len())
-            }
-        }
-    };
-    if result.is_ok() {
-        poll_network_interfaces();
-        crate::kernel::syscall::io::wake_poll_waiters();
-    }
-    result
+    crate::net::stack::network_stack()
+        .lock()
+        .socket_sendto(handle, buf, endpoint)
 }
 
 impl File for SocketFile {
     fn readable(&self) -> bool {
-        // Listener socket: only readable when a connection is ready to accept.
-        if *self.is_listener.lock() {
-            let sockets = SOCKET_SET.lock();
-
-            for handle in self.listen_sockets.lock().iter() {
-                if let SocketHandle::Tcp(h) = handle {
-                    let s = sockets.get::<tcp::Socket>(*h);
-                    if matches!(s.state(), tcp::State::Established | tcp::State::CloseWait) {
-                        return true;
-                    }
-                }
-            }
-
-            if let Some(SocketHandle::Tcp(h)) = *self.handle.lock() {
-                let s = sockets.get::<tcp::Socket>(h);
-                return matches!(s.state(), tcp::State::Established | tcp::State::CloseWait);
-            }
-            return false;
-        }
-
-        let sockets = SOCKET_SET.lock();
-        match self.handle.lock().as_ref() {
-            Some(SocketHandle::Tcp(h)) => {
-                let socket = sockets.get::<tcp::Socket>(*h);
-                let can_recv = socket.can_recv();
-                let state = socket.state();
-                crate::pr_debug!(
-                    "[Socket] readable: handle={:?}, state={:?}, can_recv={}",
-                    h,
-                    state,
-                    can_recv
-                );
-                // Linux-like semantics: sockets become readable on FIN (EOF).
-                // smoltcp reports this as CloseWait when the peer has closed.
-                can_recv || matches!(state, tcp::State::Closed | tcp::State::CloseWait)
-            }
-            Some(SocketHandle::Udp(h)) => {
-                drop(sockets);
-                self.udp_queue_len() > 0
-            }
-            None => false,
-        }
+        crate::net::stack::network_stack()
+            .lock()
+            .socket_readable(self)
     }
     fn writable(&self) -> bool {
-        let sockets = SOCKET_SET.lock();
-        let result = match self.handle.lock().as_ref() {
-            Some(SocketHandle::Tcp(h)) => {
-                let socket = sockets.get::<tcp::Socket>(*h);
-                let can_send = socket.can_send();
-                let state = socket.state();
-                crate::pr_debug!(
-                    "[Socket] writable: handle={:?}, state={:?}, can_send={}",
-                    h,
-                    state,
-                    can_send
-                );
-                can_send
-            }
-            Some(SocketHandle::Udp(h)) => {
-                let socket = sockets.get::<udp::Socket>(*h);
-                socket.can_send()
-            }
-            None => false,
-        };
-        result
+        crate::net::stack::network_stack()
+            .lock()
+            .socket_writable(self)
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
-        if self.is_shutdown_read() {
-            return Ok(0); // EOF
-        }
-
-        let mut sockets = SOCKET_SET.lock();
-        let result = match self.handle.lock().as_ref() {
-            Some(SocketHandle::Tcp(h)) => {
-                let socket = sockets.get_mut::<tcp::Socket>(*h);
-                let state = socket.state();
-                let recv_queue = socket.recv_queue();
-                crate::pr_debug!(
-                    "[Socket] read: handle={:?}, state={:?}, recv_queue={}, buf.len()={}",
-                    h,
-                    state,
-                    recv_queue,
-                    buf.len()
-                );
-
-                // Closed socket returns EOF (0 bytes)
-                if socket.state() == tcp::State::Closed {
-                    return Ok(0);
-                }
-
-                // Linux-like EOF semantics for TCP:
-                // once peer has closed (CloseWait) and we have no pending data, read must return 0.
-                if state == tcp::State::CloseWait && recv_queue == 0 {
-                    return Ok(0);
-                }
-
-                let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
-
-                // CRITICAL FIX: smoltcp's recv_slice() returns Ok(0) when no data is available
-                // but the socket is still connected. We need to distinguish between:
-                // 1. No data available (should return EAGAIN for non-blocking, or block for blocking)
-                // 2. Connection closed (should return 0 = EOF)
-                if let Ok(0) = result {
-                    // CloseWait indicates FIN received. Treat 0-length read as EOF.
-                    if state == tcp::State::CloseWait {
-                        crate::pr_debug!(
-                            "[Socket] read: recv_slice returned 0 and state=CloseWait, returning EOF"
-                        );
-                        Ok(0)
-                    } else
-                    // recv_slice returned 0 bytes - check if this is EOF or just no data
-                    if socket.may_recv() {
-                        // Socket can still receive data, so this is not EOF
-                        // Return EAGAIN to indicate no data available
-                        crate::pr_debug!(
-                            "[Socket] read: recv_slice returned 0 but may_recv=true, returning EAGAIN"
-                        );
-                        Err(FsError::WouldBlock)
-                    } else {
-                        // Socket cannot receive anymore, this is EOF
-                        crate::pr_debug!(
-                            "[Socket] read: recv_slice returned 0 and may_recv=false, returning EOF"
-                        );
-                        Ok(0)
-                    }
-                } else {
-                    if let Ok(n) = result {
-                        crate::pr_debug!("[Socket] read: received {} bytes", n);
-                    }
-                    result
-                }
-            }
-            Some(SocketHandle::Udp(_h)) => {
-                drop(sockets);
-                let Some(d) = self.udp_pop() else {
-                    return Err(FsError::WouldBlock);
-                };
-                let n = core::cmp::min(buf.len(), d.len);
-                buf[..n].copy_from_slice(&d.data[..n]);
-                Ok(n)
-            }
-            None => Err(FsError::InvalidArgument),
-        };
-        if result.is_ok() {
-            crate::kernel::syscall::io::wake_poll_waiters();
-        }
-        result
+        crate::net::stack::network_stack()
+            .lock()
+            .socket_read(self, buf)
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        if self.is_shutdown_write() {
-            return Err(FsError::BrokenPipe);
-        }
-
-        let result = {
-            let mut sockets = SOCKET_SET.lock();
-            match self.handle.lock().as_ref() {
-                Some(SocketHandle::Tcp(h)) => {
-                    let socket = sockets.get_mut::<tcp::Socket>(*h);
-                    let result = socket.send_slice(buf).map_err(|_| FsError::WouldBlock);
-
-                    // Similar to recv_slice(), smoltcp may return Ok(0) when it cannot currently
-                    // accept more data, even though the connection is still alive.
-                    if !buf.is_empty() {
-                        if let Ok(0) = result {
-                            if socket.may_send() {
-                                return Err(FsError::WouldBlock);
-                            } else {
-                                return Err(FsError::BrokenPipe);
-                            }
-                        }
-                    }
-
-                    result
-                }
-                Some(SocketHandle::Udp(h)) => {
-                    let endpoint = match self.get_remote_endpoint() {
-                        Some(ep) => ep,
-                        None => return Err(FsError::NotConnected),
-                    };
-                    let socket = sockets.get_mut::<udp::Socket>(*h);
-                    socket
-                        .send_slice(buf, endpoint)
-                        .map_err(|_| FsError::WouldBlock)?;
-                    Ok(buf.len())
-                }
-                None => Err(FsError::InvalidArgument),
-            }
-        };
-        if result.is_ok() {
-            poll_network_interfaces();
-            crate::kernel::syscall::io::wake_poll_waiters();
-        }
-        result
+        crate::net::stack::network_stack()
+            .lock()
+            .socket_write(self, buf)
     }
 
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
@@ -712,54 +448,352 @@ impl File for SocketFile {
     }
 
     fn recvfrom(&self, buf: &mut [u8]) -> Result<(usize, Option<alloc::vec::Vec<u8>>), FsError> {
-        if self.is_shutdown_read() {
-            return Ok((0, None));
+        crate::net::stack::network_stack()
+            .lock()
+            .socket_recvfrom(self, buf)
+    }
+}
+
+pub(crate) fn take_established_from_listen_queue_impl(file: &SocketFile) -> Option<SocketHandle> {
+    let sockets = SOCKET_SET.lock();
+    let mut q = file.listen_sockets.lock();
+    let mut i = 0;
+    while i < q.len() {
+        match q[i] {
+            SocketHandle::Tcp(h) => {
+                let s = sockets.get::<tcp::Socket>(h);
+                match s.state() {
+                    tcp::State::Established | tcp::State::CloseWait => {
+                        return Some(q.remove(i));
+                    }
+                    tcp::State::Closed => {
+                        q.remove(i);
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            SocketHandle::Udp(_) => {
+                q.remove(i);
+                continue;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+pub(crate) fn socket_is_closed_impl(file: &SocketFile) -> bool {
+    let sockets = SOCKET_SET.lock();
+    match file.handle.lock().as_ref() {
+        Some(SocketHandle::Tcp(h)) => {
+            let socket = sockets.get::<tcp::Socket>(*h);
+            socket.state() == tcp::State::Closed
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn drop_socket_file_impl(file: &SocketFile) {
+    let mut sockets = SOCKET_SET.lock();
+    if let Some(handle) = *file.handle.lock() {
+        match handle {
+            SocketHandle::Tcp(h) => {
+                let socket = sockets.get_mut::<tcp::Socket>(h);
+                let state = socket.state();
+                crate::pr_debug!("[Socket] Drop: handle={:?}, state={:?}", h, state);
+                // Active connections are closed gracefully and removed by the poll reaper.
+                match state {
+                    tcp::State::Closed | tcp::State::TimeWait | tcp::State::Listen => {
+                        sockets.remove(h);
+                    }
+                    _ => {
+                        crate::pr_debug!("[Socket] Drop: closing socket handle={:?}", h);
+                        socket.close();
+                        PENDING_TCP_CLOSE.lock().push(h);
+                    }
+                }
+            }
+            SocketHandle::Udp(h) => {
+                // UDP sockets may be shared by the per-port dispatcher.
+                let ports = UDP_PORTS.lock();
+                let is_shared = ports.values().any(|e| e.handle == h);
+                drop(ports);
+                if !is_shared {
+                    sockets.remove(h);
+                }
+            }
+        }
+    }
+    for handle in file.listen_sockets.lock().iter() {
+        match handle {
+            SocketHandle::Tcp(h) => {
+                sockets.remove(*h);
+            }
+            SocketHandle::Udp(h) => {
+                sockets.remove(*h);
+            }
+        }
+    }
+}
+
+pub(crate) fn socket_sendto_impl(
+    handle: SocketHandle,
+    buf: &[u8],
+    endpoint: IpEndpoint,
+) -> Result<usize, FsError> {
+    let result = {
+        let mut sockets = SOCKET_SET.lock();
+        match handle {
+            SocketHandle::Tcp(_) => Err(FsError::NotSupported),
+            SocketHandle::Udp(h) => {
+                let socket = sockets.get_mut::<udp::Socket>(h);
+                socket
+                    .send_slice(buf, endpoint)
+                    .map_err(|_| FsError::WouldBlock)?;
+                Ok(buf.len())
+            }
+        }
+    };
+    if result.is_ok() {
+        poll_network_interfaces_impl();
+        crate::kernel::syscall::io::wake_poll_waiters();
+    }
+    result
+}
+
+pub(crate) fn socket_readable_impl(file: &SocketFile) -> bool {
+    // Listener socket: only readable when a connection is ready to accept.
+    if *file.is_listener.lock() {
+        let sockets = SOCKET_SET.lock();
+
+        for handle in file.listen_sockets.lock().iter() {
+            if let SocketHandle::Tcp(h) = handle {
+                let s = sockets.get::<tcp::Socket>(*h);
+                if matches!(s.state(), tcp::State::Established | tcp::State::CloseWait) {
+                    return true;
+                }
+            }
         }
 
+        if let Some(SocketHandle::Tcp(h)) = *file.handle.lock() {
+            let s = sockets.get::<tcp::Socket>(h);
+            return matches!(s.state(), tcp::State::Established | tcp::State::CloseWait);
+        }
+        return false;
+    }
+
+    let sockets = SOCKET_SET.lock();
+    match file.handle.lock().as_ref() {
+        Some(SocketHandle::Tcp(h)) => {
+            let socket = sockets.get::<tcp::Socket>(*h);
+            let can_recv = socket.can_recv();
+            let state = socket.state();
+            crate::pr_debug!(
+                "[Socket] readable: handle={:?}, state={:?}, can_recv={}",
+                h,
+                state,
+                can_recv
+            );
+            can_recv || matches!(state, tcp::State::Closed | tcp::State::CloseWait)
+        }
+        Some(SocketHandle::Udp(_)) => {
+            drop(sockets);
+            file.udp_queue_len() > 0
+        }
+        None => false,
+    }
+}
+
+pub(crate) fn socket_writable_impl(file: &SocketFile) -> bool {
+    let sockets = SOCKET_SET.lock();
+    match file.handle.lock().as_ref() {
+        Some(SocketHandle::Tcp(h)) => {
+            let socket = sockets.get::<tcp::Socket>(*h);
+            let can_send = socket.can_send();
+            let state = socket.state();
+            crate::pr_debug!(
+                "[Socket] writable: handle={:?}, state={:?}, can_send={}",
+                h,
+                state,
+                can_send
+            );
+            can_send
+        }
+        Some(SocketHandle::Udp(h)) => {
+            let socket = sockets.get::<udp::Socket>(*h);
+            socket.can_send()
+        }
+        None => false,
+    }
+}
+
+pub(crate) fn socket_read_impl(file: &SocketFile, buf: &mut [u8]) -> Result<usize, FsError> {
+    if file.is_shutdown_read() {
+        return Ok(0);
+    }
+
+    let mut sockets = SOCKET_SET.lock();
+    let result = match file.handle.lock().as_ref() {
+        Some(SocketHandle::Tcp(h)) => {
+            let socket = sockets.get_mut::<tcp::Socket>(*h);
+            let state = socket.state();
+            let recv_queue = socket.recv_queue();
+            crate::pr_debug!(
+                "[Socket] read: handle={:?}, state={:?}, recv_queue={}, buf.len()={}",
+                h,
+                state,
+                recv_queue,
+                buf.len()
+            );
+
+            if socket.state() == tcp::State::Closed {
+                return Ok(0);
+            }
+
+            if state == tcp::State::CloseWait && recv_queue == 0 {
+                return Ok(0);
+            }
+
+            let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
+
+            if let Ok(0) = result {
+                if state == tcp::State::CloseWait {
+                    crate::pr_debug!(
+                        "[Socket] read: recv_slice returned 0 and state=CloseWait, returning EOF"
+                    );
+                    Ok(0)
+                } else if socket.may_recv() {
+                    crate::pr_debug!(
+                        "[Socket] read: recv_slice returned 0 but may_recv=true, returning EAGAIN"
+                    );
+                    Err(FsError::WouldBlock)
+                } else {
+                    crate::pr_debug!(
+                        "[Socket] read: recv_slice returned 0 and may_recv=false, returning EOF"
+                    );
+                    Ok(0)
+                }
+            } else {
+                if let Ok(n) = result {
+                    crate::pr_debug!("[Socket] read: received {} bytes", n);
+                }
+                result
+            }
+        }
+        Some(SocketHandle::Udp(_)) => {
+            drop(sockets);
+            let Some(d) = file.udp_pop() else {
+                return Err(FsError::WouldBlock);
+            };
+            let n = core::cmp::min(buf.len(), d.len);
+            buf[..n].copy_from_slice(&d.data[..n]);
+            Ok(n)
+        }
+        None => Err(FsError::InvalidArgument),
+    };
+    if result.is_ok() {
+        crate::kernel::syscall::io::wake_poll_waiters();
+    }
+    result
+}
+
+pub(crate) fn socket_write_impl(file: &SocketFile, buf: &[u8]) -> Result<usize, FsError> {
+    if file.is_shutdown_write() {
+        return Err(FsError::BrokenPipe);
+    }
+
+    let result = {
         let mut sockets = SOCKET_SET.lock();
-        match self.handle.lock().as_ref() {
+        match file.handle.lock().as_ref() {
             Some(SocketHandle::Tcp(h)) => {
                 let socket = sockets.get_mut::<tcp::Socket>(*h);
-                let state = socket.state();
-                if state == tcp::State::Closed {
-                    return Ok((0, None));
-                }
-                if state == tcp::State::CloseWait && socket.recv_queue() == 0 {
-                    return Ok((0, None));
+                let result = socket.send_slice(buf).map_err(|_| FsError::WouldBlock);
+
+                if !buf.is_empty() {
+                    if let Ok(0) = result {
+                        if socket.may_send() {
+                            return Err(FsError::WouldBlock);
+                        } else {
+                            return Err(FsError::BrokenPipe);
+                        }
+                    }
                 }
 
-                let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
-                let n = if let Ok(0) = result {
-                    if state == tcp::State::CloseWait {
-                        0
-                    } else if socket.may_recv() {
-                        return Err(FsError::WouldBlock);
-                    } else {
-                        0
-                    }
-                } else {
-                    result?
-                };
-                let remote = socket.remote_endpoint().map(|ep| {
-                    let mut addr_buf = alloc::vec![0u8; 16];
-                    let _ = write_sockaddr_in_to_buf(&mut addr_buf, ep);
-                    addr_buf
-                });
-                Ok((n, remote))
+                result
             }
-            Some(SocketHandle::Udp(_h)) => {
-                drop(sockets);
-                let Some(d) = self.udp_pop() else {
-                    return Err(FsError::WouldBlock);
+            Some(SocketHandle::Udp(h)) => {
+                let endpoint = match file.get_remote_endpoint() {
+                    Some(ep) => ep,
+                    None => return Err(FsError::NotConnected),
                 };
-                let n = core::cmp::min(buf.len(), d.len);
-                buf[..n].copy_from_slice(&d.data[..n]);
-                let mut addr_buf = alloc::vec![0u8; 16];
-                let _ = write_sockaddr_in_to_buf(&mut addr_buf, d.src);
-                Ok((n, Some(addr_buf)))
+                let socket = sockets.get_mut::<udp::Socket>(*h);
+                socket
+                    .send_slice(buf, endpoint)
+                    .map_err(|_| FsError::WouldBlock)?;
+                Ok(buf.len())
             }
             None => Err(FsError::InvalidArgument),
         }
+    };
+    if result.is_ok() {
+        poll_network_interfaces_impl();
+        crate::kernel::syscall::io::wake_poll_waiters();
+    }
+    result
+}
+
+pub(crate) fn socket_recvfrom_impl(
+    file: &SocketFile,
+    buf: &mut [u8],
+) -> Result<(usize, Option<alloc::vec::Vec<u8>>), FsError> {
+    if file.is_shutdown_read() {
+        return Ok((0, None));
+    }
+
+    let mut sockets = SOCKET_SET.lock();
+    match file.handle.lock().as_ref() {
+        Some(SocketHandle::Tcp(h)) => {
+            let socket = sockets.get_mut::<tcp::Socket>(*h);
+            let state = socket.state();
+            if state == tcp::State::Closed {
+                return Ok((0, None));
+            }
+            if state == tcp::State::CloseWait && socket.recv_queue() == 0 {
+                return Ok((0, None));
+            }
+
+            let result = socket.recv_slice(buf).map_err(|_| FsError::WouldBlock);
+            let n = if let Ok(0) = result {
+                if state == tcp::State::CloseWait {
+                    0
+                } else if socket.may_recv() {
+                    return Err(FsError::WouldBlock);
+                } else {
+                    0
+                }
+            } else {
+                result?
+            };
+            let remote = socket.remote_endpoint().map(|ep| {
+                let mut addr_buf = alloc::vec![0u8; 16];
+                let _ = write_sockaddr_in_to_buf(&mut addr_buf, ep);
+                addr_buf
+            });
+            Ok((n, remote))
+        }
+        Some(SocketHandle::Udp(_)) => {
+            drop(sockets);
+            let Some(d) = file.udp_pop() else {
+                return Err(FsError::WouldBlock);
+            };
+            let n = core::cmp::min(buf.len(), d.len);
+            buf[..n].copy_from_slice(&d.data[..n]);
+            let mut addr_buf = alloc::vec![0u8; 16];
+            let _ = write_sockaddr_in_to_buf(&mut addr_buf, d.src);
+            Ok((n, Some(addr_buf)))
+        }
+        None => Err(FsError::InvalidArgument),
     }
 }
 
@@ -788,7 +822,7 @@ fn create_udp_socket_in_set(sockets: &mut SocketSet<'static>) -> Result<SmoltcpH
     Ok(sockets.add(socket))
 }
 
-pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
+pub(crate) fn create_tcp_socket_impl() -> Result<SocketHandle, ()> {
     let mut rx_vec = alloc::vec::Vec::new();
     rx_vec.try_reserve(4096).map_err(|_| ())?;
     rx_vec.resize(4096, 0);
@@ -805,7 +839,7 @@ pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
     Ok(SocketHandle::Tcp(handle))
 }
 
-pub fn create_udp_socket() -> Result<SocketHandle, ()> {
+pub(crate) fn create_udp_socket_impl() -> Result<SocketHandle, ()> {
     let mut sockets = SOCKET_SET.lock();
     let handle = create_udp_socket_in_set(&mut *sockets)?;
     Ok(SocketHandle::Udp(handle))
@@ -895,7 +929,7 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
 }
 
 /// Initialize network interface (should be called during network setup)
-pub fn init_network(mut smoltcp_iface: crate::net::interface::SmoltcpInterface) {
+pub(crate) fn init_network_impl(mut smoltcp_iface: crate::net::interface::SmoltcpInterface) {
     let wrapper = NetIfaceWrapper {
         device: SpinLock::new(smoltcp_iface.device_adapter_mut().clone()),
         interface: SpinLock::new(smoltcp_iface.into_interface()),
@@ -904,7 +938,11 @@ pub fn init_network(mut smoltcp_iface: crate::net::interface::SmoltcpInterface) 
 }
 
 /// Perform TCP connect with Context
-pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
+pub(crate) fn tcp_connect_impl(
+    handle: SmoltcpHandle,
+    remote: IpEndpoint,
+    local: IpEndpoint,
+) -> Result<(), ()> {
     crate::pr_debug!("tcp_connect: start, handle={:?}", handle);
 
     let iface_guard = NET_IFACE.lock();
@@ -938,7 +976,7 @@ pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint)
 }
 
 /// Poll network interfaces to process packets
-pub fn poll_network_interfaces() {
+pub(crate) fn poll_network_interfaces_impl() {
     if let Some(ref wrapper) = *NET_IFACE.lock() {
         crate::pr_debug!("poll_network_interfaces: calling poll");
         wrapper.poll(&SOCKET_SET);
@@ -949,9 +987,9 @@ pub fn poll_network_interfaces() {
 ///
 /// IMPORTANT: this may allocate (copies UDP payloads) and therefore must not be called from
 /// interrupt context.
-pub fn poll_network_and_dispatch() {
-    poll_network_interfaces();
-    if udp_dispatch() {
+pub(crate) fn poll_network_and_dispatch_impl() {
+    poll_network_interfaces_impl();
+    if udp_dispatch_impl() {
         crate::kernel::syscall::io::wake_poll_waiters();
     }
 }
@@ -959,7 +997,7 @@ pub fn poll_network_and_dispatch() {
 /// Drain UDP datagrams from shared per-port sockets and deliver them to per-fd queues.
 ///
 /// Returns whether any datagram was delivered.
-pub fn udp_dispatch() -> bool {
+pub(crate) fn udp_dispatch_impl() -> bool {
     let mut sockets = SOCKET_SET.lock();
     udp_dispatch_drain_locked(&mut *sockets)
 }
@@ -968,7 +1006,7 @@ pub fn udp_dispatch() -> bool {
 /// for datagram dispatching.
 ///
 /// Lock order: SOCKET_SET -> UDP_PORTS (must match NetIfaceWrapper::poll path).
-pub fn udp_attach_fd_to_port(
+pub(crate) fn udp_attach_fd_to_port_impl(
     tid: usize,
     fd: usize,
     file: &Arc<dyn crate::vfs::File>,
@@ -1129,7 +1167,7 @@ fn udp_dispatch_drain_locked(sockets: &mut SocketSet<'static>) -> bool {
 }
 
 /// Poll until loopback queue is empty
-pub fn poll_until_empty() {
+pub(crate) fn poll_until_empty_impl() {
     if let Some(ref wrapper) = *NET_IFACE.lock() {
         // Always poll at least once to process socket state changes
         wrapper.poll(&SOCKET_SET);
@@ -1146,4 +1184,158 @@ pub fn poll_until_empty() {
             wrapper.poll(&SOCKET_SET);
         }
     }
+}
+
+pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
+    crate::net::stack::network_stack()
+        .lock()
+        .create_tcp_socket()
+}
+
+pub fn create_udp_socket() -> Result<SocketHandle, ()> {
+    crate::net::stack::network_stack()
+        .lock()
+        .create_udp_socket()
+}
+
+/// Initialize network interface through the stack facade.
+pub fn init_network(smoltcp_iface: crate::net::interface::SmoltcpInterface) {
+    crate::net::stack::network_stack()
+        .lock()
+        .init_network(smoltcp_iface);
+}
+
+pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
+    crate::net::stack::network_stack()
+        .lock()
+        .tcp_connect(handle, remote, local)
+}
+
+pub fn tcp_connection_state_impl(
+    handle: SmoltcpHandle,
+) -> Option<crate::net::stack::TcpConnectionState> {
+    let sockets = SOCKET_SET.lock();
+    let socket = sockets.get::<tcp::Socket>(handle);
+    Some(match socket.state() {
+        tcp::State::Established => crate::net::stack::TcpConnectionState::Established,
+        tcp::State::Closed => crate::net::stack::TcpConnectionState::Closed,
+        _ => crate::net::stack::TcpConnectionState::Other,
+    })
+}
+
+pub(crate) fn tcp_listen_impl(
+    handle: SmoltcpHandle,
+    endpoint: smoltcp::wire::IpListenEndpoint,
+) -> Result<(), ()> {
+    let mut sockets = SOCKET_SET.lock();
+    sockets
+        .get_mut::<tcp::Socket>(handle)
+        .listen(endpoint)
+        .map_err(|_| ())
+}
+
+pub(crate) fn tcp_listener_state_endpoint_impl(
+    handle: SmoltcpHandle,
+) -> Option<(
+    crate::net::stack::TcpListenState,
+    smoltcp::wire::IpListenEndpoint,
+)> {
+    let sockets = SOCKET_SET.lock();
+    let socket = sockets.get::<tcp::Socket>(handle);
+    let state = match socket.state() {
+        tcp::State::Listen => crate::net::stack::TcpListenState::Listen,
+        tcp::State::Established => crate::net::stack::TcpListenState::Established,
+        tcp::State::CloseWait => crate::net::stack::TcpListenState::CloseWait,
+        _ => crate::net::stack::TcpListenState::Other,
+    };
+    Some((state, socket.listen_endpoint()))
+}
+
+pub(crate) fn remove_tcp_socket_impl(handle: SmoltcpHandle) {
+    SOCKET_SET.lock().remove(handle);
+}
+
+pub(crate) fn tcp_accept_endpoints_impl(
+    handle: SmoltcpHandle,
+) -> Option<(IpEndpoint, Option<IpEndpoint>)> {
+    let sockets = SOCKET_SET.lock();
+    let socket = sockets.get::<tcp::Socket>(handle);
+    let remote = socket.remote_endpoint()?;
+    Some((remote, socket.local_endpoint()))
+}
+
+pub(crate) fn tcp_debug_state_impl(
+    handle: SmoltcpHandle,
+) -> Option<(crate::net::stack::TcpConnectionState, bool)> {
+    let sockets = SOCKET_SET.lock();
+    let socket = sockets.get::<tcp::Socket>(handle);
+    let state = match socket.state() {
+        tcp::State::Established => crate::net::stack::TcpConnectionState::Established,
+        tcp::State::Closed => crate::net::stack::TcpConnectionState::Closed,
+        _ => crate::net::stack::TcpConnectionState::Other,
+    };
+    Some((state, socket.is_open()))
+}
+
+pub(crate) fn tcp_close_impl(handle: SmoltcpHandle) {
+    SOCKET_SET.lock().get_mut::<tcp::Socket>(handle).close();
+}
+
+pub(crate) fn socket_local_endpoint_impl(handle: SocketHandle) -> Option<IpEndpoint> {
+    let sockets = SOCKET_SET.lock();
+    match handle {
+        SocketHandle::Tcp(h) => sockets.get::<tcp::Socket>(h).local_endpoint(),
+        SocketHandle::Udp(h) => {
+            let listen_ep = sockets.get::<udp::Socket>(h).endpoint();
+            Some(IpEndpoint::new(
+                listen_ep
+                    .addr
+                    .unwrap_or(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED)),
+                listen_ep.port,
+            ))
+        }
+    }
+}
+
+pub(crate) fn socket_remote_endpoint_impl(handle: SocketHandle) -> Option<IpEndpoint> {
+    let sockets = SOCKET_SET.lock();
+    match handle {
+        SocketHandle::Tcp(h) => sockets.get::<tcp::Socket>(h).remote_endpoint(),
+        SocketHandle::Udp(_) => None,
+    }
+}
+
+/// Poll network interfaces to process packets.
+pub fn poll_network_interfaces() {
+    crate::net::stack::network_stack().lock().poll();
+}
+
+/// Poll smoltcp + dispatch UDP datagrams to per-fd queues.
+pub fn poll_network_and_dispatch() {
+    crate::net::stack::network_stack()
+        .lock()
+        .poll_and_dispatch();
+}
+
+/// Drain UDP datagrams from shared per-port sockets and deliver them to per-fd queues.
+pub fn udp_dispatch() -> bool {
+    crate::net::stack::network_stack().lock().udp_dispatch()
+}
+
+pub fn udp_attach_fd_to_port(
+    tid: usize,
+    fd: usize,
+    file: &Arc<dyn crate::vfs::File>,
+    old_handle: SmoltcpHandle,
+    port: u16,
+    bind_addr: Option<IpAddress>,
+) -> Result<SmoltcpHandle, ()> {
+    crate::net::stack::network_stack()
+        .lock()
+        .udp_attach_fd_to_port(tid, fd, file, old_handle, port, bind_addr)
+}
+
+/// Poll until loopback queue is empty.
+pub fn poll_until_empty() {
+    crate::net::stack::network_stack().lock().poll_until_empty();
 }
