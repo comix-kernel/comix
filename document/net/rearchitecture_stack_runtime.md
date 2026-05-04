@@ -4,10 +4,10 @@
 
 ## 当前代码
 
-- `os/src/net/socket.rs` 定义 `SOCKET_SET`、`NET_IFACE`、`FD_SOCKET_MAP`、`NetIfaceWrapper`。
-- `os/src/net/interface.rs` 定义 `SmoltcpInterface` 和 `NetDeviceAdapter`。
-- `poll_network_interfaces()`、`poll_network_and_dispatch()`、`poll_until_empty()` 分散承担协议栈推进。
-- UDP per-port dispatcher 与 TCP pending close 也在 `socket.rs` 内部。
+- `os/src/net/stack.rs` 定义 `NetworkStack`，持有 smoltcp socket set、active interface runtime、loopback link、UDP per-port dispatcher 和 TCP pending close。
+- `os/src/net/socket.rs` 保留 `SocketFile`、fd/socket 映射、UDP per-fd queue 和公开 socket 包装 API。
+- `os/src/net/interface.rs` 定义接口控制面，`SmoltcpInterface` 和 `NetDeviceAdapter` 由 `net::stack` 提供。
+- `poll_network_interfaces()`、`poll_network_and_dispatch()`、`poll_until_empty()` 均委托到 `NetworkStack`。
 
 ## 目标对象
 
@@ -50,7 +50,7 @@ impl NetworkStack {
 
 1. 把 `SmoltcpInterface` 下沉到 `net::stack`，不再从接口层公开返回。
 2. 把 `NetDeviceAdapter` 移到 `net::stack` 内部。
-3. 把 `SOCKET_SET` 和 `NET_IFACE` 收进 `NetworkStack`，旧全局符号改成兼容包装。
+3. 把 smoltcp socket set 和 active interface runtime 收进 `NetworkStack`，不再保留裸全局状态。
 4. 把 UDP dispatch、TCP pending close、poll waiters 唤醒统一放入 `NetworkStack::poll()`。
 5. 所有 socket 操作完成后如需推进协议栈，只调用 `NetworkStack::poll()`。
 
@@ -75,12 +75,12 @@ impl NetworkStack {
 
 ## 当前执行状态
 
-- `SOCKET_SET` 与 `NET_IFACE` 已移入 `net::stack`，`socket.rs` 仅作为 runtime 实现模块以 `pub(crate)` 方式引用。
+- smoltcp socket set、active interface runtime、loopback link、UDP dispatch 表和 TCP pending close 表已成为 `NetworkStack` 字段。
 - `NetworkStack` 已覆盖 socket 创建、TCP connect/listen/state/close/endpoints、UDP dispatch/attach、poll、SocketFile read/write/readable/writable/drop/sendto/recvfrom。
 - UDP dispatch、TCP pending close reaping 和 poll waiter 唤醒仍在统一 poll 路径中执行。
-- loopback 兼容队列已从 `NetDeviceAdapter` 字段移入 `net::stack` runtime 的 loopback link。
+- `NetIfaceWrapper` 已搬入 `net::stack`，`socket.rs` 不再承载协议栈 runtime 实现。
+- loopback 兼容队列已从 `NetDeviceAdapter` 字段移入 `NetworkStack` 的 loopback link。
 
 保留的兼容点：
 
-- `NetIfaceWrapper` 仍定义在 `socket.rs`，作为旧单接口 runtime 的实现细节；后续可整体搬入 `stack.rs` 或 `stack/runtime.rs`。
 - `SocketHandle` 仍等同于 smoltcp handle 包装，暂未引入多 runtime 安全的 socket id。

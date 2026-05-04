@@ -4,7 +4,7 @@
 
 ## NetworkStack
 
-`NetworkStack` 对外提供稳定门面：
+`NetworkStack` 对外提供稳定状态对象：
 
 - 创建 TCP/UDP socket。
 - TCP connect/listen/state/close/endpoints。
@@ -18,11 +18,13 @@
 
 `net::stack` 持有：
 
-- `SOCKET_SET`：smoltcp socket set。
-- `NET_IFACE`：当前 active interface runtime。
-- loopback link：当前单 runtime 下的 loopback frame queue。
+- `socket_set`：smoltcp socket set。
+- `net_iface`：当前 active interface runtime。
+- `loopback_link`：当前单 runtime 下的 loopback frame queue。
+- `udp_ports`：UDP per-port dispatcher。
+- `pending_tcp_close`：等待 graceful close 回收的 TCP socket。
 
-这些符号仅限 `pub(crate)` 兼容实现使用，不对 syscall 层开放。
+这些状态都是 `NetworkStack` 字段，不作为裸全局符号暴露给 syscall 层或 socket 层。
 
 ## Poll 顺序
 

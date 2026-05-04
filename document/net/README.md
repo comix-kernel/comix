@@ -6,8 +6,8 @@
 
 - `os/src/device/net/`：网卡设备抽象和 VirtIO/loopback/null 设备。
 - `os/src/net/interface.rs`：接口注册表、接口配置和 smoltcp interface 兼容工厂。
-- `os/src/net/stack.rs`：`NetworkStack` 门面和协议栈运行时状态。
-- `os/src/net/socket.rs`：`SocketFile`、fd/socket 映射、UDP per-fd 队列和兼容实现。
+- `os/src/net/stack.rs`：`NetworkStack` 状态对象和协议栈运行时实现。
+- `os/src/net/socket.rs`：`SocketFile`、fd/socket 映射、UDP per-fd 队列和公开 socket 包装 API。
 - `os/src/kernel/syscall/network.rs`：网络 syscall ABI 层。
 
 ## 文档导航
