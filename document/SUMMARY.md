@@ -108,11 +108,13 @@
 - [用户栈布局](arch/riscv/stack_layout.md)
 - [多核启动](arch/riscv/smp_boot.md)
 - [核间中断 (IPI)](arch/riscv/ipi.md)
+- [网络重构说明](arch/riscv/network_rearchitecture.md)
 
 ## LoongArch64
 
 - [LoongArch64](arch/loongarch/README.md)
   - [启动与用户态运行修复总结（comix-1 当前分支）](arch/loongarch/bringup_userland.md)
+  - [网络重构说明](arch/loongarch/network_rearchitecture.md)
 
 
 ---
