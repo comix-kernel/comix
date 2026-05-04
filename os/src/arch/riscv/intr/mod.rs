@@ -36,7 +36,7 @@ pub unsafe fn disable_timer_interrupt() {
 ///
 /// 该函数直接操作 CPU 寄存器，调用者必须确保在适当的上下文中调用
 pub unsafe fn enable_software_interrupt() {
-    sie::set_ssoft()
+    unsafe { sie::set_ssoft() }
 }
 
 /// 禁用软件中断
@@ -45,7 +45,7 @@ pub unsafe fn enable_software_interrupt() {
 ///
 /// 该函数直接操作 CPU 寄存器，调用者必须确保在适当的上下文中调用
 pub unsafe fn disable_software_interrupt() {
-    sie::clear_ssoft()
+    unsafe { sie::clear_ssoft() }
 }
 
 /// 启用中断

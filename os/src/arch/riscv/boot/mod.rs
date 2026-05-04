@@ -152,7 +152,7 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
-    // 初始化默认网络配置（eth0 + 127.0.0.1 loopback + 全局 NET_IFACE）
+    // 初始化默认网络配置（eth0 + 127.0.0.1 loopback + NetworkStack runtime）
     if let Err(e) = crate::net::config::NetworkConfigManager::init_default_interface() {
         pr_warn!(
             "[Init] Warning: Failed to init default network interface: {:?}",

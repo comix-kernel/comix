@@ -242,7 +242,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
 
 /// 绑定套接字
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    let endpoint = unsafe {
+    let endpoint = {
         let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(addr, addrlen);
         match ep {
@@ -430,11 +430,7 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                     listen_endpoint.port
                 );
 
-                if network_stack()
-                    .lock()
-                    .tcp_listen(h, listen_endpoint)
-                    .is_err()
-                {
+                if network_stack().tcp_listen(h, listen_endpoint).is_err() {
                     attempts_left = attempts_left.saturating_sub(1);
                     if attempts_left == 0 {
                         return -98; // EADDRINUSE
@@ -504,13 +500,11 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             None => return -88,                       // ENOTSOCK
         };
 
-        let (state, listen_endpoint) = match network_stack()
-            .lock()
-            .tcp_listener_state_endpoint(listen_handle)
-        {
-            Some(v) => v,
-            None => return -88, // ENOTSOCK
-        };
+        let (state, listen_endpoint) =
+            match network_stack().tcp_listener_state_endpoint(listen_handle) {
+                Some(v) => v,
+                None => return -88, // ENOTSOCK
+            };
 
         if state != TcpListenState::Listen && socket_file.listen_sockets_len() < backlog {
             // detach current listen socket immediately
@@ -520,11 +514,10 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             };
 
             if network_stack()
-                .lock()
                 .tcp_listen(new_listen_handle, listen_endpoint)
                 .is_err()
             {
-                network_stack().lock().remove_tcp_socket(new_listen_handle);
+                network_stack().remove_tcp_socket(new_listen_handle);
                 return -12; // ENOMEM or other error
             }
 
@@ -574,18 +567,16 @@ fn accept_return_conn(
 ) -> isize {
     use crate::net::socket::SocketFile;
 
-    let (remote_endpoint, local_endpoint) =
-        match network_stack().lock().tcp_accept_endpoints(conn_handle) {
-            Some(v) => v,
-            None => return -11, // EAGAIN
-        };
+    let (remote_endpoint, local_endpoint) = match network_stack().tcp_accept_endpoints(conn_handle)
+    {
+        Some(v) => v,
+        None => return -11, // EAGAIN
+    };
 
     if !addr.is_null() && !addrlen.is_null() {
         let _guard = SumGuard::new();
-        unsafe {
-            // accept(): Linux truncates if addrlen is too small; our helper implements that.
-            let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
-        }
+        // accept(): Linux truncates if addrlen is too small; our helper implements that.
+        let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
     }
 
     let conn = Arc::new(SocketFile::new(SocketHandle::Tcp(conn_handle)));
@@ -605,7 +596,7 @@ fn accept_return_conn(
 
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    let endpoint = unsafe {
+    let endpoint = {
         let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(addr, addrlen);
         match ep {
@@ -642,7 +633,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     match handle {
         SocketHandle::Tcp(h) => {
             let (_state, is_open) = network_stack()
-                .lock()
                 .tcp_debug_state(h)
                 .unwrap_or((TcpConnectionState::Closed, false));
             pr_debug!("connect: socket state={:?}, is_open={}", _state, is_open);
@@ -659,7 +649,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             };
 
             let mut local_endpoint = network_stack()
-                .lock()
                 .socket_local_endpoint(handle)
                 .unwrap_or_else(|| {
                     // Choose local address based on remote address.
@@ -716,7 +705,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                     }
 
                     let state = network_stack()
-                        .lock()
                         .tcp_connection_state(h)
                         .unwrap_or(TcpConnectionState::Closed);
                     pr_debug!("connect: loop, handle={:?}, state={:?}", h, state);
@@ -1576,7 +1564,7 @@ pub fn sendto(
         return send(sockfd, buf, len, 0);
     }
 
-    let endpoint = unsafe {
+    let endpoint = {
         let _guard = SumGuard::new();
         let ep = parse_sockaddr_in(dest_addr, addrlen);
         match ep {
@@ -1742,7 +1730,7 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
 
     if should_close_tcp {
         if let SocketHandle::Tcp(h) = handle {
-            network_stack().lock().tcp_close(h);
+            network_stack().tcp_close(h);
         }
     }
 
@@ -1765,7 +1753,7 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
     drop(task_lock);
 
-    let local_endpoint = network_stack().lock().socket_local_endpoint(handle);
+    let local_endpoint = network_stack().socket_local_endpoint(handle);
 
     // Linux behavior: getsockname() on an unbound socket typically returns success and
     // fills a sockaddr with AF_INET and port 0.
@@ -1779,10 +1767,8 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     let _guard = SumGuard::new();
-    unsafe {
-        if write_sockaddr_in(addr, addrlen, ep).is_err() {
-            return -22; // EINVAL
-        }
+    if write_sockaddr_in(addr, addrlen, ep).is_err() {
+        return -22; // EINVAL
     }
     0
 }
@@ -1798,7 +1784,7 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     let remote_endpoint = match handle {
-        SocketHandle::Tcp(_) => network_stack().lock().socket_remote_endpoint(handle),
+        SocketHandle::Tcp(_) => network_stack().socket_remote_endpoint(handle),
         SocketHandle::Udp(_) => {
             // UDP doesn't have a peer, use stored endpoint
             let file = match task.lock().fd_table.get(sockfd as usize) {
@@ -1813,10 +1799,8 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     if let Some(ep) = remote_endpoint {
         {
             let _guard = SumGuard::new();
-            unsafe {
-                if write_sockaddr_in(addr, addrlen, ep).is_err() {
-                    return -22; // EINVAL
-                }
+            if write_sockaddr_in(addr, addrlen, ep).is_err() {
+                return -22; // EINVAL
             }
         }
         0

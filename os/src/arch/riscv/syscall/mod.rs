@@ -182,15 +182,6 @@ pub fn dispatch_syscall(frame: &mut super::trap::TrapFrame) {
 
         // 扩展系统调用 (Extended/Legacy)
         // (send/recv 等已经通过更通用的接口实现，不需要单独分发)
-
-        // 系统信息 (补充)
-        syscall_number::SYS_SYSINFO => sys_sysinfo(frame),
-
-        // POSIX 定时器 (补充)
-        syscall_number::SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
-        syscall_number::SYS_CLOCK_SETTIME => sys_clock_settime(frame),
-        syscall_number::SYS_CLOCK_GETRES => sys_clock_getres(frame),
-
         _ => {
             // 未知的系统调用
             frame.x10_a0 = (-(ENOSYS as isize)) as usize;
