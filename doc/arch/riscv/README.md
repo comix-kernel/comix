@@ -5,4 +5,3 @@
 ## 文件说明
 
 - `network_rearchitecture.md`：网络重构中涉及 RISC-V syscall 入口、编号和 VirtIO 接入的差异。
-
