@@ -152,7 +152,7 @@ fn init() {
         pr_info!("[Init] Continuing without filesystem...");
     }
 
-    // 初始化默认网络配置（eth0 + 127.0.0.1 loopback + 全局 NET_IFACE）
+    // 初始化默认网络配置（eth0 + 127.0.0.1 loopback + NetworkStack runtime）
     if let Err(e) = crate::net::config::NetworkConfigManager::init_default_interface() {
         pr_warn!(
             "[Init] Warning: Failed to init default network interface: {:?}",
@@ -238,7 +238,7 @@ pub fn main(hartid: usize) {
     // 必须在任何可能调用 cpu_id() 的代码之前完成
     {
         use crate::kernel::CPUS;
-        let cpu_ptr = &*CPUS.get_of(0) as *const _ as usize;
+        let cpu_ptr = CPUS.get_of(0) as *const _ as usize;
         unsafe {
             core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
         }
@@ -448,7 +448,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     // 设置 tp 指向对应的 Cpu 结构体
     {
         use crate::kernel::CPUS;
-        let cpu_ptr = &*CPUS.get_of(hartid) as *const _ as usize;
+        let cpu_ptr = CPUS.get_of(hartid) as *const _ as usize;
         unsafe {
             core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
         }

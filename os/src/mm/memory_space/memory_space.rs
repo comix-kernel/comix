@@ -744,7 +744,7 @@ impl MemorySpace {
             Std(&'a [xmas_elf::symbol_table::Entry64]),
         }
 
-        let mut write_usize_at = |va: usize, value: usize| -> Result<(), PagingError> {
+        let write_usize_at = |va: usize, value: usize| -> Result<(), PagingError> {
             let paddr = space
                 .page_table
                 .translate(Vaddr::from_usize(va))
@@ -1258,7 +1258,7 @@ impl MemorySpace {
         }
 
         // 检查地址对齐
-        if start % PAGE_SIZE != 0 {
+        if !start.is_multiple_of(PAGE_SIZE) {
             return Err(PagingError::InvalidAddress);
         }
 

@@ -2,7 +2,7 @@
 //!
 //! 定义了等待队列结构体及其相关操作
 use crate::kernel::task::SharedTask;
-use crate::kernel::{TaskQueue, sleep_task_with_block, wake_up_with_block, yield_task};
+use crate::kernel::{TaskQueue, sleep_task_with_block, wake_up_with_block};
 use crate::sync::RawSpinLock;
 use alloc::vec::Vec;
 

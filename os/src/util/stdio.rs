@@ -32,15 +32,11 @@ impl Stdin {
 
     pub fn read_line(&mut self, buf: &mut String) {
         let mut bytes = Vec::new();
-        loop {
-            if let Some(c) = crate::console::getchar() {
-                if c == b'\n' || c == b'\r' {
-                    break;
-                }
-                bytes.push(c);
-            } else {
+        while let Some(c) = crate::console::getchar() {
+            if c == b'\n' || c == b'\r' {
                 break;
             }
+            bytes.push(c);
         }
         buf.push_str(&String::from_utf8_lossy(&bytes));
     }

@@ -12,12 +12,10 @@ mod rwlock;
 mod spin_lock;
 mod ticket_lock;
 
-pub use intr_guard::*;
 pub use mutex::*;
 pub use per_cpu::PerCpu;
-pub use preempt::{PreemptGuard, preempt_disable, preempt_enable};
+pub use preempt::PreemptGuard;
 pub use raw_spin_lock::*;
 pub use raw_spin_lock_without_guard::*;
 pub use rwlock::*;
 pub use spin_lock::*;
-pub use ticket_lock::*;

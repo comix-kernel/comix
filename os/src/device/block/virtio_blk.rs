@@ -1,5 +1,4 @@
-use alloc::sync::Arc;
-use alloc::{format, string::String};
+use alloc::{string::String, sync::Arc};
 use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::InterruptStatus;
 use virtio_drivers::transport::{mmio::MmioTransport, pci::PciTransport};
@@ -18,6 +17,10 @@ use super::{
 /// VirtIO 块设备驱动结构体
 pub struct VirtIOBlkDriver(Mutex<VirtIOBlk<VirtIOHal, MmioTransport<'static>>>);
 
+impl VirtIOBlkDriver {
+    const ID: &'static str = "virtio_block";
+}
+
 impl Driver for VirtIOBlkDriver {
     fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
         let status = self.0.lock().ack_interrupt();
@@ -29,7 +32,7 @@ impl Driver for VirtIOBlkDriver {
     }
 
     fn get_id(&self) -> String {
-        format!("virtio_block")
+        String::from(Self::ID)
     }
 
     fn as_block(&self) -> Option<&dyn BlockDriver> {
@@ -85,7 +88,7 @@ impl Driver for VirtIOBlkPciDriver {
     }
 
     fn get_id(&self) -> String {
-        format!("virtio_block_pci")
+        String::from("virtio_block_pci")
     }
 
     fn as_block(&self) -> Option<&dyn BlockDriver> {
@@ -204,7 +207,7 @@ mod tests {
     test_case!(test_virtioblk_basic_metadata, {
         // 无法直接构造 VirtIOBlkDriver（需要真实 MmioTransport），
         // 因此这里只做字符串与常量行为的直接校验。
-        kassert!("virtio_block".to_string() == "virtio_block");
+        kassert!(VirtIOBlkDriver::ID == "virtio_block");
     });
 
     // 中断处理逻辑的可调用性测试（只验证调用路径，不验证硬件副作用）
@@ -227,9 +230,8 @@ mod tests {
             check_common_driver_behavior(drv.as_ref());
             let block_iface = drv.as_block().unwrap();
             // 尝试测试第 0 号块（实际系统中可根据分配策略选择安全块号）
-            let ok = try_block_roundtrip(block_iface, 0);
-            // 如果失败（比如环境不支持实际 I/O），则跳过，不判为失败
-            kassert!(ok || !ok); // 始终为真，占位避免 panic；可替换为日志。
+            // 这个测试只覆盖调用路径；没有真实 I/O 能力的环境允许失败。
+            let _ = try_block_roundtrip(block_iface, 0);
         } else {
             // 未初始化驱动，跳过
             kassert!(true);

@@ -130,7 +130,7 @@ impl TaskManagerTrait for TaskManager {
     fn exit_task(&mut self, task: SharedTask, code: i32) {
         {
             let mut task = task.lock();
-            task.exit_code = Some(code as i32);
+            task.exit_code = Some(code);
             // Linux 语义：线程退出时应释放其对用户地址空间的引用。
             // 线程组共享的地址空间由 Arc 计数管理：最后一个线程退出时自动释放。
             task.memory_space = None;
@@ -266,7 +266,7 @@ mod tests {
         let g = exited_task.lock();
 
         // 验证任务管理器设置了返回值 (新的责任)
-        kassert!(g.exit_code == Some(EXIT_CODE as i32));
+        kassert!(g.exit_code == Some(EXIT_CODE));
 
         // 验证调度器设置了状态 (调度器的责任)
         kassert!(g.state == TaskState::Zombie);

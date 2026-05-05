@@ -147,7 +147,7 @@ mod tests {
         let mut q = TaskQueue::new();
         kassert!(q.is_empty());
         let t = mk_task(40);
-        q.add_task(t.clone());
+        q.add_task(t);
         kassert!(!q.is_empty());
         let _ = q.pop_task();
         kassert!(q.is_empty());

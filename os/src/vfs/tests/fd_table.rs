@@ -21,7 +21,7 @@ test_case!(test_fdtable_alloc, {
 
     // 分配 FD
     let fd = fd_table.alloc(file).unwrap();
-    kassert!(fd >= 0);
+    kassert!(fd_table.get(fd).is_ok());
 });
 
 test_case!(test_fdtable_get, {

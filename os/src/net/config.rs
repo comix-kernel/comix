@@ -19,6 +19,27 @@ pub enum NetworkConfigError {
 pub struct NetworkConfigManager;
 
 impl NetworkConfigManager {
+    fn ensure_loopback_interface() -> alloc::sync::Arc<NetworkInterface> {
+        if let Some(existing) = NETWORK_INTERFACE_MANAGER
+            .lock()
+            .find_interface_by_name("lo")
+            .cloned()
+        {
+            return existing;
+        }
+
+        use crate::device::net::loopback::LoopbackNetDevice;
+        use alloc::sync::Arc;
+
+        let dev = LoopbackNetDevice::new(0);
+        let iface = Arc::new(NetworkInterface::new(String::from("lo"), dev));
+        iface.add_ip_address(IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8));
+        NETWORK_INTERFACE_MANAGER
+            .lock()
+            .add_interface(iface.clone());
+        iface
+    }
+
     /// 解析点分十进制子网掩码并计算前缀长度
     ///
     /// # 参数
@@ -65,16 +86,16 @@ impl NetworkConfigManager {
         if prefix_length == 0 {
             // 特殊情况：掩码为 0.0.0.0
             if mask_u32 == 0 {
-                return Ok(0);
+                Ok(0)
             } else {
-                return Err(NetworkConfigError::InvalidSubnet);
+                Err(NetworkConfigError::InvalidSubnet)
             }
         } else if prefix_length == 32 {
             // 特殊情况：掩码为 255.255.255.255
             if mask_u32 == 0xFFFFFFFF {
-                return Ok(32);
+                Ok(32)
             } else {
-                return Err(NetworkConfigError::InvalidSubnet);
+                Err(NetworkConfigError::InvalidSubnet)
             }
         } else {
             // 一般情况：验证掩码格式
@@ -82,7 +103,7 @@ impl NetworkConfigManager {
             if mask_u32 != expected_mask {
                 return Err(NetworkConfigError::InvalidSubnet);
             }
-            return Ok(prefix_length);
+            Ok(prefix_length)
         }
     }
 
@@ -90,25 +111,33 @@ impl NetworkConfigManager {
     pub fn init_default_interface() -> Result<(), NetworkConfigError> {
         earlyprintln!("Initializing default network configuration...");
 
+        let loopback_interface = Self::ensure_loopback_interface();
+        earlyprintln!("Ensured loopback interface: {}", loopback_interface.name());
+
         // 先获取接口的Arc，然后释放全局锁
         // 避免在持有 NETWORK_INTERFACE_MANAGER 锁时操作接口字段锁
         let interface = {
             let binding = NETWORK_INTERFACE_MANAGER.lock();
-            binding.get_interfaces().first().cloned()
+            binding
+                .get_interfaces()
+                .iter()
+                .find(|iface| iface.name() != "lo")
+                .cloned()
+                .or_else(|| binding.find_interface_by_name("lo").cloned())
         }; // NETWORK_INTERFACE_MANAGER锁已释放
 
         let (interface, is_null_loopback_only) = if let Some(interface) = interface {
-            (interface, false)
+            let loopback_only = interface.name() == "lo";
+            (interface, loopback_only)
         } else {
-            // 没有任何真实网卡（例如 QEMU 没挂 virtio-net）时，创建一个“空设备接口”，
-            // 让 smoltcp/套接字栈至少能在 loopback(127.0.0.1) 场景工作。
-            use crate::device::net::null_net::NullNetDevice;
+            // 没有任何真实网卡（例如 QEMU 没挂 virtio-net）时，创建显式 loopback 设备。
+            use crate::device::net::loopback::LoopbackNetDevice;
             use alloc::sync::Arc;
 
-            earlyprintln!("No net interfaces found; creating null loopback-only interface");
+            earlyprintln!("No net interfaces found; creating explicit loopback interface");
 
-            let dev = NullNetDevice::new(0);
-            let iface = Arc::new(NetworkInterface::new(String::from("lo0"), dev));
+            let dev = LoopbackNetDevice::new(0);
+            let iface = Arc::new(NetworkInterface::new(String::from("lo"), dev));
             NETWORK_INTERFACE_MANAGER
                 .lock()
                 .add_interface(iface.clone());
@@ -119,7 +148,7 @@ impl NetworkConfigManager {
             earlyprintln!("Configuring interface: {}", interface.name());
 
             if is_null_loopback_only {
-                // NullNetDevice 只有 loopback 场景可用：不要配置非 127/8 的地址和网关，
+                // Loopback-only 场景不要配置非 127/8 的地址和网关，
                 // 否则 smoltcp 可能会为 127.0.0.1 选择错误的源地址/路由，导致 UDP/TCP 行为异常。
                 let loopback_cidr = IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8);
                 interface.add_ip_address(loopback_cidr);

@@ -1,12 +1,6 @@
 #![allow(dead_code)]
-use crate::{
-    arch::intr::{
-        are_interrupts_enabled, disable_interrupts, enable_interrupts, read_and_enable_interrupts,
-        restore_interrupts,
-    },
-    println,
-};
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::println;
+use core::sync::atomic::AtomicUsize;
 
 #[derive(Copy, Clone, Debug)]
 pub struct FailedAssertion {
@@ -81,9 +75,9 @@ macro_rules! early_test {
             #[allow(dead_code)] // 函数不是直接调用的，所以允许未使用
             fn [<early_test_ $func_name>]() {
                 // 打印测试开始信息，此时 console 应该已经可以工作
-                crate::println!("\x1b[36m[early_test] Running: {}\x1b[0m\n", stringify!($func_name));
+                $crate::println!("\x1b[36m[early_test] Running: {}\x1b[0m\n", stringify!($func_name));
                 $body
-                crate::println!("\x1b[36m[early_test] Passed: {}\x1b[0m\n", stringify!($func_name));
+                $crate::println!("\x1b[36m[early_test] Passed: {}\x1b[0m\n", stringify!($func_name));
             }
 
             // 将函数指针放入自定义的链接器段
@@ -194,13 +188,16 @@ fn run_test(test_name: &str, env_name: Option<&str>, test_fn: impl FnOnce()) {
     let failed_count = failed_after - failed_before;
 
     unsafe {
-        for i in failed_before..FAILED_INDEX {
-            if let Some(fail) = &FAILED_LIST[i] {
-                println!(
-                    "\x1b[31mFailed assertion: {} at {}:{}\x1b[0m",
-                    fail.cond, fail.file, fail.line
-                );
-            }
+        let failed_limit = FAILED_INDEX;
+        let failed_list = core::ptr::addr_of!(FAILED_LIST).cast::<Option<FailedAssertion>>();
+        for i in failed_before..failed_limit {
+            let Some(fail) = failed_list.add(i).read() else {
+                continue;
+            };
+            println!(
+                "\x1b[31mFailed assertion: {} at {}:{}\x1b[0m",
+                fail.cond, fail.file, fail.line
+            );
         }
     }
 
@@ -225,8 +222,8 @@ pub fn run_early_tests() {
     // 创建一个指向函数指针的切片
     // 安全性：我们假设链接器脚本正确创建了这些符号，并且它们对齐了函数指针。
     // 段中的每个项都是一个 `fn()` 类型的指针。
-    let start = unsafe { &__early_test_start as *const _ as *const extern "C" fn() };
-    let end = unsafe { &__early_test_end as *const _ as *const extern "C" fn() };
+    let start: *const extern "C" fn() = unsafe { &__early_test_start as *const _ };
+    let end: *const extern "C" fn() = unsafe { &__early_test_end as *const _ };
 
     // 计算测试数量
     let count = unsafe { end.offset_from(start) } as usize;

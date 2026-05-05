@@ -184,7 +184,7 @@ impl FileLockManager {
             }
             LockType::Read | LockType::Write => {
                 // 检查是否有冲突
-                let file_locks = locks.entry(file_id).or_insert_with(Vec::new);
+                let file_locks = locks.entry(file_id).or_default();
 
                 let new_lock = FileLockEntry {
                     lock_type,

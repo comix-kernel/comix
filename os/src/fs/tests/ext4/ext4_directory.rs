@@ -31,7 +31,7 @@ test_case!(test_ext4_create_directory, {
     }
     kassert!(result.is_ok());
 
-    if let Ok(_) = result {
+    if result.is_ok() {
         // 验证目录存在
         let lookup_result = root.lookup("testdir");
         kassert!(lookup_result.is_ok());

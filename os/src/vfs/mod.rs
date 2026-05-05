@@ -163,17 +163,15 @@ pub mod mount;
 pub mod path;
 
 pub use adapter::inode_type_to_d_type;
-pub use dentry::{DENTRY_CACHE, Dentry, DentryCache};
-pub use dev::{major, makedev, minor};
-pub use devno::{get_blkdev_index, get_chrdev_driver};
+pub use dentry::{DENTRY_CACHE, Dentry};
 pub use error::FsError;
 pub use fd_table::FDTable;
 pub use file::File;
 pub use file_lock::file_lock_manager;
 pub use file_system::{FileSystem, StatFs};
-pub use impls::{PipeFile, RegFile, StderrFile, StdinFile, StdoutFile, create_stdio_files};
+pub use impls::{PipeFile, RegFile, create_stdio_files};
 pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType};
-pub use mount::{MOUNT_TABLE, MountFlags, MountPoint, MountTable, get_root_dentry};
+pub use mount::{MOUNT_TABLE, MountFlags, get_root_dentry};
 pub use path::{
     normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_from, vfs_lookup_no_follow,
     vfs_lookup_no_follow_from,

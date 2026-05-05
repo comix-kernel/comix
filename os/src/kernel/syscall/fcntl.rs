@@ -1,7 +1,7 @@
 //! fcntl 系统调用实现
 
 use crate::arch::trap::SumGuard;
-use crate::kernel::{current_cpu, current_task};
+use crate::kernel::current_task;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::fcntl::{FcntlCmd, FdFlags, FileStatusFlags, Flock, LockType};
 use crate::vfs::{FsError, OpenFlags, file_lock_manager};

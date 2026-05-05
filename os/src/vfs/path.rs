@@ -301,7 +301,7 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
         Ok((dir, filename))
     } else {
         // 相对路径，使用当前目录
-        Ok((String::from("."), String::from(normalized)))
+        Ok((String::from("."), normalized))
     }
 }
 
@@ -447,12 +447,12 @@ fn check_mount_point(dentry: Arc<Dentry>) -> Result<Arc<Dentry>, FsError> {
 
     // 慢速路径：查找挂载表（首次访问或缓存失效）
     let full_path = dentry.full_path();
-    if let Some(mount_point) = crate::vfs::MOUNT_TABLE.find_mount(&full_path) {
-        if mount_point.mount_path == full_path {
-            // 更新 dentry 的挂载缓存
-            dentry.set_mount(&mount_point.root);
-            return Ok(mount_point.root.clone());
-        }
+    if let Some(mount_point) = crate::vfs::MOUNT_TABLE.find_mount(&full_path)
+        && mount_point.mount_path == full_path
+    {
+        // 更新 dentry 的挂载缓存
+        dentry.set_mount(&mount_point.root);
+        return Ok(mount_point.root.clone());
     }
 
     Ok(dentry)

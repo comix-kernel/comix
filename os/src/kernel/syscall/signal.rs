@@ -113,7 +113,7 @@ pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut Signal
     let t = task.lock();
 
     if !oldact.is_null() {
-        let current_action = t.signal_handlers.lock().actions[signum as usize].clone();
+        let current_action = t.signal_handlers.lock().actions[signum as usize];
         unsafe {
             write_to_user(oldact, current_action);
         }
@@ -257,7 +257,7 @@ pub fn signal_stack(uss: *const StackT, uoss: *mut StackT) -> c_int {
     let mut t = task.lock();
 
     if !uoss.is_null() {
-        let old_ss = t.signal_stack.lock().clone();
+        let old_ss = *t.signal_stack.lock();
         unsafe {
             write_to_user(uoss, old_ss);
         }
@@ -411,7 +411,7 @@ fn wait_for_signal(
                     .unwrap();
                 let sig_num = flag.to_signal_number();
                 t.pending.signals.remove(flag);
-                return Ok((sig_num, create_siginfo_for_signal(flag)));
+                Ok((sig_num, create_siginfo_for_signal(flag)))
             } else {
                 Err(-EAGAIN)
             }
@@ -441,7 +441,7 @@ fn wait_for_signal(
                 .unwrap();
             let sig_num = flag.to_signal_number();
             t.pending.signals.remove(flag);
-            return Ok((sig_num, create_siginfo_for_signal(flag)));
+            Ok((sig_num, create_siginfo_for_signal(flag)))
         }
     } else {
         // 阻塞等待
@@ -463,6 +463,6 @@ fn wait_for_signal(
             .unwrap();
         let sig_num = flag.to_signal_number();
         t.pending.signals.remove(flag);
-        return Ok((sig_num, create_siginfo_for_signal(flag)));
+        Ok((sig_num, create_siginfo_for_signal(flag)))
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! 冷插拔系统的简化实现：所有设备号到驱动的映射都通过硬编码规则完成。
 
-use crate::device::{BLK_DRIVERS, Driver, RTC_DRIVERS, SERIAL_DRIVERS};
+use crate::device::{Driver, RTC_DRIVERS, SERIAL_DRIVERS};
 use crate::vfs::dev::{major, minor};
 use alloc::sync::Arc;
 
@@ -47,7 +47,7 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
         }
         chrdev_major::TTY => {
             // TTY 设备
-            if min >= 64 && min < 128 {
+            if (64..128).contains(&min) {
                 // 串口设备：ttyS0-ttyS63 (minor 64-127)
                 let idx = (min - 64) as usize;
                 SERIAL_DRIVERS

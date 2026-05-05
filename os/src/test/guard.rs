@@ -25,17 +25,17 @@ impl TestEnvGuard {
             None
         } else {
             // 将裸指针转换回函数指针 fn() 以便保存
-            Some(unsafe { core::mem::transmute(current_handler_ptr) })
+            Some(unsafe { core::mem::transmute::<*mut (), fn()>(current_handler_ptr) })
         };
 
-        let mut guard = TestEnvGuard {
+        let guard = TestEnvGuard {
             prev_flags: unsafe { read_flags() },
             prev_handler, // 保存旧的 handler
         };
 
         match env {
             TestEnvironment::None => {}
-            TestEnvironment::Interrupt(handler) => unsafe {
+            TestEnvironment::Interrupt(_handler) => unsafe {
                 crate::arch::intr::enable_interrupts();
             },
         }
