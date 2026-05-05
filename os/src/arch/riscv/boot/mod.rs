@@ -238,7 +238,7 @@ pub fn main(hartid: usize) {
     // 必须在任何可能调用 cpu_id() 的代码之前完成
     {
         use crate::kernel::CPUS;
-        let cpu_ptr = &*CPUS.get_of(0) as *const _ as usize;
+        let cpu_ptr = CPUS.get_of(0) as *const _ as usize;
         unsafe {
             core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
         }
@@ -448,7 +448,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     // 设置 tp 指向对应的 Cpu 结构体
     {
         use crate::kernel::CPUS;
-        let cpu_ptr = &*CPUS.get_of(hartid) as *const _ as usize;
+        let cpu_ptr = CPUS.get_of(hartid) as *const _ as usize;
         unsafe {
             core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
         }

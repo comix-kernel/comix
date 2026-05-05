@@ -153,8 +153,7 @@ pub fn yield_task() {
 pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
     let cpu_id = {
         let t = task.lock();
-        t.on_cpu
-            .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id())
+        t.on_cpu.unwrap_or_else(crate::arch::kernel::cpu::cpu_id)
     };
     scheduler_of(cpu_id).lock().sleep_task(task, receive_signal);
 }
@@ -171,7 +170,7 @@ pub fn wake_up_with_block(task: SharedTask) {
     // 关键：多核下 wake 可能被重复触发（不同 CPU/不同事件源），必须做到“全局幂等”：
     // - 若任务已经是 Running（正在跑/已入队），则不要再次入队到其他 CPU 的运行队列
     // 否则同一任务可能被两个 CPU 同时调度运行，导致 TrapFrame/上下文被并发破坏（海森堡 panic/挂起）。
-    let mut should_ipi = false;
+    let should_ipi;
     {
         let mut sched = scheduler_of(target_cpu).lock();
 
@@ -216,8 +215,7 @@ pub fn wake_up_with_block(task: SharedTask) {
 pub fn exit_task_with_block(task: SharedTask) {
     let cpu_id = {
         let t = task.lock();
-        t.on_cpu
-            .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id())
+        t.on_cpu.unwrap_or_else(crate::arch::kernel::cpu::cpu_id)
     };
     scheduler_of(cpu_id).lock().exit_task(task);
 }
@@ -235,9 +233,7 @@ pub fn sleep_task_with_guard_and_block(
     stask: SharedTask,
     receive_signal: bool,
 ) {
-    let cpu_id = task
-        .on_cpu
-        .unwrap_or_else(|| crate::arch::kernel::cpu::cpu_id());
+    let cpu_id = task.on_cpu.unwrap_or_else(crate::arch::kernel::cpu::cpu_id);
     scheduler_of(cpu_id)
         .lock()
         .sleep_task_with_guard(task, stask, receive_signal);

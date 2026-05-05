@@ -226,7 +226,7 @@
 //! ```
 
 use crate::sync::SpinLock;
-use crate::vfs::{Dentry, FileMode, FileSystem, FsError};
+use crate::vfs::{Dentry, FileSystem, FsError};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -324,7 +324,7 @@ impl MountTable {
         let mut mounts = self.mounts.lock();
         mounts
             .entry(normalized_path.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(mount_point.clone());
 
         // 如果挂载点的 dentry 已经存在于缓存中，更新其挂载信息

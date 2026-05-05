@@ -6,7 +6,7 @@ use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
-use crate::uapi::errno::{EACCES, EBADF, EEXIST, EINVAL, EIO, ENOMEM, EOPNOTSUPP};
+use crate::uapi::errno::{EACCES, EBADF, EEXIST, EINVAL, EIO, ENOMEM};
 use crate::uapi::mm::{MAP_FAILED, MapFlags, ProtFlags};
 use crate::{pr_err, pr_warn};
 
@@ -123,7 +123,7 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
     // 创建 MmapFile（如果是文件映射）
     let mmap_file = if !map_flags.contains(MapFlags::ANONYMOUS) {
         // 文件映射：验证文件描述符和偏移量
-        if offset < 0 || (offset as usize) % PAGE_SIZE != 0 {
+        if offset < 0 || !(offset as usize).is_multiple_of(PAGE_SIZE) {
             pr_err!("mmap: file offset must be non-negative and page-aligned");
             return -EINVAL as isize;
         }
@@ -290,24 +290,24 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
     }
 
     // 如果是文件映射，立即加载数据
-    if let Some(area) = space.areas_mut().last_mut() {
-        if let Err(e) = area.load_from_file() {
-            pr_err!(
-                "mmap failed to load file data: {:?}, addr=0x{:x}, len=0x{:x}, fd={}",
-                e,
-                start_addr,
-                len,
-                fd
+    if let Some(area) = space.areas_mut().last_mut()
+        && let Err(e) = area.load_from_file()
+    {
+        pr_err!(
+            "mmap failed to load file data: {:?}, addr=0x{:x}, len=0x{:x}, fd={}",
+            e,
+            start_addr,
+            len,
+            fd
+        );
+        // 加载失败，清理已创建的映射
+        if let Err(unmap_err) = space.munmap(start_addr, len) {
+            pr_warn!(
+                "mmap: failed to clean up mapping on load error: {:?}",
+                unmap_err
             );
-            // 加载失败，清理已创建的映射
-            if let Err(unmap_err) = space.munmap(start_addr, len) {
-                pr_warn!(
-                    "mmap: failed to clean up mapping on load error: {:?}",
-                    unmap_err
-                );
-            }
-            return -EIO as isize;
         }
+        return -EIO as isize;
     }
 
     start_addr as isize
@@ -384,7 +384,7 @@ pub fn mprotect(addr: *mut c_void, len: usize, prot: i32) -> isize {
     }
 
     // 检查地址对齐
-    if start % PAGE_SIZE != 0 {
+    if !start.is_multiple_of(PAGE_SIZE) {
         pr_err!("mprotect: address not page-aligned: 0x{:x}", start);
         return -EINVAL as isize;
     }

@@ -80,7 +80,7 @@ impl MappingArea {
     }
 
     pub fn permission(&self) -> UniversalPTEFlag {
-        self.permission.clone()
+        self.permission
     }
 
     pub fn set_permission(&mut self, perm: UniversalPTEFlag) {
@@ -178,7 +178,7 @@ impl MappingArea {
             }
         };
 
-        page_table.map_with_batch(vpn, ppn, PageSize::Size4K, self.permission.clone(), batch)?;
+        page_table.map_with_batch(vpn, ppn, PageSize::Size4K, self.permission, batch)?;
         Ok(())
     }
 
@@ -284,7 +284,7 @@ impl MappingArea {
             vpn_range: self.vpn_range,
             area_type: self.area_type,
             map_type: self.map_type,
-            permission: self.permission.clone(),
+            permission: self.permission,
             frames: BTreeMap::new(), // 不克隆帧
             // fork 时复制文件映射信息（MAP_SHARED 和 MAP_PRIVATE 都需要）
             file: self.file.as_ref().map(|f| MmapFile {
@@ -339,7 +339,7 @@ impl MappingArea {
                             *vpn,
                             new_ppn,
                             PageSize::Size4K,
-                            self.permission.clone(),
+                            self.permission,
                             Some(batch),
                         )?;
 
@@ -374,7 +374,7 @@ impl MappingArea {
                                 *vpn,
                                 new_ppn,
                                 PageSize::Size4K,
-                                self.permission.clone(),
+                                self.permission,
                                 Some(batch),
                             )?;
 
@@ -448,7 +448,7 @@ impl MappingArea {
     /// - 只支持 Framed 映射类型
     pub fn split_at(
         mut self,
-        page_table: &mut ActivePageTableInner,
+        _page_table: &mut ActivePageTableInner,
         split_vpn: Vpn,
     ) -> Result<(Self, Self), page_table::PagingError> {
         // 验证拆分点
@@ -493,7 +493,7 @@ impl MappingArea {
             left_range,
             self.area_type,
             self.map_type,
-            self.permission.clone(),
+            self.permission,
             left_file,
         );
 
@@ -501,7 +501,7 @@ impl MappingArea {
             right_range,
             self.area_type,
             self.map_type,
-            self.permission.clone(),
+            self.permission,
             right_file,
         );
 
@@ -601,7 +601,7 @@ impl MappingArea {
                 left_range,
                 self.area_type,
                 self.map_type,
-                self.permission.clone(),
+                self.permission,
                 left_file,
             ))
         } else {
@@ -625,7 +625,7 @@ impl MappingArea {
                 right_range,
                 self.area_type,
                 self.map_type,
-                self.permission.clone(),
+                self.permission,
                 right_file,
             ))
         } else {
@@ -691,7 +691,7 @@ impl MappingArea {
                                 vpn,
                                 ppn,
                                 PageSize::Size4K,
-                                middle_area.permission.clone(),
+                                middle_area.permission,
                                 Some(batch),
                             )?;
                         }
@@ -760,15 +760,15 @@ impl MappingArea {
         // 根据解除映射的位置，决定返回什么
         if unmap_start == area_start && unmap_end == area_end {
             // 情况 1: 整个区域被解除映射
-            return Ok(None);
+            Ok(None)
         } else if unmap_start == area_start {
             // 情况 2: 解除映射了前半部分，保留 [unmap_end, area_end)
             self.vpn_range = VpnRange::new(unmap_end, area_end);
-            return Ok(Some((self, None)));
+            Ok(Some((self, None)))
         } else if unmap_end == area_end {
             // 情况 3: 解除映射了后半部分，保留 [area_start, unmap_start)
             self.vpn_range = VpnRange::new(area_start, unmap_start);
-            return Ok(Some((self, None)));
+            Ok(Some((self, None)))
         } else {
             // 情况 4: 解除映射了中间部分，需要拆分为两个区域
             // 保留 [area_start, unmap_start) 和 [unmap_end, area_end)
@@ -800,7 +800,7 @@ impl MappingArea {
                 left_range,
                 self.area_type,
                 self.map_type,
-                self.permission.clone(),
+                self.permission,
                 left_file,
             );
 
@@ -808,7 +808,7 @@ impl MappingArea {
                 right_range,
                 self.area_type,
                 self.map_type,
-                self.permission.clone(),
+                self.permission,
                 right_file,
             );
 
@@ -825,7 +825,7 @@ impl MappingArea {
                 }
             }
 
-            return Ok(Some((left_area, Some(right_area))));
+            Ok(Some((left_area, Some(right_area))))
         }
     }
 

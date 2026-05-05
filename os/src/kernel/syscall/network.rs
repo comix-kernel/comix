@@ -217,7 +217,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     let socket_file = Arc::new(SocketFile::new_with_flags(handle, open_flags));
     let task = current_task();
 
-    let mut task_lock = task.lock();
+    let task_lock = task.lock();
     let tid = task_lock.tid;
     match task_lock.fd_table.alloc_with_flags(socket_file, fd_flags) {
         Ok(fd) => {
@@ -286,12 +286,11 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             };
 
             // Linux behavior: binding an already-bound TCP socket is invalid.
-            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
-                if let Some(old) = sf.get_local_endpoint() {
-                    if old.port != 0 {
-                        return -22; // EINVAL
-                    }
-                }
+            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>()
+                && let Some(old) = sf.get_local_endpoint()
+                && old.port != 0
+            {
+                return -22; // EINVAL
             }
 
             if set_socket_local_endpoint(&file, endpoint).is_err() {
@@ -304,12 +303,11 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             // one smoltcp UDP socket per local port, and per-fd queues filtered by remote endpoint.
 
             // Linux behavior: binding an already-bound UDP socket is invalid.
-            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
-                if let Some(old) = sf.get_local_endpoint() {
-                    if old.port != 0 {
-                        return -22; // EINVAL
-                    }
-                }
+            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>()
+                && let Some(old) = sf.get_local_endpoint()
+                && old.port != 0
+            {
+                return -22; // EINVAL
             }
 
             // Bind port 0 => allocate an ephemeral port.
@@ -331,6 +329,7 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 IpAddress::Ipv6(a) if a.is_unspecified() => None,
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(_) => Some(endpoint.addr),
+                #[cfg(not(feature = "proto-ipv6"))]
                 _ => None,
             };
 
@@ -444,7 +443,7 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
             socket_file.set_listener(true);
             socket_file.clear_listen_sockets();
             // iperf 会传入非常大的 backlog（甚至 INT_MAX），这里做一个上限避免内存/逻辑风险
-            let backlog = (backlog as usize).max(1).min(128);
+            let backlog = (backlog as usize).clamp(1, 128);
             socket_file.set_listen_backlog(backlog);
             0
         }
@@ -478,7 +477,7 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let is_nonblock = socket_file
         .flags()
         .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK);
-    let backlog = socket_file.listen_backlog().max(1).min(128);
+    let backlog = socket_file.listen_backlog().clamp(1, 128);
 
     loop {
         // 推进 loopback + 网络状态机
@@ -645,6 +644,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 IpAddress::Ipv4(addr) => addr.octets()[0] == 127,
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(addr) => addr.is_loopback(),
+                #[cfg(not(feature = "proto-ipv6"))]
                 _ => false,
             };
 
@@ -665,11 +665,12 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                         IpAddress::Ipv6(_) => {
                             use smoltcp::wire::Ipv6Address;
                             if is_loopback {
-                                IpAddress::Ipv6(Ipv6Address::LOOPBACK)
+                                IpAddress::Ipv6(Ipv6Address::LOCALHOST)
                             } else {
                                 IpAddress::Ipv6(Ipv6Address::UNSPECIFIED)
                             }
                         }
+                        #[cfg(not(feature = "proto-ipv6"))]
                         _ => IpAddress::Ipv4(Ipv4Address::new(10, 0, 2, 15)),
                     };
                     IpEndpoint::new(local_addr, 0)
@@ -761,7 +762,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                     #[cfg(feature = "proto-ipv6")]
                     IpAddress::Ipv6(a) if a.is_loopback() => {
                         use smoltcp::wire::Ipv6Address;
-                        IpAddress::Ipv6(Ipv6Address::LOOPBACK)
+                        IpAddress::Ipv6(Ipv6Address::LOCALHOST)
                     }
                     _ => IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
                 };
@@ -775,7 +776,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(a) if a.is_loopback() => {
                     use smoltcp::wire::Ipv6Address;
-                    Some(IpAddress::Ipv6(Ipv6Address::LOOPBACK))
+                    Some(IpAddress::Ipv6(Ipv6Address::LOCALHOST))
                 }
                 _ => None,
             };
@@ -834,18 +835,17 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
             }
             Err(e) => {
                 pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, len, e);
-                if e == crate::vfs::FsError::WouldBlock {
-                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
-                        if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
-                            drop(file);
-                            crate::net::socket::poll_network_and_dispatch();
-                            crate::kernel::yield_task();
-                            if crate::ipc::signal_interrupts_syscall(&task) {
-                                return -(crate::uapi::errno::EINTR as isize);
-                            }
-                            continue;
-                        }
+                if e == crate::vfs::FsError::WouldBlock
+                    && let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                    && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
+                {
+                    drop(file);
+                    crate::net::socket::poll_network_and_dispatch();
+                    crate::kernel::yield_task();
+                    if crate::ipc::signal_interrupts_syscall(&task) {
+                        return -(crate::uapi::errno::EINTR as isize);
                     }
+                    continue;
                 }
                 return e.to_errno();
             }
@@ -887,18 +887,17 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
             }
             Err(e) => {
                 pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, len, e);
-                if e == crate::vfs::FsError::WouldBlock {
-                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
-                        if !socket_file.flags().contains(OpenFlags::O_NONBLOCK) {
-                            drop(file);
-                            crate::net::socket::poll_network_and_dispatch();
-                            crate::kernel::yield_task();
-                            if crate::ipc::signal_interrupts_syscall(&task) {
-                                return -(crate::uapi::errno::EINTR as isize);
-                            }
-                            continue;
-                        }
+                if e == crate::vfs::FsError::WouldBlock
+                    && let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                    && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
+                {
+                    drop(file);
+                    crate::net::socket::poll_network_and_dispatch();
+                    crate::kernel::yield_task();
+                    if crate::ipc::signal_interrupts_syscall(&task) {
+                        return -(crate::uapi::errno::EINTR as isize);
                     }
+                    continue;
                 }
                 return e.to_errno();
             }
@@ -909,7 +908,7 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
 /// 关闭套接字
 pub fn close_sock(sockfd: i32) -> isize {
     let task = current_task();
-    let mut task_lock = task.lock();
+    let task_lock = task.lock();
     let tid = task_lock.tid;
 
     unregister_socket_fd(tid as usize, sockfd as usize);
@@ -926,10 +925,7 @@ unsafe fn get_c_str_safe(ptr: *const c_char) -> Option<&'static str> {
         return None;
     }
 
-    match unsafe { CStr::from_ptr(ptr) }.to_str() {
-        Ok(s) => Some(s),
-        Err(_) => None,
-    }
+    unsafe { CStr::from_ptr(ptr) }.to_str().ok()
 }
 
 /// 获取网络接口统计信息
@@ -1093,7 +1089,7 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
             0,
         );
 
-        if addr < 0 || addr == 0 {
+        if addr <= 0 {
             return -(ENOMEM as isize);
         }
 
@@ -1246,6 +1242,7 @@ unsafe fn fill_sockaddr_from_ip(addr: *mut SockAddrIn, ip: smoltcp::wire::IpAddr
             // IPv6 需要不同的结构体，这里暂不支持
             sockaddr.sin_addr = [0; 4];
         }
+        #[cfg(not(feature = "proto-ipv6"))]
         _ => {
             sockaddr.sin_addr = [0; 4];
         }
@@ -1352,7 +1349,7 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
 // 设置网络接口配置
 pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optlen: u32) -> isize {
     use crate::arch::trap::SumGuard;
-    use crate::kernel::current_cpu;
+
     use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
     use crate::uapi::socket::*;
 
@@ -1529,7 +1526,7 @@ pub fn accept4(sockfd: i32, addr: *mut u8, addrlen: *mut u32, flags: i32) -> isi
     let fd_usize = fd as usize;
 
     if flags & SOCK_CLOEXEC != 0 {
-        let mut task_lock = task.lock();
+        let task_lock = task.lock();
         if let Ok(old_flags) = task_lock.fd_table.get_fd_flags(fd_usize) {
             let _ = task_lock
                 .fd_table
@@ -1665,19 +1662,18 @@ pub fn recvfrom(
                 pr_debug!("recvfrom: sockfd={}, len={} -> error={:?}", sockfd, len, e);
                 if e == crate::vfs::FsError::WouldBlock {
                     use crate::net::socket::SocketFile;
-                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
-                        if !socket_file
+                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                        && !socket_file
                             .flags()
                             .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
-                        {
-                            drop(file);
-                            crate::net::socket::poll_network_and_dispatch();
-                            crate::kernel::yield_task();
-                            if crate::ipc::signal_interrupts_syscall(&task) {
-                                return -(crate::uapi::errno::EINTR as isize);
-                            }
-                            continue;
+                    {
+                        drop(file);
+                        crate::net::socket::poll_network_and_dispatch();
+                        crate::kernel::yield_task();
+                        if crate::ipc::signal_interrupts_syscall(&task) {
+                            return -(crate::uapi::errno::EINTR as isize);
                         }
+                        continue;
                     }
                 }
                 return e.to_errno();
@@ -1692,7 +1688,7 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
     const SHUT_WR: i32 = 1;
     const SHUT_RDWR: i32 = 2;
 
-    if how < 0 || how > 2 {
+    if !(0..=2).contains(&how) {
         return -22; // EINVAL
     }
 
@@ -1728,10 +1724,8 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
         _ => unreachable!(), // 这里是不可到达的到达即意味着有问题
     };
 
-    if should_close_tcp {
-        if let SocketHandle::Tcp(h) = handle {
-            network_stack().tcp_close(h);
-        }
+    if should_close_tcp && let SocketHandle::Tcp(h) = handle {
+        network_stack().tcp_close(h);
     }
 
     0

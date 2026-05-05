@@ -170,14 +170,14 @@ impl SimpleFs {
         let mut cur_offset = offset + 32;
 
         // 读取文件名
-        let name_aligned = (name_len + 3) / 4 * 4;
+        let name_aligned = name_len.div_ceil(4) * 4;
         let mut name_buf = vec![0u8; name_aligned];
         Self::read_at_offset(device.clone(), cur_offset, &mut name_buf)?;
         let name = String::from(String::from_utf8_lossy(&name_buf[..name_len]));
         cur_offset += name_aligned;
 
         // 读取文件数据
-        let data_aligned = (data_len + 511) / 512 * 512;
+        let data_aligned = data_len.div_ceil(512) * 512;
         let mut data_buf = vec![0u8; data_len];
         if data_len > 0 {
             Self::read_at_offset(device.clone(), cur_offset, &mut data_buf)?;
@@ -338,7 +338,7 @@ impl Inode for SimpleFsInode {
         Ok(InodeMetadata {
             inode_no: self.inode_no,
             inode_type: self.inode_type,
-            mode: self.mode.clone(),
+            mode: self.mode,
             uid: 0,
             gid: 0,
             size: data.len(),
@@ -346,7 +346,7 @@ impl Inode for SimpleFsInode {
             mtime: TimeSpec::now(),
             ctime: TimeSpec::now(),
             nlinks: 1,
-            blocks: (data.len() + 511) / 512,
+            blocks: data.len().div_ceil(512),
             rdev: 0,
         })
     }

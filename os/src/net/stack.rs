@@ -47,7 +47,7 @@ impl NetIfaceWrapper {
         let mut sockets = sockets.lock();
 
         crate::pr_debug!("poll: before iface.poll");
-        let result = iface.poll(timestamp, &mut *dev, &mut *sockets);
+        let result = iface.poll(timestamp, &mut *dev, &mut sockets);
         crate::pr_debug!("poll: result={:?}", result);
 
         // Frames produced by loopback Tx are visible to Rx on a later poll.
@@ -57,7 +57,7 @@ impl NetIfaceWrapper {
                 if dev.loopback_queue_len() == 0 {
                     break;
                 }
-                let _ = iface.poll(timestamp, &mut *dev, &mut *sockets);
+                let _ = iface.poll(timestamp, &mut *dev, &mut sockets);
             }
         }
 
@@ -355,7 +355,7 @@ impl NetworkStack {
     /// Create a UDP socket in the stack runtime.
     pub fn create_udp_socket(&self) -> Result<SocketHandle, ()> {
         let mut sockets = self.socket_set.lock();
-        let handle = self.create_udp_socket_in_set(&mut *sockets)?;
+        let handle = self.create_udp_socket_in_set(&mut sockets)?;
         Ok(SocketHandle::Udp(handle))
     }
 
@@ -380,7 +380,6 @@ impl NetworkStack {
             crate::pr_debug!("tcp_connect: calling socket.connect");
             let r = socket.connect(context, remote, local).map_err(|e| {
                 crate::pr_debug!("tcp_connect error: {:?}", e);
-                ()
             });
             crate::pr_debug!("tcp_connect: socket.connect returned {:?}", r);
             r
@@ -501,7 +500,7 @@ impl NetworkStack {
             let smoltcp_changed = wrapper.poll_smoltcp(&self.socket_set);
             let udp_changed = {
                 let mut sockets = self.socket_set.lock();
-                self.udp_dispatch_drain_locked(&mut *sockets)
+                self.udp_dispatch_drain_locked(&mut sockets)
             };
             self.reap_pending_tcp_close();
             if smoltcp_changed || udp_changed {
@@ -518,7 +517,7 @@ impl NetworkStack {
     /// Drain UDP datagrams from shared per-port sockets.
     pub fn udp_dispatch(&self) -> bool {
         let mut sockets = self.socket_set.lock();
-        self.udp_dispatch_drain_locked(&mut *sockets)
+        self.udp_dispatch_drain_locked(&mut sockets)
     }
 
     /// Attach a UDP fd to the shared per-port socket.
@@ -537,7 +536,7 @@ impl NetworkStack {
             if let Some(e) = ports.get(&port) {
                 e.handle
             } else {
-                let h = self.create_udp_socket_in_set(&mut *sockets)?;
+                let h = self.create_udp_socket_in_set(&mut sockets)?;
                 let listen = IpListenEndpoint {
                     addr: bind_addr,
                     port,
@@ -595,7 +594,7 @@ impl NetworkStack {
             wrapper.poll_smoltcp(&self.socket_set);
             {
                 let mut sockets = self.socket_set.lock();
-                self.udp_dispatch_drain_locked(&mut *sockets);
+                self.udp_dispatch_drain_locked(&mut sockets);
             }
             self.reap_pending_tcp_close();
 
@@ -606,7 +605,7 @@ impl NetworkStack {
                 }
                 wrapper.poll_smoltcp(&self.socket_set);
                 let mut sockets = self.socket_set.lock();
-                self.udp_dispatch_drain_locked(&mut *sockets);
+                self.udp_dispatch_drain_locked(&mut sockets);
             }
         }
     }
@@ -888,13 +887,13 @@ impl NetworkStack {
                         .send_slice(buf)
                         .map_err(|_| crate::vfs::FsError::WouldBlock);
 
-                    if !buf.is_empty() {
-                        if let Ok(0) = result {
-                            if socket.may_send() {
-                                return Err(crate::vfs::FsError::WouldBlock);
-                            } else {
-                                return Err(crate::vfs::FsError::BrokenPipe);
-                            }
+                    if !buf.is_empty()
+                        && let Ok(0) = result
+                    {
+                        if socket.may_send() {
+                            return Err(crate::vfs::FsError::WouldBlock);
+                        } else {
+                            return Err(crate::vfs::FsError::BrokenPipe);
                         }
                     }
 
@@ -1063,12 +1062,11 @@ impl NetworkStack {
                 }
 
                 let target = target.or(fallback);
-                if let Some(f) = target {
-                    if let Some(sf) = f.as_any().downcast_ref::<SocketFile>() {
-                        if sf.udp_push(d) {
-                            delivered_any = true;
-                        }
-                    }
+                if let Some(f) = target
+                    && let Some(sf) = f.as_any().downcast_ref::<SocketFile>()
+                    && sf.udp_push(d)
+                {
+                    delivered_any = true;
                 }
             }
 

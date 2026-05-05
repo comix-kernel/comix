@@ -22,6 +22,10 @@ chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 uart_16550 = "0.4.0"
 hashbrown = "0.16.1"
 
+[features]
+default = []
+proto-ipv6 = []
+
 # RISC-V 架构特定依赖
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 sbi-rt = { version = "0.0.2", features = ["legacy"] }

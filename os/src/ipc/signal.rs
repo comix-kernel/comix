@@ -114,7 +114,7 @@ pub fn check_signal() {
         let mut t = task.lock();
         let pending_copy = t.pending.clone();
         let shared_pending_copy = t.shared_pending.lock().clone();
-        let blocked_copy = t.blocked.clone();
+        let blocked_copy = t.blocked;
         if let Some(flag) = first_deliverable_signal(pending_copy.signals, blocked_copy) {
             let num = signal_from_flag(flag).unwrap();
             let action = {
@@ -180,9 +180,9 @@ fn install_user_signal_trap_frame(
         let siginfo = create_siginfo_for_signal(SignalFlags::from_signal_num(sig_num).unwrap());
         let sa_flags = SaFlags::from_bits_truncate(action.sa_flags as u32);
         let uc = UContextT::new(
-            0,           // TODO: flags未实现
-            0 as *mut _, // TODO: link未实现
-            t.signal_stack.lock().clone(),
+            0,                     // TODO: flags未实现
+            core::ptr::null_mut(), // TODO: link未实现
+            *t.signal_stack.lock(),
             t.blocked.to_sigset_t(),
             MContextT::from_trap_frame(tf),
         );
@@ -313,7 +313,7 @@ impl SignalPending {
     /// # 参数:
     /// * `blocked`: 当前阻塞的信号集合
     pub fn has_deliverable_signal(&self, blocked: SignalFlags) -> bool {
-        !first_deliverable_signal(self.signals, blocked).is_none()
+        first_deliverable_signal(self.signals, blocked).is_some()
     }
 
     /// 获取第一个可投递的信号

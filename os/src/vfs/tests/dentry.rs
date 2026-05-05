@@ -109,7 +109,7 @@ test_case!(test_dentry_overwrite_child, {
     let child1 = Dentry::new("child".to_string(), root_inode.clone());
     let child2 = Dentry::new("child".to_string(), root_inode.clone());
 
-    parent.add_child(child1.clone());
+    parent.add_child(child1);
     parent.add_child(child2.clone());
 
     let found = parent.lookup_child("child");

@@ -85,15 +85,15 @@ pub fn init() {
         pr_info!(
             "[Device] Memory Region: Start = {:#X}, Size = {:#X}",
             region.starting_address as usize,
-            region.size.unwrap() as usize
+            { region.size.unwrap() }
         );
     });
 
-    if let Some(bootargs) = FDT.chosen().bootargs() {
-        if !bootargs.is_empty() {
-            pr_info!("Kernel cmdline: {}", bootargs);
-            *CMDLINE.write() = String::from(bootargs);
-        }
+    if let Some(bootargs) = FDT.chosen().bootargs()
+        && !bootargs.is_empty()
+    {
+        pr_info!("Kernel cmdline: {}", bootargs);
+        *CMDLINE.write() = String::from(bootargs);
     }
 
     // 首先初始化中断控制器
@@ -106,14 +106,14 @@ pub fn init() {
 /// * `fdt` - 设备树对象
 fn walk_dt(fdt: &Fdt, intc_only: bool) {
     for node in fdt.all_nodes() {
-        if let Some(compatible) = node.compatible() {
-            if node.property("interrupt-controller").is_some() == intc_only {
-                pr_info!("[Device] Found device: {}", node.name);
-                let registry = DEVICE_TREE_REGISTRY.read();
-                for c in compatible.all() {
-                    if let Some(f) = registry.get(c) {
-                        f(&node);
-                    }
+        if let Some(compatible) = node.compatible()
+            && node.property("interrupt-controller").is_some() == intc_only
+        {
+            pr_info!("[Device] Found device: {}", node.name);
+            let registry = DEVICE_TREE_REGISTRY.read();
+            for c in compatible.all() {
+                if let Some(f) = registry.get(c) {
+                    f(&node);
                 }
             }
         }
@@ -129,7 +129,7 @@ pub fn dram_info() -> Option<(usize, usize)> {
 
     for region in FDT.memory().regions() {
         let s = region.starting_address as usize;
-        let size = region.size.unwrap_or(0) as usize;
+        let size = region.size.unwrap_or(0);
         let e = s.saturating_add(size);
         if size == 0 {
             continue;

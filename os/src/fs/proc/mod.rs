@@ -60,5 +60,5 @@ pub mod generators;
 pub mod inode;
 pub mod proc;
 
-pub use inode::{ContentGenerator, ProcInode, ProcInodeContent};
+pub use inode::{ContentGenerator, ProcInode};
 pub use proc::ProcFS;

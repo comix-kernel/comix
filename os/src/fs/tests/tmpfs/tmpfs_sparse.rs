@@ -28,7 +28,7 @@ test_case!(test_tmpfs_sparse_hole, {
     // 读取开始部分
     let mut buf = vec![0u8; 5];
     kassert!(file.read_at(0, &mut buf).unwrap() == 5);
-    kassert!(&buf == data1);
+    kassert!(buf == data1);
 
     // 读取空洞部分（应该返回0）
     let mut hole_buf = vec![0xFF; 1024];
@@ -42,7 +42,7 @@ test_case!(test_tmpfs_sparse_hole, {
     // 读取结束部分
     let mut buf2 = vec![0u8; 3];
     kassert!(file.read_at(offset, &mut buf2).unwrap() == 3);
-    kassert!(&buf2 == data2);
+    kassert!(buf2 == data2);
 });
 
 test_case!(test_tmpfs_sparse_multiple_holes, {
@@ -66,16 +66,16 @@ test_case!(test_tmpfs_sparse_multiple_holes, {
     // 验证各个数据块
     let mut buf = vec![0u8; 5];
     kassert!(file.read_at(0, &mut buf).unwrap() == 5);
-    kassert!(&buf == data);
+    kassert!(buf == data);
 
     kassert!(file.read_at(4096, &mut buf).unwrap() == 5);
-    kassert!(&buf == data);
+    kassert!(buf == data);
 
     kassert!(file.read_at(8192, &mut buf).unwrap() == 5);
-    kassert!(&buf == data);
+    kassert!(buf == data);
 
     kassert!(file.read_at(16384, &mut buf).unwrap() == 5);
-    kassert!(&buf == data);
+    kassert!(buf == data);
 });
 
 test_case!(test_tmpfs_sparse_truncate_extend, {
@@ -99,7 +99,7 @@ test_case!(test_tmpfs_sparse_truncate_extend, {
     // 读取初始数据
     let mut buf = vec![0u8; 7];
     kassert!(file.read_at(0, &mut buf).unwrap() == 7);
-    kassert!(&buf == data);
+    kassert!(buf == data);
 
     // 读取扩展部分（应该是0）
     let mut hole = vec![0xFF; 1024];
@@ -135,7 +135,7 @@ test_case!(test_tmpfs_sparse_write_beyond_eof, {
     // 读取实际数据
     let mut buf = vec![0u8; 6];
     kassert!(file.read_at(offset, &mut buf).unwrap() == 6);
-    kassert!(&buf == data);
+    kassert!(buf == data);
 });
 
 test_case!(test_tmpfs_sparse_fill_hole, {

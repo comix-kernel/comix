@@ -1,4 +1,17 @@
-use crate::{println, test_case};
+use crate::println;
+
+/// 运行所有网络相关测试
+///
+/// 此函数用于在系统启动时手动运行网络测试。
+pub fn run_network_tests() {
+    println!("\n--- 运行网络系统调用测试 ---");
+
+    // 这里可以添加更多测试执行代码
+    println!("网络测试框架已初始化");
+    println!("可以在合适的时机通过 test_case! 宏定义的测试函数执行具体测试");
+
+    println!("--- 网络系统调用测试结束 ---");
+}
 
 /// 网络系统调用测试
 ///
@@ -8,6 +21,7 @@ use crate::{println, test_case};
 #[cfg(test)]
 mod net_tests {
     use super::*;
+    use crate::test_case;
 
     /// 测试获取网络接口列表
     test_case!(test_get_network_interfaces, {
@@ -61,17 +75,4 @@ mod net_tests {
         println!("模拟调用网络系统调用时传入无效参数");
         println!("预期行为: 返回错误码，不会导致系统崩溃");
     });
-}
-
-/// 运行所有网络相关测试
-///
-/// 此函数用于在系统启动时手动运行网络测试。
-pub fn run_network_tests() {
-    println!("\n--- 运行网络系统调用测试 ---");
-
-    // 这里可以添加更多测试执行代码
-    println!("网络测试框架已初始化");
-    println!("可以在合适的时机通过 test_case! 宏定义的测试函数执行具体测试");
-
-    println!("--- 网络系统调用测试结束 ---");
 }

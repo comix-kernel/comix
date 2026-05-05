@@ -151,7 +151,7 @@ pub fn init_simple_fs() -> Result<(), crate::vfs::FsError> {
 ///
 /// 尝试从第一个可用的块设备创建 Ext4 文件系统，并挂载为根文件系统
 pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
-    use crate::config::{EXT4_BLOCK_SIZE, FS_IMAGE_SIZE, VIRTIO_BLK_SECTOR_SIZE};
+    use crate::config::{EXT4_BLOCK_SIZE, FS_IMAGE_SIZE};
     use crate::vfs::FsError;
 
     pr_info!("[Ext4] Initializing Ext4 filesystem from block device");
@@ -220,7 +220,6 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
 /// - `mount_point`: 挂载点路径（如 "/tmp"）
 /// - `max_size_mb`: 最大容量（MB），0 表示无限制
 pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::vfs::FsError> {
-    use crate::vfs::FsError;
     use alloc::string::ToString;
 
     pr_info!(
@@ -249,9 +248,7 @@ pub fn mount_tmpfs(mount_point: &str, max_size_mb: usize) -> Result<(), crate::v
 }
 
 pub fn init_dev() -> Result<(), FsError> {
-    if let Err(e) = vfs_lookup("/dev") {
-        return Err(e);
-    }
+    vfs_lookup("/dev")?;
 
     create_devices()?;
 
@@ -311,7 +308,6 @@ fn create_devices() -> Result<(), FsError> {
 pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
     use crate::fs::proc::ProcFS;
     use crate::vfs::MountFlags;
-    use alloc::string::ToString;
 
     pr_info!("[ProcFS] Initializing procfs");
 
@@ -338,7 +334,6 @@ pub fn init_procfs() -> Result<(), crate::vfs::FsError> {
 pub fn init_sysfs() -> Result<(), crate::vfs::FsError> {
     use crate::fs::sysfs::SysFS;
     use crate::vfs::MountFlags;
-    use alloc::string::ToString;
 
     pr_info!("[SysFS] Initializing sysfs");
 

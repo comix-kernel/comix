@@ -108,7 +108,7 @@ test_case!(test_procfs_readdir_entry_types, {
         );
 
         // 验证名称非空
-        kassert!(entry.name.len() > 0);
+        kassert!(!entry.name.is_empty());
 
         // 验证 inode 号非零
         kassert!(entry.inode_no > 0);

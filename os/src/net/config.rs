@@ -86,16 +86,16 @@ impl NetworkConfigManager {
         if prefix_length == 0 {
             // 特殊情况：掩码为 0.0.0.0
             if mask_u32 == 0 {
-                return Ok(0);
+                Ok(0)
             } else {
-                return Err(NetworkConfigError::InvalidSubnet);
+                Err(NetworkConfigError::InvalidSubnet)
             }
         } else if prefix_length == 32 {
             // 特殊情况：掩码为 255.255.255.255
             if mask_u32 == 0xFFFFFFFF {
-                return Ok(32);
+                Ok(32)
             } else {
-                return Err(NetworkConfigError::InvalidSubnet);
+                Err(NetworkConfigError::InvalidSubnet)
             }
         } else {
             // 一般情况：验证掩码格式
@@ -103,7 +103,7 @@ impl NetworkConfigManager {
             if mask_u32 != expected_mask {
                 return Err(NetworkConfigError::InvalidSubnet);
             }
-            return Ok(prefix_length);
+            Ok(prefix_length)
         }
     }
 

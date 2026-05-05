@@ -114,9 +114,9 @@ pub unsafe fn cstr_equal(s1: *const u8, s2: *const u8) -> bool {
 /// * `dest` - 目标缓冲区切片
 /// * `len` - 最大拷贝长度
 pub fn cstr_copy(src: *const u8, dest: &mut [u8], len: usize) {
-    for i in 0..len {
+    for (i, byte) in dest.iter_mut().enumerate().take(len) {
         let b = unsafe { core::ptr::read(src.add(i)) };
-        dest[i] = b;
+        *byte = b;
         if b == 0 {
             break;
         }

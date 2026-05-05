@@ -72,8 +72,8 @@ impl EntropyPool for BiogasPoll {
     }
 
     fn try_fill(&mut self, dest: &mut [u8]) -> Result<usize, EntropyError> {
-        for i in 0..dest.len() {
-            dest[i] = (self.biogas & 0xFF) as u8;
+        for byte in dest.iter_mut() {
+            *byte = (self.biogas & 0xFF) as u8;
             self.biogas = self
                 .biogas
                 .wrapping_mul(6364136223846793005)

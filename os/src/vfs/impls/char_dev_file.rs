@@ -31,10 +31,10 @@ impl CharDeviceFile {
 
     #[inline]
     fn echo_byte(&self, ch: u8) {
-        if let Some(ref driver) = self.driver {
-            if let Some(serial) = driver.as_serial() {
-                serial.write(&[ch]);
-            }
+        if let Some(ref driver) = self.driver
+            && let Some(serial) = driver.as_serial()
+        {
+            serial.write(&[ch]);
         }
     }
 }
@@ -265,7 +265,7 @@ impl File for CharDeviceFile {
                 if post && onlcr {
                     for &ch in buf {
                         if ch == b'\n' {
-                            serial.write(&[b'\r', b'\n']);
+                            serial.write(b"\r\n");
                         } else {
                             serial.write(&[ch]);
                         }
@@ -286,7 +286,7 @@ impl File for CharDeviceFile {
         self.inode.metadata()
     }
 
-    fn lseek(&self, offset: isize, whence: SeekWhence) -> Result<usize, FsError> {
+    fn lseek(&self, _offset: isize, _whence: SeekWhence) -> Result<usize, FsError> {
         // 大多数字符设备不支持 seek
         // 但某些设备（如 /dev/mem）可能需要
         Err(FsError::NotSupported)
@@ -297,7 +297,7 @@ impl File for CharDeviceFile {
     }
 
     fn flags(&self) -> OpenFlags {
-        self.flags.clone()
+        self.flags
     }
 
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
@@ -309,10 +309,6 @@ impl File for CharDeviceFile {
     }
 
     fn ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
-        use crate::arch::trap::SumGuard;
-        use crate::uapi::errno::{EINVAL, ENOTTY};
-        use crate::uapi::ioctl::*;
-
         let maj = major(self.dev);
 
         // 根据设备类型分发 ioctl
@@ -458,41 +454,41 @@ impl CharDeviceFile {
                     }
 
                     // 通过驱动获取时间
-                    if let Some(ref driver) = self.driver {
-                        if let Some(rtc) = driver.as_rtc() {
-                            let dt = rtc.read_datetime();
+                    if let Some(ref driver) = self.driver
+                        && let Some(rtc) = driver.as_rtc()
+                    {
+                        let dt = rtc.read_datetime();
 
-                            unsafe {
-                                let _guard = SumGuard::new();
-                                let rtc_time_ptr = arg as *mut RtcTime;
-                                if rtc_time_ptr.is_null() {
-                                    return Ok(-EINVAL as isize);
-                                }
-
-                                // 清零结构体
-                                core::ptr::write_bytes(
-                                    rtc_time_ptr as *mut u8,
-                                    0,
-                                    core::mem::size_of::<RtcTime>(),
-                                );
-
-                                // 填充时间结构体
-                                let rtc_time = RtcTime {
-                                    tm_sec: dt.second as i32,
-                                    tm_min: dt.minute as i32,
-                                    tm_hour: dt.hour as i32,
-                                    tm_mday: dt.day as i32,
-                                    tm_mon: (dt.month - 1) as i32, // Linux 月份是 0-based
-                                    tm_year: (dt.year - 1900) as i32,
-                                    tm_wday: 0, // 未计算
-                                    tm_yday: 0, // 未计算
-                                    tm_isdst: 0,
-                                };
-
-                                core::ptr::write_volatile(rtc_time_ptr, rtc_time);
+                        unsafe {
+                            let _guard = SumGuard::new();
+                            let rtc_time_ptr = arg as *mut RtcTime;
+                            if rtc_time_ptr.is_null() {
+                                return Ok(-EINVAL as isize);
                             }
-                            return Ok(0);
+
+                            // 清零结构体
+                            core::ptr::write_bytes(
+                                rtc_time_ptr as *mut u8,
+                                0,
+                                core::mem::size_of::<RtcTime>(),
+                            );
+
+                            // 填充时间结构体
+                            let rtc_time = RtcTime {
+                                tm_sec: dt.second as i32,
+                                tm_min: dt.minute as i32,
+                                tm_hour: dt.hour as i32,
+                                tm_mday: dt.day as i32,
+                                tm_mon: (dt.month - 1) as i32, // Linux 月份是 0-based
+                                tm_year: (dt.year - 1900),
+                                tm_wday: 0, // 未计算
+                                tm_yday: 0, // 未计算
+                                tm_isdst: 0,
+                            };
+
+                            core::ptr::write_volatile(rtc_time_ptr, rtc_time);
                         }
+                        return Ok(0);
                     }
                     Err(FsError::NoDevice)
                 }

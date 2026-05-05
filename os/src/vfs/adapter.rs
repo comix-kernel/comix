@@ -3,7 +3,7 @@
 //! 用于处理数据结构之间的转换
 
 use super::{InodeMetadata, InodeType};
-use crate::uapi::fs::{LinuxDirent64, STATX_BASIC_STATS, Stat, Statx, StatxTimestamp};
+use crate::uapi::fs::{STATX_BASIC_STATS, Stat, Statx, StatxTimestamp};
 
 /// Stat 结构适配方法
 impl Stat {
@@ -38,7 +38,7 @@ impl Statx {
     /// 从 InodeMetadata 创建 Statx 结构
     pub fn from_metadata(meta: &InodeMetadata) -> Self {
         let ts = |t: crate::uapi::time::TimeSpec| StatxTimestamp {
-            tv_sec: t.tv_sec as i64,
+            tv_sec: t.tv_sec,
             tv_nsec: t.tv_nsec as u32,
             __reserved: 0,
         };

@@ -23,7 +23,7 @@ lazy_static! {
     /// 注意：使用 MAX_CPU_COUNT 而不是 NUM_CPU，避免 lazy_static 初始化时机问题
     pub static ref CPUS: PerCpu<Cpu> = {
         use crate::config::MAX_CPU_COUNT;
-        PerCpu::new_with_id_and_count(MAX_CPU_COUNT, |cpu_id| Cpu::new_with_id(cpu_id))
+        PerCpu::new_with_id_and_count(MAX_CPU_COUNT, Cpu::new_with_id)
     };
 }
 
