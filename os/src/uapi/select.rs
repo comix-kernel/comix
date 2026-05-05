@@ -7,7 +7,7 @@ pub const FD_SETSIZE: usize = 1024;
 
 /// Number of longs needed to hold FD_SETSIZE bits
 const NFDBITS: usize = 8 * mem::size_of::<usize>();
-const FD_SET_LONGS: usize = (FD_SETSIZE + NFDBITS - 1) / NFDBITS;
+const FD_SET_LONGS: usize = FD_SETSIZE.div_ceil(NFDBITS);
 
 /// File descriptor set for select()
 #[repr(C)]

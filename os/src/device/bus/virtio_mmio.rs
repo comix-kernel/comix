@@ -18,7 +18,7 @@ use crate::{
     },
     kernel::current_memory_space,
     mm::address::{Paddr, UsizeConvert},
-    pr_info, pr_warn,
+    pr_warn,
 };
 
 pub fn driver_init() {

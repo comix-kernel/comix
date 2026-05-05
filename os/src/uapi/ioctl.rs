@@ -247,7 +247,7 @@ pub const NCCS: usize = 19;
 /// - offset 17-35: c_cc\[19\] (19 * u8 = 19 bytes)
 /// - offset 36-39: c_ispeed (u32 = 4 bytes, 对齐到4字节边界)
 /// - offset 40-43: c_ospeed (u32 = 4 bytes)
-/// 总大小：44字节
+///   总大小：44字节
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Termios {

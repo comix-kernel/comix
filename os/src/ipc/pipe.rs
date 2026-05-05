@@ -135,6 +135,6 @@ impl PipeRingBuffer {
     pub fn all_write_ends_dropped(&self) -> bool {
         self.write_end
             .as_ref()
-            .map_or(true, |weak| weak.upgrade().is_none())
+            .is_none_or(|weak| weak.upgrade().is_none())
     }
 }

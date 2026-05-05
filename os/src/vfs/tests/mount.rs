@@ -11,7 +11,7 @@ test_case!(test_mount_fs, {
 
     // 挂载到 /test
     let result = MOUNT_TABLE.mount(
-        fs.clone(),
+        fs,
         "/test",
         MountFlags::empty(),
         Some(String::from("testfs")),
@@ -34,7 +34,7 @@ test_case!(test_mount_list, {
     // 列出挂载点
     let mounts = MOUNT_TABLE.list_mounts();
     // 至少应该有根文件系统
-    kassert!(mounts.len() >= 1);
+    kassert!(!mounts.is_empty());
 });
 
 // P2 边界和错误处理测试

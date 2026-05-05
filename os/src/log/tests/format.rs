@@ -6,7 +6,7 @@ test_case!(test_message_truncation, {
     let log = LogCore::new(LogLevel::Debug, LogLevel::Warning);
 
     // Create a long message (>256 bytes)
-    let long_msg = alloc::format!("{}", "a".repeat(300));
+    let long_msg = "a".repeat(300);
     test_log!(log, LogLevel::Info, "{}", long_msg);
 
     let entry = log._read_log().unwrap();

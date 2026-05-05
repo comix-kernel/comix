@@ -35,17 +35,16 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
         // 对 blocking socket：EAGAIN 时主动 poll + yield 重试（驱动网络前进）
         if result == -11 {
             use crate::net::socket::SocketFile;
-            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
-                if !socket_file
+            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                && !socket_file
                     .flags()
                     .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
-                {
-                    drop(file);
-                    drop(task);
-                    crate::net::socket::poll_network_and_dispatch();
-                    crate::kernel::yield_task();
-                    continue;
-                }
+            {
+                drop(file);
+                drop(task);
+                crate::net::socket::poll_network_and_dispatch();
+                crate::kernel::yield_task();
+                continue;
             }
         }
 
@@ -80,17 +79,16 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
         // 对 blocking socket：EAGAIN 时主动 poll + yield 重试（驱动网络前进）
         if result == -11 {
             use crate::net::socket::SocketFile;
-            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
-                if !socket_file
+            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                && !socket_file
                     .flags()
                     .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
-                {
-                    drop(file);
-                    drop(task);
-                    crate::net::socket::poll_network_and_dispatch();
-                    crate::kernel::yield_task();
-                    continue;
-                }
+            {
+                drop(file);
+                drop(task);
+                crate::net::socket::poll_network_and_dispatch();
+                crate::kernel::yield_task();
+                continue;
             }
         }
 
@@ -237,16 +235,14 @@ pub fn pread64(fd: usize, buf: *mut u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    let result = {
+    {
         let _guard = SumGuard::new();
         let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
         match file.read_at(offset as usize, buffer) {
             Ok(n) => n as isize,
             Err(e) => e.to_errno(),
         }
-    };
-
-    result
+    }
 }
 
 /// 位置写入：向指定位置写入数据，不改变文件偏移量
@@ -266,16 +262,14 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    let result = {
+    {
         let _guard = SumGuard::new();
         let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
         match file.write_at(offset as usize, buffer) {
             Ok(n) => n as isize,
             Err(e) => e.to_errno(),
         }
-    };
-
-    result
+    }
 }
 
 /// 向量化位置读取：从指定位置读取数据到多个缓冲区，不改变文件偏移量
@@ -626,10 +620,10 @@ fn poll_with_timeout(
         crate::net::socket::poll_network_and_dispatch();
 
         // Check if woken by timeout
-        if let Some(trigger) = timeout_trigger {
-            if get_time() >= trigger {
-                return 0;
-            }
+        if let Some(trigger) = timeout_trigger
+            && get_time() >= trigger
+        {
+            return 0;
         }
     }
 }
@@ -778,13 +772,13 @@ fn select_common(
         let mut ready_count = 0;
         let mut read_set = input_read.as_ref().map(|_| FdSet::new());
         let mut write_set = input_write.as_ref().map(|_| FdSet::new());
-        let mut except_set = input_except.as_ref().map(|_| FdSet::new());
+        let except_set = input_except.as_ref().map(|_| FdSet::new());
 
         let task_lock = task.lock();
         for fd in 0..nfds {
-            let check_read = input_read.as_ref().map_or(false, |s| s.is_set(fd));
-            let check_write = input_write.as_ref().map_or(false, |s| s.is_set(fd));
-            let check_except = input_except.as_ref().map_or(false, |s| s.is_set(fd));
+            let check_read = input_read.as_ref().is_some_and(|s| s.is_set(fd));
+            let check_write = input_write.as_ref().is_some_and(|s| s.is_set(fd));
+            let check_except = input_except.as_ref().is_some_and(|s| s.is_set(fd));
 
             if !check_read && !check_write && !check_except {
                 continue;
@@ -806,17 +800,19 @@ fn select_common(
             };
 
             let mut fd_ready = false;
-            if check_read && file.readable() {
-                if let Some(ref mut set) = read_set {
-                    set.set(fd);
-                    fd_ready = true;
-                }
+            if check_read
+                && file.readable()
+                && let Some(ref mut set) = read_set
+            {
+                set.set(fd);
+                fd_ready = true;
             }
-            if check_write && file.writable() {
-                if let Some(ref mut set) = write_set {
-                    set.set(fd);
-                    fd_ready = true;
-                }
+            if check_write
+                && file.writable()
+                && let Some(ref mut set) = write_set
+            {
+                set.set(fd);
+                fd_ready = true;
             }
             // exceptfds: OOB data, errors (not implemented yet)
             if fd_ready {

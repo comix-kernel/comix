@@ -42,5 +42,4 @@
 mod inode;
 mod tmpfs;
 
-pub use inode::TmpfsInode;
 pub use tmpfs::TmpFs;

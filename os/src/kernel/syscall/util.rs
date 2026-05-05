@@ -183,7 +183,7 @@ pub fn validate_syslog_args(action: SyslogAction, bufp: *mut u8, len: i32) -> Re
         SyslogAction::ConsoleLevel => {
             // Linux 要求 console_loglevel 在 1-8 范围内
             // 参考：kernel/printk/printk.c
-            if len < 1 || len > 8 {
+            if !(1..=8).contains(&len) {
                 return Err(EINVAL);
             }
         }

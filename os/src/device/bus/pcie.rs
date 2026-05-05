@@ -91,7 +91,7 @@ impl PcieHost {
             })
             .unwrap_or(3); // PCI 默认 3
 
-        let child_size_cells = node
+        let _child_size_cells = node
             .property("#size-cells")
             .and_then(|p| {
                 if p.value.len() >= 4 {
@@ -151,9 +151,8 @@ impl PcieHost {
 
                 // child 地址（第一 cell 为 flags）
                 let mut child_cells_vals: [u32; 8] = [0; 8];
-                for c in 0..child_addr_cells {
-                    child_cells_vals[c] =
-                        u32::from_be_bytes(prop.value[idx..idx + 4].try_into().unwrap());
+                for cell in child_cells_vals.iter_mut().take(child_addr_cells) {
+                    *cell = u32::from_be_bytes(prop.value[idx..idx + 4].try_into().unwrap());
                     idx += 4;
                 }
                 let flags = child_cells_vals[0];
@@ -163,8 +162,8 @@ impl PcieHost {
                 let is_mem = space_code == 0x0100_0000 || space_code == 0x0200_0000;
                 // 组合 child 基址（后两个 cells）
                 let mut child_addr = 0usize;
-                for c in 1..child_addr_cells {
-                    child_addr = (child_addr << 32) | child_cells_vals[c] as usize;
+                for cell in child_cells_vals.iter().take(child_addr_cells).skip(1) {
+                    child_addr = (child_addr << 32) | *cell as usize;
                 }
 
                 // parent 地址
@@ -206,21 +205,21 @@ impl PcieHost {
         let mut mmio_base = mmio_base;
         let mut mmio_size = mmio_size;
 
-        if ecam_size == 0 {
-            if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieEcam) {
-                ecam_base = def_base;
-                ecam_size = def_size;
-                ecam_from_fdt = false;
-                pr_warn!("[PCIe] FDT ECAM missing, using platform defaults");
-            }
+        if ecam_size == 0
+            && let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieEcam)
+        {
+            ecam_base = def_base;
+            ecam_size = def_size;
+            ecam_from_fdt = false;
+            pr_warn!("[PCIe] FDT ECAM missing, using platform defaults");
         }
 
-        if mmio_size < 0x100000 {
-            if let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieMmio) {
-                mmio_base = def_base;
-                mmio_size = def_size;
-                pr_warn!("[PCIe] FDT PCIe ranges too small, overriding MMIO window");
-            }
+        if mmio_size < 0x100000
+            && let Some((def_base, def_size)) = mmio_of(VirtDevice::VirtPcieMmio)
+        {
+            mmio_base = def_base;
+            mmio_size = def_size;
+            pr_warn!("[PCIe] FDT PCIe ranges too small, overriding MMIO window");
         }
 
         let ecam_end = ecam_base.saturating_add(ecam_size);
@@ -360,7 +359,7 @@ impl PcieHost {
 
 /// 初始化并枚举 PCIe 设备
 pub fn init_and_enumerate() {
-    if let Some(host) = PcieHost::from_fdt().or_else(|| PcieHost::from_platform_defaults()) {
+    if let Some(host) = PcieHost::from_fdt().or_else(PcieHost::from_platform_defaults) {
         host.enumerate();
     } else {
         pr_info!("[PCIe] no host found from platform defaults");
@@ -369,13 +368,12 @@ pub fn init_and_enumerate() {
 
 /// 初始化 PCIe 并枚举 VirtIO PCI 设备
 pub fn init_virtio_pci() {
-    let host =
-        if let Some(host) = PcieHost::from_fdt().or_else(|| PcieHost::from_platform_defaults()) {
-            host
-        } else {
-            pr_info!("[PCIe] no host found from platform defaults");
-            return;
-        };
+    let host = if let Some(host) = PcieHost::from_fdt().or_else(PcieHost::from_platform_defaults) {
+        host
+    } else {
+        pr_info!("[PCIe] no host found from platform defaults");
+        return;
+    };
 
     let ecam_vaddr = match current_memory_space()
         .lock()

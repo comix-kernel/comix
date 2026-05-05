@@ -115,9 +115,7 @@ impl Ext4FileSystem {
         let adapter = Arc::new(BlockDeviceAdapter::new(device.clone(), block_size));
 
         // 预检 superblock，避免 ext4_rs 在坏镜像/错误读取时 panic
-        if let Err(e) = validate_superblock(&adapter) {
-            return Err(e);
-        }
+        validate_superblock(&adapter)?;
 
         // 使用 ext4_rs 打开文件系统
         // 注意：ext4_rs::Ext4::open 直接返回 Ext4，不返回 Result

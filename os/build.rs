@@ -5,6 +5,8 @@
 //! 2. Packs them into an init_simple_fs image
 //! 3. Embeds the image into the kernel binary
 
+#![allow(dead_code)]
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -125,7 +127,7 @@ fn main() {
         // 我们创建一个空的伪文件来满足 include_bytes! 的需求
         let dummy_img = PathBuf::from(&out_dir).join("ext4_test_dummy.img");
         if !dummy_img.exists() {
-            let _ = fs::write(&dummy_img, &[]);
+            let _ = fs::write(&dummy_img, []);
         }
         println!(
             "cargo:warning=[build.rs] Skipping real test image creation (using dummy for IDE)"

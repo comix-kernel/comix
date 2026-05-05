@@ -1,6 +1,6 @@
 //! 16550 UART 串行端口驱动程序模块
 
-use alloc::{format, sync::Arc};
+use alloc::sync::Arc;
 use fdt::node::FdtNode;
 use uart_16550::MmioSerialPort;
 
@@ -21,7 +21,7 @@ pub struct Uart16550 {
 }
 
 impl Driver for Uart16550 {
-    fn try_handle_interrupt(&self, irq: Option<usize>) -> bool {
+    fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
         todo!()
     }
 
@@ -30,7 +30,7 @@ impl Driver for Uart16550 {
     }
 
     fn get_id(&self) -> alloc::string::String {
-        format!("ns16550a")
+        alloc::string::String::from("ns16550a")
     }
 
     fn as_serial(&self) -> Option<&dyn SerialDriver> {
@@ -51,10 +51,7 @@ impl SerialDriver for Uart16550 {
     }
 
     fn try_read(&self) -> Option<u8> {
-        match self.serial_port.lock().try_receive() {
-            Ok(byte) => Some(byte),
-            Err(_) => None,
-        }
+        self.serial_port.lock().try_receive().ok()
     }
 }
 

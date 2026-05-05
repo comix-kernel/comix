@@ -206,7 +206,7 @@ fn handle_fionread(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) ->
 }
 
 /// FIOASYNC - 设置/清除异步 I/O 通知
-fn handle_fioasync(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
+fn handle_fioasync(_file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
     unsafe {
         let _guard = SumGuard::new();
         let value_ptr = arg as *const i32;

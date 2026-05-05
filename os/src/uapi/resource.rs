@@ -1,6 +1,6 @@
 //! 资源限制相关的常量和类型定义。
 
-use core::{ffi::c_long, usize};
+use core::ffi::c_long;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

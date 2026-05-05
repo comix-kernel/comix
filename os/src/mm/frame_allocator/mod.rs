@@ -202,7 +202,7 @@ mod frame_allocator_tests {
         let ppn = frames.range().start().as_usize();
 
         // 验证对齐
-        kassert!(ppn % 16 == 0);
+        kassert!(ppn.is_multiple_of(16));
     });
 
     // 6. 大量分配测试

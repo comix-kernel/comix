@@ -81,7 +81,7 @@ impl SysfsInode {
     /// 创建属性文件 inode
     pub fn new_attribute(attr: SysfsAttr) -> Arc<Self> {
         let inode_no = NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed);
-        let mode = attr.mode.clone();
+        let mode = attr.mode;
         let now = TimeSpec::now();
         Arc::new(Self {
             inode_no,

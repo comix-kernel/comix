@@ -21,10 +21,8 @@ impl CacheAlignedAtomic {
 /// Per-CPU 抢占计数器
 ///
 /// 每个 CPU 维护一个计数器，> 0 表示抢占已禁用。
-static PREEMPT_COUNT: [CacheAlignedAtomic; MAX_CPU_COUNT] = {
-    const INIT: CacheAlignedAtomic = CacheAlignedAtomic::new();
-    [INIT; MAX_CPU_COUNT]
-};
+static PREEMPT_COUNT: [CacheAlignedAtomic; MAX_CPU_COUNT] =
+    [const { CacheAlignedAtomic::new() }; MAX_CPU_COUNT];
 
 /// 禁用抢占
 ///

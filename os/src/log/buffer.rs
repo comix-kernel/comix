@@ -187,7 +187,6 @@ struct ReaderData {
 impl GlobalLogBuffer {
     /// 在编译时创建一个新的全局日志缓冲区
     pub(super) const fn new() -> Self {
-        const EMPTY: LogEntry = LogEntry::empty();
         Self {
             writer_data: CachePadded64 {
                 inner: WriterData {
@@ -200,7 +199,7 @@ impl GlobalLogBuffer {
                     dropped: AtomicUsize::new(0),
                 },
             },
-            buffer: [EMPTY; MAX_LOG_ENTRIES],
+            buffer: [const { LogEntry::empty() }; MAX_LOG_ENTRIES],
             unread_bytes: AtomicUsize::new(0),
         }
     }
@@ -288,11 +287,11 @@ impl GlobalLogBuffer {
         let read_seq = self.reader_data.read_seq.load(Ordering::Acquire);
 
         let slot = read_seq % MAX_LOG_ENTRIES;
-        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) as *const LogEntry };
+        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) };
 
-        const EMPTY: LogEntry = LogEntry::empty();
+        let empty = LogEntry::empty();
         unsafe {
-            if !EMPTY.is_ready(slot_ptr, read_seq) {
+            if !empty.is_ready(slot_ptr, read_seq) {
                 return None;
             }
         }
@@ -364,12 +363,12 @@ impl GlobalLogBuffer {
 
         // 计算缓冲区索引
         let slot = index % MAX_LOG_ENTRIES;
-        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) as *const LogEntry };
+        let slot_ptr = unsafe { self.buffer.as_ptr().add(slot) };
 
         // 检查序列号是否匹配（确保数据有效）
-        const EMPTY: LogEntry = LogEntry::empty();
+        let empty = LogEntry::empty();
         unsafe {
-            if !EMPTY.is_ready(slot_ptr, index) {
+            if !empty.is_ready(slot_ptr, index) {
                 return None;
             }
         }

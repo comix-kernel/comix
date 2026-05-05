@@ -353,12 +353,12 @@ impl Inode for ProcInode {
                 }
 
                 // 仅对 /proc 根目录：检查是否为进程目录（数字命名）
-                if self.kind == ProcInodeKind::Root {
-                    if let Ok(pid) = name.parse::<u32>() {
-                        // 动态创建进程目录（不缓存，避免 stale PID 与 dentry 缓存问题）
-                        if let Some(proc_dir) = self.create_process_dir(pid) {
-                            return Ok(proc_dir as Arc<dyn Inode>);
-                        }
+                if self.kind == ProcInodeKind::Root
+                    && let Ok(pid) = name.parse::<u32>()
+                {
+                    // 动态创建进程目录（不缓存，避免 stale PID 与 dentry 缓存问题）
+                    if let Some(proc_dir) = self.create_process_dir(pid) {
+                        return Ok(proc_dir as Arc<dyn Inode>);
                     }
                 }
 

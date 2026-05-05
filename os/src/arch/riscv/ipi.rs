@@ -81,9 +81,9 @@ pub fn send_ipi_many(hart_mask: usize, ipi_type: IpiType) {
     let num_cpu = unsafe { crate::kernel::NUM_CPU };
 
     // 设置所有目标 CPU 的待处理标志
-    for cpu in 0..num_cpu {
+    for (cpu, pending) in IPI_PENDING.iter().enumerate().take(num_cpu) {
         if (hart_mask & (1 << cpu)) != 0 {
-            IPI_PENDING[cpu].fetch_or(ipi_type as u32, Ordering::Release);
+            pending.fetch_or(ipi_type as u32, Ordering::Release);
         }
     }
 
