@@ -2,12 +2,12 @@
 
 use core::ffi::c_char;
 
-use alloc::{string::ToString, sync::Arc};
+use alloc::string::ToString;
 
 use crate::{
     arch::trap::SumGuard,
     kernel::{
-        current_cpu, current_task,
+        current_task,
         syscall::util::{
             create_file_at, create_file_from_dentry, get_path_safe, resolve_at_path,
             resolve_at_path_with_flags,
@@ -19,8 +19,8 @@ use crate::{
         time::TimeSpec,
     },
     vfs::{
-        DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, RegFile, SeekWhence, Stat,
-        Statx, split_path, vfs_lookup,
+        DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, Statx,
+        split_path, vfs_lookup,
     },
 };
 
@@ -31,19 +31,18 @@ pub const O_CLOEXEC: u32 = 0o2000000;
 
 pub fn close(fd: usize) -> isize {
     let task = current_task();
-    let mut task_lock = task.lock();
+    let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
     // If this fd is a socket, also remove the (tid, fd) -> socket handle mapping.
     // Otherwise, fd reuse can accidentally refer to a stale socket handle.
-    if let Ok(file) = task_lock.fd_table.get(fd) {
-        if file
+    if let Ok(file) = task_lock.fd_table.get(fd)
+        && file
             .as_any()
             .downcast_ref::<crate::net::socket::SocketFile>()
             .is_some()
-        {
-            crate::net::socket::unregister_socket_fd(tid, fd);
-        }
+    {
+        crate::net::socket::unregister_socket_fd(tid, fd);
     }
 
     match task_lock.fd_table.close(fd) {
@@ -158,19 +157,17 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     };
 
     // 检查 O_DIRECTORY (必须是目录)
-    if open_flags.contains(OpenFlags::O_DIRECTORY) {
-        if meta.inode_type != InodeType::Directory {
-            return FsError::NotDirectory.to_errno();
-        }
+    if open_flags.contains(OpenFlags::O_DIRECTORY) && meta.inode_type != InodeType::Directory {
+        return FsError::NotDirectory.to_errno();
     }
 
     // 处理 O_TRUNC (截断文件)
-    if open_flags.contains(OpenFlags::O_TRUNC) && open_flags.writable() {
-        if meta.inode_type == InodeType::File {
-            if let Err(e) = dentry.inode.truncate(0) {
-                return e.to_errno();
-            }
-        }
+    if open_flags.contains(OpenFlags::O_TRUNC)
+        && open_flags.writable()
+        && meta.inode_type == InodeType::File
+        && let Err(e) = dentry.inode.truncate(0)
+    {
+        return e.to_errno();
     }
 
     // 创建 File 对象
@@ -413,7 +410,7 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     unsafe {
         let _guard = SumGuard::new();
 
-        for (_, entry) in entries.iter().skip(start_index).enumerate() {
+        for entry in entries.iter().skip(start_index) {
             // 计算这个 dirent 需要的空间
             let dirent_len = LinuxDirent64::total_len(&entry.name);
 
@@ -648,7 +645,7 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
-    let bytes_read = core::cmp::min(target.as_bytes().len(), bufsiz);
+    let bytes_read = core::cmp::min(target.len(), bufsiz);
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
     {

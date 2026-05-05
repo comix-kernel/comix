@@ -133,10 +133,10 @@ impl File for BlockDeviceFile {
             let mut sector_buf = [0u8; 512];
 
             // 如果不是完整扇区写入，需要先读取
-            if offset_in_sector != 0 || to_write != Self::BLOCK_SIZE {
-                if !driver.read_block(sector_idx, &mut sector_buf) {
-                    return Err(FsError::IoError);
-                }
+            if (offset_in_sector != 0 || to_write != Self::BLOCK_SIZE)
+                && !driver.read_block(sector_idx, &mut sector_buf)
+            {
+                return Err(FsError::IoError);
             }
 
             // 修改数据
@@ -189,7 +189,7 @@ impl File for BlockDeviceFile {
     }
 
     fn flags(&self) -> OpenFlags {
-        self.flags.clone()
+        self.flags
     }
 
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {

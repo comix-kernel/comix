@@ -49,8 +49,8 @@ pub fn run_early_tests() {
     // 创建一个指向函数指针的切片
     // 安全性：我们假设链接器脚本正确创建了这些符号，并且它们对齐了函数指针。
     // 段中的每个项都是一个 `fn()` 类型的指针。
-    let start = unsafe { &__early_test_start as *const _ as *const extern "C" fn() };
-    let end = unsafe { &__early_test_end as *const _ as *const extern "C" fn() };
+    let start: *const extern "C" fn() = unsafe { &__early_test_start as *const _ };
+    let end: *const extern "C" fn() = unsafe { &__early_test_end as *const _ };
 
     // 计算测试数量
     let count = unsafe { end.offset_from(start) } as usize;
@@ -125,7 +125,7 @@ mod tests {
     });
 
     early_test!(exampe_early_test, {
-        kassert!(1 == 1);
+        kassert!(true);
     });
 
     // 测试 `test_case!` 宏的 `(Interrupts)` 环境是否能正确地

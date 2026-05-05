@@ -102,12 +102,12 @@ impl IrqManager {
     /// # 返回值：
     /// 如果中断被处理则返回 true，否则返回 false
     pub fn try_handle_interrupt(&self, irq_opt: Option<usize>) -> bool {
-        if let Some(irq) = irq_opt {
-            if let Some(e) = self.mapping.get(&irq) {
-                for dri in e.iter() {
-                    if dri.try_handle_interrupt(Some(irq)) {
-                        return true;
-                    }
+        if let Some(irq) = irq_opt
+            && let Some(e) = self.mapping.get(&irq)
+        {
+            for dri in e.iter() {
+                if dri.try_handle_interrupt(Some(irq)) {
+                    return true;
                 }
             }
         }

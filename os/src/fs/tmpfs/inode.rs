@@ -304,7 +304,7 @@ impl Inode for TmpfsInode {
         // 更新文件大小和时间
         let mut meta = self.metadata.lock();
         meta.size = meta.size.max(offset + bytes_written);
-        meta.blocks = (meta.size + 511) / 512; // 以 512B 为单位
+        meta.blocks = meta.size.div_ceil(512); // 以 512B 为单位
         drop(meta);
 
         self.update_mtime();
@@ -558,8 +558,8 @@ impl Inode for TmpfsInode {
 
         if new_size < old_size {
             // 缩小：释放多余的页
-            let new_page_count = (new_size + PAGE_SIZE - 1) / PAGE_SIZE;
-            let old_page_count = (old_size + PAGE_SIZE - 1) / PAGE_SIZE;
+            let new_page_count = new_size.div_ceil(PAGE_SIZE);
+            let old_page_count = old_size.div_ceil(PAGE_SIZE);
 
             let mut data = self.data.lock();
 
@@ -576,7 +576,7 @@ impl Inode for TmpfsInode {
         }
 
         meta.size = new_size;
-        meta.blocks = (new_size + 511) / 512;
+        meta.blocks = new_size.div_ceil(512);
         drop(meta);
 
         self.update_mtime();
@@ -624,9 +624,7 @@ impl Inode for TmpfsInode {
 
         // 将目标路径写入符号链接文件的数据中
         let target_bytes = target.as_bytes();
-        if let Err(e) = symlink_inode.write_at(0, target_bytes) {
-            return Err(e);
-        }
+        symlink_inode.write_at(0, target_bytes)?;
 
         // 添加到父目录
         self.children

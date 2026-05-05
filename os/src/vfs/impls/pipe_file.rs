@@ -42,7 +42,7 @@ impl PipeRingBuffer {
 
     /// 设置管道容量
     fn set_capacity(&mut self, new_capacity: usize) -> Result<(), FsError> {
-        if new_capacity < Self::MIN_CAPACITY || new_capacity > Self::MAX_CAPACITY {
+        if !(Self::MIN_CAPACITY..=Self::MAX_CAPACITY).contains(&new_capacity) {
             return Err(FsError::InvalidArgument);
         }
 
@@ -67,8 +67,8 @@ impl PipeRingBuffer {
         }
 
         let nread = buf.len().min(self.buffer.len());
-        for i in 0..nread {
-            buf[i] = self.buffer.pop_front().unwrap();
+        for byte in buf.iter_mut().take(nread) {
+            *byte = self.buffer.pop_front().unwrap();
         }
 
         Ok(nread)
@@ -200,10 +200,10 @@ impl File for PipeFile {
         let mut ring_buf = self.buffer.lock();
         let result = ring_buf.read(buf);
         // Only wake up writers if we actually freed buffer space
-        if let Ok(bytes_read) = result {
-            if bytes_read > 0 {
-                crate::kernel::syscall::io::wake_poll_waiters();
-            }
+        if let Ok(bytes_read) = result
+            && bytes_read > 0
+        {
+            crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
     }
@@ -216,10 +216,10 @@ impl File for PipeFile {
         let mut ring_buf = self.buffer.lock();
         let result = ring_buf.write(buf);
         // Only wake up readers if we actually wrote data
-        if let Ok(bytes_written) = result {
-            if bytes_written > 0 {
-                crate::kernel::syscall::io::wake_poll_waiters();
-            }
+        if let Ok(bytes_written) = result
+            && bytes_written > 0
+        {
+            crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
     }

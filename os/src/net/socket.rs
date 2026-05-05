@@ -381,6 +381,7 @@ pub(crate) fn write_sockaddr_in_to_buf(buf: &mut [u8], endpoint: IpEndpoint) -> 
         IpAddress::Ipv6(_) => {
             return Err(()); // IPv6 not supported in AF_INET
         }
+        #[cfg(not(feature = "proto-ipv6"))]
         _ => {
             return Err(()); // Unknown address type
         }

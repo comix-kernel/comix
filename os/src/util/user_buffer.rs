@@ -10,7 +10,7 @@
 use alloc::vec::Vec;
 use core::ptr;
 
-use crate::arch::constant::{USER_BASE, USER_TOP};
+use crate::arch::constant::USER_TOP;
 use crate::arch::trap::SumGuard;
 
 /// 向用户空间写入数据
@@ -94,7 +94,7 @@ impl UserBuffer {
         let Some(end) = start.checked_add(self.len) else {
             return false;
         };
-        start >= USER_BASE && end <= USER_TOP
+        end <= USER_TOP
     }
 
     /// 返回用户缓冲区长度
@@ -114,7 +114,7 @@ impl UserBuffer {
 ///
 /// 检查指针是否：
 /// 1. 非空
-/// 2. 指向用户空间地址范围 [USER_BASE, USER_TOP]
+/// 2. 指向用户空间地址范围 [0, USER_TOP]
 /// 3. 指针指向的内存区域不溢出用户空间
 ///
 /// # 参数

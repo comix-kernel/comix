@@ -82,8 +82,8 @@ unsafe impl Hal for VirtIOHal {
         let virt = paddr_to_vaddr(phys_addr);
 
         // 验证虚拟地址的合法性
-        let ptr = NonNull::new(virt as *mut u8).expect("mmio_phys_to_virt returned null pointer");
-        ptr
+
+        NonNull::new(virt as *mut u8).expect("mmio_phys_to_virt returned null pointer")
     }
 
     /// 共享内存区域给设备，并返回设备可访问的物理地址
@@ -91,8 +91,7 @@ unsafe impl Hal for VirtIOHal {
         let vaddr = buffer.as_ptr() as *const u8 as usize;
         let paddr = unsafe { vaddr_to_paddr(vaddr) };
 
-        let result = PhysAddr::from(paddr as u64);
-        result
+        PhysAddr::from(paddr as u64)
     }
 
     /// 取消共享内存区域，并在必要时将数据复制回原始缓冲区

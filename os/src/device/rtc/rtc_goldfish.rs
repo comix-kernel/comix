@@ -19,7 +19,7 @@ pub struct RtcGoldfish {
 }
 
 impl Driver for RtcGoldfish {
-    fn try_handle_interrupt(&self, irq: Option<usize>) -> bool {
+    fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
         false
     }
 

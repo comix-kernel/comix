@@ -145,19 +145,16 @@ mod tests {
         // NOTE: 在实际运行环境中，第二次调用会死循环，测试环境通常需要模拟并发
         // 在这里我们依赖测试框架的单线程执行来简单检查 is_locked 状态
 
-        // 模拟多线程获取失败的场景：
-        let second_lock_failed;
-
         // 临时释放，让第二次获取成功
         drop(guard1);
 
         let guard2 = lock.lock();
-        if lock.is_locked() {
+        let second_lock_failed = if lock.is_locked() {
             // 第二次获取成功
-            second_lock_failed = false;
+            false
         } else {
-            second_lock_failed = true;
-        }
+            true
+        };
 
         kassert!(!second_lock_failed);
         drop(guard2);

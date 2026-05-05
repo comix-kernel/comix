@@ -26,7 +26,7 @@ impl BlockDeviceAdapter {
 
         // 确保块大小是扇区大小的整数倍
         assert!(
-            block_size % sector_size == 0,
+            block_size.is_multiple_of(sector_size),
             "Block size must be a multiple of sector size"
         );
 
@@ -49,8 +49,7 @@ impl ext4_rs::BlockDevice for BlockDeviceAdapter {
 
         // 计算需要读取多少个扇区才能获得 block_size 字节的数据
         let bytes_needed = self.block_size;
-        let sectors_needed =
-            (sector_offset + bytes_needed + self.sector_size - 1) / self.sector_size;
+        let sectors_needed = (sector_offset + bytes_needed).div_ceil(self.sector_size);
 
         // 读取所有需要的扇区
         let mut buffer = alloc::vec![0u8; sectors_needed * self.sector_size];
@@ -83,8 +82,7 @@ impl ext4_rs::BlockDevice for BlockDeviceAdapter {
 
         // 计算需要写入多少个扇区
         let bytes_to_write = data.len();
-        let sectors_needed =
-            (sector_offset + bytes_to_write + self.sector_size - 1) / self.sector_size;
+        let sectors_needed = (sector_offset + bytes_to_write).div_ceil(self.sector_size);
 
         // 读取-修改-写入
         let mut buffer = alloc::vec![0u8; sectors_needed * self.sector_size];

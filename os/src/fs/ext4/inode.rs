@@ -170,7 +170,7 @@ impl Inode for Ext4Inode {
 
         // 类似 create,lookup 也应该使用相对路径
         // 直接在当前目录下查找指定名称的文件
-        let mut fs = self.fs.lock();
+        let fs = self.fs.lock();
         let mut parent = self.ino;
         let mut name_off = 0;
 
@@ -654,7 +654,7 @@ impl Inode for Ext4Inode {
     }
 
     fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
-        let mut fs = self.fs.lock();
+        let fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
         let mut inode_ref = fs.get_inode_ref(self.ino);
@@ -686,7 +686,7 @@ impl Inode for Ext4Inode {
     }
 
     fn chown(&self, uid: u32, gid: u32) -> Result<(), FsError> {
-        let mut fs = self.fs.lock();
+        let fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
         let mut inode_ref = fs.get_inode_ref(self.ino);
@@ -714,7 +714,7 @@ impl Inode for Ext4Inode {
     }
 
     fn chmod(&self, mode: FileMode) -> Result<(), FsError> {
-        let mut fs = self.fs.lock();
+        let fs = self.fs.lock();
 
         // 获取 inode 引用（可变）
         let mut inode_ref = fs.get_inode_ref(self.ino);

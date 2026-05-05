@@ -540,10 +540,8 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
             if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
                 crate::pr_debug!("wait4: found child pid={}", res.lock().pid);
                 break res;
-            } else {
-                if opt.contains(WaitFlags::NOHANG) {
-                    return 0;
-                }
+            } else if opt.contains(WaitFlags::NOHANG) {
+                return 0;
             }
             {
                 let mut wc = t.wait_child.lock();
@@ -653,12 +651,12 @@ pub fn get_pgid(pid: c_int) -> c_int {
 
 /// 设置进程组 ID
 pub fn set_pgid(pid: c_int, pgid: c_int) -> c_int {
-    use crate::uapi::errno::{EACCES, EINVAL, EPERM, ESRCH};
+    use crate::uapi::errno::{EINVAL, EPERM, ESRCH};
 
     let current = current_task();
     let current_locked = current.lock();
     let current_pid = current_locked.tid as c_int;
-    let current_ppid = current_locked.ppid as c_int;
+    let _current_ppid = current_locked.ppid as c_int;
     drop(current_locked);
 
     let target_pid = if pid == 0 { current_pid } else { pid };
@@ -921,7 +919,7 @@ pub fn getitimer(which: c_int, curr_value: *mut Itimerval) -> c_int {
     let mut val = Itimerval::zero();
     if let Some(timer) = TIMER.lock().find_entry(&owner, sig) {
         let now = get_time();
-        let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
+        let remaining = (*timer.0).saturating_sub(now);
         let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
         let it_interval = timer.1.it_interval.to_timeval();
         val = Itimerval {
@@ -969,7 +967,7 @@ pub fn setitimer(which: c_int, new_value: *const Itimerval, old_value: *mut Itim
     let mut old = Itimerval::zero();
     if let Some(timer) = binding.find_entry(&owner, sig) {
         let now = get_time();
-        let remaining = if *timer.0 > now { *timer.0 - now } else { 0 };
+        let remaining = (*timer.0).saturating_sub(now);
         let it_value = TimeSpec::from_freq(remaining, clock_freq()).to_timeval();
         let it_interval = timer.1.it_interval.to_timeval();
         old = Itimerval {
@@ -1042,7 +1040,7 @@ pub fn futex(
             } else {
                 return -EFAULT;
             };
-            if user_val != val as u32 {
+            if user_val != val {
                 return -EAGAIN;
             }
 

@@ -48,10 +48,10 @@ impl TimerQueue {
     /// # 返回值:
     /// - 已到期的任务（如果有）
     pub fn pop_due_task(&mut self, current_time: usize) -> Option<SharedTask> {
-        if let Some((&trigger_time, _)) = self.queue.iter().next() {
-            if trigger_time <= current_time {
-                return self.queue.remove(&trigger_time);
-            }
+        if let Some((&trigger_time, _)) = self.queue.iter().next()
+            && trigger_time <= current_time
+        {
+            return self.queue.remove(&trigger_time);
         }
         None
     }
@@ -124,10 +124,10 @@ impl TimerEntries {
     /// # 返回值:
     /// - 已到期的定时器条目（如果有）
     pub fn pop_due_entry(&mut self, current_time: usize) -> Option<TimerEntry> {
-        if let Some((&trigger_time, _)) = self.entries.iter().next() {
-            if trigger_time <= current_time {
-                return self.entries.remove(&trigger_time);
-            }
+        if let Some((&trigger_time, _)) = self.entries.iter().next()
+            && trigger_time <= current_time
+        {
+            return self.entries.remove(&trigger_time);
         }
         None
     }

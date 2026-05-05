@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpCidr, Ipv4Address};
 
-pub use crate::net::stack::{NetDeviceAdapter, SmoltcpInterface};
+pub use crate::net::stack::SmoltcpInterface;
 
 /// 网络接口管理器
 pub struct NetworkInterfaceManager {

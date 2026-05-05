@@ -22,11 +22,11 @@ pub fn init() {
 
 #[inline]
 fn write_str_unlocked(s: &str) {
-    if CONSOLE_RUNTIME.load(Ordering::Acquire) {
-        if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
-            console.write_str(s);
-            return;
-        }
+    if CONSOLE_RUNTIME.load(Ordering::Acquire)
+        && let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref()
+    {
+        console.write_str(s);
+        return;
     }
 
     for b in s.bytes() {

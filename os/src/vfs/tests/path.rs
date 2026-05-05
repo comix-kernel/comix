@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::vfs::path::PathComponent;
+use crate::vfs::path::{PathComponent, parse_path};
 use crate::{kassert, test_case};
 use alloc::string::ToString;
 
@@ -194,7 +194,7 @@ test_case!(test_dentry_mount_cache, {
     let fs = create_test_simplefs();
 
     // 挂载到 /cache_test
-    let mount_result = MOUNT_TABLE.mount(fs.clone(), "/cache_test", MountFlags::empty(), None);
+    let mount_result = MOUNT_TABLE.mount(fs, "/cache_test", MountFlags::empty(), None);
     kassert!(mount_result.is_ok());
 
     // 获取挂载点
