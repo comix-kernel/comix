@@ -1,6 +1,6 @@
 # 网络子系统实现指南
 
-本文档描述 `new-main` 上网络模块的当前实现边界和维护方式。历史上的“待实现 POSIX 网络栈”说明已经合并为当前事实：网络模块以 `NetDevice -> NetworkInterface -> NetworkStack -> SocketFile/syscall` 为主线，保留少量兼容壳体以降低重构风险。
+本文档描述 `new-main` 上网络模块的当前实现边界和维护方式。网络模块以 `NetDevice -> NetworkInterface -> NetworkStack -> SocketFile/syscall` 为主线，保留少量兼容壳体以维持现有接口稳定。
 
 ## 当前分层
 
@@ -43,4 +43,4 @@ cargo check
 - `set_network_interface_config()` 能正确设置和查询 IP、mask、gateway。
 - `socket/bind/listen/accept/connect/send/recv/sendto/recvfrom` 基础路径可用。
 - `ppoll/select` 能观察 TCP accept、TCP recv、UDP recv 可读事件。
-- netperf/netserver 已知 EINTR 行为不要误判为网络重构失败。
+- netperf/netserver 已知 EINTR 行为不要误判为网络功能不可用。
