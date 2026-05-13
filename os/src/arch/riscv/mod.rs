@@ -1,6 +1,7 @@
 //! RISC-V 架构相关模块
 pub mod boot;
 pub mod constant;
+pub mod cpu_ops;
 pub mod info;
 pub mod intr;
 pub mod ipi;

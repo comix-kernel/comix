@@ -21,3 +21,11 @@ pub use loongarch::*;
 
 #[cfg(target_arch = "riscv64")]
 pub use riscv::*;
+
+// ---- ArchImpl 类型别名 ----
+// 内核其余部分通过 ArchImpl 访问架构特定功能，无需关心具体架构。
+#[cfg(target_arch = "riscv64")]
+pub use riscv::cpu_ops::Riscv64 as ArchImpl;
+
+#[cfg(target_arch = "loongarch64")]
+pub use loongarch::cpu_ops::LoongArch64 as ArchImpl;

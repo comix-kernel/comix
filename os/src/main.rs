@@ -17,6 +17,7 @@ mod config;
 mod console;
 mod device;
 mod fs;
+mod hal;
 mod ipc;
 mod kernel;
 mod mm;
