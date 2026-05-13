@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 mod cred;
+pub mod dispatch;
 mod fcntl;
 mod fs;
 pub mod io;
@@ -13,6 +14,7 @@ mod mm;
 mod network;
 mod signal;
 mod sys;
+pub mod syscall_frame;
 mod task;
 mod util;
 

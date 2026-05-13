@@ -93,7 +93,7 @@ macro_rules! println {
 /// 测试环境下的打印宏
 macro_rules! println {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::arch::lib::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+        $crate::console::_early_print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }
 }
 
@@ -102,6 +102,6 @@ macro_rules! println {
 /// 测试环境下的打印宏
 macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::arch::lib::console::print(format_args!($fmt $(, $($arg)+)?))
+        $crate::console::_early_print(format_args!($fmt $(, $($arg)+)?))
     }
 }

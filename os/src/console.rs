@@ -132,3 +132,35 @@ impl Write for Stdout {
         UnlockedWriter.write_fmt(args)
     }
 }
+
+/// 早期打印：逐字节通过 arch 的 console_putchar 输出。
+/// 不使用锁，适用于内核初始化早期阶段。
+#[doc(hidden)]
+pub fn _early_print(args: core::fmt::Arguments) {
+    struct EarlyWriter;
+    impl core::fmt::Write for EarlyWriter {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            for b in s.bytes() {
+                crate::arch::lib::sbi::console_putchar(b as usize);
+            }
+            Ok(())
+        }
+    }
+    EarlyWriter.write_fmt(args).unwrap();
+}
+
+/// 早期打印宏 (不含换行)
+#[macro_export]
+macro_rules! earlyprint {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::console::_early_print(format_args!($fmt $(, $($arg)+)?))
+    }
+}
+
+/// 早期打印宏 (含换行)
+#[macro_export]
+macro_rules! earlyprintln {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::console::_early_print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+    }
+}
