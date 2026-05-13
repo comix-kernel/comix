@@ -193,7 +193,7 @@ mod tests {
     use crate::{arch::intr::are_interrupts_enabled, kassert, test_case};
 
     test_case!(test_rwlock_read_basic, {
-        let lock = RwLock::new(42);
+        let lock: RwLock<i32> = RwLock::new(42);
 
         let guard = lock.read();
         kassert!(*guard == 42);
@@ -205,7 +205,7 @@ mod tests {
     });
 
     test_case!(test_rwlock_write_basic, {
-        let lock = RwLock::new(100);
+        let lock: RwLock<i32> = RwLock::new(100);
 
         let mut guard = lock.write();
         kassert!(*guard == 100);
@@ -222,7 +222,7 @@ mod tests {
     });
 
     test_case!(test_rwlock_multiple_readers, {
-        let lock = RwLock::new(42);
+        let lock: RwLock<i32> = RwLock::new(42);
 
         let guard1 = lock.read();
         kassert!(lock.reader_count() == 1);
@@ -248,7 +248,7 @@ mod tests {
     });
 
     test_case!(test_rwlock_writer_excludes_readers, {
-        let lock = RwLock::new(0);
+        let lock: RwLock<i32> = RwLock::new(0);
 
         let guard = lock.write();
         kassert!(lock.is_write_locked());
@@ -263,7 +263,7 @@ mod tests {
     });
 
     test_case!(test_rwlock_interrupt_disable, {
-        let lock = RwLock::new(0);
+        let lock: RwLock<i32> = RwLock::new(0);
 
         let guard = lock.read();
         kassert!(!are_interrupts_enabled());
@@ -277,7 +277,7 @@ mod tests {
     });
 
     test_case!(test_rwlock_try_read, {
-        let lock = RwLock::new(42);
+        let lock: RwLock<i32> = RwLock::new(42);
 
         if let Some(guard) = lock.try_read() {
             kassert!(*guard == 42);
@@ -287,7 +287,7 @@ mod tests {
     });
 
     test_case!(test_rwlock_try_write, {
-        let lock = RwLock::new(100);
+        let lock: RwLock<i32> = RwLock::new(100);
 
         let guard = lock.try_write();
         kassert!(guard.is_some());

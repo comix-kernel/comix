@@ -114,7 +114,7 @@ mod tests {
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     test_case!(test_per_cpu_basic, {
-        let per_cpu = PerCpu::new(|| AtomicUsize::new(0));
+        let per_cpu: PerCpu<AtomicUsize> = PerCpu::new(|| AtomicUsize::new(0));
         let _guard = PreemptGuard::new();
         let counter = per_cpu.get();
         kassert!(counter.load(Ordering::Relaxed) == 0);
@@ -123,7 +123,7 @@ mod tests {
     });
 
     test_case!(test_per_cpu_get_of, {
-        let per_cpu = PerCpu::new(|| AtomicUsize::new(42));
+        let per_cpu: PerCpu<AtomicUsize> = PerCpu::new(|| AtomicUsize::new(42));
         let counter = per_cpu.get_of(0);
         kassert!(counter.load(Ordering::Relaxed) == 42);
         counter.fetch_add(1, Ordering::Relaxed);
@@ -131,7 +131,7 @@ mod tests {
     });
 
     test_case!(test_per_cpu_get_mut, {
-        let per_cpu = PerCpu::new(|| 0usize);
+        let per_cpu: PerCpu<usize> = PerCpu::new(|| 0usize);
         let _guard = PreemptGuard::new();
         let value = per_cpu.get_mut();
         kassert!(*value == 0);

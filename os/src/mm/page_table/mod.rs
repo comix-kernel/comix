@@ -1,13 +1,10 @@
 //! 页表模块
 //!
 //! 本模块提供与页表管理相关的功能，包括页表的创建、映射、解除映射、翻译等操作。
-//! HACK: 在一个模块目录/文件的顶层又声明了一个同名子模块，这会造成 “module inception”。
-//! 虽然功能上可行，但会引起 API/模块层次混淆，Clippy 建议消除这种重复。
-#![allow(clippy::module_inception)]
-mod page_table;
+mod inner;
 mod page_table_entry;
 
-pub use page_table::*;
+pub use inner::*;
 pub use page_table_entry::*;
 
 // 活动页表内部类型别名

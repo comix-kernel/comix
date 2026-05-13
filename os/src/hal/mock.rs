@@ -1,9 +1,9 @@
-//! Mock 实现（仅 test 编译时可用）
+//! Mock 实现
 //!
 //! 提供 `MockCpuOps`、`MockAddressSpace`、`MockArch` 等，
 //! 使得架构无关代码可以在宿主编译和测试。
 //!
-//! 这些 mock 实现不会出现在非测试构建中。
+//! 这些 mock 实现仅在非目标架构（x86_64 host）上编译。
 
 use alloc::vec::Vec;
 
@@ -202,7 +202,7 @@ impl Arch for MockArch {
         }
     }
 
-    unsafe fn context_switch(_new_ctx: &Self::UserContext) {}
+    unsafe fn context_switch(_old: *mut Self::UserContext, _new: *const Self::UserContext) {}
 
     unsafe fn copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
         Ok(())

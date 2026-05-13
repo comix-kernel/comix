@@ -113,7 +113,7 @@ mod tests {
     use crate::{arch::intr::are_interrupts_enabled, kassert, test_case};
 
     test_case!(test_ticket_lock_basic, {
-        let lock = TicketLock::new(42);
+        let lock: TicketLock<i32> = TicketLock::new(42);
         kassert!(!lock.is_locked());
 
         let guard = lock.lock();
@@ -125,7 +125,7 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_raii, {
-        let lock = TicketLock::new(100);
+        let lock: TicketLock<i32> = TicketLock::new(100);
 
         {
             let mut guard = lock.lock();
@@ -140,7 +140,7 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_fairness, {
-        let lock = TicketLock::new(0);
+        let lock: TicketLock<i32> = TicketLock::new(0);
 
         let guard1 = lock.lock();
         kassert!(lock.next_ticket.load(Ordering::Relaxed) == 1);
@@ -156,7 +156,7 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_interrupt_disable, {
-        let lock = TicketLock::new(0);
+        let lock: TicketLock<i32> = TicketLock::new(0);
 
         let guard = lock.lock();
         kassert!(!are_interrupts_enabled());
@@ -166,7 +166,7 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_try_lock, {
-        let lock = TicketLock::new(42);
+        let lock: TicketLock<i32> = TicketLock::new(42);
 
         let guard = lock.try_lock();
         kassert!(guard.is_some());

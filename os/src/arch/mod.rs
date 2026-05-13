@@ -29,3 +29,7 @@ pub use riscv::cpu_ops::Riscv64 as ArchImpl;
 
 #[cfg(target_arch = "loongarch64")]
 pub use loongarch::cpu_ops::LoongArch64 as ArchImpl;
+
+// 宿主（非目标架构）使用 Mock 实现
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+pub use crate::hal::mock::MockArch as ArchImpl;
