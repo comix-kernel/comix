@@ -1,7 +1,7 @@
 //! fcntl 系统调用实现
 
-use crate::arch::trap::SumGuard;
 use crate::kernel::current_task;
+use crate::util::user_buffer::{read_from_user, write_to_user};
 use crate::uapi::errno::EINVAL;
 use crate::uapi::fcntl::{FcntlCmd, FdFlags, FileStatusFlags, Flock, LockType};
 use crate::vfs::{FsError, OpenFlags, file_lock_manager};
@@ -107,10 +107,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             }
 
             // 读取用户空间的 flock 结构
-            let mut flock = {
-                let _guard = SumGuard::new();
-                unsafe { core::ptr::read(flock_ptr) }
-            };
+            let mut flock = unsafe { read_from_user(flock_ptr) };
 
             // 获取文件对象
             let file = match task.lock().fd_table.get(fd) {
@@ -157,10 +154,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             }
 
             // 将结果写回用户空间
-            {
-                let _guard = SumGuard::new();
-                unsafe { core::ptr::write(flock_ptr, flock) };
-            }
+            unsafe { write_to_user(flock_ptr, flock) };
 
             0
         }
@@ -174,10 +168,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             }
 
             // 读取用户空间的 flock 结构
-            let flock = {
-                let _guard = SumGuard::new();
-                unsafe { core::ptr::read(flock_ptr) }
-            };
+            let flock = unsafe { read_from_user(flock_ptr) };
 
             // 解析锁类型
             let lock_type = match LockType::from_raw(flock.l_type) {

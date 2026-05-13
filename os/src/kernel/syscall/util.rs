@@ -1,7 +1,8 @@
 //! 系统调用辅助函数
 
-use core::ffi::{CStr, c_char};
+use core::ffi::CStr;
 
+use crate::hal::arch::Arch;
 use alloc::{
     format,
     string::{String, ToString},
@@ -19,28 +20,38 @@ use crate::{
     },
 };
 
+const PATH_MAX: usize = 4096;
+
+/// 从用户空间复制字符串到内核缓冲区
+fn copy_str_from_user(user_ptr: usize) -> Result<String, &'static str> {
+    let mut buf = [0u8; PATH_MAX];
+    let len = unsafe {
+        crate::arch::ArchImpl::copy_strn_from_user(user_ptr, buf.as_mut_ptr(), PATH_MAX)
+            .map_err(|_| "Failed to read string from user space")?
+    };
+    if len == PATH_MAX {
+        return Err("Path exceeds PATH_MAX");
+    }
+    // copy_strn_from_user 在遇到 '\0' 时返回其索引（含 '\0'）
+    let c_str = CStr::from_bytes_until_nul(&buf[..=len])
+        .map_err(|_| "String is not null-terminated")?;
+    c_str
+        .to_str()
+        .map(|s| s.to_string())
+        .map_err(|_| "String is not valid UTF-8")
+}
+
 /// 从用户空间获取路径字符串
 /// # 参数
 /// - `path`: 指向用户空间路径字符串的指针
 /// # 返回值
-/// - 成功时返回路径字符串的引用
+/// - 成功时返回路径字符串
 /// - 失败时返回错误字符串
-pub fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> {
-    // 必须在 unsafe 块中进行，因为依赖 C 的正确性
-    let c_str = unsafe {
-        // 检查指针是否为 NULL (空指针)
-        if path.is_null() {
-            return Err("Path pointer is NULL");
-        }
-        // 转换为安全的 &CStr 引用。如果指针无效或非空终止，这里会发生未定义行为 (UB)
-        CStr::from_ptr(path)
-    };
-
-    // 转换为 Rust 的 &str。to_str() 会检查 UTF-8 有效性
-    match c_str.to_str() {
-        Ok(s) => Ok(s),
-        Err(_) => Err("Path is not valid UTF-8"),
+pub fn get_path_safe(path: usize) -> Result<String, &'static str> {
+    if path == 0 {
+        return Err("Path pointer is NULL");
     }
+    copy_str_from_user(path)
 }
 
 /// 从用户空间获取参数字符串数组
@@ -51,38 +62,40 @@ pub fn get_path_safe(path: *const c_char) -> Result<&'static str, &'static str> 
 /// - 成功时返回包含参数字符串的 `Vec<String>`
 /// - 失败时返回错误字符串
 pub fn get_args_safe(
-    ptr_array: *const *const c_char,
-    name: &str, // 用于错误报告
+    ptr_array: usize,
+    name: &str,
 ) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
 
-    // 1. 检查指针数组是否为 NULL
-    if ptr_array.is_null() {
-        return Ok(Vec::new()); // 可能是合法的空列表
+    if ptr_array == 0 {
+        return Ok(Vec::new());
     }
 
-    // 必须在 unsafe 块中进行，因为涉及到裸指针操作
-    unsafe {
-        let mut current_ptr = ptr_array;
-
-        // 2. 迭代直到遇到 NULL 指针
-        while !(*current_ptr).is_null() {
-            let c_str = {
-                // 3. 将当前的 *const c_char 转换为 &CStr
-                CStr::from_ptr(*current_ptr)
-            };
-
-            // 4. 转换为 Rust String 并收集
-            match c_str.to_str() {
-                Ok(s) => args.push(s.to_string()),
-                Err(_) => {
-                    return Err(format!("{} contains non-UTF-8 string", name));
-                }
+    let mut offset = 0;
+    loop {
+        // 读取用户空间的指针值 (char*)
+        let ptr_val: usize = {
+            let mut val = 0usize;
+            unsafe {
+                crate::arch::ArchImpl::copy_from_user(
+                    ptr_array + offset,
+                    (&mut val) as *mut usize as *mut u8,
+                    core::mem::size_of::<usize>(),
+                )
+                .map_err(|_| format!("Failed to read {} pointer array from user space", name))?;
             }
+            val
+        };
 
-            // 移动到数组的下一个元素
-            current_ptr = current_ptr.add(1);
+        if ptr_val == 0 {
+            break; // NULL 终止
         }
+
+        let s = copy_str_from_user(ptr_val)
+            .map_err(|e| format!("{}[{}]: {}", name, args.len(), e))?;
+
+        args.push(s);
+        offset += core::mem::size_of::<usize>();
     }
 
     Ok(args)

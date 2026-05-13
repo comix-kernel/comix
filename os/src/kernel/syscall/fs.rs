@@ -2,10 +2,11 @@
 
 use core::ffi::c_char;
 
+use crate::hal::arch::Arch;
 use alloc::string::ToString;
 
 use crate::{
-    arch::trap::SumGuard,
+    util::user_buffer::write_to_user,
     kernel::{
         current_task,
         syscall::util::{
@@ -107,8 +108,7 @@ pub fn ftruncate(fd: usize, length: i64) -> isize {
 /// openat - 相对于目录文件描述符打开文件
 pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
     // 解析路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -186,8 +186,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 
 pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     // 解析路径
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -217,8 +216,7 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
 
 pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     // 解析路径
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -277,8 +275,7 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
 
 pub fn chdir(path: *const c_char) -> isize {
     // 解析路径
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(path) {
+    let path_str = match get_path_safe(path as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -323,12 +320,9 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
     }
 
     // 复制到用户态缓冲区
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            core::ptr::copy_nonoverlapping(path_bytes.as_ptr(), buf, path_bytes.len());
-            *buf.add(path_bytes.len()) = 0; // null terminator
-        }
+    unsafe {
+        crate::arch::ArchImpl::copy_to_user(path_bytes.as_ptr(), buf as usize, path_bytes.len()).ok();
+        write_to_user(buf.add(path_bytes.len()), 0u8);
     }
 
     buf as isize
@@ -357,12 +351,7 @@ pub fn fstat(fd: usize, statbuf: *mut Stat) -> isize {
     let stat = crate::vfs::Stat::from_metadata(&metadata);
 
     // 写回用户空间
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            core::ptr::write(statbuf, stat);
-        }
-    }
+    unsafe { write_to_user(statbuf, stat) };
 
     0
 }
@@ -407,25 +396,22 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
     let mut written = 0usize;
     let mut items_written = 0usize;
 
-    unsafe {
-        let _guard = SumGuard::new();
+    for entry in entries.iter().skip(start_index) {
+        // 计算这个 dirent 需要的空间
+        let dirent_len = LinuxDirent64::total_len(&entry.name);
 
-        for entry in entries.iter().skip(start_index) {
-            // 计算这个 dirent 需要的空间
-            let dirent_len = LinuxDirent64::total_len(&entry.name);
+        // 检查缓冲区是否还有足够空间
+        if written + dirent_len > count {
+            break;
+        }
 
-            // 检查缓冲区是否还有足够空间
-            if written + dirent_len > count {
-                break;
-            }
+        // 计算下一个 entry 的 offset (index + 1)
+        let current_off = (start_index + items_written + 1) as i64;
 
-            // 计算下一个 entry 的 offset (index + 1)
-            let current_off = (start_index + items_written + 1) as i64;
-
-            // 写入 dirent 头部
-            let dirent_ptr = dirp.add(written) as *mut LinuxDirent64;
-            core::ptr::write(
-                dirent_ptr,
+        // 写入 dirent 头部
+        unsafe {
+            write_to_user(
+                dirp.add(written) as *mut LinuxDirent64,
                 LinuxDirent64 {
                     d_ino: entry.inode_no as u64,
                     d_off: current_off,
@@ -433,20 +419,23 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
                     d_type: inode_type_to_d_type(entry.inode_type),
                 },
             );
-
-            // 写入文件名
-            // 注意：LinuxDirent64 在 Rust 中由 padding (到 24 字节)
-            // 但 d_name 实际上应该从 offset 19 开始 (u64+u64+u16+u8 = 8+8+2+1 = 19)
-            // 我们必须覆盖 padding 区域
-            let name_ptr = dirp.add(written + 19);
-            let name_bytes = entry.name.as_bytes();
-            core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, name_bytes.len());
-            // 添加 null 终止符
-            core::ptr::write(name_ptr.add(name_bytes.len()), 0);
-
-            written += dirent_len;
-            items_written += 1;
         }
+
+        // 写入文件名到 d_name 字段（从 LinuxDirent64 offset 19 开始）
+        let name_offset = written + 19;
+        let name_bytes = entry.name.as_bytes();
+        unsafe {
+            crate::arch::ArchImpl::copy_to_user(
+                name_bytes.as_ptr(),
+                dirp as usize + name_offset,
+                name_bytes.len(),
+            )
+            .ok();
+            write_to_user(dirp.add(name_offset + name_bytes.len()), 0u8);
+        }
+
+        written += dirent_len;
+        items_written += 1;
     }
 
     // 更新文件偏移量
@@ -474,8 +463,7 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     }
 
     // 解析路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(path) {
+    let path_str = match get_path_safe(path as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -522,20 +510,14 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     };
 
     // 写回用户空间
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            core::ptr::write(buf, statfs_buf);
-        }
-    }
+    unsafe { write_to_user(buf, statfs_buf) };
 
     0
 }
 
 pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> isize {
     // 解析路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -616,8 +598,7 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     }
 
     // 解析路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -648,11 +629,8 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     let bytes_read = core::cmp::min(target.len(), bufsiz);
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            core::ptr::copy_nonoverlapping(target.as_bytes().as_ptr(), buf, bytes_read);
-        }
+    unsafe {
+        crate::arch::ArchImpl::copy_to_user(target.as_bytes().as_ptr(), buf as usize, bytes_read).ok();
     }
 
     bytes_read as isize
@@ -665,8 +643,7 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     }
 
     // 解析路径
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -705,12 +682,7 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     let stat = Stat::from_metadata(&metadata);
 
     // 写回用户空间
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            core::ptr::write(statbuf, stat);
-        }
-    }
+    unsafe { write_to_user(statbuf, stat) };
 
     0
 }
@@ -727,8 +699,7 @@ pub fn statx(
     }
 
     // 解析路径
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -754,10 +725,7 @@ pub fn statx(
         };
 
         let stx = crate::vfs::Statx::from_metadata(&metadata);
-        let _guard = SumGuard::new();
-        unsafe {
-            core::ptr::write(statxbuf, stx);
-        }
+        unsafe { write_to_user(statxbuf, stx) };
         return 0;
     }
 
@@ -776,18 +744,14 @@ pub fn statx(
     let stx = crate::vfs::Statx::from_metadata(&metadata);
 
     // 写回用户空间
-    let _guard = SumGuard::new();
-    unsafe {
-        core::ptr::write(statxbuf, stx);
-    }
+    unsafe { write_to_user(statxbuf, stx) };
 
     0
 }
 
 pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, flags: u32) -> isize {
     // 解析路径
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -814,33 +778,33 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
         (Some(now), Some(now))
     } else {
         unsafe {
-            let _guard = SumGuard::new();
-            let user_times = core::slice::from_raw_parts(times, 2);
+            use crate::util::user_buffer::read_from_user;
+            let ts0: TimeSpec = read_from_user(times);
+            let ts1: TimeSpec = read_from_user(times.add(1));
 
-            // 验证时间结构
-            if let Err(e) = user_times[0].validate() {
+            if let Err(e) = ts0.validate() {
                 return -(e as isize);
             }
-            if let Err(e) = user_times[1].validate() {
+            if let Err(e) = ts1.validate() {
                 return -(e as isize);
             }
 
             // 处理访问时间
-            let atime_opt = if user_times[0].is_omit() {
-                None // 不修改
-            } else if user_times[0].is_now() {
+            let atime_opt = if ts0.is_omit() {
+                None
+            } else if ts0.is_now() {
                 Some(TimeSpec::now())
             } else {
-                Some(user_times[0])
+                Some(ts0)
             };
 
             // 处理修改时间
-            let mtime_opt = if user_times[1].is_omit() {
+            let mtime_opt = if ts1.is_omit() {
                 None
-            } else if user_times[1].is_now() {
+            } else if ts1.is_now() {
                 Some(TimeSpec::now())
             } else {
-                Some(user_times[1])
+                Some(ts1)
             };
 
             (atime_opt, mtime_opt)
@@ -880,8 +844,7 @@ pub fn renameat2(
     }
 
     // 解析旧路径
-    let _guard = SumGuard::new();
-    let old_path_str = match get_path_safe(oldpath) {
+    let old_path_str = match get_path_safe(oldpath as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -889,7 +852,7 @@ pub fn renameat2(
     };
 
     // 解析新路径
-    let new_path_str = match get_path_safe(newpath) {
+    let new_path_str = match get_path_safe(newpath as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -1208,11 +1171,8 @@ pub fn mount(
     use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
 
-    // 启用用户空间内存访问
-    let _guard = SumGuard::new();
-
     // 解析目标路径
-    let target_str = match get_path_safe(target) {
+    let target_str = match get_path_safe(target as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -1221,7 +1181,7 @@ pub fn mount(
 
     // 解析 source (可能为空)
     let source_str = if !source.is_null() {
-        match get_path_safe(source) {
+        match get_path_safe(source as usize) {
             Ok(s) => s.to_string(),
             Err(_) => {
                 return FsError::InvalidArgument.to_errno();
@@ -1233,7 +1193,7 @@ pub fn mount(
 
     // 解析 filesystemtype (可能为空)
     let fstype_str = if !filesystemtype.is_null() {
-        match get_path_safe(filesystemtype) {
+        match get_path_safe(filesystemtype as usize) {
             Ok(s) => s.to_string(),
             Err(_) => {
                 return FsError::InvalidArgument.to_errno();
@@ -1390,11 +1350,8 @@ pub fn mount(
 pub fn umount2(target: *const c_char, _flags: i32) -> isize {
     use crate::vfs::MOUNT_TABLE;
 
-    // 启用用户空间内存访问
-    let _guard = SumGuard::new();
-
     // 解析目标路径
-    let target_str = match get_path_safe(target) {
+    let target_str = match get_path_safe(target as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -1476,8 +1433,7 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
     use crate::uapi::fs::AtFlags;
 
     // 解析路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -1545,8 +1501,7 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     use crate::uapi::fs::AtFlags;
 
     // 解析路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return -(EINVAL as isize);
@@ -1590,8 +1545,7 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
 /// * -errno - 失败
 pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isize {
     // 安全地读取路径字符串
-    let _guard = SumGuard::new();
-    let path_str = match get_path_safe(pathname) {
+    let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -1642,8 +1596,7 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
 /// target 参数不会被检查,即使目标不存在也能创建符号链接
 pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) -> isize {
     // 解析 target 路径
-    let _guard = SumGuard::new();
-    let target_str = match get_path_safe(target) {
+    let target_str = match get_path_safe(target as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
@@ -1651,7 +1604,7 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
     };
 
     // 解析 linkpath 路径
-    let link_str = match get_path_safe(linkpath) {
+    let link_str = match get_path_safe(linkpath as usize) {
         Ok(s) => s.to_string(),
         Err(_) => {
             return FsError::InvalidArgument.to_errno();

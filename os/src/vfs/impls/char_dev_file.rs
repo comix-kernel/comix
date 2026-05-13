@@ -332,9 +332,9 @@ impl File for CharDeviceFile {
 impl CharDeviceFile {
     /// 控制台设备 ioctl 处理
     fn console_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
-        use crate::arch::trap::SumGuard;
         use crate::uapi::errno::{EINVAL, ENOTTY};
         use crate::uapi::ioctl::*;
+        use crate::util::user_buffer::{read_from_user, write_to_user};
 
         match request {
             TCGETS => {
@@ -342,24 +342,15 @@ impl CharDeviceFile {
                     return Ok(-EINVAL as isize);
                 }
 
-                unsafe {
-                    let _guard = SumGuard::new();
-                    let termios_ptr = arg as *mut Termios;
-                    if termios_ptr.is_null() {
-                        return Ok(-EINVAL as isize);
-                    }
-
-                    // 清零结构体（包括 padding），避免泄露内核栈数据
-                    core::ptr::write_bytes(
-                        termios_ptr as *mut u8,
-                        0,
-                        core::mem::size_of::<Termios>(),
-                    );
-
-                    // 返回保存的 termios 设置
-                    let termios = *self.termios.lock();
-                    core::ptr::write_volatile(termios_ptr, termios);
+                let termios_ptr = arg as *mut Termios;
+                if termios_ptr.is_null() {
+                    return Ok(-EINVAL as isize);
                 }
+
+                let termios = *self.termios.lock();
+                let zeroed = unsafe { core::mem::MaybeUninit::<Termios>::zeroed().assume_init() };
+                unsafe { write_to_user(termios_ptr, zeroed) };
+                unsafe { write_to_user(termios_ptr, termios) };
                 Ok(0)
             }
 
@@ -368,19 +359,13 @@ impl CharDeviceFile {
                     return Ok(-EINVAL as isize);
                 }
 
-                {
-                    let _guard = SumGuard::new();
-                    let termios_ptr = arg as *const Termios;
-                    if termios_ptr.is_null() {
-                        return Ok(-EINVAL as isize);
-                    }
-
-                    unsafe {
-                        // 读取新的 termios 设置并保存
-                        let new_termios = core::ptr::read_volatile(termios_ptr);
-                        *self.termios.lock() = new_termios;
-                    }
+                let termios_ptr = arg as *const Termios;
+                if termios_ptr.is_null() {
+                    return Ok(-EINVAL as isize);
                 }
+
+                let new_termios = unsafe { read_from_user(termios_ptr) };
+                *self.termios.lock() = new_termios;
                 Ok(0)
             }
 
@@ -389,24 +374,15 @@ impl CharDeviceFile {
                     return Ok(-EINVAL as isize);
                 }
 
-                unsafe {
-                    let _guard = SumGuard::new();
-                    let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
-                    if winsize_ptr.is_null() {
-                        return Ok(-EINVAL as isize);
-                    }
-
-                    // 清零结构体（包括 padding），避免泄露内核栈数据
-                    core::ptr::write_bytes(
-                        winsize_ptr as *mut u8,
-                        0,
-                        core::mem::size_of::<crate::uapi::ioctl::WinSize>(),
-                    );
-
-                    // 返回保存的窗口大小
-                    let winsize = *self.winsize.lock();
-                    core::ptr::write_volatile(winsize_ptr, winsize);
+                let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
+                if winsize_ptr.is_null() {
+                    return Ok(-EINVAL as isize);
                 }
+
+                let winsize = *self.winsize.lock();
+                let zeroed = unsafe { core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init() };
+                unsafe { write_to_user(winsize_ptr, zeroed) };
+                unsafe { write_to_user(winsize_ptr, winsize) };
                 Ok(0)
             }
 
@@ -415,32 +391,25 @@ impl CharDeviceFile {
                     return Ok(-EINVAL as isize);
                 }
 
-                {
-                    let _guard = SumGuard::new();
-                    let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
-                    if winsize_ptr.is_null() {
-                        return Ok(-EINVAL as isize);
-                    }
-
-                    unsafe {
-                        // 读取新的窗口大小并保存
-                        let new_winsize = core::ptr::read_volatile(winsize_ptr);
-                        *self.winsize.lock() = new_winsize;
-                    }
+                let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
+                if winsize_ptr.is_null() {
+                    return Ok(-EINVAL as isize);
                 }
+
+                let new_winsize = unsafe { read_from_user(winsize_ptr) };
+                *self.winsize.lock() = new_winsize;
                 Ok(0)
             }
 
-            // 其他 ioctl 命令不支持
             _ => Ok(-ENOTTY as isize),
         }
     }
 
     /// MISC 设备 ioctl 处理
     fn misc_ioctl(&self, request: u32, arg: usize) -> Result<isize, FsError> {
-        use crate::arch::trap::SumGuard;
         use crate::uapi::errno::EINVAL;
         use crate::uapi::ioctl::*;
+        use crate::util::user_buffer::write_to_user;
         use crate::vfs::dev::minor;
 
         let min = minor(self.dev);
@@ -459,35 +428,26 @@ impl CharDeviceFile {
                     {
                         let dt = rtc.read_datetime();
 
-                        unsafe {
-                            let _guard = SumGuard::new();
-                            let rtc_time_ptr = arg as *mut RtcTime;
-                            if rtc_time_ptr.is_null() {
-                                return Ok(-EINVAL as isize);
-                            }
-
-                            // 清零结构体
-                            core::ptr::write_bytes(
-                                rtc_time_ptr as *mut u8,
-                                0,
-                                core::mem::size_of::<RtcTime>(),
-                            );
-
-                            // 填充时间结构体
-                            let rtc_time = RtcTime {
-                                tm_sec: dt.second as i32,
-                                tm_min: dt.minute as i32,
-                                tm_hour: dt.hour as i32,
-                                tm_mday: dt.day as i32,
-                                tm_mon: (dt.month - 1) as i32, // Linux 月份是 0-based
-                                tm_year: (dt.year - 1900),
-                                tm_wday: 0, // 未计算
-                                tm_yday: 0, // 未计算
-                                tm_isdst: 0,
-                            };
-
-                            core::ptr::write_volatile(rtc_time_ptr, rtc_time);
+                        let rtc_time_ptr = arg as *mut RtcTime;
+                        if rtc_time_ptr.is_null() {
+                            return Ok(-EINVAL as isize);
                         }
+
+                        let rtc_time = RtcTime {
+                            tm_sec: dt.second as i32,
+                            tm_min: dt.minute as i32,
+                            tm_hour: dt.hour as i32,
+                            tm_mday: dt.day as i32,
+                            tm_mon: (dt.month - 1) as i32,
+                            tm_year: (dt.year - 1900),
+                            tm_wday: 0,
+                            tm_yday: 0,
+                            tm_isdst: 0,
+                        };
+
+                        let zeroed = unsafe { core::mem::MaybeUninit::<RtcTime>::zeroed().assume_init() };
+                        unsafe { write_to_user(rtc_time_ptr, zeroed) };
+                        unsafe { write_to_user(rtc_time_ptr, rtc_time) };
                         return Ok(0);
                     }
                     Err(FsError::NoDevice)

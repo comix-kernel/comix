@@ -2,10 +2,10 @@
 //!
 //! ioctl (input/output control) 是一个多功能的系统调用，用于设备特定的控制操作。
 
-use crate::arch::trap::SumGuard;
 use crate::kernel::current_task;
 use crate::uapi::errno::{EBADF, EINVAL, ENOTTY, EOPNOTSUPP};
 use crate::uapi::ioctl::*;
+use crate::util::user_buffer::{read_from_user, write_to_user};
 use crate::vfs::FsError;
 use crate::{pr_debug, pr_err, pr_warn};
 
@@ -147,79 +147,63 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
 
 /// FIONBIO - 设置/清除非阻塞 I/O 标志
 fn handle_fionbio(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
-        let value_ptr = arg as *const i32;
-        if value_ptr.is_null() {
-            return -EINVAL as isize;
-        }
+    let value_ptr = arg as *const i32;
+    if value_ptr.is_null() {
+        return -EINVAL as isize;
+    }
+    let value = unsafe { read_from_user(value_ptr) };
 
-        let value = core::ptr::read_volatile(value_ptr);
+    let mut flags = file.flags();
+    if value != 0 {
+        flags |= crate::uapi::fcntl::OpenFlags::O_NONBLOCK;
+    } else {
+        flags &= !crate::uapi::fcntl::OpenFlags::O_NONBLOCK;
+    }
 
-        // 设置文件的 O_NONBLOCK 标志
-        let mut flags = file.flags();
-        if value != 0 {
-            flags |= crate::uapi::fcntl::OpenFlags::O_NONBLOCK;
-        } else {
-            flags &= !crate::uapi::fcntl::OpenFlags::O_NONBLOCK;
-        }
-
-        match file.set_status_flags(flags) {
-            Ok(_) => 0,
-            Err(e) => {
-                pr_warn!("ioctl: FIONBIO failed: {:?}", e);
-                -EOPNOTSUPP as isize
-            }
+    match file.set_status_flags(flags) {
+        Ok(_) => 0,
+        Err(e) => {
+            pr_warn!("ioctl: FIONBIO failed: {:?}", e);
+            -EOPNOTSUPP as isize
         }
     }
 }
 
 /// FIONREAD - 获取可读字节数
 fn handle_fionread(file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
-        let value_ptr = arg as *mut i32;
-        if value_ptr.is_null() {
-            return -EINVAL as isize;
-        }
+    let value_ptr = arg as *mut i32;
+    if value_ptr.is_null() {
+        return -EINVAL as isize;
+    }
 
-        // 对于普通文件，可读字节数 = 文件大小 - 当前偏移量
-        let available = match file.metadata() {
-            Ok(meta) => {
-                let size = meta.size;
-                let offset = file.offset();
-                if size > offset {
-                    (size - offset) as i32
-                } else {
-                    0
-                }
-            }
-            Err(_) => {
-                // 对于不支持 metadata 的设备，返回 0
+    let available = match file.metadata() {
+        Ok(meta) => {
+            let size = meta.size;
+            let offset = file.offset();
+            if size > offset {
+                (size - offset) as i32
+            } else {
                 0
             }
-        };
+        }
+        Err(_) => 0,
+    };
 
-        core::ptr::write_volatile(value_ptr, available);
-        0
-    }
+    unsafe { write_to_user(value_ptr, available) };
+    0
 }
 
 /// FIOASYNC - 设置/清除异步 I/O 通知
 fn handle_fioasync(_file: &alloc::sync::Arc<dyn crate::vfs::File>, arg: usize) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
-        let value_ptr = arg as *const i32;
-        if value_ptr.is_null() {
-            return -EINVAL as isize;
-        }
-
-        let _value = core::ptr::read_volatile(value_ptr);
-
-        // TODO: 实现异步 I/O 支持
-        pr_warn!("ioctl: FIOASYNC not yet implemented");
-        -EOPNOTSUPP as isize
+    let value_ptr = arg as *const i32;
+    if value_ptr.is_null() {
+        return -EINVAL as isize;
     }
+
+    let _value = unsafe { read_from_user(value_ptr) };
+
+    pr_warn!("ioctl: FIOASYNC not yet implemented");
+    -EOPNOTSUPP as isize
 }
 
 //  终端控制处理函数
@@ -249,21 +233,17 @@ fn handle_tiocspgrp(
     task: &alloc::sync::Arc<crate::sync::SpinLock<crate::kernel::task::TaskStruct>>,
     arg: usize,
 ) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
-        let pid_ptr = arg as *const i32;
-        if pid_ptr.is_null() {
-            return -EINVAL as isize;
-        }
-
-        let pgid = core::ptr::read_volatile(pid_ptr);
-
-        // 设置当前任务的进程组 ID
-        task.lock().pgid = pgid as u32;
-
-        pr_debug!("ioctl: TIOCSPGRP set pgid={}", pgid);
-        0
+    let pid_ptr = arg as *const i32;
+    if pid_ptr.is_null() {
+        return -EINVAL as isize;
     }
+
+    let pgid = unsafe { read_from_user(pid_ptr) };
+
+    task.lock().pgid = pgid as u32;
+
+    pr_debug!("ioctl: TIOCSPGRP set pgid={}", pgid);
+    0
 }
 
 /// TIOCSCTTY - 设置控制终端
@@ -296,54 +276,47 @@ fn handle_vt_openqry(arg: usize) -> isize {
 
 /// SIOCGIFCONF - 获取网络接口列表
 fn handle_siocgifconf(arg: usize) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
-        let ifconf_ptr = arg as *mut Ifconf;
-        if ifconf_ptr.is_null() {
-            return -EINVAL as isize;
-        }
-
-        // 读取 ifconf 结构
-        let ifconf = core::ptr::read_volatile(ifconf_ptr);
-
-        // 先清零原结构体，避免泄露内核栈数据
-        core::ptr::write_bytes(ifconf_ptr, 0, 1);
-
-        // TODO: 填充实际的网络接口列表
-        // 目前返回空列表
-        let mut new_ifconf = ifconf;
-        new_ifconf.ifc_len = 0;
-        core::ptr::write_volatile(ifconf_ptr, new_ifconf);
-
-        pr_debug!("ioctl: SIOCGIFCONF returned 0 interfaces");
-        0
+    let ifconf_ptr = arg as *mut Ifconf;
+    if ifconf_ptr.is_null() {
+        return -EINVAL as isize;
     }
+
+    let ifconf = unsafe { read_from_user(ifconf_ptr as *const Ifconf) };
+
+    // 先清零原结构体，避免泄露内核栈数据
+    let zeroed = unsafe { core::mem::MaybeUninit::<Ifconf>::zeroed().assume_init() };
+    unsafe { write_to_user(ifconf_ptr, zeroed) };
+
+    // TODO: 填充实际的网络接口列表
+    let mut new_ifconf = ifconf;
+    new_ifconf.ifc_len = 0;
+    unsafe { write_to_user(ifconf_ptr, new_ifconf) };
+
+    pr_debug!("ioctl: SIOCGIFCONF returned 0 interfaces");
+    0
 }
 
 /// 处理网络接口请求（ifreq 结构）
 fn handle_ifreq(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, arg: usize) -> isize {
-    unsafe {
-        let _guard = SumGuard::new();
-        let ifreq_ptr = arg as *mut Ifreq;
-        if ifreq_ptr.is_null() {
-            return -EINVAL as isize;
-        }
+    let ifreq_ptr = arg as *mut Ifreq;
+    if ifreq_ptr.is_null() {
+        return -EINVAL as isize;
+    }
 
-        let _ifreq = core::ptr::read_volatile(ifreq_ptr);
+    let _ifreq = unsafe { read_from_user(ifreq_ptr as *const Ifreq) };
 
-        // TODO: 实现实际的网络接口操作
-        match request {
-            SIOCGIFADDR | SIOCGIFFLAGS | SIOCGIFNETMASK | SIOCGIFMTU | SIOCGIFHWADDR
-            | SIOCGIFINDEX => {
-                pr_debug!("ioctl: network get request {:#x} not implemented", request);
-                -EOPNOTSUPP as isize
-            }
-            SIOCSIFADDR | SIOCSIFFLAGS | SIOCSIFNETMASK | SIOCSIFMTU | SIOCSIFHWADDR => {
-                pr_debug!("ioctl: network set request {:#x} not implemented", request);
-                -EOPNOTSUPP as isize
-            }
-            _ => -EINVAL as isize,
+    // TODO: 实现实际的网络接口操作
+    match request {
+        SIOCGIFADDR | SIOCGIFFLAGS | SIOCGIFNETMASK | SIOCGIFMTU | SIOCGIFHWADDR
+        | SIOCGIFINDEX => {
+            pr_debug!("ioctl: network get request {:#x} not implemented", request);
+            -EOPNOTSUPP as isize
         }
+        SIOCSIFADDR | SIOCSIFFLAGS | SIOCSIFNETMASK | SIOCSIFMTU | SIOCSIFHWADDR => {
+            pr_debug!("ioctl: network set request {:#x} not implemented", request);
+            -EOPNOTSUPP as isize
+        }
+        _ => -EINVAL as isize,
     }
 }
 

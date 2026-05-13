@@ -22,6 +22,9 @@ pub use loongarch::*;
 #[cfg(target_arch = "riscv64")]
 pub use riscv::*;
 
+// 重导出 Arch trait，以便通过 ArchImpl 调用其方法
+pub use crate::hal::arch::Arch;
+
 // ---- ArchImpl 类型别名 ----
 // 内核其余部分通过 ArchImpl 访问架构特定功能，无需关心具体架构。
 #[cfg(target_arch = "riscv64")]
