@@ -236,6 +236,12 @@ impl Arch for MockArch {
         None
     }
 
+    fn console_putchar(_c: u8) {}
+
+    fn console_getchar() -> Option<u8> {
+        None
+    }
+
     fn power_off() -> ! {
         loop {
             core::hint::spin_loop();

@@ -7,6 +7,7 @@
 use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::hal::arch::Arch;
 use crate::sync::SpinLock;
 
 /// 控制台是否已切换到运行时模式
@@ -30,7 +31,7 @@ fn write_str_unlocked(s: &str) {
     }
 
     for b in s.bytes() {
-        crate::arch::lib::sbi::console_putchar(b as usize);
+        crate::arch::ArchImpl::console_putchar(b);
     }
 }
 
@@ -47,15 +48,15 @@ fn putchar_unlocked(c: u8) {
                 let s = core::str::from_utf8(&buf).unwrap();
                 console.write_str(s);
             } else {
-                crate::arch::lib::sbi::console_putchar(c as usize);
+                crate::arch::ArchImpl::console_putchar(c);
             }
         } else {
             // 降级到 SBI
-            crate::arch::lib::sbi::console_putchar(c as usize);
+            crate::arch::ArchImpl::console_putchar(c);
         }
     } else {
         // 早期：使用 arch SBI
-        crate::arch::lib::sbi::console_putchar(c as usize);
+        crate::arch::ArchImpl::console_putchar(c);
     }
 }
 
@@ -68,22 +69,12 @@ fn getchar_unlocked() -> Option<u8> {
             let ch = console.read_char();
             Some(ch as u8)
         } else {
-            // 降级到 SBI
-            let ch = crate::arch::lib::sbi::console_getchar();
-            if ch == usize::MAX {
-                None
-            } else {
-                Some(ch as u8)
-            }
+            // 降级到 arch console
+            crate::arch::ArchImpl::console_getchar()
         }
     } else {
-        // 早期：使用 arch SBI
-        let ch = crate::arch::lib::sbi::console_getchar();
-        if ch == usize::MAX {
-            None
-        } else {
-            Some(ch as u8)
-        }
+        // 早期：使用 arch console
+        crate::arch::ArchImpl::console_getchar()
     }
 }
 
@@ -141,7 +132,7 @@ pub fn _early_print(args: core::fmt::Arguments) {
     impl core::fmt::Write for EarlyWriter {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
             for b in s.bytes() {
-                crate::arch::lib::sbi::console_putchar(b as usize);
+                crate::arch::ArchImpl::console_putchar(b);
             }
             Ok(())
         }
