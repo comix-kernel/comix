@@ -72,3 +72,20 @@ pub fn shutdown(_failure: bool) -> ! {
         }
     }
 }
+
+/// 重启实现
+pub fn restart() -> ! {
+    let base_vaddr = VIRT_GED_REG_ADDR | 0x8000_0000_0000_0000;
+
+    unsafe {
+        let ptr = base_vaddr as *mut u8;
+        ptr.add(ACPI_GED_REG_RESET)
+            .write_volatile(ACPI_GED_VALUE_REBOOT);
+    }
+
+    loop {
+        unsafe {
+            core::arch::asm!("idle 0");
+        }
+    }
+}

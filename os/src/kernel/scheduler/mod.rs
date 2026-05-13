@@ -8,8 +8,9 @@ mod wait_queue;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    arch::kernel::{context::Context, switch},
+    arch::kernel::context::Context,
     config::MAX_CPU_COUNT,
+    hal::arch::Arch,
     kernel::{TaskState, TaskStruct, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     sync::{SpinLock, SpinLockGuard},
 };
@@ -128,7 +129,7 @@ pub fn schedule() {
 
         if let Some(plan) = plan {
             // SAFETY: next_task 生成的上下文指针有效
-            unsafe { switch(plan.old, plan.new) };
+            unsafe { crate::arch::ArchImpl::context_switch(plan.old, plan.new) };
             // 通常不会立即返回；返回时再继续当前上下文后续逻辑
         }
     }

@@ -168,7 +168,7 @@ mod tests {
         use crate::sync::{PerCpu, PreemptGuard};
         use core::sync::atomic::{AtomicUsize, Ordering};
 
-        let per_cpu = PerCpu::new(|| AtomicUsize::new(0));
+        let per_cpu: PerCpu<AtomicUsize> = PerCpu::new(|| AtomicUsize::new(0));
 
         // 在当前 CPU 上修改值
         {
@@ -203,7 +203,7 @@ mod tests {
     test_case!(test_per_cpu_with_id, {
         use crate::sync::PerCpu;
 
-        let per_cpu = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
+        let per_cpu: PerCpu<usize> = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
 
         let num_cpu = unsafe { NUM_CPU };
         for cpu_id in 0..num_cpu {

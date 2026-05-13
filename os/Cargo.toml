@@ -23,7 +23,14 @@ uart_16550 = "0.4.0"
 hashbrown = "0.16.1"
 
 [features]
-default = []
+default = ["sync", "alloc", "paging", "proc_vm", "fs", "net"]
+sync = []
+alloc = ["sync"]
+paging = ["alloc"]
+proc = []
+fs = ["proc", "sync"]
+proc_vm = ["paging", "fs"]
+net = ["sync"]
 proto-ipv6 = []
 
 # RISC-V 架构特定依赖

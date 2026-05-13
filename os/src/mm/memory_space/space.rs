@@ -1511,7 +1511,7 @@ mod memory_space_tests {
 
     // 4. 内核空间访问
     test_case!(test_kernel_space, {
-        use crate::mm::memory_space::memory_space::kernel_token;
+        use crate::mm::memory_space::space::kernel_token;
 
         let token = kernel_token();
         kassert!(token > 0); // 有效的 SATP 值
@@ -1519,7 +1519,7 @@ mod memory_space_tests {
 
     // 5. 测试 MMIO 映射是否存在 - 已移除自动映射,改为测试手动映射
     test_case!(test_mmio_mapping_exists, {
-        use crate::mm::memory_space::memory_space::with_kernel_space;
+        use crate::mm::memory_space::space::with_kernel_space;
 
         with_kernel_space(|space| {
             // 由于移除了自动 MMIO 映射,初始状态应该没有 MMIO 区域
@@ -1589,7 +1589,7 @@ mod memory_space_tests {
 
     // // 7. 测试 MMIO 内存访问（读写测试）- 修改为手动映射后访问
     // test_case!(test_mmio_memory_access, {
-    //     use crate::mm::memory_space::memory_space::with_kernel_space;
+    //     use crate::mm::memory_space::space::with_kernel_space;
 
     //     // 注意：这个测试会实际访问 MMIO 设备
     //     // QEMU virt 机器的 TEST 设备 (0x100000) 支持简单的读写

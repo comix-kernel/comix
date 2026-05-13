@@ -32,7 +32,7 @@ pub trait Arch: CpuOps + VirtualMemory {
     /// # Safety
     ///
     /// 调用者必须确保 `new_ctx` 指向有效的用户上下文。
-    unsafe fn context_switch(new_ctx: &Self::UserContext);
+    unsafe fn context_switch(old: *mut Self::UserContext, new: *const Self::UserContext);
 
     // ---- 用户/内核内存复制 ----
 

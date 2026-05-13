@@ -129,7 +129,7 @@ macro_rules! impl_address {
         $crate::impl_calc_ops!($type);
         impl $crate::mm::address::operations::AlignOps for $type {}
 
-        impl $crate::mm::address::address::Address for $type {}
+        impl $crate::mm::address::types::Address for $type {}
 
         // 地址类型通常需要在多线程环境下传递和共享
         unsafe impl Sync for $type {}
@@ -426,6 +426,34 @@ pub type PaddrRange = AddressRange<Paddr>;
 
 /// 虚拟地址范围的类型别名
 pub type VaddrRange = AddressRange<Vaddr>;
+
+// ============================================================================
+// 与 hal::address 的类型转换
+// ============================================================================
+
+impl From<Paddr> for crate::hal::address::PA {
+    fn from(p: Paddr) -> Self {
+        crate::hal::address::PA::from_usize(p.as_usize())
+    }
+}
+
+impl From<crate::hal::address::PA> for Paddr {
+    fn from(a: crate::hal::address::PA) -> Self {
+        Paddr::from_usize(a.as_usize())
+    }
+}
+
+impl From<Vaddr> for crate::hal::address::VA {
+    fn from(v: Vaddr) -> Self {
+        crate::hal::address::VA::from_usize(v.as_usize())
+    }
+}
+
+impl From<crate::hal::address::VA> for Vaddr {
+    fn from(a: crate::hal::address::VA) -> Self {
+        Vaddr::from_usize(a.as_usize())
+    }
+}
 
 #[cfg(test)]
 mod address_basic_tests {

@@ -1,6 +1,3 @@
-// HACK: 在一个模块目录/文件的顶层又声明了一个同名子模块，这会造成 “module inception”。
-// 虽然功能上可行，但会引起 API/模块层次混淆，Clippy 建议消除这种重复。
-#![allow(clippy::module_inception)]
 //! 地址模块
 //!
 //! 此模块提供了用于处理物理地址和虚拟地址，
@@ -41,10 +38,10 @@
 //! - [`UsizeConvert`] - 在类型和 usize 之间进行转换
 //! - CalcOps - 算术和位操作
 //! - AlignOps - 地址对齐操作
-mod address;
+mod types;
 mod operations;
 mod page_num;
 
-pub use address::{ConvertablePaddr, Paddr, Vaddr};
+pub use types::{ConvertablePaddr, Paddr, Vaddr};
 pub use operations::UsizeConvert;
 pub use page_num::{PageNum, Ppn, PpnRange, Vpn, VpnRange};
