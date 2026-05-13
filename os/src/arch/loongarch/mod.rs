@@ -5,7 +5,6 @@
 pub mod boot;
 pub mod constant;
 pub mod cpu_ops;
-pub mod info;
 pub mod intr;
 pub mod ipi;
 pub mod kernel;
@@ -13,7 +12,6 @@ pub mod lib;
 pub mod memory;
 pub mod mm;
 pub mod platform;
-mod selftest;
 pub mod syscall;
 pub mod timer;
 pub mod trap;
@@ -114,10 +112,10 @@ impl Arch for cpu_ops::LoongArch64 {
     }
 
     fn power_off() -> ! {
-        lib::sbi::shutdown(false)
+        lib::platform::shutdown(false)
     }
 
     fn restart() -> ! {
-        lib::sbi::restart()
+        lib::platform::restart()
     }
 }
