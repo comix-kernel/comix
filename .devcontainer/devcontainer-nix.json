@@ -1,0 +1,38 @@
+{
+  "name": "comix-devcontainer-nix",
+  "build": {
+    "dockerfile": "Dockerfile.nix"
+  },
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "postCreateCommand": ". /home/vscode/.nix-profile/etc/profile.d/nix.sh && nix develop /workspace --command true",
+  "postStartCommand": "git config --global --add safe.directory '*'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "serayuzgur.crates",
+        "Gruntfuggly.todo-tree"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "fish-nix",
+        "terminal.integrated.profiles.linux": {
+          "fish": {
+            "path": "/usr/bin/fish"
+          },
+          "fish-nix": {
+            "path": "/usr/bin/fish",
+            "args": [
+              "-c",
+              "nix develop /workspace -c fish"
+            ]
+          }
+        },
+        "rust-analyzer.checkOnSave": true,
+        "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer"
+      }
+    }
+  }
+}
