@@ -66,6 +66,16 @@ pub trait Arch: CpuOps + VirtualMemory {
     /// 同上
     unsafe fn copy_strn_from_user(src: usize, dst: *mut u8, max_len: usize) -> Result<usize, ()>;
 
+    // ---- 控制台 I/O ----
+
+    /// 向调试控制台输出一个字节
+    fn console_putchar(c: u8);
+
+    /// 从调试控制台读取一个字节（非阻塞）
+    ///
+    /// 返回 `None` 表示没有可用输入。
+    fn console_getchar() -> Option<u8>;
+
     // ---- 系统信息 ----
 
     /// 架构名称（如 "riscv64", "loongarch64"）

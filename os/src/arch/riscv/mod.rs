@@ -100,6 +100,19 @@ impl Arch for cpu_ops::Riscv64 {
         constant::ARCH
     }
 
+    fn console_putchar(c: u8) {
+        lib::sbi::console_putchar(c as usize);
+    }
+
+    fn console_getchar() -> Option<u8> {
+        let ch = lib::sbi::console_getchar();
+        if ch == usize::MAX {
+            None
+        } else {
+            Some(ch as u8)
+        }
+    }
+
     fn cpu_count() -> usize {
         unsafe { crate::kernel::NUM_CPU }
     }

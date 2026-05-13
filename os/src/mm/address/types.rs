@@ -150,20 +150,33 @@ pub trait ConvertablePaddr {
 /// [Paddr] (Physical Address)
 /// ---------------------
 /// 物理内存地址，对应于内存芯片上的实际位置。
+///
+/// 内部封装 `hal::address::PA`（`Address<Physical, ()>`），
+/// 通过 sealed trait 模式在编译期防止地址空间混用。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Paddr(pub *const ());
-impl_address!(Paddr);
+pub struct Paddr(pub crate::hal::address::PA);
+
+impl UsizeConvert for Paddr {
+    fn as_usize(&self) -> usize {
+        self.0.as_usize()
+    }
+    fn from_usize(value: usize) -> Self {
+        Self(crate::hal::address::PA::from_usize(value))
+    }
+}
+crate::impl_calc_ops!(Paddr);
+impl AlignOps for Paddr {}
+impl Address for Paddr {}
+unsafe impl Sync for Paddr {}
+unsafe impl Send for Paddr {}
 
 impl ConvertablePaddr for Paddr {
     fn is_valid_paddr(&self) -> bool {
-        // 注意: 实际实现依赖于具体的架构函数 `vaddr_to_paddr`，
-        // 这里的逻辑通常需要检查地址是否在物理内存范围内。
         self.as_usize() == unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) }
     }
 
     fn to_vaddr(&self) -> Vaddr {
-        // 依赖于架构特定的映射函数 (例如：线性映射或固定偏移)
         Vaddr::from_usize(crate::arch::mm::paddr_to_vaddr(self.as_usize()))
     }
 }
@@ -181,19 +194,33 @@ pub trait ConvertableVaddr {
 /// [Vaddr] (Virtual Address)
 /// ---------------------
 /// 虚拟内存地址，对应于进程或内核的页表映射空间中的位置。
+///
+/// 内部封装 `hal::address::VA`（`Address<Virtual, ()>`），
+/// 通过 sealed trait 模式在编译期防止地址空间混用。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Vaddr(pub *const ());
-impl_address!(Vaddr);
+pub struct Vaddr(pub crate::hal::address::VA);
+
+impl UsizeConvert for Vaddr {
+    fn as_usize(&self) -> usize {
+        self.0.as_usize()
+    }
+    fn from_usize(value: usize) -> Self {
+        Self(crate::hal::address::VA::from_usize(value))
+    }
+}
+crate::impl_calc_ops!(Vaddr);
+impl AlignOps for Vaddr {}
+impl Address for Vaddr {}
+unsafe impl Sync for Vaddr {}
+unsafe impl Send for Vaddr {}
 
 impl ConvertableVaddr for Vaddr {
     fn is_valid_vaddr(&self) -> bool {
-        // 注意: 实际实现通常涉及查询页表来确定映射关系。
         self.as_usize() == crate::arch::mm::paddr_to_vaddr(self.as_usize())
     }
 
     fn to_paddr(&self) -> Paddr {
-        // 依赖于架构特定的反向映射函数 (查询页表或固定偏移)
         Paddr::from_usize(unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) })
     }
 }
@@ -433,25 +460,25 @@ pub type VaddrRange = AddressRange<Vaddr>;
 
 impl From<Paddr> for crate::hal::address::PA {
     fn from(p: Paddr) -> Self {
-        crate::hal::address::PA::from_usize(p.as_usize())
+        p.0
     }
 }
 
 impl From<crate::hal::address::PA> for Paddr {
     fn from(a: crate::hal::address::PA) -> Self {
-        Paddr::from_usize(a.as_usize())
+        Paddr(a)
     }
 }
 
 impl From<Vaddr> for crate::hal::address::VA {
     fn from(v: Vaddr) -> Self {
-        crate::hal::address::VA::from_usize(v.as_usize())
+        v.0
     }
 }
 
 impl From<crate::hal::address::VA> for Vaddr {
     fn from(a: crate::hal::address::VA) -> Self {
-        Vaddr::from_usize(a.as_usize())
+        Vaddr(a)
     }
 }
 

@@ -31,7 +31,7 @@ mod vfs;
 mod log;
 mod net;
 
-use crate::arch::lib::sbi::shutdown;
+use crate::hal::arch::Arch;
 #[cfg(target_arch = "loongarch64")]
 use core::arch::asm;
 use core::panic::PanicInfo;
@@ -66,5 +66,5 @@ fn panic(info: &PanicInfo) -> ! {
         earlyprintln!("Panicked: {}", info.message());
     }
 
-    shutdown(true)
+    crate::arch::ArchImpl::power_off()
 }
