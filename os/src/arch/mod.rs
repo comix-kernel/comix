@@ -12,6 +12,7 @@
 
 // ---- trait 定义 ----
 
+pub mod address;
 pub mod arch;
 pub mod cpu_ops;
 pub mod virtual_memory;
