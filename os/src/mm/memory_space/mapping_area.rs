@@ -2,7 +2,6 @@ use alloc::collections::btree_map::BTreeMap;
 use core::cmp::min;
 
 use crate::arch::mm::TlbBatchContext;
-use crate::arch::ArchImpl;
 use crate::config::PAGE_SIZE;
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};

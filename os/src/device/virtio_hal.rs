@@ -1,6 +1,5 @@
 //! HAL (硬件抽象层) 实现，用于适配 virtio-drivers 0.12.0 库
 
-use crate::arch::ArchImpl;
 use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
 use crate::mm::frame_allocator::FrameRangeTracker;
 use crate::sync::SpinLock;

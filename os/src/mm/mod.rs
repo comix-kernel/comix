@@ -21,7 +21,6 @@ pub use frame_allocator::init_frame_allocator;
 #[cfg(feature = "alloc")]
 pub use global_allocator::init_heap;
 
-use crate::arch::ArchImpl;
 use crate::arch::platform::MEMORY_END;
 use crate::config::PAGE_SIZE;
 use crate::earlyprintln;

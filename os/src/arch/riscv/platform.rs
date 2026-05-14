@@ -99,7 +99,3 @@ pub fn mmio_of(dev: VirtDevice) -> Option<(usize, usize)> {
         .map(|(_, b, s)| (*b, *s))
 }
 
-/// 兼容性模块别名
-pub mod virt {
-    pub use super::*;
-}

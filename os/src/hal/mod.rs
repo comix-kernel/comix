@@ -25,7 +25,3 @@ pub mod mock;
 pub mod virtual_memory;
 
 pub use cpu_ops::CpuOps;
-pub use virtual_memory::{
-    KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions, UserAddressSpace,
-    VirtualMemory, VirtMemoryRegion,
-};

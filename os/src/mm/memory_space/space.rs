@@ -1,6 +1,5 @@
 use core::cmp::Ordering;
 
-use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
 use crate::arch::platform::MEMORY_END;
 use crate::config::{
     MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
@@ -355,7 +354,7 @@ impl MemorySpace {
         )?;
 
         // 5. 映射物理内存（从 ekernel 到 MEMORY_END 的直接映射）
-        let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
+        let ekernel_paddr = unsafe { crate::arch::vaddr_to_paddr(ekernel as usize) };
         let phys_mem_start_vaddr = crate::arch::paddr_to_vaddr(ekernel_paddr);
         let phys_mem_end_vaddr = crate::arch::paddr_to_vaddr(MEMORY_END);
 

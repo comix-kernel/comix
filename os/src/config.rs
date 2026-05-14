@@ -1,5 +1,5 @@
 //! 平台无关的常量
-#![allow(unused)]
+#![allow(dead_code)]
 
 // about CPU and SMP
 /// 最大支持的 CPU 核心数
