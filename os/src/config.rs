@@ -1,5 +1,5 @@
 //! 平台无关的常量
-#![allow(unused)]
+#![allow(dead_code)]
 
 // about CPU and SMP
 /// 最大支持的 CPU 核心数
@@ -31,12 +31,6 @@ pub const USER_SIGRETURN_TRAMPOLINE: usize = SV39_BOT_HALF_TOP & !(PAGE_SIZE - 1
 /// Maximum heap size (prevent OOM)
 pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024; // 64MB
 
-// memory layout constants
-#[cfg(target_arch = "riscv64")]
-pub const MEMORY_END: usize = 0x8800_0000; // 128MB for QEMU RISC-V virt
-#[cfg(target_arch = "loongarch64")]
-pub const MEMORY_END: usize = crate::arch::platform::virt::MEMORY_END;
-
 pub const DEFAULT_MAX_FDS: usize = 256;
 
 // Ext4 filesystem constants
@@ -48,4 +42,3 @@ pub const VIRTIO_BLK_SECTOR_SIZE: usize = 512;
 pub const FS_IMAGE_SIZE: usize = 1024 * 1024 * 1024; // 1 GB
 
 use crate::arch::constant::SV39_BOT_HALF_TOP;
-pub use crate::arch::platform::virt::*;

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::arch::constant::{
     CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK, CSR_TLBRENT,
 };
-use crate::arch::syscall::dispatch_syscall;
+use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::arch::timer::{
     TIMER_TICKS, ack_timer_interrupt, clock_freq, get_time, set_next_trigger,
 };

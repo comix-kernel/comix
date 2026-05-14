@@ -243,9 +243,9 @@ impl File for StderrFile {
 
 /// 通用的 stdio ioctl 实现
 fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EINVAL, ENOTTY};
     use crate::uapi::ioctl::*;
+    use crate::util::user_buffer::{read_from_user, write_to_user};
 
     match request {
         TCGETS => {
@@ -253,31 +253,25 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 return Ok(-EINVAL as isize);
             }
 
-            unsafe {
-                let _guard = SumGuard::new();
-                let termios_ptr = arg as *mut Termios;
-                if termios_ptr.is_null() {
-                    return Ok(-EINVAL as isize);
-                }
-
-                // 清零结构体（包括 padding），避免泄露内核栈数据
-                core::ptr::write_bytes(termios_ptr as *mut u8, 0, core::mem::size_of::<Termios>());
-
-                // 返回保存的 termios 设置
-                let termios = *STDIO_TERMIOS.lock();
-                core::ptr::write_volatile(termios_ptr, termios);
-
-                // 调试：打印返回的 termios 内容
-                crate::pr_debug!(
-                    "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
-                    termios.c_iflag,
-                    termios.c_oflag,
-                    termios.c_cflag,
-                    termios.c_lflag,
-                    termios.c_ispeed,
-                    termios.c_ospeed
-                );
+            let termios_ptr = arg as *mut Termios;
+            if termios_ptr.is_null() {
+                return Ok(-EINVAL as isize);
             }
+
+            let termios = *STDIO_TERMIOS.lock();
+            let zeroed = unsafe { core::mem::MaybeUninit::<Termios>::zeroed().assume_init() };
+            unsafe { write_to_user(termios_ptr, zeroed) };
+            unsafe { write_to_user(termios_ptr, termios) };
+
+            crate::pr_debug!(
+                "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
+                termios.c_iflag,
+                termios.c_oflag,
+                termios.c_cflag,
+                termios.c_lflag,
+                termios.c_ispeed,
+                termios.c_ospeed
+            );
             Ok(0)
         }
 
@@ -286,29 +280,24 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 return Ok(-EINVAL as isize);
             }
 
-            unsafe {
-                let _guard = SumGuard::new();
-                let termios_ptr = arg as *const Termios;
-                if termios_ptr.is_null() {
-                    return Ok(-EINVAL as isize);
-                }
-
-                // 读取新的 termios 设置并保存
-                let new_termios = core::ptr::read_volatile(termios_ptr);
-
-                // 调试：打印接收到的 termios 内容
-                crate::pr_debug!(
-                    "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
-                    new_termios.c_iflag,
-                    new_termios.c_oflag,
-                    new_termios.c_cflag,
-                    new_termios.c_lflag,
-                    new_termios.c_ispeed,
-                    new_termios.c_ospeed
-                );
-
-                *STDIO_TERMIOS.lock() = new_termios;
+            let termios_ptr = arg as *const Termios;
+            if termios_ptr.is_null() {
+                return Ok(-EINVAL as isize);
             }
+
+            let new_termios = unsafe { read_from_user(termios_ptr) };
+
+            crate::pr_debug!(
+                "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
+                new_termios.c_iflag,
+                new_termios.c_oflag,
+                new_termios.c_cflag,
+                new_termios.c_lflag,
+                new_termios.c_ispeed,
+                new_termios.c_ospeed
+            );
+
+            *STDIO_TERMIOS.lock() = new_termios;
             Ok(0)
         }
 
@@ -317,32 +306,23 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 return Ok(-EINVAL as isize);
             }
 
-            unsafe {
-                let _guard = SumGuard::new();
-                let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
-                if winsize_ptr.is_null() {
-                    return Ok(-EINVAL as isize);
-                }
-
-                // 清零结构体（包括 padding），避免泄露内核栈数据
-                core::ptr::write_bytes(
-                    winsize_ptr as *mut u8,
-                    0,
-                    core::mem::size_of::<crate::uapi::ioctl::WinSize>(),
-                );
-
-                // 返回保存的窗口大小
-                let winsize = *STDIO_WINSIZE.lock();
-                core::ptr::write_volatile(winsize_ptr, winsize);
-
-                crate::pr_debug!(
-                    "TIOCGWINSZ: returning {}x{} ({}x{} pixels)",
-                    winsize.ws_row,
-                    winsize.ws_col,
-                    winsize.ws_xpixel,
-                    winsize.ws_ypixel
-                );
+            let winsize_ptr = arg as *mut crate::uapi::ioctl::WinSize;
+            if winsize_ptr.is_null() {
+                return Ok(-EINVAL as isize);
             }
+
+            let winsize = *STDIO_WINSIZE.lock();
+            let zeroed = unsafe { core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init() };
+            unsafe { write_to_user(winsize_ptr, zeroed) };
+            unsafe { write_to_user(winsize_ptr, winsize) };
+
+            crate::pr_debug!(
+                "TIOCGWINSZ: returning {}x{} ({}x{} pixels)",
+                winsize.ws_row,
+                winsize.ws_col,
+                winsize.ws_xpixel,
+                winsize.ws_ypixel
+            );
             Ok(0)
         }
 
@@ -351,29 +331,24 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
                 return Ok(-EINVAL as isize);
             }
 
-            unsafe {
-                let _guard = SumGuard::new();
-                let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
-                if winsize_ptr.is_null() {
-                    return Ok(-EINVAL as isize);
-                }
-
-                // 读取新的窗口大小并保存
-                let new_winsize = core::ptr::read_volatile(winsize_ptr);
-                *STDIO_WINSIZE.lock() = new_winsize;
-
-                crate::pr_debug!(
-                    "TIOCSWINSZ: set to {}x{} ({}x{} pixels)",
-                    new_winsize.ws_row,
-                    new_winsize.ws_col,
-                    new_winsize.ws_xpixel,
-                    new_winsize.ws_ypixel
-                );
+            let winsize_ptr = arg as *const crate::uapi::ioctl::WinSize;
+            if winsize_ptr.is_null() {
+                return Ok(-EINVAL as isize);
             }
+
+            let new_winsize = unsafe { read_from_user(winsize_ptr) };
+            *STDIO_WINSIZE.lock() = new_winsize;
+
+            crate::pr_debug!(
+                "TIOCSWINSZ: set to {}x{} ({}x{} pixels)",
+                new_winsize.ws_row,
+                new_winsize.ws_col,
+                new_winsize.ws_xpixel,
+                new_winsize.ws_ypixel
+            );
             Ok(0)
         }
 
-        // 其他 ioctl 命令不支持
         _ => Ok(-ENOTTY as isize),
     }
 }

@@ -240,3 +240,32 @@ impl Default for TrapFrame {
         Self::empty()
     }
 }
+
+impl crate::kernel::syscall::syscall_frame::SyscallFrame for TrapFrame {
+    fn syscall_id(&self) -> usize {
+        self.regs[11] // a7, same as inherent syscall_id()
+    }
+
+    fn arg0(&self) -> usize {
+        self.regs[4]
+    }
+    fn arg1(&self) -> usize {
+        self.regs[5]
+    }
+    fn arg2(&self) -> usize {
+        self.regs[6]
+    }
+    fn arg3(&self) -> usize {
+        self.regs[7]
+    }
+    fn arg4(&self) -> usize {
+        self.regs[8]
+    }
+    fn arg5(&self) -> usize {
+        self.regs[9]
+    }
+
+    fn set_ret(&mut self, val: usize) {
+        self.regs[4] = val;
+    }
+}

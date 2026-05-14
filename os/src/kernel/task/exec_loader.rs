@@ -449,6 +449,8 @@ fn apply_static_pie_relocs(
             }
             _ => return Err(ExecImageError::InvalidElf),
         };
+        #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+        let value = 0usize;
 
         space
             .write_usize_at(target_va, value)

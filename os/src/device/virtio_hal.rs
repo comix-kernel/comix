@@ -1,6 +1,5 @@
 //! HAL (硬件抽象层) 实现，用于适配 virtio-drivers 0.12.0 库
 
-use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
 use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
 use crate::mm::frame_allocator::FrameRangeTracker;
 use crate::sync::SpinLock;
@@ -79,7 +78,7 @@ unsafe impl Hal for VirtIOHal {
     unsafe fn mmio_phys_to_virt(paddr: PhysAddr, _size: usize) -> NonNull<u8> {
         // 提取物理地址值并使用架构特定的转换函数
         let phys_addr = paddr as usize;
-        let virt = paddr_to_vaddr(phys_addr);
+        let virt = crate::arch::paddr_to_vaddr(phys_addr);
 
         // 验证虚拟地址的合法性
 
@@ -89,7 +88,7 @@ unsafe impl Hal for VirtIOHal {
     /// 共享内存区域给设备，并返回设备可访问的物理地址
     unsafe fn share(buffer: NonNull<[u8]>, _direction: BufferDirection) -> PhysAddr {
         let vaddr = buffer.as_ptr() as *const u8 as usize;
-        let paddr = unsafe { vaddr_to_paddr(vaddr) };
+        let paddr = unsafe { crate::arch::vaddr_to_paddr(vaddr) };
 
         PhysAddr::from(paddr as u64)
     }

@@ -129,7 +129,7 @@ macro_rules! impl_address {
         $crate::impl_calc_ops!($type);
         impl $crate::mm::address::operations::AlignOps for $type {}
 
-        impl $crate::mm::address::address::Address for $type {}
+        impl $crate::mm::address::types::Address for $type {}
 
         // 地址类型通常需要在多线程环境下传递和共享
         unsafe impl Sync for $type {}
@@ -150,21 +150,34 @@ pub trait ConvertablePaddr {
 /// [Paddr] (Physical Address)
 /// ---------------------
 /// 物理内存地址，对应于内存芯片上的实际位置。
+///
+/// 内部封装 `hal::address::PA`（`Address<Physical, ()>`），
+/// 通过 sealed trait 模式在编译期防止地址空间混用。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Paddr(pub *const ());
-impl_address!(Paddr);
+pub struct Paddr(pub crate::arch::address::PA);
+
+impl UsizeConvert for Paddr {
+    fn as_usize(&self) -> usize {
+        self.0.as_usize()
+    }
+    fn from_usize(value: usize) -> Self {
+        Self(crate::arch::address::PA::from_usize(value))
+    }
+}
+crate::impl_calc_ops!(Paddr);
+impl AlignOps for Paddr {}
+impl Address for Paddr {}
+unsafe impl Sync for Paddr {}
+unsafe impl Send for Paddr {}
 
 impl ConvertablePaddr for Paddr {
     fn is_valid_paddr(&self) -> bool {
-        // 注意: 实际实现依赖于具体的架构函数 `vaddr_to_paddr`，
-        // 这里的逻辑通常需要检查地址是否在物理内存范围内。
-        self.as_usize() == unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) }
+        self.as_usize() == unsafe { crate::arch::vaddr_to_paddr(self.as_usize()) }
     }
 
     fn to_vaddr(&self) -> Vaddr {
-        // 依赖于架构特定的映射函数 (例如：线性映射或固定偏移)
-        Vaddr::from_usize(crate::arch::mm::paddr_to_vaddr(self.as_usize()))
+        Vaddr::from_usize(crate::arch::paddr_to_vaddr(self.as_usize()))
     }
 }
 
@@ -181,20 +194,34 @@ pub trait ConvertableVaddr {
 /// [Vaddr] (Virtual Address)
 /// ---------------------
 /// 虚拟内存地址，对应于进程或内核的页表映射空间中的位置。
+///
+/// 内部封装 `hal::address::VA`（`Address<Virtual, ()>`），
+/// 通过 sealed trait 模式在编译期防止地址空间混用。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Vaddr(pub *const ());
-impl_address!(Vaddr);
+pub struct Vaddr(pub crate::arch::address::VA);
+
+impl UsizeConvert for Vaddr {
+    fn as_usize(&self) -> usize {
+        self.0.as_usize()
+    }
+    fn from_usize(value: usize) -> Self {
+        Self(crate::arch::address::VA::from_usize(value))
+    }
+}
+crate::impl_calc_ops!(Vaddr);
+impl AlignOps for Vaddr {}
+impl Address for Vaddr {}
+unsafe impl Sync for Vaddr {}
+unsafe impl Send for Vaddr {}
 
 impl ConvertableVaddr for Vaddr {
     fn is_valid_vaddr(&self) -> bool {
-        // 注意: 实际实现通常涉及查询页表来确定映射关系。
-        self.as_usize() == crate::arch::mm::paddr_to_vaddr(self.as_usize())
+        self.as_usize() == crate::arch::paddr_to_vaddr(self.as_usize())
     }
 
     fn to_paddr(&self) -> Paddr {
-        // 依赖于架构特定的反向映射函数 (查询页表或固定偏移)
-        Paddr::from_usize(unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) })
+        Paddr::from_usize(unsafe { crate::arch::vaddr_to_paddr(self.as_usize()) })
     }
 }
 
@@ -427,11 +454,39 @@ pub type PaddrRange = AddressRange<Paddr>;
 /// 虚拟地址范围的类型别名
 pub type VaddrRange = AddressRange<Vaddr>;
 
+// ============================================================================
+// 与 hal::address 的类型转换
+// ============================================================================
+
+impl From<Paddr> for crate::arch::address::PA {
+    fn from(p: Paddr) -> Self {
+        p.0
+    }
+}
+
+impl From<crate::arch::address::PA> for Paddr {
+    fn from(a: crate::arch::address::PA) -> Self {
+        Paddr(a)
+    }
+}
+
+impl From<Vaddr> for crate::arch::address::VA {
+    fn from(v: Vaddr) -> Self {
+        v.0
+    }
+}
+
+impl From<crate::arch::address::VA> for Vaddr {
+    fn from(a: crate::arch::address::VA) -> Self {
+        Vaddr(a)
+    }
+}
+
 #[cfg(test)]
 mod address_basic_tests {
     use super::*;
     // 假设 arch 模块提供了 paddr_to_vaddr 的桩实现
-    use crate::arch::mm::paddr_to_vaddr;
+    use crate::arch::paddr_to_vaddr;
     use crate::{kassert, test_case};
 
     // 1.1 Paddr/Vaddr 创建和转换测试

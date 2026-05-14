@@ -1,6 +1,7 @@
 //! 工具函数模块 - UTS 命名空间
 
-use crate::arch::constant::ARCH;
+use crate::arch::ArchImpl;
+use crate::arch::Arch;
 
 /// UTS 名称最大长度
 pub const UTS_NAME_LEN: usize = 65;
@@ -32,7 +33,7 @@ impl Default for UtsNamespace {
     /// - nodename: "localhost"
     /// - release: "0.1.0"
     /// - version: "Version 0.1.0"
-    /// - machine: ARCH (架构名称)
+    /// - machine: ArchImpl::name() (架构名称，如 "riscv64")
     /// - domainname: "localdomain"
     fn default() -> Self {
         Self {
@@ -68,7 +69,7 @@ impl Default for UtsNamespace {
             },
             machine: {
                 let mut buf = [0u8; 65];
-                let bytes = ARCH.as_bytes();
+                let bytes = ArchImpl::name().as_bytes();
                 buf[..bytes.len()].copy_from_slice(bytes);
                 buf
             },

@@ -2,7 +2,7 @@
 //!
 //! 该模块为每个日志条目收集**上下文信息**（CPU ID、任务 ID、时间戳）。
 
-use crate::arch::{kernel::cpu::cpu_id, timer};
+use crate::arch::ArchImpl;
 
 /// 日志条目的上下文信息
 pub(super) struct LogContext {
@@ -23,7 +23,7 @@ pub(super) struct LogContext {
 /// - **任务 ID**: 通过当前任务的 tid 字段获取（如果存在任务）
 pub(super) fn collect_context() -> LogContext {
     // 获取 CPU ID
-    let cpu_id = cpu_id();
+    let cpu_id = crate::arch::cpu_id();
 
     // 尝试获取当前任务的 tid
     // 注意：在早期启动或中断上下文中可能没有当前任务
@@ -41,6 +41,6 @@ pub(super) fn collect_context() -> LogContext {
     LogContext {
         cpu_id,
         task_id,
-        timestamp: timer::get_time(),
+        timestamp: crate::arch::get_time(),
     }
 }

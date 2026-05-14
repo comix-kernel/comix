@@ -76,7 +76,7 @@ impl Scheduler for RRScheduler {
     fn next_task(&mut self) -> Option<SwitchPlan> {
         let _guard = crate::sync::PreemptGuard::new();
 
-        let cpu_id = crate::arch::kernel::cpu::cpu_id();
+        let cpu_id = crate::arch::cpu_id();
         crate::pr_debug!(
             "[Scheduler] CPU {} next_task called, queue size: {}",
             cpu_id,
@@ -158,7 +158,7 @@ impl Scheduler for RRScheduler {
 
         // 更新 on_cpu 字段和时间片
         {
-            let cpu_id = crate::arch::kernel::cpu::cpu_id();
+            let cpu_id = crate::arch::cpu_id();
             next_task.lock().on_cpu = Some(cpu_id);
         }
         self.reset_time_slice();

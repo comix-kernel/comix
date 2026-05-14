@@ -20,21 +20,13 @@ pub const DEVICE_END: usize = 0x30000000;
 /// VirtIO 设备类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VirtDevice {
-    /// VirtIO 块设备
     Block,
-    /// VirtIO 网络设备
     Network,
-    /// VirtIO GPU
     Gpu,
-    /// VirtIO 输入设备
     Input,
-    /// VirtIO PCIe MMIO
     VirtPcieMmio,
-    /// VirtIO PCIe ECAM
     VirtPcieEcam,
-    /// UART
     Uart,
-    /// RTC
     Rtc,
 }
 
@@ -42,16 +34,14 @@ pub enum VirtDevice {
 /// 格式: (设备类型, 基地址, 大小)
 /// 注意：第一个条目会被测试用例使用，避免使用 UART（可能与 console 冲突）
 pub const MMIO: &[(VirtDevice, usize, usize)] = &[
-    // LoongArch QEMU virt 平台 MMIO 布局
-    // RTC 放在第一位，用于测试（不容易冲突）
-    (VirtDevice::Rtc, 0x10081000, 0x1000),     // RTC (Goldfish)
-    (VirtDevice::Block, 0x10008000, 0x1000),   // VirtIO Block
-    (VirtDevice::Network, 0x10009000, 0x1000), // VirtIO Network
-    (VirtDevice::Gpu, 0x1000a000, 0x1000),     // VirtIO GPU
-    (VirtDevice::Input, 0x1000b000, 0x1000),   // VirtIO Input
-    (VirtDevice::Uart, 0x1fe001e0, 0x100),     // UART (放在后面，避免测试冲突)
-    (VirtDevice::VirtPcieMmio, 0x20000000, 0x10000000), // PCIe MMIO
-    (VirtDevice::VirtPcieEcam, 0x30000000, 0x10000000), // PCIe ECAM
+    (VirtDevice::Rtc, 0x10081000, 0x1000),
+    (VirtDevice::Block, 0x10008000, 0x1000),
+    (VirtDevice::Network, 0x10009000, 0x1000),
+    (VirtDevice::Gpu, 0x1000a000, 0x1000),
+    (VirtDevice::Input, 0x1000b000, 0x1000),
+    (VirtDevice::Uart, 0x1fe001e0, 0x100),
+    (VirtDevice::VirtPcieMmio, 0x20000000, 0x10000000),
+    (VirtDevice::VirtPcieEcam, 0x30000000, 0x10000000),
 ];
 
 /// 获取 VirtIO 设备的 MMIO 地址和大小
@@ -61,3 +51,14 @@ pub fn mmio_of(device: VirtDevice) -> Option<(usize, usize)> {
         .find(|(d, _, _)| *d == device)
         .map(|(_, b, s)| (*b, *s))
 }
+
+/// 初始化平台
+pub fn init() {
+    crate::device::serial::uart16550::driver_init();
+    crate::device::bus::virtio_mmio::driver_init();
+    crate::device::rtc::rtc_goldfish::driver_init();
+    crate::device::device_tree::init();
+    crate::device::bus::pcie::init_virtio_pci();
+    crate::device::console::init();
+}
+

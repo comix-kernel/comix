@@ -1,6 +1,3 @@
-// HACK: 在一个模块目录/文件的顶层又声明了一个同名子模块，这会造成 “module inception”。
-// 虽然功能上可行，但会引起 API/模块层次混淆，Clippy 建议消除这种重复。
-#![allow(clippy::module_inception)]
 //! 帧分配器模块
 //!
 //! 本模块提供物理内存帧的分配和跟踪功能。
@@ -15,15 +12,13 @@
 //! - `alloc_contig_frames`：分配多个连续帧。
 //! - `alloc_contig_frames_aligned`：分配带对齐要求的多个连续帧。
 
-mod frame_allocator;
+mod allocator;
 
 use alloc::vec::Vec;
-pub use frame_allocator::{FrameRangeTracker, FrameTracker, TrackedFrames};
+pub use allocator::{FrameRangeTracker, FrameTracker, TrackedFrames};
 
-use crate::mm::{
-    address::{Paddr, PageNum, Ppn, UsizeConvert},
-    frame_allocator::frame_allocator::FRAME_ALLOCATOR,
-};
+use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert};
+use allocator::FRAME_ALLOCATOR;
 
 /// 使用可用的物理内存范围初始化全局帧分配器。
 ///

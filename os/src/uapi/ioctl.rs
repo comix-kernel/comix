@@ -353,6 +353,7 @@ pub struct Ifreq {
 
 /// 接口配置结构（用于 SIOCGIFCONF）
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Ifconf {
     pub ifc_len: i32,
     pub ifc_buf: usize, // void* 或 struct ifreq*

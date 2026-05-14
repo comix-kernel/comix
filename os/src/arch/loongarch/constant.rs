@@ -1,5 +1,5 @@
 //! LoongArch64 架构常量定义
-#![allow(unused)]
+#![allow(dead_code)]
 
 /// 架构名称字符串
 pub const ARCH: &str = "loongarch64";
@@ -25,7 +25,6 @@ pub const SV39_BOT_HALF_TOP: usize = USER_TOP;
 pub const SV39_BOT_HALF_BASE: usize = USER_BASE;
 
 /// 中断相关常量
-pub const IRQ_MIN: usize = usize::MAX / 2;
 pub const IRQ_MAX: usize = usize::MAX;
 pub const TIMER: usize = usize::MAX / 2 + 1 + 11; // LoongArch 定时器中断
 pub const SUPERVISOR_EXTERNAL: usize = usize::MAX / 2 + 1 + 2; // 外部中断

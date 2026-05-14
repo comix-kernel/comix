@@ -1,5 +1,6 @@
 //! Socket implementation using smoltcp
 
+use crate::arch::Arch;
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
 use alloc::collections::VecDeque;
@@ -337,27 +338,28 @@ impl File for SocketFile {
 const AF_INET: u16 = 2;
 const SOCKADDR_IN_SIZE: usize = 16;
 
-/// Parse sockaddr_in structure
+/// Parse sockaddr_in structure from user space
 pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()> {
     if (addrlen as usize) < SOCKADDR_IN_SIZE {
         return Err(());
     }
 
-    unsafe {
-        let family = core::ptr::read_unaligned(addr as *const u16);
-        if family != AF_INET {
-            return Err(());
-        }
+    let mut buf = [0u8; SOCKADDR_IN_SIZE];
+    unsafe { crate::arch::ArchImpl::copy_from_user(addr as usize, buf.as_mut_ptr(), SOCKADDR_IN_SIZE) }
+        .map_err(|_| ())?;
 
-        let port = u16::from_be(core::ptr::read_unaligned(addr.add(2) as *const u16));
-        let ip_bytes = core::slice::from_raw_parts(addr.add(4), 4);
-        let ip = Ipv4Address::from_octets([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
-
-        // Note: Loopback addresses (127.0.0.1) are handled by smoltcp internally
-        // No need to map to external IP
-
-        Ok(IpEndpoint::new(IpAddress::Ipv4(ip), port))
+    let family = u16::from_ne_bytes([buf[0], buf[1]]);
+    if family != AF_INET {
+        return Err(());
     }
+
+    let port = u16::from_be_bytes([buf[2], buf[3]]);
+    let ip = Ipv4Address::from_octets([buf[4], buf[5], buf[6], buf[7]]);
+
+    // Note: Loopback addresses (127.0.0.1) are handled by smoltcp internally
+    // No need to map to external IP
+
+    Ok(IpEndpoint::new(IpAddress::Ipv4(ip), port))
 }
 
 /// Write sockaddr_in to buffer
@@ -393,27 +395,27 @@ pub(crate) fn write_sockaddr_in_to_buf(buf: &mut [u8], endpoint: IpEndpoint) -> 
     Ok(())
 }
 
-/// Write sockaddr_in structure
+/// Write sockaddr_in structure to user space
 pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint) -> Result<(), ()> {
     if addr.is_null() || addrlen.is_null() {
         return Ok(());
     }
 
-    unsafe {
-        let len = *addrlen as usize;
+    use crate::util::user_buffer::read_from_user;
 
-        // Linux behavior: truncate the stored address if the provided buffer is too small.
-        // Still report the full required length back to user space.
-        *addrlen = SOCKADDR_IN_SIZE as u32;
-        if len == 0 {
-            return Ok(());
-        }
+    let len = read_from_user(addrlen as *const u32) as usize;
 
-        let mut tmp = [0u8; SOCKADDR_IN_SIZE];
-        write_sockaddr_in_to_buf(&mut tmp, endpoint)?;
-        let n = core::cmp::min(len, SOCKADDR_IN_SIZE);
-        core::ptr::copy_nonoverlapping(tmp.as_ptr(), addr, n);
+    // Linux behavior: truncate the stored address if the provided buffer is too small.
+    // Still report the full required length back to user space.
+    crate::util::user_buffer::write_to_user(addrlen, SOCKADDR_IN_SIZE as u32);
+    if len == 0 {
+        return Ok(());
     }
+
+    let mut tmp = [0u8; SOCKADDR_IN_SIZE];
+    write_sockaddr_in_to_buf(&mut tmp, endpoint)?;
+    let n = core::cmp::min(len, SOCKADDR_IN_SIZE);
+    unsafe { crate::arch::ArchImpl::copy_to_user(tmp.as_ptr(), addr as usize, n) }.map_err(|_| ())?;
 
     Ok(())
 }

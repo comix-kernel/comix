@@ -1,7 +1,12 @@
 //! 网络相关的系统调用实现
 
-use core::ffi::{CStr, c_char};
+use alloc::string::{String, ToString};
+use core::ffi::c_char;
 use core::sync::atomic::{AtomicU16, Ordering};
+
+use crate::arch::Arch;
+
+use crate::util::user_buffer::{read_from_user, write_to_user};
 
 /// ifaddrs 结构体布局 - 与 Linux libc 兼容
 #[repr(C)]
@@ -54,7 +59,7 @@ fn alloc_ephemeral_port() -> u16 {
 macro_rules! set_sockopt_bool {
     ($optval:expr, $optlen:expr, $field:expr) => {
         if $optlen >= 4 {
-            let val = *($optval as *const i32);
+            let val: i32 = read_from_user($optval as *const i32);
             $field = val != 0;
         }
     };
@@ -63,7 +68,7 @@ macro_rules! set_sockopt_bool {
 macro_rules! set_sockopt_int {
     ($optval:expr, $optlen:expr, $field:expr) => {
         if $optlen >= 4 {
-            let val = *($optval as *const i32);
+            let val: i32 = read_from_user($optval as *const i32);
             if val < 0 {
                 return -(EINVAL as isize);
             }
@@ -77,7 +82,7 @@ macro_rules! set_sockopt_int {
 macro_rules! get_sockopt_bool {
     ($optval:expr, $avail:expr, $field:expr, $written:expr) => {
         if $avail >= 4 {
-            *($optval as *mut i32) = if $field { 1 } else { 0 };
+            write_to_user($optval as *mut i32, if $field { 1 } else { 0 });
             $written = 4;
         }
     };
@@ -86,7 +91,7 @@ macro_rules! get_sockopt_bool {
 macro_rules! get_sockopt_int {
     ($optval:expr, $avail:expr, $field:expr, $written:expr) => {
         if $avail >= 4 {
-            *($optval as *mut i32) = $field as i32;
+            write_to_user($optval as *mut i32, $field as i32);
             $written = 4;
         }
     };
@@ -94,7 +99,6 @@ macro_rules! get_sockopt_int {
 
 use crate::vfs::File;
 use crate::{
-    arch::trap::SumGuard,
     kernel::current_task,
     net::{
         config::{NetworkConfigError, NetworkConfigManager},
@@ -128,52 +132,48 @@ pub fn set_network_interface_config(
     mask: *const c_char,
 ) -> isize {
     // 解析参数
-    unsafe {
-        let _guard = SumGuard::new();
+    let ifname_str = match copy_c_str_from_user(ifname) {
+        Some(s) => s,
+        None => {
+            return -(errno::EFAULT as isize);
+        }
+    };
 
-        let ifname_str = match get_c_str_safe(ifname) {
-            Some(s) => s,
-            None => {
-                return -(errno::EFAULT as isize);
-            }
-        };
+    let ip_str = match copy_c_str_from_user(ip) {
+        Some(s) => s,
+        None => {
+            return -(errno::EFAULT as isize);
+        }
+    };
 
-        let ip_str = match get_c_str_safe(ip) {
-            Some(s) => s,
-            None => {
-                return -(errno::EFAULT as isize);
-            }
-        };
+    let gateway_str = match copy_c_str_from_user(gateway) {
+        Some(s) => s,
+        None => {
+            return -(errno::EFAULT as isize);
+        }
+    };
 
-        let gateway_str = match get_c_str_safe(gateway) {
-            Some(s) => s,
-            None => {
-                return -(errno::EFAULT as isize);
-            }
-        };
+    let mask_str = match copy_c_str_from_user(mask) {
+        Some(s) => s,
+        None => {
+            return -(errno::EFAULT as isize);
+        }
+    };
 
-        let mask_str = match get_c_str_safe(mask) {
-            Some(s) => s,
-            None => {
-                return -(errno::EFAULT as isize);
-            }
-        };
-
-        // 设置网络配置
-        match NetworkConfigManager::set_interface_config(ifname_str, ip_str, gateway_str, mask_str)
-        {
-            Ok(_) => 0,
-            Err(e) => {
-                println!("Network config error: {:?}", e);
-                let errno = match e {
-                    NetworkConfigError::InterfaceNotFound => errno::ENODEV,
-                    NetworkConfigError::InvalidAddress
-                    | NetworkConfigError::InvalidSubnet
-                    | NetworkConfigError::InvalidGateway => errno::EINVAL,
-                    NetworkConfigError::ConfigFailed => errno::EIO,
-                };
-                -(errno as isize)
-            }
+    // 设置网络配置
+    match NetworkConfigManager::set_interface_config(&ifname_str, &ip_str, &gateway_str, &mask_str)
+    {
+        Ok(_) => 0,
+        Err(e) => {
+            println!("Network config error: {:?}", e);
+            let errno = match e {
+                NetworkConfigError::InterfaceNotFound => errno::ENODEV,
+                NetworkConfigError::InvalidAddress
+                | NetworkConfigError::InvalidSubnet
+                | NetworkConfigError::InvalidGateway => errno::EINVAL,
+                NetworkConfigError::ConfigFailed => errno::EIO,
+            };
+            -(errno as isize)
         }
     }
 }
@@ -242,13 +242,9 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
 
 /// 绑定套接字
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    let endpoint = {
-        let _guard = SumGuard::new();
-        let ep = parse_sockaddr_in(addr, addrlen);
-        match ep {
-            Ok(e) => e,
-            Err(_) => return -22, // EINVAL
-        }
+    let endpoint = match parse_sockaddr_in(addr, addrlen) {
+        Ok(e) => e,
+        Err(_) => return -22, // EINVAL
     };
 
     let task = current_task();
@@ -573,7 +569,6 @@ fn accept_return_conn(
     };
 
     if !addr.is_null() && !addrlen.is_null() {
-        let _guard = SumGuard::new();
         // accept(): Linux truncates if addrlen is too small; our helper implements that.
         let _ = write_sockaddr_in(addr, addrlen, remote_endpoint);
     }
@@ -595,16 +590,12 @@ fn accept_return_conn(
 
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
-    let endpoint = {
-        let _guard = SumGuard::new();
-        let ep = parse_sockaddr_in(addr, addrlen);
-        match ep {
-            Ok(e) => {
-                pr_debug!("connect: sockfd={}, endpoint={}", sockfd, e);
-                e
-            }
-            Err(_) => return -22, // EINVAL
+    let endpoint = match parse_sockaddr_in(addr, addrlen) {
+        Ok(e) => {
+            pr_debug!("connect: sockfd={}, endpoint={}", sockfd, e);
+            e
         }
+        Err(_) => return -22, // EINVAL
     };
 
     let task = current_task();
@@ -823,9 +814,9 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
         };
 
         let result = {
-            let _guard = SumGuard::new();
-            let data = unsafe { core::slice::from_raw_parts(buf, len) };
-            file.write(data)
+            let mut kernel_buf = alloc::vec![0u8; len];
+            unsafe { crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), len).ok(); }
+            file.write(&kernel_buf)
         };
 
         match result {
@@ -875,9 +866,14 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
         };
 
         let result = {
-            let _guard = SumGuard::new();
-            let data = unsafe { core::slice::from_raw_parts_mut(buf, len) };
-            file.read(data)
+            let mut kernel_buf = alloc::vec![0u8; len];
+            match file.read(&mut kernel_buf) {
+                Ok(n) => {
+                    unsafe { crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok(); }
+                    Ok(n)
+                }
+                Err(e) => Err(e),
+            }
         };
 
         match result {
@@ -919,13 +915,19 @@ pub fn close_sock(sockfd: i32) -> isize {
     }
 }
 
-/// 安全地获取C字符串
-unsafe fn get_c_str_safe(ptr: *const c_char) -> Option<&'static str> {
+/// 安全地从用户空间拷贝C字符串
+fn copy_c_str_from_user(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-
-    unsafe { CStr::from_ptr(ptr) }.to_str().ok()
+    let mut buf = [0u8; 256];
+    match unsafe { crate::arch::ArchImpl::copy_strn_from_user(ptr as usize, buf.as_mut_ptr(), buf.len()) } {
+        Ok(len) if len > 0 => {
+            let s = core::str::from_utf8(&buf[..len]).ok()?;
+            Some(s.to_string())
+        }
+        _ => None,
+    }
 }
 
 /// 获取网络接口统计信息
@@ -939,7 +941,6 @@ unsafe fn get_c_str_safe(ptr: *const c_char) -> Option<&'static str> {
 /// - 成功返回 0
 /// - 失败返回负的错误码
 fn get_interface_stats(ifname: *const c_char, stats: *mut u8, size: usize) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EFAULT, EINVAL, ENODEV};
 
     if ifname.is_null() || stats.is_null() {
@@ -953,17 +954,15 @@ fn get_interface_stats(ifname: *const c_char, stats: *mut u8, size: usize) -> is
         return -(EINVAL as isize);
     }
 
-    let _guard = SumGuard::new();
-
     // 解析接口名称
-    let if_name_str = match unsafe { get_c_str_safe(ifname) } {
+    let if_name_str = match copy_c_str_from_user(ifname) {
         Some(s) => s,
         None => return -(EINVAL as isize),
     };
 
     // 查找网络接口
     let iface_manager = NETWORK_INTERFACE_MANAGER.lock();
-    let interface = match iface_manager.find_interface_by_name(if_name_str) {
+    let interface = match iface_manager.find_interface_by_name(&if_name_str) {
         Some(iface) => iface,
         None => return -(ENODEV as isize),
     };
@@ -971,37 +970,9 @@ fn get_interface_stats(ifname: *const c_char, stats: *mut u8, size: usize) -> is
     // 获取设备统计信息
     let _device = interface.device();
 
-    // 填充统计信息结构 (struct rtnl_link_stats64)
-    // 结构体布局（简化版）：
-    // offset 0:   rx_packets (u64)
-    // offset 8:   tx_packets (u64)
-    // offset 16:  rx_bytes (u64)
-    // offset 24:  tx_bytes (u64)
-    // offset 32:  rx_errors (u64)
-    // offset 40:  tx_errors (u64)
-    // offset 48:  rx_dropped (u64)
-    // offset 56:  tx_dropped (u64)
-    // offset 64:  multicast (u64)
-    // offset 72:  collisions (u64)
-    // ... 更多字段
-
-    unsafe {
-        let stats_slice = core::slice::from_raw_parts_mut(stats, size);
-
-        // 清零整个结构
-        stats_slice.fill(0);
-
-        // TODO: 当 NetDevice trait 扩展后，从设备获取真实的统计数据
-        // 目前返回零值表示统计信息不可用
-        //
-        // 未来的实现示例：
-        // let stats_ptr = stats as *mut u64;
-        // *stats_ptr.add(0) = device.get_rx_packets();
-        // *stats_ptr.add(1) = device.get_tx_packets();
-        // *stats_ptr.add(2) = device.get_rx_bytes();
-        // *stats_ptr.add(3) = device.get_tx_bytes();
-        // ... 等等
-    }
+    // 清零整个统计结构 (struct rtnl_link_stats64)
+    let zero_buf = alloc::vec![0u8; size];
+    unsafe { crate::arch::ArchImpl::copy_to_user(zero_buf.as_ptr(), stats as usize, size).ok(); }
 
     0 // 成功
 }
@@ -1015,14 +986,11 @@ pub fn init_network_syscalls() {
 /// 这个函数会在用户态内存空间分配一块连续内存，存储所有接口信息
 /// 包括：ifaddrs 链表、sockaddr 结构、接口名称字符串等
 pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EFAULT, ENOMEM};
 
     if ifap.is_null() {
         return -(EFAULT as isize);
     }
-
-    let _guard = SumGuard::new();
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -1037,35 +1005,22 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
     let interfaces = NETWORK_INTERFACE_MANAGER.lock().get_interfaces().to_vec();
 
     if interfaces.is_empty() {
-        unsafe {
-            *ifap = core::ptr::null_mut();
-        }
+        write_to_user(ifap, core::ptr::null_mut::<u8>());
         return 0;
     }
 
     // 计算需要的总内存大小
-    // 每个接口需要：
-    // - 1 个 IfAddrs 结构体
-    // - 1 个 SockAddrIn (addr)
-    // - 1 个 SockAddrIn (netmask)
-    // - 1 个 SockAddrIn (broadcast，如果需要)
-    // - 接口名称字符串 (包括 null 终止符)
-
     let mut total_size = 0usize;
     let ifaddrs_size = core::mem::size_of::<IfAddrs>();
     let sockaddr_size = core::mem::size_of::<SockAddrIn>();
 
     for iface in interfaces.iter() {
-        total_size += ifaddrs_size; // IfAddrs 结构
-        total_size += sockaddr_size * 3; // addr + netmask + broadcast
-        total_size += iface.name().len() + 1; // 名称 + '\0'
-
-        // 每个 IP 地址都需要一套完整结构
+        total_size += ifaddrs_size;
+        total_size += sockaddr_size * 3;
+        total_size += iface.name().len() + 1;
         let ip_count = iface.ip_addresses().len().max(1);
         total_size += (ifaddrs_size + sockaddr_size * 3) * (ip_count.saturating_sub(1));
     }
-
-    // 添加对齐填充
     total_size = (total_size + 7) & !7;
 
     // 使用 mmap 在用户空间分配内存
@@ -1074,18 +1029,17 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
         use crate::kernel::syscall::mm::mmap;
         use crate::uapi::mm::{MapFlags, ProtFlags};
 
-        // 额外预留一段 header，用于 freeifaddrs 释放整块映射（Linux ABI 语义）
         let map_len = {
             let raw = total_size + IFADDRS_HEADER_SIZE;
             (raw + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
         };
 
         let addr = mmap(
-            core::ptr::null_mut(), // 让内核选择地址
+            core::ptr::null_mut(),
             map_len,
             (ProtFlags::READ | ProtFlags::WRITE).bits(),
             (MapFlags::ANONYMOUS | MapFlags::PRIVATE).bits(),
-            -1, // 匿名映射
+            -1,
             0,
         );
 
@@ -1096,117 +1050,117 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
         (addr as usize + IFADDRS_HEADER_SIZE, map_len)
     };
 
-    // 写入 header（位于 ifa 链表之前）
-    unsafe {
-        let header_ptr = (user_mem_start - IFADDRS_HEADER_SIZE) as *mut IfAddrsAllocHeader;
-        header_ptr.write(IfAddrsAllocHeader {
+    // 写入 header
+    write_to_user(
+        (user_mem_start - IFADDRS_HEADER_SIZE) as *mut IfAddrsAllocHeader,
+        IfAddrsAllocHeader {
             magic: IFADDRS_ALLOC_MAGIC,
             map_len,
-        });
-    }
+        },
+    );
 
-    // 现在开始在用户内存中构建扁平化的数据结构
+    // 在 kernel buffer 中构建整个数据结构（使用绝对用户态地址）
+    let mut kernel_buf = alloc::vec![0u8; total_size];
     let mut current_offset = 0usize;
     let mut first_ifaddrs_addr = 0usize;
-    let mut prev_ifaddrs_addr = 0usize;
+    let mut prev_ifaddrs_offset = 0usize;
 
-    unsafe {
-        for iface in interfaces.iter() {
-            let ip_addrs = iface.ip_addresses();
-            let ip_list = if ip_addrs.is_empty() {
-                // 即使没有 IP，也创建一个条目
-                alloc::vec![None]
-            } else {
-                ip_addrs
-                    .iter()
-                    .map(|ip| Some(*ip))
-                    .collect::<alloc::vec::Vec<_>>()
-            };
+    for iface in interfaces.iter() {
+        let ip_addrs = iface.ip_addresses();
+        let ip_list = if ip_addrs.is_empty() {
+            alloc::vec![None]
+        } else {
+            ip_addrs
+                .iter()
+                .map(|ip| Some(*ip))
+                .collect::<alloc::vec::Vec<_>>()
+        };
 
-            for ip_cidr_opt in ip_list.iter() {
-                // 1. IfAddrs 结构体位置
-                let ifaddrs_addr = user_mem_start + current_offset;
-                if first_ifaddrs_addr == 0 {
-                    first_ifaddrs_addr = ifaddrs_addr;
-                }
-                current_offset += ifaddrs_size;
-
-                // 2. sockaddr (addr) 位置
-                let addr_addr = user_mem_start + current_offset;
-                current_offset += sockaddr_size;
-
-                // 3. sockaddr (netmask) 位置
-                let netmask_addr = user_mem_start + current_offset;
-                current_offset += sockaddr_size;
-
-                // 4. sockaddr (broadcast) 位置
-                let broadcast_addr = user_mem_start + current_offset;
-                current_offset += sockaddr_size;
-
-                // 5. 接口名称位置
-                let name_addr = user_mem_start + current_offset;
-                let name_bytes = iface.name().as_bytes();
-                current_offset += name_bytes.len() + 1; // +1 for null terminator
-
-                // 8字节对齐
-                current_offset = (current_offset + 7) & !7;
-
-                // 填充 IfAddrs 结构体
-                let ifaddrs_ptr = ifaddrs_addr as *mut IfAddrs;
-                let ifaddrs = &mut *ifaddrs_ptr;
-                ifaddrs.ifa_next = 0; // 稍后填充
-                ifaddrs.ifa_name = name_addr;
-                ifaddrs.ifa_flags = get_interface_flags(iface.name());
-                ifaddrs.ifa_addr = addr_addr;
-                ifaddrs.ifa_netmask = netmask_addr;
-                ifaddrs.ifa_ifu = broadcast_addr;
-                ifaddrs.ifa_data = 0; // 不提供统计数据
-
-                // 填充 sockaddr_in (addr)
-                if let Some(ip_cidr) = ip_cidr_opt {
-                    let addr_ptr = addr_addr as *mut SockAddrIn;
-                    fill_sockaddr_from_ip(addr_ptr, ip_cidr.address());
-
-                    // 填充 netmask
-                    let netmask_ptr = netmask_addr as *mut SockAddrIn;
-                    fill_sockaddr_from_netmask(netmask_ptr, ip_cidr.prefix_len());
-
-                    // 填充 broadcast (如果是 IPv4 且不是回环)
-                    if !iface.name().starts_with("lo") {
-                        let broadcast_ptr = broadcast_addr as *mut SockAddrIn;
-                        fill_sockaddr_broadcast(broadcast_ptr, ip_cidr);
-                    }
-                } else {
-                    // 没有 IP 地址，清零
-                    core::ptr::write_bytes(addr_addr as *mut u8, 0, sockaddr_size);
-                    core::ptr::write_bytes(netmask_addr as *mut u8, 0, sockaddr_size);
-                    core::ptr::write_bytes(broadcast_addr as *mut u8, 0, sockaddr_size);
-                }
-
-                // 填充接口名称
-                let name_ptr = name_addr as *mut u8;
-                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, name_bytes.len());
-                *name_ptr.add(name_bytes.len()) = 0; // null terminator
-
-                // 链接到前一个节点
-                if prev_ifaddrs_addr != 0 {
-                    let prev_ptr = prev_ifaddrs_addr as *mut IfAddrs;
-                    (*prev_ptr).ifa_next = ifaddrs_addr;
-                }
-
-                prev_ifaddrs_addr = ifaddrs_addr;
+        for ip_cidr_opt in ip_list.iter() {
+            let ifaddrs_off = current_offset;
+            let ifaddrs_ua = user_mem_start + ifaddrs_off;
+            if first_ifaddrs_addr == 0 {
+                first_ifaddrs_addr = ifaddrs_ua;
             }
-        }
+            current_offset += ifaddrs_size;
 
-        // 最后一个节点的 next 指针设为 null
-        if prev_ifaddrs_addr != 0 {
-            let prev_ptr = prev_ifaddrs_addr as *mut IfAddrs;
-            (*prev_ptr).ifa_next = 0;
-        }
+            let addr_off = current_offset;
+            let addr_ua = user_mem_start + addr_off;
+            current_offset += sockaddr_size;
 
-        // 返回第一个 ifaddrs 的地址给用户
-        *ifap = first_ifaddrs_addr as *mut u8;
+            let netmask_off = current_offset;
+            let netmask_ua = user_mem_start + netmask_off;
+            current_offset += sockaddr_size;
+
+            let broadcast_off = current_offset;
+            let broadcast_ua = user_mem_start + broadcast_off;
+            current_offset += sockaddr_size;
+
+            let name_off = current_offset;
+            let name_ua = user_mem_start + name_off;
+            let name_bytes = iface.name().as_bytes();
+            current_offset += name_bytes.len() + 1;
+            current_offset = (current_offset + 7) & !7;
+
+            // 填充 IfAddrs 结构体到 kernel buffer
+            let ifa_slice = &mut kernel_buf[ifaddrs_off..ifaddrs_off + ifaddrs_size];
+            // ifa_next: usize (offset 0)
+            ifa_slice[0..8].copy_from_slice(&0usize.to_ne_bytes());
+            // ifa_name: usize (offset 8)
+            ifa_slice[8..16].copy_from_slice(&name_ua.to_ne_bytes());
+            // ifa_flags: u32 (offset 16)
+            ifa_slice[16..20].copy_from_slice(&get_interface_flags(iface.name()).to_ne_bytes());
+            // ifa_addr: usize (offset 24)
+            ifa_slice[24..32].copy_from_slice(&addr_ua.to_ne_bytes());
+            // ifa_netmask: usize (offset 32)
+            ifa_slice[32..40].copy_from_slice(&netmask_ua.to_ne_bytes());
+            // ifa_ifu: usize (offset 40)
+            ifa_slice[40..48].copy_from_slice(&broadcast_ua.to_ne_bytes());
+            // ifa_data: usize (offset 48)
+            ifa_slice[48..56].fill(0);
+
+            // 填充 sockaddr (使用 split_at_mut 避免多重借用冲突，布局保证 addr/netmask/broadcast 连续)
+            let (_pre, rest) = kernel_buf.split_at_mut(addr_off);
+            let (addr_slice, rest) = rest.split_at_mut(sockaddr_size);
+            let (netmask_slice, rest) = rest.split_at_mut(sockaddr_size);
+            let (broadcast_slice, _rest) = rest.split_at_mut(sockaddr_size);
+
+            if let Some(ip_cidr) = ip_cidr_opt {
+                fill_sockaddr_from_ip(addr_slice, ip_cidr.address());
+                fill_sockaddr_from_netmask(netmask_slice, ip_cidr.prefix_len());
+                if !iface.name().starts_with("lo") {
+                    fill_sockaddr_broadcast(broadcast_slice, ip_cidr);
+                } else {
+                    broadcast_slice.fill(0);
+                }
+            } else {
+                addr_slice.fill(0);
+                netmask_slice.fill(0);
+                broadcast_slice.fill(0);
+            }
+
+            // 填充接口名称
+            let name_slice = &mut kernel_buf[name_off..name_off + name_bytes.len() + 1];
+            name_slice[..name_bytes.len()].copy_from_slice(name_bytes);
+            name_slice[name_bytes.len()] = 0;
+
+            // 链接到前一个节点
+            if prev_ifaddrs_offset != 0 {
+                let prev_ifa_slice = &mut kernel_buf[prev_ifaddrs_offset..prev_ifaddrs_offset + 8];
+                prev_ifa_slice.copy_from_slice(&ifaddrs_ua.to_ne_bytes());
+            }
+
+            prev_ifaddrs_offset = ifaddrs_off;
+        }
     }
+
+    // 最后一个节点的 next 指针已经填充为 0（初始化时）
+
+    // 复制整个结构到用户空间
+    unsafe { crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), user_mem_start, total_size).ok(); }
+
+    // 返回第一个 ifaddrs 的地址给用户
+    write_to_user(ifap, first_ifaddrs_addr as *mut u8);
 
     0 // 成功
 }
@@ -1224,37 +1178,28 @@ fn get_interface_flags(iface_name: &str) -> u32 {
     flags
 }
 
-/// 从 IP 地址填充 sockaddr_in
-unsafe fn fill_sockaddr_from_ip(addr: *mut SockAddrIn, ip: smoltcp::wire::IpAddress) {
+/// 从 IP 地址填充 sockaddr_in 到字节缓冲区
+fn fill_sockaddr_from_ip(buf: &mut [u8], ip: smoltcp::wire::IpAddress) {
     use smoltcp::wire::IpAddress;
-
-    let sockaddr = unsafe { &mut *addr };
-    sockaddr.sin_family = AF_INET;
-    sockaddr.sin_port = 0;
-    sockaddr.sin_zero = [0; 8];
+    buf[0..2].copy_from_slice(&AF_INET.to_ne_bytes());
+    buf[2..4].copy_from_slice(&0u16.to_ne_bytes()); // port = 0
+    buf[8..16].fill(0); // sin_zero
 
     match ip {
         IpAddress::Ipv4(ipv4) => {
-            sockaddr.sin_addr = ipv4.octets();
+            buf[4..8].copy_from_slice(&ipv4.octets());
         }
-        #[cfg(feature = "proto-ipv6")]
-        IpAddress::Ipv6(_) => {
-            // IPv6 需要不同的结构体，这里暂不支持
-            sockaddr.sin_addr = [0; 4];
-        }
-        #[cfg(not(feature = "proto-ipv6"))]
         _ => {
-            sockaddr.sin_addr = [0; 4];
+            buf[4..8].fill(0);
         }
     }
 }
 
-/// 从前缀长度填充 netmask
-unsafe fn fill_sockaddr_from_netmask(addr: *mut SockAddrIn, prefix_len: u8) {
-    let sockaddr = unsafe { &mut *addr };
-    sockaddr.sin_family = AF_INET;
-    sockaddr.sin_port = 0;
-    sockaddr.sin_zero = [0; 8];
+/// 从前缀长度填充 netmask 到字节缓冲区
+fn fill_sockaddr_from_netmask(buf: &mut [u8], prefix_len: u8) {
+    buf[0..2].copy_from_slice(&AF_INET.to_ne_bytes());
+    buf[2..4].copy_from_slice(&0u16.to_ne_bytes()); // port = 0
+    buf[8..16].fill(0); // sin_zero
 
     // 计算 netmask (例如 /24 -> 255.255.255.0)
     let mask = if prefix_len == 0 {
@@ -1265,22 +1210,21 @@ unsafe fn fill_sockaddr_from_netmask(addr: *mut SockAddrIn, prefix_len: u8) {
         !((1u32 << (32 - prefix_len)) - 1)
     };
 
-    sockaddr.sin_addr = [
+    buf[4..8].copy_from_slice(&[
         ((mask >> 24) & 0xFF) as u8,
         ((mask >> 16) & 0xFF) as u8,
         ((mask >> 8) & 0xFF) as u8,
         (mask & 0xFF) as u8,
-    ];
+    ]);
 }
 
-/// 从 IP CIDR 填充广播地址
-unsafe fn fill_sockaddr_broadcast(addr: *mut SockAddrIn, ip_cidr: &smoltcp::wire::IpCidr) {
+/// 从 IP CIDR 填充广播地址到字节缓冲区
+fn fill_sockaddr_broadcast(buf: &mut [u8], ip_cidr: &smoltcp::wire::IpCidr) {
     use smoltcp::wire::IpAddress;
 
-    let sockaddr = unsafe { &mut *addr };
-    sockaddr.sin_family = AF_INET;
-    sockaddr.sin_port = 0;
-    sockaddr.sin_zero = [0; 8];
+    buf[0..2].copy_from_slice(&AF_INET.to_ne_bytes());
+    buf[2..4].copy_from_slice(&0u16.to_ne_bytes()); // port = 0
+    buf[8..16].fill(0); // sin_zero
 
     match ip_cidr.address() {
         IpAddress::Ipv4(ipv4) => {
@@ -1296,25 +1240,22 @@ unsafe fn fill_sockaddr_broadcast(addr: *mut SockAddrIn, ip_cidr: &smoltcp::wire
 
             let broadcast = ip_u32 | !mask;
 
-            sockaddr.sin_addr = broadcast.to_be_bytes();
+            buf[4..8].copy_from_slice(&broadcast.to_be_bytes());
         }
         _ => {
-            sockaddr.sin_addr = [255, 255, 255, 255];
+            buf[4..8].copy_from_slice(&[255, 255, 255, 255]);
         }
     }
 }
 
 // 释放获取网络接口列表分配的内存
 pub fn freeifaddrs(ifa: *mut u8) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::kernel::syscall::mm::munmap;
     use crate::uapi::errno::EINVAL;
 
     if ifa.is_null() {
         return 0; // NULL 指针，直接返回
     }
-
-    let _guard = SumGuard::new();
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -1331,16 +1272,14 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
         None => return -(EINVAL as isize),
     };
 
-    unsafe {
-        let header = (header_addr as *const IfAddrsAllocHeader).read();
-        if header.magic != IFADDRS_ALLOC_MAGIC || header.map_len < IFADDRS_HEADER_SIZE {
-            return -(EINVAL as isize);
-        }
+    let header: IfAddrsAllocHeader = read_from_user(header_addr as *const IfAddrsAllocHeader);
+    if header.magic != IFADDRS_ALLOC_MAGIC || header.map_len < IFADDRS_HEADER_SIZE {
+        return -(EINVAL as isize);
+    }
 
-        let result = munmap(header_addr as *mut core::ffi::c_void, header.map_len);
-        if result < 0 {
-            return -(EINVAL as isize);
-        }
+    let result = munmap(header_addr as *mut core::ffi::c_void, header.map_len);
+    if result < 0 {
+        return -(EINVAL as isize);
     }
 
     0
@@ -1348,8 +1287,6 @@ pub fn freeifaddrs(ifa: *mut u8) -> isize {
 
 // 设置网络接口配置
 pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optlen: u32) -> isize {
-    use crate::arch::trap::SumGuard;
-
     use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
     use crate::uapi::socket::*;
 
@@ -1373,40 +1310,31 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
 
     let mut opts = socket_file.get_socket_options();
 
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            match level {
-                SOL_SOCKET => match optname {
-                    SO_REUSEADDR => set_sockopt_bool!(optval, optlen, opts.reuse_addr),
-                    SO_REUSEPORT => set_sockopt_bool!(optval, optlen, opts.reuse_port),
-                    SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
-                    // netperf uses these; smoltcp doesn't implement them, accept for Linux ABI compatibility.
-                    SO_DONTROUTE | SO_BROADCAST | SO_OOBINLINE => { /* ignore */ }
-                    // Note: SO_SNDBUF/SO_RCVBUF are stored but not applied to smoltcp sockets
-                    // smoltcp uses fixed-size buffers allocated at socket creation time
-                    SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
-                    SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
-                    SO_RCVLOWAT | SO_SNDLOWAT => { /* ignore */ }
-                    SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ }
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                IPPROTO_IP => match optname {
-                    // Commonly touched by tools; we currently treat them as no-ops.
-                    IP_TOS | IP_TTL | IP_PKTINFO | IP_MTU_DISCOVER | IP_RECVERR => { /* ignore */ }
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                IPPROTO_TCP => match optname {
-                    TCP_NODELAY => set_sockopt_bool!(optval, optlen, opts.tcp_nodelay),
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                IPPROTO_IPV6 => match optname {
-                    IPV6_V6ONLY => set_sockopt_bool!(optval, optlen, opts.ipv6_v6only),
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                _ => return -(ENOPROTOOPT as isize),
-            }
-        }
+    match level {
+        SOL_SOCKET => match optname {
+            SO_REUSEADDR => set_sockopt_bool!(optval, optlen, opts.reuse_addr),
+            SO_REUSEPORT => set_sockopt_bool!(optval, optlen, opts.reuse_port),
+            SO_KEEPALIVE => set_sockopt_bool!(optval, optlen, opts.keepalive),
+            SO_DONTROUTE | SO_BROADCAST | SO_OOBINLINE => { /* ignore */ }
+            SO_SNDBUF => set_sockopt_int!(optval, optlen, opts.send_buffer_size),
+            SO_RCVBUF => set_sockopt_int!(optval, optlen, opts.recv_buffer_size),
+            SO_RCVLOWAT | SO_SNDLOWAT => { /* ignore */ }
+            SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ }
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        IPPROTO_IP => match optname {
+            IP_TOS | IP_TTL | IP_PKTINFO | IP_MTU_DISCOVER | IP_RECVERR => { /* ignore */ }
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        IPPROTO_TCP => match optname {
+            TCP_NODELAY => set_sockopt_bool!(optval, optlen, opts.tcp_nodelay),
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        IPPROTO_IPV6 => match optname {
+            IPV6_V6ONLY => set_sockopt_bool!(optval, optlen, opts.ipv6_v6only),
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        _ => return -(ENOPROTOOPT as isize),
     }
 
     socket_file.set_socket_options(opts);
@@ -1421,7 +1349,6 @@ pub fn getsockopt(
     optval: *mut u8,
     optlen: *mut u32,
 ) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EBADF, EINVAL, ENOPROTOOPT, ENOTSOCK};
     use crate::uapi::socket::*;
 
@@ -1445,67 +1372,62 @@ pub fn getsockopt(
 
     let opts = socket_file.get_socket_options();
 
-    {
-        let _guard = SumGuard::new();
-        unsafe {
-            let available_len = *optlen as usize;
-            let mut written_len = 0usize;
+    let available_len = read_from_user(optlen as *const u32) as usize;
+    let mut written_len = 0usize;
 
-            match level {
-                SOL_SOCKET => match optname {
-                    SO_REUSEADDR => {
-                        get_sockopt_bool!(optval, available_len, opts.reuse_addr, written_len)
-                    }
-                    SO_REUSEPORT => {
-                        get_sockopt_bool!(optval, available_len, opts.reuse_port, written_len)
-                    }
-                    SO_KEEPALIVE => {
-                        get_sockopt_bool!(optval, available_len, opts.keepalive, written_len)
-                    }
-                    SO_SNDBUF => {
-                        get_sockopt_int!(optval, available_len, opts.send_buffer_size, written_len)
-                    }
-                    SO_RCVBUF => {
-                        get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len)
-                    }
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                IPPROTO_TCP => match optname {
-                    TCP_NODELAY => {
-                        get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len)
-                    }
-                    TCP_MAXSEG => {
-                        get_sockopt_int!(optval, available_len, opts.tcp_maxseg, written_len)
-                    }
-                    TCP_CONGESTION => {
-                        // Return a dummy congestion control name. iperf3 mainly uses this for display.
-                        let cc = b"cubic\0";
-                        let n = core::cmp::min(available_len, cc.len());
-                        core::ptr::copy_nonoverlapping(cc.as_ptr(), optval, n);
-                        written_len = n;
-                    }
-                    TCP_INFO => {
-                        // Best-effort placeholder. smoltcp doesn't currently expose full tcp_info metrics.
-                        let info = TcpInfo::dummy_established();
-                        let src = &info as *const TcpInfo as *const u8;
-                        let n = core::cmp::min(available_len, core::mem::size_of::<TcpInfo>());
-                        core::ptr::copy_nonoverlapping(src, optval, n);
-                        written_len = n;
-                    }
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                IPPROTO_IPV6 => match optname {
-                    IPV6_V6ONLY => {
-                        get_sockopt_bool!(optval, available_len, opts.ipv6_v6only, written_len)
-                    }
-                    _ => return -(ENOPROTOOPT as isize),
-                },
-                _ => return -(ENOPROTOOPT as isize),
+    match level {
+        SOL_SOCKET => match optname {
+            SO_REUSEADDR => {
+                get_sockopt_bool!(optval, available_len, opts.reuse_addr, written_len)
             }
-
-            *optlen = written_len as u32;
-        }
+            SO_REUSEPORT => {
+                get_sockopt_bool!(optval, available_len, opts.reuse_port, written_len)
+            }
+            SO_KEEPALIVE => {
+                get_sockopt_bool!(optval, available_len, opts.keepalive, written_len)
+            }
+            SO_SNDBUF => {
+                get_sockopt_int!(optval, available_len, opts.send_buffer_size, written_len)
+            }
+            SO_RCVBUF => {
+                get_sockopt_int!(optval, available_len, opts.recv_buffer_size, written_len)
+            }
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        IPPROTO_TCP => match optname {
+            TCP_NODELAY => {
+                get_sockopt_bool!(optval, available_len, opts.tcp_nodelay, written_len)
+            }
+            TCP_MAXSEG => {
+                get_sockopt_int!(optval, available_len, opts.tcp_maxseg, written_len)
+            }
+            TCP_CONGESTION => {
+                // Return a dummy congestion control name. iperf3 mainly uses this for display.
+                let cc = b"cubic\0";
+                let n = core::cmp::min(available_len, cc.len());
+                unsafe { crate::arch::ArchImpl::copy_to_user(cc.as_ptr(), optval as usize, n).ok(); }
+                written_len = n;
+            }
+            TCP_INFO => {
+                // Best-effort placeholder. smoltcp doesn't currently expose full tcp_info metrics.
+                let info = TcpInfo::dummy_established();
+                let src = &info as *const TcpInfo as *const u8;
+                let n = core::cmp::min(available_len, core::mem::size_of::<TcpInfo>());
+                unsafe { crate::arch::ArchImpl::copy_to_user(src, optval as usize, n).ok(); }
+                written_len = n;
+            }
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        IPPROTO_IPV6 => match optname {
+            IPV6_V6ONLY => {
+                get_sockopt_bool!(optval, available_len, opts.ipv6_v6only, written_len)
+            }
+            _ => return -(ENOPROTOOPT as isize),
+        },
+        _ => return -(ENOPROTOOPT as isize),
     }
+
+    write_to_user(optlen, written_len as u32);
 
     0
 }
@@ -1561,13 +1483,9 @@ pub fn sendto(
         return send(sockfd, buf, len, 0);
     }
 
-    let endpoint = {
-        let _guard = SumGuard::new();
-        let ep = parse_sockaddr_in(dest_addr, addrlen);
-        match ep {
-            Ok(e) => e,
-            Err(_) => return -22, // EINVAL
-        }
+    let endpoint = match parse_sockaddr_in(dest_addr, addrlen) {
+        Ok(e) => e,
+        Err(_) => return -22, // EINVAL
     };
 
     let task = current_task();
@@ -1580,9 +1498,9 @@ pub fn sendto(
 
     use crate::net::socket::socket_sendto;
     let result = {
-        let _guard = SumGuard::new();
-        let data = unsafe { core::slice::from_raw_parts(buf, len) };
-        socket_sendto(handle, data, endpoint)
+        let mut kernel_buf = alloc::vec![0u8; len];
+        unsafe { crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), len).ok(); }
+        socket_sendto(handle, &kernel_buf, endpoint)
     };
     match result {
         Ok(n) => {
@@ -1626,20 +1544,23 @@ pub fn recvfrom(
         };
 
         let result = {
-            let _guard = SumGuard::new();
-            let data = unsafe { core::slice::from_raw_parts_mut(buf, len) };
-            file.recvfrom(data)
+            let mut kernel_buf = alloc::vec![0u8; len];
+            match file.recvfrom(&mut kernel_buf) {
+                Ok((n, addr)) => {
+                    unsafe { crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok(); }
+                    Ok((n, addr))
+                }
+                Err(e) => Err(e),
+            }
         };
 
         match result {
             Ok((n, Some(addr_buf))) => {
                 if !src_addr.is_null() && !addrlen.is_null() {
-                    unsafe {
-                        let _guard = SumGuard::new();
-                        let len = (*addrlen as usize).min(addr_buf.len());
-                        core::ptr::copy_nonoverlapping(addr_buf.as_ptr(), src_addr, len);
-                        *addrlen = len as u32;
-                    }
+                    let user_addrlen = read_from_user(addrlen as *const u32) as usize;
+                    let copy_len = user_addrlen.min(addr_buf.len());
+                    unsafe { crate::arch::ArchImpl::copy_to_user(addr_buf.as_ptr(), src_addr as usize, copy_len).ok(); }
+                    write_to_user(addrlen, copy_len as u32);
                 }
                 pr_debug!(
                     "recvfrom: sockfd={}, len={} -> received={} (with addr)",
@@ -1760,7 +1681,6 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         }
     };
 
-    let _guard = SumGuard::new();
     if write_sockaddr_in(addr, addrlen, ep).is_err() {
         return -22; // EINVAL
     }
@@ -1791,11 +1711,8 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     if let Some(ep) = remote_endpoint {
-        {
-            let _guard = SumGuard::new();
-            if write_sockaddr_in(addr, addrlen, ep).is_err() {
-                return -22; // EINVAL
-            }
+        if write_sockaddr_in(addr, addrlen, ep).is_err() {
+            return -22; // EINVAL
         }
         0
     } else {

@@ -1,10 +1,11 @@
-//! LoongArch64 memory helpers.
+//! 编译器内建函数替代实现 (LoongArch)
 //!
-//! Provide simple byte-wise implementations to avoid unsupported instructions
-//! in QEMU/LoongArch for compiler_builtins memcpy/memmove/memset.
-
+//! LoongArch64 目标的 compiler_builtins crate 不完全支持，
+//! 因此提供纯 Rust 的 memcpy/memmove/memset 实现。
+#[cfg(target_arch = "loongarch64")]
 use core::ptr;
 
+#[cfg(target_arch = "loongarch64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     for i in 0..n {
@@ -13,6 +14,7 @@ pub unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut 
     dst
 }
 
+#[cfg(target_arch = "loongarch64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     if dst as usize == src as usize || n == 0 {
@@ -30,6 +32,7 @@ pub unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut
     dst
 }
 
+#[cfg(target_arch = "loongarch64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
     let val = c as u8;

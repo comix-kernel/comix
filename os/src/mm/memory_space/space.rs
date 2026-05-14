@@ -1,8 +1,8 @@
 use core::cmp::Ordering;
 
-use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::arch::platform::MEMORY_END;
 use crate::config::{
-    MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
+    MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
     USER_STACK_TOP,
 };
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
@@ -206,7 +206,7 @@ impl MemorySpace {
             let page_off = paddr_usize & (PAGE_SIZE - 1);
 
             let take = core::cmp::min(bytes.len() - written, PAGE_SIZE - page_off);
-            let dst = (paddr_to_vaddr(page_base) + page_off) as *mut u8;
+            let dst = (crate::arch::paddr_to_vaddr(page_base) + page_off) as *mut u8;
             unsafe {
                 core::ptr::copy_nonoverlapping(bytes[written..].as_ptr(), dst, take);
             }
@@ -234,7 +234,7 @@ impl MemorySpace {
             let page_off = paddr_usize & (PAGE_SIZE - 1);
 
             let take = core::cmp::min(out.len() - read, PAGE_SIZE - page_off);
-            let src = (paddr_to_vaddr(page_base) + page_off) as *const u8;
+            let src = (crate::arch::paddr_to_vaddr(page_base) + page_off) as *const u8;
             unsafe {
                 core::ptr::copy_nonoverlapping(src, out[read..].as_mut_ptr(), take);
             }
@@ -354,9 +354,9 @@ impl MemorySpace {
         )?;
 
         // 5. 映射物理内存（从 ekernel 到 MEMORY_END 的直接映射）
-        let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
-        let phys_mem_start_vaddr = paddr_to_vaddr(ekernel_paddr);
-        let phys_mem_end_vaddr = paddr_to_vaddr(MEMORY_END);
+        let ekernel_paddr = unsafe { crate::arch::vaddr_to_paddr(ekernel as usize) };
+        let phys_mem_start_vaddr = crate::arch::paddr_to_vaddr(ekernel_paddr);
+        let phys_mem_end_vaddr = crate::arch::paddr_to_vaddr(MEMORY_END);
 
         let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_start_vaddr));
         let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_end_vaddr));
@@ -374,7 +374,7 @@ impl MemorySpace {
         // 暂时移除自动 MMIO 映射
         // // 6. 映射 MMIO 区域
         // for &(_device, mmio_base, mmio_size) in crate::config::MMIO {
-        //     let mmio_vaddr = paddr_to_vaddr(mmio_base);
+        //     let mmio_vaddr = crate::arch::paddr_to_vaddr(mmio_base);
         //     self.map_mmio_region(mmio_vaddr, mmio_size)?;
         // }
 
@@ -752,7 +752,7 @@ impl MemorySpace {
             let paddr_usize = paddr.as_usize();
             let page_base = paddr_usize & !(PAGE_SIZE - 1);
             let off = paddr_usize & (PAGE_SIZE - 1);
-            let kva = paddr_to_vaddr(page_base) + off;
+            let kva = crate::arch::paddr_to_vaddr(page_base) + off;
             unsafe {
                 core::ptr::write_unaligned(kva as *mut usize, value);
             }
@@ -1355,7 +1355,7 @@ impl MemorySpace {
     /// 进程手动映射MMIO区域
     pub fn map_mmio(&mut self, paddr: Paddr, size: usize) -> Result<Vaddr, PagingError> {
         // 将物理地址转换为虚拟地址
-        let vaddr_usize = paddr_to_vaddr(paddr.as_usize());
+        let vaddr_usize = crate::arch::paddr_to_vaddr(paddr.as_usize());
         let vaddr = Vaddr::from_usize(vaddr_usize);
 
         // 计算VPN范围
@@ -1511,7 +1511,7 @@ mod memory_space_tests {
 
     // 4. 内核空间访问
     test_case!(test_kernel_space, {
-        use crate::mm::memory_space::memory_space::kernel_token;
+        use crate::mm::memory_space::space::kernel_token;
 
         let token = kernel_token();
         kassert!(token > 0); // 有效的 SATP 值
@@ -1519,7 +1519,7 @@ mod memory_space_tests {
 
     // 5. 测试 MMIO 映射是否存在 - 已移除自动映射,改为测试手动映射
     test_case!(test_mmio_mapping_exists, {
-        use crate::mm::memory_space::memory_space::with_kernel_space;
+        use crate::mm::memory_space::space::with_kernel_space;
 
         with_kernel_space(|space| {
             // 由于移除了自动 MMIO 映射,初始状态应该没有 MMIO 区域
@@ -1534,7 +1534,7 @@ mod memory_space_tests {
 
     // 6. 测试 MMIO 地址翻译 - 使用独立的 MemorySpace 实例
     test_case!(test_mmio_translation, {
-        use crate::arch::mm::paddr_to_vaddr;
+        use crate::arch::ArchImpl;
 
         // 使用独立的 MemorySpace 实例，避免与其他测试或全局状态冲突
         let mut ms = MemorySpace::new();
@@ -1589,7 +1589,7 @@ mod memory_space_tests {
 
     // // 7. 测试 MMIO 内存访问（读写测试）- 修改为手动映射后访问
     // test_case!(test_mmio_memory_access, {
-    //     use crate::mm::memory_space::memory_space::with_kernel_space;
+    //     use crate::mm::memory_space::space::with_kernel_space;
 
     //     // 注意：这个测试会实际访问 MMIO 设备
     //     // QEMU virt 机器的 TEST 设备 (0x100000) 支持简单的读写
@@ -1633,7 +1633,7 @@ mod memory_space_tests {
 
     // 8. 测试动态添加 MMIO 映射
     test_case!(test_dynamic_mmio_mapping, {
-        use crate::arch::mm::paddr_to_vaddr;
+        use crate::arch::ArchImpl;
 
         let mut ms = MemorySpace::new();
 
@@ -1641,7 +1641,7 @@ mod memory_space_tests {
         const CUSTOM_MMIO_PADDR: usize = 0x5000_0000;
         const CUSTOM_MMIO_SIZE: usize = 0x1000;
 
-        let custom_vaddr = paddr_to_vaddr(CUSTOM_MMIO_PADDR);
+        let custom_vaddr = crate::arch::paddr_to_vaddr(CUSTOM_MMIO_PADDR);
 
         println!(
             "Adding custom MMIO mapping at PA=0x{:x}, VA=0x{:x}",
@@ -1729,7 +1729,7 @@ mod memory_space_tests {
 
     // 11. 测试 map_mmio 函数 - 冲突检测
     test_case!(test_map_mmio_conflict, {
-        use crate::arch::mm::paddr_to_vaddr;
+        use crate::arch::ArchImpl;
 
         let mut ms = MemorySpace::new();
 
@@ -1738,7 +1738,7 @@ mod memory_space_tests {
         const TEST_SIZE: usize = 0x1000;
 
         // 先通过 paddr_to_vaddr 获取虚拟地址
-        let test_vaddr = paddr_to_vaddr(TEST_PADDR);
+        let test_vaddr = crate::arch::paddr_to_vaddr(TEST_PADDR);
         let vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(test_vaddr));
         let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(test_vaddr + TEST_SIZE));
 
