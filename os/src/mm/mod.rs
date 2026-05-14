@@ -18,6 +18,7 @@ pub mod memory_space;
 pub mod page_table;
 
 pub use frame_allocator::init_frame_allocator;
+#[cfg(feature = "alloc")]
 pub use global_allocator::init_heap;
 
 use crate::arch::ArchImpl;
@@ -58,6 +59,7 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     init_frame_allocator(start, end);
 
     // 2. 初始化堆分配器
+    #[cfg(feature = "alloc")]
     init_heap();
 
     // 3. 创建内核地址空间（不激活，由调用者在合适时机激活）
