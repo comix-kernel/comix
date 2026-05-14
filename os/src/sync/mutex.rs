@@ -13,7 +13,7 @@ use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::arch::ArchImpl;
-use crate::hal::CpuOps;
+use crate::arch::CpuOps;
 use crate::kernel::{WaitQueue, current_task, yield_task};
 use crate::sync::SpinLock;
 use crate::sync::{raw_spin_lock::RawSpinLock, raw_spin_lock::RawSpinLockGuard};

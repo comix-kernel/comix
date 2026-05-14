@@ -7,7 +7,7 @@
 use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 use crate::sync::SpinLock;
 
 /// 控制台是否已切换到运行时模式

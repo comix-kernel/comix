@@ -1,9 +1,9 @@
 //! RISC-V CpuOps 实现
 //!
-//! 提供 `Riscv64` 结构体，实现 `hal::CpuOps` trait。
+//! 提供 `Riscv64` 结构体，实现 `arch::CpuOps` trait。
 //! 将现有的 CSR 内联汇编操作映射到 trait 方法。
 
-use crate::hal::CpuOps;
+use crate::arch::CpuOps;
 use riscv::register::sstatus;
 
 /// RISC-V 64 架构标记类型

@@ -9,7 +9,7 @@
 #[macro_export]
 macro_rules! impl_arch_common {
     ($arch:ty, $process_space:ty, $kernel_space:ty) => {
-        use $crate::hal::virtual_memory::VirtualMemory;
+        use $crate::arch::virtual_memory::VirtualMemory;
         use $crate::mm::address::Ppn;
         use $crate::sync::SpinLock;
 
@@ -30,7 +30,7 @@ macro_rules! impl_arch_common {
             }
         }
 
-        impl $crate::hal::arch::Arch for $arch {
+        impl $crate::arch::arch::Arch for $arch {
             type UserContext = kernel::context::Context;
 
             fn new_user_context(entry_point: usize, stack_top: usize) -> Self::UserContext {

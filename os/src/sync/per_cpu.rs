@@ -12,7 +12,7 @@ use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 
 use crate::arch::ArchImpl;
-use crate::hal::CpuOps;
+use crate::arch::CpuOps;
 
 const CACHE_LINE_SIZE: usize = 64;
 

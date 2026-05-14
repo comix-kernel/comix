@@ -14,7 +14,7 @@
 //! * `CPU` - 实现 `CpuOps` 的类型，默认使用 `ArchImpl`
 
 use crate::arch::ArchImpl;
-use crate::hal::CpuOps;
+use crate::arch::CpuOps;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

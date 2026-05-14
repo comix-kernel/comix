@@ -4,10 +4,10 @@
 //! 用户/内核内存复制、系统信息、电源管理等高层操作。
 //!
 //! 注意：此 trait 使用关联类型来避免直接引用内核数据结构，
-//! 确保 HAL 层与内核其余部分的解耦。
+//! 确保架构层与内核其余部分的解耦。
 
-use crate::hal::cpu_ops::CpuOps;
-use crate::hal::virtual_memory::VirtualMemory;
+use crate::arch::cpu_ops::CpuOps;
+use crate::arch::virtual_memory::VirtualMemory;
 /// 顶层架构抽象 trait。
 ///
 /// 组合了 `CpuOps` 和 `VirtualMemory`，并添加了进程管理、信号处理、

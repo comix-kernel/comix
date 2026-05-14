@@ -12,7 +12,7 @@ macro_rules! impl_virtual_memory {
         use alloc::vec::Vec;
 
         use crate::config::PAGE_SIZE;
-        use crate::hal::virtual_memory::{
+        use crate::arch::virtual_memory::{
             KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions,
             UserAddressSpace, VirtMemoryRegion,
         };

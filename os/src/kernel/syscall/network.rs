@@ -4,7 +4,7 @@ use alloc::string::{String, ToString};
 use core::ffi::c_char;
 use core::sync::atomic::{AtomicU16, Ordering};
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 
 use crate::util::user_buffer::{read_from_user, write_to_user};
 

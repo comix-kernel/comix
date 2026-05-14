@@ -1,6 +1,6 @@
-//! CpuOps — HAL 最底层 trait
+//! CpuOps — 最底层架构抽象 trait
 //!
-//! 将架构相关操作缩小到最少 5 个方法，使得 sync/memory 等模块完全可移植。
+//! 将架构相关操作缩小到最少 6 个方法，使得 sync/memory 等模块完全可移植。
 
 /// CPU 操作抽象 trait。
 ///

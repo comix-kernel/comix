@@ -8,7 +8,7 @@
 //! * `CPU` - 实现 `CpuOps` 的类型，默认使用 `ArchImpl`
 
 use crate::arch::ArchImpl;
-use crate::hal::CpuOps;
+use crate::arch::CpuOps;
 use crate::sync::intr_guard::IntrGuard;
 use core::{
     cell::UnsafeCell,

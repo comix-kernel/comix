@@ -14,7 +14,7 @@
 use core::cell::UnsafeCell;
 
 use crate::arch::ArchImpl;
-use crate::hal::CpuOps;
+use crate::arch::CpuOps;
 use crate::sync::raw_spin_lock::{RawSpinLock, RawSpinLockGuard};
 
 /// 提供对数据的互斥访问的自旋锁结构体。

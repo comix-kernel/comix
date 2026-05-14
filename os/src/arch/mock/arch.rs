@@ -1,16 +1,14 @@
-//! Mock 实现
+//! Mock 实现 — Arch trait + CpuOps + VirtualMemory + AddressSpace
 //!
-//! 提供 `MockCpuOps`、`MockAddressSpace`、`MockArch` 等，
-//! 使得架构无关代码可以在宿主编译和测试。
-//!
-//! 这些 mock 实现仅在非目标架构（x86_64 host）上编译。
+//! 提供在宿主（x86_64）上编译和测试架构无关代码所需的 mock 类型。
+//! 这些 mock 实现仅在非目标架构上激活。
 
 use alloc::vec::Vec;
 
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-use crate::hal::arch::Arch;
-use crate::hal::cpu_ops::CpuOps;
-use crate::hal::virtual_memory::{
+use crate::arch::arch::Arch;
+use crate::arch::cpu_ops::CpuOps;
+use crate::arch::virtual_memory::{
     KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions, UserAddressSpace,
     VirtualMemory, VirtMemoryRegion,
 };
@@ -19,7 +17,7 @@ use crate::sync::SpinLock;
 // 在非目标架构上，MockArch 的 UserContext 应等于 arch::kernel::context::Context，
 // 这样才能与 scheduler 传递的 Context 类型匹配。
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-pub type MockUserContext = crate::arch::mock::kernel::context::Context;
+pub type MockUserContext = super::kernel::context::Context;
 
 // ============================================================================
 // MockCpuOps

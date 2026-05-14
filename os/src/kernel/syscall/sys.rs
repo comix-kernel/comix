@@ -1,6 +1,6 @@
 //! 系统相关系统调用实现
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 use core::{
     ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     sync::atomic::Ordering,

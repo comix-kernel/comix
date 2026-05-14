@@ -1,6 +1,6 @@
 //! Socket implementation using smoltcp
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
 use alloc::collections::VecDeque;
