@@ -15,6 +15,11 @@ use crate::hal::virtual_memory::{
 };
 use crate::sync::SpinLock;
 
+// 在非目标架构上，MockArch 的 UserContext 应等于 arch::kernel::context::Context，
+// 这样才能与 scheduler 传递的 Context 类型匹配。
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+pub type MockUserContext = crate::arch::mock_stubs::kernel::context::Context;
+
 // ============================================================================
 // MockCpuOps
 // ============================================================================
@@ -153,13 +158,6 @@ impl KernAddressSpace for MockAddressSpace {
 // MockArch
 // ============================================================================
 
-/// Mock 用户上下文
-#[derive(Debug, Clone)]
-pub struct MockUserContext {
-    pub entry_point: usize,
-    pub stack_top: usize,
-}
-
 pub struct MockArch;
 
 impl CpuOps for MockArch {
@@ -192,65 +190,69 @@ impl VirtualMemory for MockArch {
     }
 }
 
-impl Arch for MockArch {
-    type UserContext = MockUserContext;
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+mod mock_arch_impl {
+    use super::*;
 
-    fn new_user_context(entry_point: usize, stack_top: usize) -> Self::UserContext {
-        MockUserContext {
-            entry_point,
-            stack_top,
+    impl Arch for MockArch {
+        type UserContext = MockUserContext;
+
+        fn new_user_context(entry_point: usize, stack_top: usize) -> Self::UserContext {
+            let mut ctx = MockUserContext::zero_init();
+            ctx.set_init_context(entry_point, stack_top);
+            ctx
         }
-    }
 
-    unsafe fn context_switch(_old: *mut Self::UserContext, _new: *const Self::UserContext) {}
+        unsafe fn context_switch(_old: *mut Self::UserContext, _new: *const Self::UserContext) {}
 
-    unsafe fn copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
-        Ok(())
-    }
-
-    unsafe fn try_copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
-        Ok(())
-    }
-
-    unsafe fn copy_to_user(_src: *const u8, _dst: usize, _len: usize) -> Result<(), ()> {
-        Ok(())
-    }
-
-    unsafe fn copy_strn_from_user(
-        _src: usize,
-        _dst: *mut u8,
-        _max_len: usize,
-    ) -> Result<usize, ()> {
-        Ok(0)
-    }
-
-    fn name() -> &'static str {
-        "mock"
-    }
-
-    fn cpu_count() -> usize {
-        1
-    }
-
-    fn get_cmdline() -> Option<alloc::string::String> {
-        None
-    }
-
-    fn console_putchar(_c: u8) {}
-
-    fn console_getchar() -> Option<u8> {
-        None
-    }
-
-    fn power_off() -> ! {
-        loop {
-            core::hint::spin_loop();
+        unsafe fn copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
+            Ok(())
         }
-    }
 
-    fn restart() -> ! {
-        loop {
-            core::hint::spin_loop();
+        unsafe fn try_copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
+            Ok(())
+        }
+
+        unsafe fn copy_to_user(_src: *const u8, _dst: usize, _len: usize) -> Result<(), ()> {
+            Ok(())
+        }
+
+        unsafe fn copy_strn_from_user(
+            _src: usize,
+            _dst: *mut u8,
+            _max_len: usize,
+        ) -> Result<usize, ()> {
+            Ok(0)
+        }
+
+        fn name() -> &'static str {
+            "mock"
+        }
+
+        fn cpu_count() -> usize {
+            1
+        }
+
+        fn get_cmdline() -> Option<alloc::string::String> {
+            None
+        }
+
+        fn console_putchar(_c: u8) {}
+
+        fn console_getchar() -> Option<u8> {
+            None
+        }
+
+        fn power_off() -> ! {
+            loop {
+                core::hint::spin_loop();
+            }
+        }
+
+        fn restart() -> ! {
+            loop {
+                core::hint::spin_loop();
+            }
         }
     }
 }

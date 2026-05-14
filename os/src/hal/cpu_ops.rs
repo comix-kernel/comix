@@ -9,7 +9,7 @@
 ///
 /// # 移植要点
 ///
-/// 这是移植新架构时第一个需要实现的 trait。只有 5 个方法，实现后即可编译
+/// 这是移植新架构时第一个需要实现的 trait。只需 6 个方法，实现后即可编译
 /// 同步原语和内存分配器等核心模块。
 pub trait CpuOps: 'static {
     /// 获取当前 CPU 核心 ID
@@ -32,4 +32,11 @@ pub trait CpuOps: 'static {
 
     /// 显式启用中断
     fn enable_interrupts();
+
+    /// 检查 `disable_interrupts()` 返回的 flags 中中断是否处于启用状态
+    ///
+    /// 默认实现假定 flags 的 bit 0 表示中断启用状态。
+    fn interrupt_was_enabled(flags: usize) -> bool {
+        flags & 1 != 0
+    }
 }

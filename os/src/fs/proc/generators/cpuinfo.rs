@@ -27,3 +27,8 @@ fn proc_cpuinfo() -> Vec<u8> {
 arch\t\t: loongarch64\n\n"
         .to_vec()
 }
+
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+fn proc_cpuinfo() -> Vec<u8> {
+    b"processor\t: 0\narch\t\t: mock\n\n".to_vec()
+}
