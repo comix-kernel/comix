@@ -1,38 +1,37 @@
 //! IO 相关的系统调用实现
 
-use crate::arch::trap::SumGuard;
+use crate::arch::Arch;
 use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
-use crate::util::user_buffer::{validate_user_ptr, validate_user_ptr_mut};
+use crate::util::user_buffer::{read_from_user, validate_user_ptr, validate_user_ptr_mut, write_to_user};
 use crate::vfs::File;
 
 /// 向文件描述符写入数据
-/// # 参数
-/// - `fd`: 文件描述符
-/// - `buf`: 要写入的数据缓冲区
-/// - `count`: 要写入的字节数
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     loop {
-        // 1. 获取文件对象
         let task = current_task();
         let file = match task.lock().fd_table.get(fd) {
             Ok(f) => f,
             Err(e) => return e.to_errno(),
         };
 
-        // 2. 访问用户态缓冲区并调用 File::write
-        let result = {
-            let _guard = SumGuard::new();
-            let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
-            match file.write(buffer) {
-                Ok(n) => n as isize,
-                Err(e) => e.to_errno(),
-            }
+        let mut kernel_buf = alloc::vec![0u8; count];
+        unsafe {
+            crate::arch::ArchImpl::copy_from_user(
+                buf as usize,
+                kernel_buf.as_mut_ptr(),
+                count,
+            )
+            .ok();
+        }
+
+        let result = match file.write(&kernel_buf) {
+            Ok(n) => n as isize,
+            Err(e) => e.to_errno(),
         };
 
-        // 对 blocking socket：EAGAIN 时主动 poll + yield 重试（驱动网络前进）
         if result == -11 {
             use crate::net::socket::SocketFile;
             if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
@@ -53,30 +52,30 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 }
 
 /// 从文件描述符读取数据
-/// # 参数
-/// - `fd`: 文件描述符
-/// - `buf`: 存储读取数据的缓冲区
-/// - `count`: 要读取的字节数
 pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
     loop {
-        // 1. 获取文件对象
         let task = current_task();
         let file = match task.lock().fd_table.get(fd) {
             Ok(f) => f,
             Err(e) => return e.to_errno(),
         };
 
-        // 2. 访问用户态缓冲区并调用 File::read
-        let result = {
-            let _guard = SumGuard::new();
-            let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-            match file.read(buffer) {
-                Ok(n) => n as isize,
-                Err(e) => e.to_errno(),
+        let mut kernel_buf = alloc::vec![0u8; count];
+        let result = match file.read(&mut kernel_buf) {
+            Ok(n) => {
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(
+                        kernel_buf.as_ptr(),
+                        buf as usize,
+                        n,
+                    )
+                    .ok();
+                }
+                n as isize
             }
+            Err(e) => e.to_errno(),
         };
 
-        // 对 blocking socket：EAGAIN 时主动 poll + yield 重试（驱动网络前进）
         if result == -11 {
             use crate::net::socket::SocketFile;
             if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
@@ -97,18 +96,24 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
 }
 
 /// 向量化读取：从文件描述符读取数据到多个缓冲区
-/// # 参数
-/// - `fd`: 文件描述符
-/// - `iov`: iovec 数组指针
-/// - `iovcnt`: iovec 数组元素个数
 pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
     if iov.is_null() || iovcnt == 0 || iovcnt > 1024 {
         return -(EINVAL as isize);
     }
 
-    // 验证 iovec 数组指针
     if !validate_user_ptr(iov) {
         return -(EFAULT as isize);
+    }
+
+    // 读取 iovec 数组
+    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    unsafe {
+        iovec_array.set_len(iovcnt);
+        crate::arch::ArchImpl::copy_from_user(
+            iov as usize,
+            iovec_array.as_mut_ptr() as *mut u8,
+            iovcnt * core::mem::size_of::<IoVec>(),
+        ).ok();
     }
 
     let task = current_task();
@@ -117,17 +122,12 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    // 使用 SumGuard 保护整个用户空间访问区域
-    let _guard = SumGuard::new();
-    let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
-
     let mut total_read = 0usize;
-    for vec in iovec_array {
+    for vec in &iovec_array {
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
 
-        // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr_mut(vec.iov_base) {
             return if total_read > 0 {
                 total_read as isize
@@ -136,12 +136,19 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
             };
         }
 
-        let buffer = unsafe { core::slice::from_raw_parts_mut(vec.iov_base, vec.iov_len) };
-        match file.read(buffer) {
+        let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
+        match file.read(&mut kernel_buf) {
             Ok(n) => {
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(
+                        kernel_buf.as_ptr(),
+                        vec.iov_base as usize,
+                        n,
+                    ).ok();
+                }
                 total_read += n;
                 if n < vec.iov_len {
-                    break; // 未读满说明已到文件末尾
+                    break;
                 }
             }
             Err(e) => {
@@ -158,18 +165,23 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
 }
 
 /// 向量化写入：将多个缓冲区的数据写入文件描述符
-/// # 参数
-/// - `fd`: 文件描述符
-/// - `iov`: iovec 数组指针
-/// - `iovcnt`: iovec 数组元素个数
 pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
     if iov.is_null() || iovcnt == 0 || iovcnt > 1024 {
         return -(EINVAL as isize);
     }
 
-    // 验证 iovec 数组指针
     if !validate_user_ptr(iov) {
         return -(EFAULT as isize);
+    }
+
+    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    unsafe {
+        iovec_array.set_len(iovcnt);
+        crate::arch::ArchImpl::copy_from_user(
+            iov as usize,
+            iovec_array.as_mut_ptr() as *mut u8,
+            iovcnt * core::mem::size_of::<IoVec>(),
+        ).ok();
     }
 
     let task = current_task();
@@ -178,17 +190,12 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    // 使用 SumGuard 保护整个用户空间访问区域
-    let _guard = SumGuard::new();
-    let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
-
     let mut total_written = 0usize;
-    for vec in iovec_array {
+    for vec in &iovec_array {
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
 
-        // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr(vec.iov_base) {
             return if total_written > 0 {
                 total_written as isize
@@ -197,12 +204,19 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
             };
         }
 
-        let buffer = unsafe { core::slice::from_raw_parts(vec.iov_base, vec.iov_len) };
-        match file.write(buffer) {
+        let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
+        unsafe {
+            crate::arch::ArchImpl::copy_from_user(
+                vec.iov_base as usize,
+                kernel_buf.as_mut_ptr(),
+                vec.iov_len,
+            ).ok();
+        }
+        match file.write(&kernel_buf) {
             Ok(n) => {
                 total_written += n;
                 if n < vec.iov_len {
-                    break; // 未写完说明有问题
+                    break;
                 }
             }
             Err(e) => {
@@ -235,13 +249,19 @@ pub fn pread64(fd: usize, buf: *mut u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    {
-        let _guard = SumGuard::new();
-        let buffer = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-        match file.read_at(offset as usize, buffer) {
-            Ok(n) => n as isize,
-            Err(e) => e.to_errno(),
+    let mut kernel_buf = alloc::vec![0u8; count];
+    match file.read_at(offset as usize, &mut kernel_buf) {
+        Ok(n) => {
+            unsafe {
+                crate::arch::ArchImpl::copy_to_user(
+                    kernel_buf.as_ptr(),
+                    buf as usize,
+                    n,
+                ).ok();
+            }
+            n as isize
         }
+        Err(e) => e.to_errno(),
     }
 }
 
@@ -262,13 +282,17 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    {
-        let _guard = SumGuard::new();
-        let buffer = unsafe { core::slice::from_raw_parts(buf, count) };
-        match file.write_at(offset as usize, buffer) {
-            Ok(n) => n as isize,
-            Err(e) => e.to_errno(),
-        }
+    let mut kernel_buf = alloc::vec![0u8; count];
+    unsafe {
+        crate::arch::ArchImpl::copy_from_user(
+            buf as usize,
+            kernel_buf.as_mut_ptr(),
+            count,
+        ).ok();
+    }
+    match file.write_at(offset as usize, &kernel_buf) {
+        Ok(n) => n as isize,
+        Err(e) => e.to_errno(),
     }
 }
 
@@ -294,18 +318,23 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         Err(e) => return e.to_errno(),
     };
 
-    // 使用 SumGuard 保护整个用户空间访问区域
-    let _guard = SumGuard::new();
-    let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
+    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    unsafe {
+        iovec_array.set_len(iovcnt);
+        crate::arch::ArchImpl::copy_from_user(
+            iov as usize,
+            iovec_array.as_mut_ptr() as *mut u8,
+            iovcnt * core::mem::size_of::<IoVec>(),
+        ).ok();
+    }
 
     let mut total_read = 0usize;
     let mut current_offset = offset as usize;
-    for vec in iovec_array {
+    for vec in &iovec_array {
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
 
-        // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr_mut(vec.iov_base) {
             return if total_read > 0 {
                 total_read as isize
@@ -314,9 +343,16 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
             };
         }
 
-        let buffer = unsafe { core::slice::from_raw_parts_mut(vec.iov_base, vec.iov_len) };
-        match file.read_at(current_offset, buffer) {
+        let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
+        match file.read_at(current_offset, &mut kernel_buf) {
             Ok(n) => {
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(
+                        kernel_buf.as_ptr(),
+                        vec.iov_base as usize,
+                        n,
+                    ).ok();
+                }
                 total_read += n;
                 current_offset += n;
                 if n < vec.iov_len {
@@ -358,18 +394,23 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         Err(e) => return e.to_errno(),
     };
 
-    // 使用 SumGuard 保护整个用户空间访问区域
-    let _guard = SumGuard::new();
-    let iovec_array = unsafe { core::slice::from_raw_parts(iov, iovcnt) };
+    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    unsafe {
+        iovec_array.set_len(iovcnt);
+        crate::arch::ArchImpl::copy_from_user(
+            iov as usize,
+            iovec_array.as_mut_ptr() as *mut u8,
+            iovcnt * core::mem::size_of::<IoVec>(),
+        ).ok();
+    }
 
     let mut total_written = 0usize;
     let mut current_offset = offset as usize;
-    for vec in iovec_array {
+    for vec in &iovec_array {
         if vec.iov_base.is_null() || vec.iov_len == 0 {
             continue;
         }
 
-        // 验证每个 iovec 条目的缓冲区指针
         if !validate_user_ptr(vec.iov_base) {
             return if total_written > 0 {
                 total_written as isize
@@ -378,8 +419,15 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
             };
         }
 
-        let buffer = unsafe { core::slice::from_raw_parts(vec.iov_base, vec.iov_len) };
-        match file.write_at(current_offset, buffer) {
+        let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
+        unsafe {
+            crate::arch::ArchImpl::copy_from_user(
+                vec.iov_base as usize,
+                kernel_buf.as_mut_ptr(),
+                vec.iov_len,
+            ).ok();
+        }
+        match file.write_at(current_offset, &kernel_buf) {
             Ok(n) => {
                 total_written += n;
                 current_offset += n;
@@ -422,10 +470,7 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
     // 如果 offset 非空，使用 pread；否则使用 read
     let use_offset = !offset.is_null();
     let mut current_offset = if use_offset {
-        let off = {
-            let _guard = SumGuard::new();
-            unsafe { *offset }
-        };
+        let off = unsafe { read_from_user(offset) };
         if off < 0 {
             return -(EINVAL as isize);
         }
@@ -486,8 +531,7 @@ pub fn sendfile(out_fd: usize, in_fd: usize, offset: *mut i64, count: usize) -> 
 
     // 更新 offset 指针
     if use_offset {
-        let _guard = SumGuard::new();
-        unsafe { *offset = current_offset as i64 };
+        unsafe { write_to_user(offset, current_offset as i64) };
     }
 
     total_sent as isize
@@ -527,8 +571,6 @@ fn poll_with_timeout(
     nfds: usize,
     timeout: Option<crate::uapi::time::TimeSpec>,
 ) -> isize {
-    use crate::arch::timer::{clock_freq, get_time};
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::{EINTR, EINVAL};
 
     if nfds > 0 && fds == 0 {
@@ -544,8 +586,8 @@ fn poll_with_timeout(
                 return -(EINVAL as isize);
             }
             let duration_ns = (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64;
-            let duration_ticks = (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
-            Some(get_time() + duration_ticks)
+            let duration_ticks = (duration_ns * crate::arch::clock_freq() as u64 / 1_000_000_000) as usize;
+            Some(crate::arch::get_time() + duration_ticks)
         }
     };
 
@@ -556,10 +598,18 @@ fn poll_with_timeout(
         let mut ready_count = 0;
 
         {
-            let _guard = SumGuard::new();
-            let pollfds = unsafe { core::slice::from_raw_parts_mut(fds as *mut PollFd, nfds) };
+            let size = nfds * core::mem::size_of::<PollFd>();
+            let mut pollfds_buf = alloc::vec::Vec::<PollFd>::with_capacity(nfds);
+            unsafe {
+                pollfds_buf.set_len(nfds);
+                crate::arch::ArchImpl::copy_from_user(
+                    fds,
+                    pollfds_buf.as_mut_ptr() as *mut u8,
+                    size,
+                ).ok();
+            }
 
-            for pollfd in pollfds.iter_mut() {
+            for pollfd in pollfds_buf.iter_mut() {
                 pollfd.revents = 0;
 
                 if pollfd.fd < 0 {
@@ -586,6 +636,15 @@ fn poll_with_timeout(
                 if pollfd.revents != 0 {
                     ready_count += 1;
                 }
+            }
+
+            // Write revents back to user space
+            unsafe {
+                crate::arch::ArchImpl::copy_to_user(
+                    pollfds_buf.as_ptr() as *const u8,
+                    fds,
+                    size,
+                ).ok();
             }
         }
 
@@ -621,7 +680,7 @@ fn poll_with_timeout(
 
         // Check if woken by timeout
         if let Some(trigger) = timeout_trigger
-            && get_time() >= trigger
+            && crate::arch::get_time() >= trigger
         {
             return 0;
         }
@@ -630,7 +689,6 @@ fn poll_with_timeout(
 
 /// ppoll - poll 的变体，支持信号掩码
 pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::EINVAL;
 
     if nfds > 0 && fds == 0 {
@@ -640,15 +698,11 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     let timeout_spec = if timeout == 0 {
         None
     } else {
-        let _guard = SumGuard::new();
-        unsafe {
-            let timespec = timeout as *const crate::uapi::time::TimeSpec;
-            let ts = *timespec;
-            if ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
-                return -(EINVAL as isize);
-            }
-            Some(ts)
+        let ts: crate::uapi::time::TimeSpec = read_from_user(timeout as *const crate::uapi::time::TimeSpec);
+        if ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
+            return -(EINVAL as isize);
         }
+        Some(ts)
     };
 
     poll_with_timeout(fds, nfds, timeout_spec)
@@ -664,7 +718,6 @@ pub fn pselect6(
     timeout: usize,
     _sigmask: usize,
 ) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::EINVAL;
     use crate::uapi::time::TimeSpec;
 
@@ -672,19 +725,15 @@ pub fn pselect6(
     let timeout_trigger = if timeout == 0 {
         None // Infinite timeout
     } else {
-        let _guard = SumGuard::new();
-        unsafe {
-            let ts = &*(timeout as *const TimeSpec);
-            if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
-                return -(EINVAL as isize);
-            }
-            if ts.is_zero() {
-                Some(0) // Poll mode (no wait)
-            } else {
-                use crate::arch::timer::{clock_freq, get_time};
-                let duration_ticks = ts.into_freq(clock_freq());
-                Some(get_time() + duration_ticks)
-            }
+        let ts: TimeSpec = read_from_user(timeout as *const TimeSpec);
+        if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
+            return -(EINVAL as isize);
+        }
+        if ts.is_zero() {
+            Some(0) // Poll mode (no wait)
+        } else {
+            let duration_ticks = ts.into_freq(crate::arch::clock_freq());
+            Some(crate::arch::get_time() + duration_ticks)
         }
     };
 
@@ -700,7 +749,6 @@ pub fn select(
     exceptfds: usize,
     timeout: usize,
 ) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::uapi::errno::EINVAL;
     use crate::uapi::time::timeval;
 
@@ -708,19 +756,15 @@ pub fn select(
     let timeout_trigger = if timeout == 0 {
         None // Infinite timeout
     } else {
-        let _guard = SumGuard::new();
-        unsafe {
-            let tv = &*(timeout as *const timeval);
-            if tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= 1_000_000 {
-                return -(EINVAL as isize);
-            }
-            if tv.is_zero() {
-                Some(0) // Poll mode (no wait)
-            } else {
-                use crate::arch::timer::{clock_freq, get_time};
-                let duration_ticks = tv.into_freq(clock_freq());
-                Some(get_time() + duration_ticks)
-            }
+        let tv: timeval = read_from_user(timeout as *const timeval);
+        if tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= 1_000_000 {
+            return -(EINVAL as isize);
+        }
+        if tv.is_zero() {
+            Some(0) // Poll mode (no wait)
+        } else {
+            let duration_ticks = tv.into_freq(crate::arch::clock_freq());
+            Some(crate::arch::get_time() + duration_ticks)
         }
     };
 
@@ -734,7 +778,6 @@ fn select_common(
     exceptfds: usize,
     timeout_trigger: Option<usize>,
 ) -> isize {
-    use crate::arch::trap::SumGuard;
     use crate::kernel::current_task;
     use crate::uapi::errno::{EBADF, EINTR, EINVAL};
     use crate::uapi::select::FdSet;
@@ -746,26 +789,23 @@ fn select_common(
     let task = current_task();
 
     // Copy input fd_sets once before loop
-    let (input_read, input_write, input_except) = {
-        let _guard = SumGuard::new();
-        (
-            if readfds != 0 {
-                Some(unsafe { *(readfds as *const FdSet) })
-            } else {
-                None
-            },
-            if writefds != 0 {
-                Some(unsafe { *(writefds as *const FdSet) })
-            } else {
-                None
-            },
-            if exceptfds != 0 {
-                Some(unsafe { *(exceptfds as *const FdSet) })
-            } else {
-                None
-            },
-        )
-    };
+    let (input_read, input_write, input_except) = (
+        if readfds != 0 {
+            Some(read_from_user(readfds as *const FdSet))
+        } else {
+            None
+        },
+        if writefds != 0 {
+            Some(read_from_user(writefds as *const FdSet))
+        } else {
+            None
+        },
+        if exceptfds != 0 {
+            Some(read_from_user(exceptfds as *const FdSet))
+        } else {
+            None
+        },
+    );
 
     // Helper to check fds
     let check_fds = || -> (isize, Option<FdSet>, Option<FdSet>, Option<FdSet>) {
@@ -832,15 +872,14 @@ fn select_common(
         } // EBADF
 
         if ready_count > 0 {
-            let _guard = SumGuard::new();
-            if let Some(set) = read_set {
-                unsafe { *(readfds as *mut FdSet) = set };
+            if let Some(ref set) = read_set {
+                write_to_user(readfds as *mut FdSet, *set);
             }
-            if let Some(set) = write_set {
-                unsafe { *(writefds as *mut FdSet) = set };
+            if let Some(ref set) = write_set {
+                write_to_user(writefds as *mut FdSet, *set);
             }
-            if let Some(set) = except_set {
-                unsafe { *(exceptfds as *mut FdSet) = set };
+            if let Some(ref set) = except_set {
+                write_to_user(exceptfds as *mut FdSet, *set);
             }
             return ready_count;
         }
@@ -885,8 +924,7 @@ fn select_common(
             crate::net::socket::poll_network_and_dispatch();
 
             if let Some(trigger) = timeout_trigger {
-                use crate::arch::timer::get_time;
-                if get_time() >= trigger {
+                if crate::arch::get_time() >= trigger {
                     return 0;
                 }
             }

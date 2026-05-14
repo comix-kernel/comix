@@ -1,5 +1,6 @@
 //! 系统相关系统调用实现
 
+use crate::arch::Arch;
 use core::{
     ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     sync::atomic::Ordering,
@@ -7,9 +8,8 @@ use core::{
 
 use crate::{
     arch::{
-        lib::sbi::shutdown,
+        lib::shutdown,
         timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
-        trap::SumGuard,
     },
     kernel::{
         current_task,
@@ -253,129 +253,8 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
     match action {
         // 破坏性读取操作
         SyslogAction::Read => {
-            // Read: 破坏性读取（移除已读条目）
             let buf_len = len as usize;
             let mut total_written = 0;
-
-            // 开启用户空间访问
-            let _guard = SumGuard::new();
-
-            while total_written < buf_len {
-                // TODO: 暂时移除，等待信号系统实现
-                /*
-                // 检查信号中断
-                if has_pending_signal() {
-                    if total_written == 0 {
-                        // 未读取任何数据，返回 EINTR
-                        return -(EINTR as isize);
-                    } else {
-                        // 已读取部分数据，返回已读字节数
-                        break;
-                    }
-                }
-                */
-
-                // 读取下一条日志
-                let entry = match read_log() {
-                    Some(e) => e,
-                    None => break, // 没有更多日志
-                };
-
-                // 格式化日志条目
-                let formatted = format_log_entry(&entry);
-                let bytes = formatted.as_bytes();
-
-                // 检查剩余空间
-                if total_written + bytes.len() > buf_len {
-                    // 缓冲区不足，停止读取
-                    // 注意：此条目已从缓冲区移除但未返回给用户
-                    // 这是 Linux 的行为
-                    break;
-                }
-
-                // 复制到用户空间
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        bytes.as_ptr(),
-                        bufp.add(total_written),
-                        bytes.len(),
-                    );
-                }
-
-                total_written += bytes.len();
-            }
-
-            // 关闭用户空间访问
-
-            total_written as isize
-        }
-
-        // 非破坏性读取操作
-        SyslogAction::ReadAll => {
-            // ReadAll: 非破坏性读取（保留条目）
-            use crate::log::{log_reader_index, log_writer_index, peek_log};
-
-            let buf_len = len as usize;
-            let mut total_written = 0;
-
-            // 获取当前可读范围
-            let start_index = log_reader_index();
-            let end_index = log_writer_index();
-
-            // 开启用户空间访问
-            let _guard = SumGuard::new();
-
-            // 遍历所有可用的日志条目
-            let mut current_index = start_index;
-            while current_index < end_index && total_written < buf_len {
-                // TODO: 暂时移除，等待信号系统实现
-                /*
-                // 检查信号中断
-                if has_pending_signal() {
-                    if total_written == 0 {
-                        return -(EINTR as isize);
-                    } else {
-                        break;
-                    }
-                }
-                */
-
-                let entry = match peek_log(current_index) {
-                    Some(e) => e,
-                    None => break, // 条目已被覆盖或无效
-                };
-
-                let formatted = format_log_entry(&entry);
-                let bytes = formatted.as_bytes();
-
-                if total_written + bytes.len() > buf_len {
-                    // 缓冲区不足，停止读取
-                    break;
-                }
-
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        bytes.as_ptr(),
-                        bufp.add(total_written),
-                        bytes.len(),
-                    );
-                }
-
-                total_written += bytes.len();
-                current_index += 1;
-            }
-
-            // 关闭用户空间访问
-
-            total_written as isize
-        }
-
-        SyslogAction::ReadClear => {
-            // 先读取所有日志（使用与 ReadAll 相同的逻辑）
-            let buf_len = len as usize;
-            let mut total_written = 0;
-
-            let _guard = SumGuard::new();
 
             while total_written < buf_len {
                 let entry = match read_log() {
@@ -391,11 +270,84 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 }
 
                 unsafe {
-                    core::ptr::copy_nonoverlapping(
+                    crate::arch::ArchImpl::copy_to_user(
                         bytes.as_ptr(),
-                        bufp.add(total_written),
+                        bufp as usize + total_written,
                         bytes.len(),
-                    );
+                    )
+                    .ok();
+                }
+
+                total_written += bytes.len();
+            }
+
+            total_written as isize
+        }
+
+        // 非破坏性读取操作
+        SyslogAction::ReadAll => {
+            use crate::log::{log_reader_index, log_writer_index, peek_log};
+
+            let buf_len = len as usize;
+            let mut total_written = 0;
+
+            let start_index = log_reader_index();
+            let end_index = log_writer_index();
+
+            let mut current_index = start_index;
+            while current_index < end_index && total_written < buf_len {
+                let entry = match peek_log(current_index) {
+                    Some(e) => e,
+                    None => break,
+                };
+
+                let formatted = format_log_entry(&entry);
+                let bytes = formatted.as_bytes();
+
+                if total_written + bytes.len() > buf_len {
+                    break;
+                }
+
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(
+                        bytes.as_ptr(),
+                        bufp as usize + total_written,
+                        bytes.len(),
+                    )
+                    .ok();
+                }
+
+                total_written += bytes.len();
+                current_index += 1;
+            }
+
+            total_written as isize
+        }
+
+        SyslogAction::ReadClear => {
+            let buf_len = len as usize;
+            let mut total_written = 0;
+
+            while total_written < buf_len {
+                let entry = match read_log() {
+                    Some(e) => e,
+                    None => break,
+                };
+
+                let formatted = format_log_entry(&entry);
+                let bytes = formatted.as_bytes();
+
+                if total_written + bytes.len() > buf_len {
+                    break;
+                }
+
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(
+                        bytes.as_ptr(),
+                        bufp as usize + total_written,
+                        bytes.len(),
+                    )
+                    .ok();
                 }
 
                 total_written += bytes.len();

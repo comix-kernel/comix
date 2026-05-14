@@ -7,6 +7,7 @@
 use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::arch::Arch;
 use crate::sync::SpinLock;
 
 /// 控制台是否已切换到运行时模式
@@ -22,6 +23,7 @@ pub fn init() {
 
 #[inline]
 fn write_str_unlocked(s: &str) {
+    #[cfg(feature = "device")]
     if CONSOLE_RUNTIME.load(Ordering::Acquire)
         && let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref()
     {
@@ -30,13 +32,14 @@ fn write_str_unlocked(s: &str) {
     }
 
     for b in s.bytes() {
-        crate::arch::lib::sbi::console_putchar(b as usize);
+        crate::arch::ArchImpl::console_putchar(b);
     }
 }
 
 /// 无锁的单字符输出（内部使用）
 #[inline]
 fn putchar_unlocked(c: u8) {
+    #[cfg(feature = "device")]
     if CONSOLE_RUNTIME.load(Ordering::Acquire) {
         // 运行时：使用 device console
         if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
@@ -47,44 +50,34 @@ fn putchar_unlocked(c: u8) {
                 let s = core::str::from_utf8(&buf).unwrap();
                 console.write_str(s);
             } else {
-                crate::arch::lib::sbi::console_putchar(c as usize);
+                crate::arch::ArchImpl::console_putchar(c);
             }
         } else {
             // 降级到 SBI
-            crate::arch::lib::sbi::console_putchar(c as usize);
+            crate::arch::ArchImpl::console_putchar(c);
         }
-    } else {
-        // 早期：使用 arch SBI
-        crate::arch::lib::sbi::console_putchar(c as usize);
+        return;
     }
+    // 早期或无 device 功能：使用 arch console
+    crate::arch::ArchImpl::console_putchar(c);
 }
 
 /// 无锁的单字符输入（内部使用）
 #[inline]
 fn getchar_unlocked() -> Option<u8> {
+    #[cfg(feature = "device")]
     if CONSOLE_RUNTIME.load(Ordering::Acquire) {
         // 运行时：使用 device console
         if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
             let ch = console.read_char();
-            Some(ch as u8)
+            return Some(ch as u8);
         } else {
-            // 降级到 SBI
-            let ch = crate::arch::lib::sbi::console_getchar();
-            if ch == usize::MAX {
-                None
-            } else {
-                Some(ch as u8)
-            }
-        }
-    } else {
-        // 早期：使用 arch SBI
-        let ch = crate::arch::lib::sbi::console_getchar();
-        if ch == usize::MAX {
-            None
-        } else {
-            Some(ch as u8)
+            // 降级到 arch console
+            return crate::arch::ArchImpl::console_getchar();
         }
     }
+    // 早期或无 device 功能：使用 arch console
+    crate::arch::ArchImpl::console_getchar()
 }
 
 /// 带锁的字符串输出（公开接口）
@@ -130,5 +123,37 @@ impl Write for Stdout {
 
         // 在持有锁的情况下格式化并输出
         UnlockedWriter.write_fmt(args)
+    }
+}
+
+/// 早期打印：逐字节通过 arch 的 console_putchar 输出。
+/// 不使用锁，适用于内核初始化早期阶段。
+#[doc(hidden)]
+pub fn _early_print(args: core::fmt::Arguments) {
+    struct EarlyWriter;
+    impl core::fmt::Write for EarlyWriter {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            for b in s.bytes() {
+                crate::arch::ArchImpl::console_putchar(b);
+            }
+            Ok(())
+        }
+    }
+    EarlyWriter.write_fmt(args).unwrap();
+}
+
+/// 早期打印宏 (不含换行)
+#[macro_export]
+macro_rules! earlyprint {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::console::_early_print(format_args!($fmt $(, $($arg)+)?))
+    }
+}
+
+/// 早期打印宏 (含换行)
+#[macro_export]
+macro_rules! earlyprintln {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::console::_early_print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }
 }

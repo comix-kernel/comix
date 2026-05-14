@@ -11,7 +11,7 @@ use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
 
 use crate::arch::constant::SUPERVISOR_EXTERNAL;
-use crate::arch::syscall::dispatch_syscall;
+use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::arch::timer::{TIMER_TICKS, clock_freq, get_time};
 use crate::arch::trap::restore;
 use crate::device::IRQ_MANAGER;

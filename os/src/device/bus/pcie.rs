@@ -1,7 +1,7 @@
 //! PCIe 模块
 
 use crate::{
-    config::{VirtDevice, mmio_of},
+    arch::platform::{VirtDevice, mmio_of},
     device::{block::virtio_blk, device_tree::FDT, net::virtio_net},
     kernel::current_memory_space,
     mm::{
@@ -380,10 +380,10 @@ pub fn init_virtio_pci() {
         .map_mmio(Paddr::from_usize(host.ecam_paddr), host.ecam_size)
     {
         Ok(vaddr) => vaddr.as_usize(),
-        Err(PagingError::AlreadyMapped) => crate::arch::mm::paddr_to_vaddr(host.ecam_paddr),
+        Err(PagingError::AlreadyMapped) => crate::arch::paddr_to_vaddr(host.ecam_paddr),
         Err(e) => {
             pr_warn!("[PCIe] failed to map ECAM: {:?}", e);
-            crate::arch::mm::paddr_to_vaddr(host.ecam_paddr)
+            crate::arch::paddr_to_vaddr(host.ecam_paddr)
         }
     };
 

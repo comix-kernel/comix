@@ -6,7 +6,9 @@ use core::sync::atomic::Ordering;
 
 mod cap;
 mod cred;
+#[cfg(feature = "proc")]
 mod exec_loader;
+#[cfg(feature = "proc")]
 mod futex;
 mod ktask;
 mod process;
@@ -18,7 +20,9 @@ mod work_queue;
 
 pub use cap::*;
 pub use cred::*;
+#[cfg(feature = "proc")]
 pub use exec_loader::*;
+#[cfg(feature = "proc")]
 pub use futex::*;
 pub use ktask::*;
 pub use process::*;
@@ -189,7 +193,7 @@ pub fn current_task() -> SharedTask {
         None => {
             // 打印调用栈信息以便调试
             crate::pr_err!("current_task called with no current task!");
-            crate::pr_err!("CPU ID: {}", crate::arch::kernel::cpu::cpu_id());
+            crate::pr_err!("CPU ID: {}", crate::arch::cpu_id());
             panic!("current_task: CPU has no current task")
         }
     }

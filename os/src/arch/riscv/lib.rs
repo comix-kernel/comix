@@ -27,6 +27,13 @@ pub fn shutdown(failure: bool) -> ! {
     unreachable!()
 }
 
+/// use sbi call to restart the system
+pub fn restart() -> ! {
+    use sbi_rt::{ColdReboot, NoReason};
+    sbi_rt::system_reset(ColdReboot, NoReason);
+    unreachable!()
+}
+
 /// SBI 调用返回值
 #[derive(Debug)]
 pub struct SbiRet {

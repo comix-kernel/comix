@@ -369,3 +369,32 @@ impl TrapFrame {
         self.x31_t6 = mcontext.gregs[31] as usize;
     }
 }
+
+impl crate::kernel::syscall::syscall_frame::SyscallFrame for TrapFrame {
+    fn syscall_id(&self) -> usize {
+        self.x17_a7
+    }
+
+    fn arg0(&self) -> usize {
+        self.x10_a0
+    }
+    fn arg1(&self) -> usize {
+        self.x11_a1
+    }
+    fn arg2(&self) -> usize {
+        self.x12_a2
+    }
+    fn arg3(&self) -> usize {
+        self.x13_a3
+    }
+    fn arg4(&self) -> usize {
+        self.x14_a4
+    }
+    fn arg5(&self) -> usize {
+        self.x15_a5
+    }
+
+    fn set_ret(&mut self, val: usize) {
+        self.x10_a0 = val;
+    }
+}

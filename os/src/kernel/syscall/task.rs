@@ -10,7 +10,7 @@ use alloc::{string::ToString, sync::Arc, vec::Vec};
 use crate::{
     arch::{
         timer::{clock_freq, get_time},
-        trap::{SumGuard, restore},
+        trap::restore,
     },
     ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{
@@ -122,7 +122,6 @@ fn clear_child_tid_and_wake() {
 
     // 1) write 0 to userspace tid address
     unsafe {
-        let _guard = SumGuard::new();
         write_to_user(clear_addr as *mut c_int, 0);
     }
 
@@ -332,14 +331,14 @@ pub fn clone(
         .add_task(child_task);
 
     // 如果目标 CPU 不是当前 CPU，发送 IPI
-    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    let current_cpu = crate::arch::cpu_id();
     if target_cpu != current_cpu {
         crate::pr_debug!(
             "[SMP] Sending IPI from CPU {} to CPU {}",
             current_cpu,
             target_cpu
         );
-        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+        crate::arch::send_reschedule_ipi(target_cpu);
     }
 
     tid as c_int
@@ -356,19 +355,14 @@ pub fn execve(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    // 使用 SumGuard 来安全访问用户空间路径和参数
-    let (path_str, argv_strings, envp_strings) = {
-        let _guard = SumGuard::new();
-        let path_str = match get_path_safe(path) {
-            Ok(s) => s.to_string(),
-            Err(_) => {
-                return FsError::InvalidArgument.to_errno() as i32;
-            }
-        };
-        let argv_strings = get_args_safe(argv, "argv").unwrap_or_else(|_| Vec::new());
-        let envp_strings = get_args_safe(envp, "envp").unwrap_or_else(|_| Vec::new());
-        (path_str, argv_strings, envp_strings)
+    let path_str = match get_path_safe(path as usize) {
+        Ok(s) => s,
+        Err(_) => {
+            return FsError::InvalidArgument.to_errno() as i32;
+        }
     };
+    let argv_strings = get_args_safe(argv as usize, "argv").unwrap_or_else(|_| Vec::new());
+    let envp_strings = get_args_safe(envp as usize, "envp").unwrap_or_else(|_| Vec::new());
 
     let mut exec_path_str = path_str.clone();
     let (argv_strings, envp_strings, exec_path_str) = {

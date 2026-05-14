@@ -22,3 +22,15 @@ runner = "./qemu-loongarch-run.sh"
 
 [net]
 retry = 3
+
+# x86_64 宿主测试（Mock 模式）的编译设置
+# 使用方式: cargo +nightly check --tests --target x86_64-unknown-linux-gnu
+# 或: RUSTFLAGS="-Cpanic=abort -Zpanic_abort_tests" cargo +nightly check --tests --target x86_64-unknown-linux-gnu
+#
+# 注意: cargo test 在 x86_64 上会因为 hashbrown -> allocator-api2 的
+# duplicate lang item 问题无法链接，这是已知问题。cargo check --tests 可以正常通过。
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-Cpanic=abort",
+    "-Zpanic_abort_tests",
+]

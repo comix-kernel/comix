@@ -1,28 +1,27 @@
 //! 用户态缓冲区
 //!
-//! 一般来说，用户态程序通过一段位于用户地址的缓冲区与内核进行数据交换
-//! 例如，系统调用接口通常传入指向用户缓冲区的指针和长度
-//! 这个模块提供了对这类缓冲区的抽象和操作方法
-//!
-//! XXX: 目前的实现直接依赖于 RISC-V 特权级的 SUM 位来允许内核访问用户空间
-//!      未来可能需要改进为通过页表映射等方式实现更通用的用户空间访问
+//! 通过 `Arch` trait 的 `copy_from_user`/`copy_to_user` 方法访问用户空间内存，
+//! 不再直接依赖架构特定的 SumGuard。
 
 use alloc::vec::Vec;
-use core::ptr;
+use core::mem::MaybeUninit;
 
 use crate::arch::constant::USER_TOP;
-use crate::arch::trap::SumGuard;
+use crate::arch::Arch;
 
 /// 向用户空间写入数据
 /// # 参数
 /// - `user_ptr`: 指向用户空间的指针
 /// - `value`: 要写入的数据
-/// # Safety
-/// 调用者必须确保 `user_ptr` 指向的内存是有效且可写的用户空间地址。
-pub unsafe fn write_to_user<T>(user_ptr: *mut T, value: T) {
-    let _guard = SumGuard::new();
+pub fn write_to_user<T>(user_ptr: *mut T, value: T) {
+    let size = core::mem::size_of::<T>();
     unsafe {
-        ptr::write_volatile(user_ptr, value);
+        crate::arch::ArchImpl::copy_to_user(
+            (&value) as *const T as *const u8,
+            user_ptr as usize,
+            size,
+        )
+        .ok();
     }
 }
 
@@ -31,11 +30,18 @@ pub unsafe fn write_to_user<T>(user_ptr: *mut T, value: T) {
 /// - `user_ptr`: 指向用户空间的指针
 /// # 返回值
 /// - 读取到的数据
-/// # Safety
-/// 调用者必须确保 `user_ptr` 指向的内存是有效且可读的用户空间地址。
-pub unsafe fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
-    let _guard = SumGuard::new();
-    unsafe { ptr::read_volatile(user_ptr) }
+pub fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
+    let size = core::mem::size_of::<T>();
+    let mut val = MaybeUninit::<T>::uninit();
+    unsafe {
+        crate::arch::ArchImpl::copy_from_user(
+            user_ptr as usize,
+            val.as_mut_ptr() as *mut u8,
+            size,
+        )
+        .ok();
+        val.assume_init()
+    }
 }
 
 /// 用户缓冲区结构体
@@ -64,9 +70,13 @@ impl UserBuffer {
         }
         let mut vec = Vec::with_capacity(self.len);
         unsafe {
-            let _guard = SumGuard::new();
             vec.set_len(self.len);
-            ptr::copy_nonoverlapping(self.data as *const u8, vec.as_mut_ptr(), self.len);
+            crate::arch::ArchImpl::copy_from_user(
+                self.data as usize,
+                vec.as_mut_ptr(),
+                self.len,
+            )
+            .ok();
         }
         vec
     }
@@ -82,12 +92,11 @@ impl UserBuffer {
         }
         let n = core::cmp::min(self.len, data.len());
         unsafe {
-            let _guard = SumGuard::new();
-            ptr::copy_nonoverlapping(data.as_ptr(), self.data, n);
+            crate::arch::ArchImpl::copy_to_user(data.as_ptr(), self.data as usize, n).ok();
         }
     }
 
-    /// TODO: 运行时做一次“粗略”范围校验（不保证已映射，仅做地址区间与溢出检查）
+    /// TODO: 运行时做一次”粗略”范围校验（不保证已映射，仅做地址区间与溢出检查）
     /// 建议在 syscall 层或结合 MemorySpace 做页表级校验。
     pub fn range_sane(&self) -> bool {
         let start = self.data as usize;

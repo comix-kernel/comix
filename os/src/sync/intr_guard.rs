@@ -1,55 +1,55 @@
-use crate::arch::{
-    constant::SSTATUS_SIE,
-    intr::{read_and_disable_interrupts, restore_interrupts},
-};
+//! 中断保护器
+//!
+//! 基于 RAII 实现中断保护。在创建时通过 `CpuOps` 禁用中断并保存之前的状态；
+//! 在销毁时自动恢复之前的中断状态。
+//!
+//! 不可重入 (即不能嵌套调用 IntrGuard::new())。
+//!
+//! # 泛型参数
+//!
+//! * `CPU` - 实现 `CpuOps` 的类型，默认使用 `ArchImpl`（编译时选择的架构）
+
+use crate::arch::ArchImpl;
+use crate::arch::CpuOps;
+use core::marker::PhantomData;
 use core::ops::Drop;
 
 /// 中断保护器，基于 RAII 实现中断保护。
+///
 /// 在创建时原子地禁用中断并保存之前的状态；
 /// 在销毁时自动恢复之前的中断状态。
-/// 不可重入 (即不能嵌套调用 IntrGuard::new())。
-/// 使用示例：
-/// ```ignore
-/// {
-///     let guard = IntrGuard::new(); // 禁用中断
-///     // 临界区代码
-/// } // 离开作用域，自动恢复中断状态
-/// ```
-pub struct IntrGuard {
+pub struct IntrGuard<CPU: CpuOps = ArchImpl> {
     flags: usize,
+    _marker: PhantomData<CPU>,
 }
 
-impl IntrGuard {
+impl<CPU: CpuOps> IntrGuard<CPU> {
     /// 原子地禁用中断并返回一个 IntrGuard 实例。
+    ///
     /// 该实例在离开作用域时会自动恢复中断状态。
     pub fn new() -> Self {
-        // SAFETY: 调用者必须确保在创建 IntrGuard 实例时，
-        // 没有其他代码会修改中断状态，从而保证不可重入性。
-        let flags = unsafe { read_and_disable_interrupts() };
-        IntrGuard { flags }
+        let flags = CPU::disable_interrupts();
+        IntrGuard {
+            flags,
+            _marker: PhantomData,
+        }
     }
 
     /// 检查进入临界区前，中断是否处于启用状态。
-    /// 返回值：中断是否处于启用状态
-    #[allow(dead_code)]
     pub fn was_enabled(&self) -> bool {
-        self.flags & SSTATUS_SIE != 0
+        CPU::interrupt_was_enabled(self.flags)
     }
 }
 
-impl Drop for IntrGuard {
-    /// 当 IntrGuard 离开作用域时，自动恢复中断状态。
+impl<CPU: CpuOps> Drop for IntrGuard<CPU> {
     fn drop(&mut self) {
-        // SAFETY: flags 是在创建 IntrGuard 时保存的，
-        // 因此恢复操作是安全的。
-        unsafe { restore_interrupts(self.flags) };
+        CPU::restore_interrupt_state(self.flags);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::{arch::intr::*, kassert, println, test_case};
 
     // 测试 IntrGuard::new() 是否成功禁用中断，并检查 was_enabled
@@ -58,7 +58,7 @@ mod tests {
         unsafe { enable_interrupts() };
         kassert!(are_interrupts_enabled());
 
-        let guard = IntrGuard::new();
+        let guard = IntrGuard::<ArchImpl>::new();
 
         kassert!(guard.was_enabled());
 
@@ -79,10 +79,9 @@ mod tests {
         kassert!(initial_state);
 
         {
-            let guard = IntrGuard::new();
+            let guard = IntrGuard::<ArchImpl>::new();
             kassert!(!are_interrupts_enabled());
-
-            kassert!(guard.flags & SSTATUS_SIE != 0);
+            kassert!(ArchImpl::interrupt_was_enabled(guard.flags));
         }
 
         kassert!(are_interrupts_enabled());

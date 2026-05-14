@@ -1,14 +1,17 @@
 //! 抢占控制
 //!
 //! 访问 Per-CPU 变量时需要禁用抢占，防止任务迁移导致数据不一致。
+//!
+//! 抢占控制函数使用 `ArchImpl` 获取 CPU ID。如需在宿主测试中使用，
+//! 可使用泛型版本 `preempt_disable_generic::<CPU>()` 等。
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::arch::ArchImpl;
 use crate::config::MAX_CPU_COUNT;
+use crate::arch::CpuOps;
 
 /// 缓存行对齐的原子计数器
-///
-/// 确保每个 CPU 的抢占计数器独占一个缓存行，避免伪共享。
 #[repr(align(64))]
 struct CacheAlignedAtomic(AtomicUsize);
 
@@ -18,48 +21,80 @@ impl CacheAlignedAtomic {
     }
 }
 
-/// Per-CPU 抢占计数器
-///
-/// 每个 CPU 维护一个计数器，> 0 表示抢占已禁用。
 static PREEMPT_COUNT: [CacheAlignedAtomic; MAX_CPU_COUNT] =
     [const { CacheAlignedAtomic::new() }; MAX_CPU_COUNT];
 
-/// 禁用抢占
-///
-/// 可以嵌套调用，每次调用增加计数器。
+// ---- 泛型版本（用于测试或显式架构选择） ----
+
+/// 禁用抢占（泛型版本）
 #[inline]
-pub fn preempt_disable() {
-    let cpu_id = crate::arch::kernel::cpu::cpu_id();
+pub fn preempt_disable_generic<CPU: CpuOps>() {
+    let cpu_id = CPU::id();
     PREEMPT_COUNT[cpu_id].0.fetch_add(1, Ordering::Relaxed);
-    // Acquire 屏障，确保后续访问不会被重排到此之前
     core::sync::atomic::fence(Ordering::Acquire);
 }
 
+/// 启用抢占（泛型版本）
+#[inline]
+pub fn preempt_enable_generic<CPU: CpuOps>() {
+    core::sync::atomic::fence(Ordering::Release);
+    let cpu_id = CPU::id();
+    PREEMPT_COUNT[cpu_id].0.fetch_sub(1, Ordering::Relaxed);
+}
+
+/// 检查抢占是否已禁用（泛型版本）
+#[inline]
+pub fn preempt_disabled_generic<CPU: CpuOps>() -> bool {
+    let cpu_id = CPU::id();
+    PREEMPT_COUNT[cpu_id].0.load(Ordering::Relaxed) > 0
+}
+
+/// 抢占保护 RAII 守卫（泛型版本）
+pub struct PreemptGuardGeneric<CPU: CpuOps> {
+    _marker: core::marker::PhantomData<CPU>,
+}
+
+impl<CPU: CpuOps> PreemptGuardGeneric<CPU> {
+    #[inline]
+    pub fn new() -> Self {
+        preempt_disable_generic::<CPU>();
+        Self {
+            _marker: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<CPU: CpuOps> Drop for PreemptGuardGeneric<CPU> {
+    #[inline]
+    fn drop(&mut self) {
+        preempt_enable_generic::<CPU>();
+    }
+}
+
+// ---- 具体版本（生产使用，使用 ArchImpl） ----
+
+/// 禁用抢占
+#[inline]
+pub fn preempt_disable() {
+    preempt_disable_generic::<ArchImpl>();
+}
+
 /// 启用抢占
-///
-/// 必须与 preempt_disable() 配对使用。
 #[inline]
 pub fn preempt_enable() {
-    // Release 屏障，确保之前的访问不会被重排到此之后
-    core::sync::atomic::fence(Ordering::Release);
-    let cpu_id = crate::arch::kernel::cpu::cpu_id();
-    PREEMPT_COUNT[cpu_id].0.fetch_sub(1, Ordering::Relaxed);
+    preempt_enable_generic::<ArchImpl>();
 }
 
 /// 检查抢占是否已禁用
 #[inline]
 pub fn preempt_disabled() -> bool {
-    let cpu_id = crate::arch::kernel::cpu::cpu_id();
-    PREEMPT_COUNT[cpu_id].0.load(Ordering::Relaxed) > 0
+    preempt_disabled_generic::<ArchImpl>()
 }
 
 /// 抢占保护 RAII 守卫
-///
-/// 创建时禁用抢占，销毁时自动启用抢占。
 pub struct PreemptGuard;
 
 impl PreemptGuard {
-    /// 创建守卫并禁用抢占
     #[inline]
     pub fn new() -> Self {
         preempt_disable();

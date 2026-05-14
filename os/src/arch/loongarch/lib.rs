@@ -1,10 +1,12 @@
-//! LoongArch64 SBI 兼容模块（存根）
+//! LoongArch64 平台操作模块
 //!
-//! LoongArch 不使用 SBI，此模块仅用于兼容 RISC-V 代码
+//! LoongArch 不使用 RISC-V 的 SBI，此模块通过直接 MMIO 访问
+//! 提供等效功能（UART 控制台、ACPI GED 电源管理）。
+//!
+//! 兼容性别名 `sbi` 模块用于共享代码调用路径的过渡，
+//! 待 HAL trait 覆盖这些功能后可移除。
 
-// TODO: 请重构代码使得Comix不再需要为LA实现SBI的占位符
-
-use super::super::platform::virt::UART_BASE;
+use super::platform::UART_BASE;
 
 /// 通过 DMW0 映射的 UART 虚拟地址
 /// DMW0: 0x8000_xxxx_xxxx_xxxx -> 物理地址 (uncached, 用于 MMIO)
@@ -68,6 +70,23 @@ pub fn shutdown(_failure: bool) -> ! {
     loop {
         unsafe {
             // LoongArch 的休眠指令
+            core::arch::asm!("idle 0");
+        }
+    }
+}
+
+/// 重启实现
+pub fn restart() -> ! {
+    let base_vaddr = VIRT_GED_REG_ADDR | 0x8000_0000_0000_0000;
+
+    unsafe {
+        let ptr = base_vaddr as *mut u8;
+        ptr.add(ACPI_GED_REG_RESET)
+            .write_volatile(ACPI_GED_VALUE_REBOOT);
+    }
+
+    loop {
+        unsafe {
             core::arch::asm!("idle 0");
         }
     }

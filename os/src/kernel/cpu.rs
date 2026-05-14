@@ -81,14 +81,11 @@ impl Cpu {
         }
 
         // 同步 TrapFrame 的 cpu_ptr 指向当前 CPU，确保多核迁移后 trap_entry 恢复正确的 tp
-        // 说明：trap_entry 会从 TrapFrame.cpu_ptr 恢复 tp，如果任务在不同 CPU 之间迁移，
-        // 需要将该字段更新为当前 CPU 的地址，否则进入内核后会把 tp 设置为错误的 CPU，
-        // 导致 current_cpu()/per-CPU 数据读取混乱乃至崩溃。
         let tf_usize = {
             use core::sync::atomic::Ordering;
             task.lock().trap_frame_ptr.load(Ordering::SeqCst) as usize
         };
-        crate::arch::kernel::cpu::on_task_switch(tf_usize, self as *const _ as usize);
+        crate::arch::on_task_switch(tf_usize, self as *const _ as usize);
     }
 
     /// 切换当前内存空间
@@ -134,11 +131,11 @@ mod tests {
 
     /// 测试 cpu_id() 函数
     test_case!(test_cpu_id, {
-        use crate::arch::kernel::cpu::cpu_id;
+        use crate::arch::ArchImpl;
         use crate::sync::PreemptGuard;
 
         let _guard = PreemptGuard::new();
-        let id = cpu_id();
+        let id = crate::arch::cpu_id();
         kassert!(id < unsafe { NUM_CPU });
     });
 
@@ -168,7 +165,7 @@ mod tests {
         use crate::sync::{PerCpu, PreemptGuard};
         use core::sync::atomic::{AtomicUsize, Ordering};
 
-        let per_cpu = PerCpu::new(|| AtomicUsize::new(0));
+        let per_cpu: PerCpu<AtomicUsize> = PerCpu::new(|| AtomicUsize::new(0));
 
         // 在当前 CPU 上修改值
         {
@@ -188,7 +185,7 @@ mod tests {
         let num_cpu = unsafe { NUM_CPU };
         let current_id = {
             let _guard = PreemptGuard::new();
-            crate::arch::kernel::cpu::cpu_id()
+            crate::arch::cpu_id()
         };
 
         for cpu_id in 0..num_cpu {
@@ -203,7 +200,7 @@ mod tests {
     test_case!(test_per_cpu_with_id, {
         use crate::sync::PerCpu;
 
-        let per_cpu = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
+        let per_cpu: PerCpu<usize> = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
 
         let num_cpu = unsafe { NUM_CPU };
         for cpu_id in 0..num_cpu {

@@ -1,17 +1,14 @@
 //! 票号锁实现
 //!
 //! 提供公平的 FIFO 顺序锁获取机制，避免饥饿问题。
-//! 使用两个原子计数器：next_ticket（下一个票号）和 serving_ticket（当前服务票号）。
-//! 每个线程获取唯一票号，按顺序等待服务。
 //!
-//! # 不变量
-//! - serving_ticket <= next_ticket
-//! - 持有锁时 serving_ticket == 某个线程的 ticket
-//! - 释放锁时 serving_ticket 递增 1
+//! # 泛型参数
 //!
-//! # 已知限制
-//! - 票号溢出：next_ticket 在 usize::MAX 时回绕，可能导致死锁（实际不太可能发生）
+//! * `T` - 被保护的数据类型
+//! * `CPU` - 实现 `CpuOps` 的类型，默认使用 `ArchImpl`
 
+use crate::arch::ArchImpl;
+use crate::arch::CpuOps;
 use crate::sync::intr_guard::IntrGuard;
 use core::{
     cell::UnsafeCell,
@@ -21,47 +18,34 @@ use core::{
 };
 
 /// 票号锁，提供公平的 FIFO 顺序获取
-pub struct TicketLock<T> {
+pub struct TicketLock<T, CPU: CpuOps = ArchImpl> {
     next_ticket: AtomicUsize,
     serving_ticket: AtomicUsize,
     data: UnsafeCell<T>,
+    _marker: core::marker::PhantomData<CPU>,
 }
 
 /// 票号锁的 RAII 保护器
-pub struct TicketLockGuard<'a, T> {
-    lock: &'a TicketLock<T>,
-    intr_guard: IntrGuard,
+pub struct TicketLockGuard<'a, T, CPU: CpuOps = ArchImpl> {
+    lock: &'a TicketLock<T, CPU>,
+    intr_guard: IntrGuard<CPU>,
 }
 
-impl<T> TicketLock<T> {
-    /// 创建新的票号锁
-    ///
-    /// - data: 被保护的数据
-    ///
-    /// # 返回值
-    /// - `TicketLock<T>`: 新创建的票号锁
+impl<T, CPU: CpuOps> TicketLock<T, CPU> {
     pub const fn new(data: T) -> Self {
         TicketLock {
             next_ticket: AtomicUsize::new(0),
             serving_ticket: AtomicUsize::new(0),
             data: UnsafeCell::new(data),
+            _marker: core::marker::PhantomData,
         }
     }
 
-    /// 获取锁，返回 RAII 保护器
-    ///
-    /// 自动禁用中断，按 FIFO 顺序获取锁。
-    /// 如果锁被占用，则自旋等待直到轮到当前线程。
-    ///
-    /// # 返回值
-    /// - `TicketLockGuard`: RAII 保护器，提供数据访问
-    pub fn lock(&self) -> TicketLockGuard<'_, T> {
-        let intr_guard = IntrGuard::new();
+    pub fn lock(&self) -> TicketLockGuard<'_, T, CPU> {
+        let intr_guard = IntrGuard::<CPU>::new();
 
-        // 获取票号
         let my_ticket = self.next_ticket.fetch_add(1, Ordering::Relaxed);
 
-        // 等待轮到自己
         while self.serving_ticket.load(Ordering::Acquire) != my_ticket {
             hint::spin_loop();
         }
@@ -72,22 +56,13 @@ impl<T> TicketLock<T> {
         }
     }
 
-    /// 尝试获取锁，如果成功则返回 RAII 保护器，否则返回 None
-    ///
-    /// 非阻塞版本，如果当前无法立即获取锁则返回 None。
-    ///
-    /// # 返回值
-    /// - `Some(TicketLockGuard)`: 成功获取锁
-    /// - `None`: 锁被占用
-    pub fn try_lock(&self) -> Option<TicketLockGuard<'_, T>> {
-        let intr_guard = IntrGuard::new();
+    pub fn try_lock(&self) -> Option<TicketLockGuard<'_, T, CPU>> {
+        let intr_guard = IntrGuard::<CPU>::new();
 
         let serving = self.serving_ticket.load(Ordering::Relaxed);
         let next = self.next_ticket.load(Ordering::Relaxed);
 
-        // 只有在没有人等待时才能获取
         if serving == next {
-            // 尝试获取票号
             if self
                 .next_ticket
                 .compare_exchange(next, next + 1, Ordering::Acquire, Ordering::Relaxed)
@@ -103,44 +78,34 @@ impl<T> TicketLock<T> {
         None
     }
 
-    /// 检查锁是否被占用（仅用于测试）
-    ///
-    /// # 返回值
-    /// - `true`: 锁被占用
-    /// - `false`: 锁空闲
     #[cfg(test)]
     pub fn is_locked(&self) -> bool {
         self.next_ticket.load(Ordering::Relaxed) != self.serving_ticket.load(Ordering::Relaxed)
     }
 }
 
-impl<T> Deref for TicketLockGuard<'_, T> {
+impl<T, CPU: CpuOps> Deref for TicketLockGuard<'_, T, CPU> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        // SAFETY: 持有锁，保证独占访问
         unsafe { &*self.lock.data.get() }
     }
 }
 
-impl<T> DerefMut for TicketLockGuard<'_, T> {
+impl<T, CPU: CpuOps> DerefMut for TicketLockGuard<'_, T, CPU> {
     fn deref_mut(&mut self) -> &mut T {
-        // SAFETY: 持有锁，保证独占访问
         unsafe { &mut *self.lock.data.get() }
     }
 }
 
-impl<T> Drop for TicketLockGuard<'_, T> {
+impl<T, CPU: CpuOps> Drop for TicketLockGuard<'_, T, CPU> {
     fn drop(&mut self) {
         self.lock.serving_ticket.fetch_add(1, Ordering::Release);
     }
 }
 
-// SAFETY: TicketLock 可以在线程间传递，只要 T 是 Send
-unsafe impl<T: Send> Send for TicketLock<T> {}
-
-// SAFETY: TicketLock 可以在线程间共享，只要 T 是 Send + Sync
-unsafe impl<T: Send + Sync> Sync for TicketLock<T> {}
+unsafe impl<T: Send, CPU: CpuOps> Send for TicketLock<T, CPU> {}
+unsafe impl<T: Send + Sync, CPU: CpuOps> Sync for TicketLock<T, CPU> {}
 
 #[cfg(test)]
 mod tests {
@@ -148,7 +113,7 @@ mod tests {
     use crate::{arch::intr::are_interrupts_enabled, kassert, test_case};
 
     test_case!(test_ticket_lock_basic, {
-        let lock = TicketLock::new(42);
+        let lock: TicketLock<i32> = TicketLock::new(42);
         kassert!(!lock.is_locked());
 
         let guard = lock.lock();
@@ -160,7 +125,7 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_raii, {
-        let lock = TicketLock::new(100);
+        let lock: TicketLock<i32> = TicketLock::new(100);
 
         {
             let mut guard = lock.lock();
@@ -175,16 +140,14 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_fairness, {
-        let lock = TicketLock::new(0);
+        let lock: TicketLock<i32> = TicketLock::new(0);
 
-        // 获取第一个票号
         let guard1 = lock.lock();
         kassert!(lock.next_ticket.load(Ordering::Relaxed) == 1);
         kassert!(lock.serving_ticket.load(Ordering::Relaxed) == 0);
 
         drop(guard1);
 
-        // 获取第二个票号
         let guard2 = lock.lock();
         kassert!(lock.next_ticket.load(Ordering::Relaxed) == 2);
         kassert!(lock.serving_ticket.load(Ordering::Relaxed) == 1);
@@ -193,7 +156,7 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_interrupt_disable, {
-        let lock = TicketLock::new(0);
+        let lock: TicketLock<i32> = TicketLock::new(0);
 
         let guard = lock.lock();
         kassert!(!are_interrupts_enabled());
@@ -203,20 +166,17 @@ mod tests {
     });
 
     test_case!(test_ticket_lock_try_lock, {
-        let lock = TicketLock::new(42);
+        let lock: TicketLock<i32> = TicketLock::new(42);
 
-        // 第一次 try_lock 应该成功
         let guard = lock.try_lock();
         kassert!(guard.is_some());
         kassert!(lock.is_locked());
 
-        // 第二次 try_lock 应该失败（锁已被占用）
         let guard2 = lock.try_lock();
         kassert!(guard2.is_none());
 
         drop(guard);
 
-        // 释放后再次 try_lock 应该成功
         let guard3 = lock.try_lock();
         kassert!(guard3.is_some());
     });
