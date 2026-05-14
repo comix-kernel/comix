@@ -4,7 +4,7 @@
 
 use alloc::vec::Vec;
 
-use crate::hal::cpu_ops::CpuOps;
+use crate::arch::cpu_ops::CpuOps;
 use crate::sync::SpinLock;
 
 // ============================================================================

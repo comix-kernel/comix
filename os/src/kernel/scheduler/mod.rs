@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::{
     arch::kernel::context::Context,
     config::MAX_CPU_COUNT,
-    hal::arch::Arch,
+    arch::Arch,
     kernel::{TaskState, TaskStruct, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     sync::{SpinLock, SpinLockGuard},
 };

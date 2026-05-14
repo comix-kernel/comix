@@ -2,7 +2,7 @@
 
 use core::ffi::CStr;
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 use alloc::{
     format,
     string::{String, ToString},

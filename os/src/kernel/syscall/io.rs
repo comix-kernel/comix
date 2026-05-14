@@ -1,6 +1,6 @@
 //! IO 相关的系统调用实现
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;

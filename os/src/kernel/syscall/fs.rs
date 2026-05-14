@@ -2,7 +2,7 @@
 
 use core::ffi::c_char;
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 use alloc::string::ToString;
 
 use crate::{

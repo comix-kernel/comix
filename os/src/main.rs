@@ -37,7 +37,7 @@ mod net;
 mod security;
 mod vfs;
 
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 #[cfg(target_arch = "loongarch64")]
 use core::arch::asm;
 use core::panic::PanicInfo;

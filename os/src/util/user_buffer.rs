@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
 use crate::arch::constant::USER_TOP;
-use crate::hal::arch::Arch;
+use crate::arch::Arch;
 
 /// 向用户空间写入数据
 /// # 参数
