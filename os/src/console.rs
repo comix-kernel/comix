@@ -23,6 +23,7 @@ pub fn init() {
 
 #[inline]
 fn write_str_unlocked(s: &str) {
+    #[cfg(feature = "device")]
     if CONSOLE_RUNTIME.load(Ordering::Acquire)
         && let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref()
     {
@@ -38,6 +39,7 @@ fn write_str_unlocked(s: &str) {
 /// 无锁的单字符输出（内部使用）
 #[inline]
 fn putchar_unlocked(c: u8) {
+    #[cfg(feature = "device")]
     if CONSOLE_RUNTIME.load(Ordering::Acquire) {
         // 运行时：使用 device console
         if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
@@ -54,28 +56,28 @@ fn putchar_unlocked(c: u8) {
             // 降级到 SBI
             crate::arch::ArchImpl::console_putchar(c);
         }
-    } else {
-        // 早期：使用 arch SBI
-        crate::arch::ArchImpl::console_putchar(c);
+        return;
     }
+    // 早期或无 device 功能：使用 arch console
+    crate::arch::ArchImpl::console_putchar(c);
 }
 
 /// 无锁的单字符输入（内部使用）
 #[inline]
 fn getchar_unlocked() -> Option<u8> {
+    #[cfg(feature = "device")]
     if CONSOLE_RUNTIME.load(Ordering::Acquire) {
         // 运行时：使用 device console
         if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
             let ch = console.read_char();
-            Some(ch as u8)
+            return Some(ch as u8);
         } else {
             // 降级到 arch console
-            crate::arch::ArchImpl::console_getchar()
+            return crate::arch::ArchImpl::console_getchar();
         }
-    } else {
-        // 早期：使用 arch console
-        crate::arch::ArchImpl::console_getchar()
     }
+    // 早期或无 device 功能：使用 arch console
+    crate::arch::ArchImpl::console_getchar()
 }
 
 /// 带锁的字符串输出（公开接口）

@@ -6,7 +6,9 @@ use core::sync::atomic::Ordering;
 
 mod cap;
 mod cred;
+#[cfg(feature = "proc")]
 mod exec_loader;
+#[cfg(feature = "proc")]
 mod futex;
 mod ktask;
 mod process;
@@ -18,7 +20,9 @@ mod work_queue;
 
 pub use cap::*;
 pub use cred::*;
+#[cfg(feature = "proc")]
 pub use exec_loader::*;
+#[cfg(feature = "proc")]
 pub use futex::*;
 pub use ktask::*;
 pub use process::*;

@@ -1,8 +1,8 @@
-//! ComixOS - A RISC-V operating system kernel
+//! ComixOS - A multi-architecture operating system kernel
 //!
 //! This is the main crate for ComixOS, an operating system kernel written in Rust
-//! for RISC-V architecture. It provides basic OS functionalities including memory
-//! management, process scheduling, and system call handling.
+//! for RISC-V and LoongArch architectures. It provides basic OS functionalities
+//! including memory management, process scheduling, and system call handling.
 
 #![no_std]
 #![no_main]
@@ -12,24 +12,30 @@
 
 extern crate alloc;
 
+// === 基础层（始终编译） ===
 mod arch;
 mod config;
 mod console;
-mod device;
-mod fs;
 mod hal;
-mod ipc;
 mod kernel;
-mod mm;
-mod security;
 mod sync;
 mod test;
+
+// 轻量工具模块（仅依赖基础层）
 mod uapi;
 mod util;
-mod vfs;
+
+// 日志模块：console 在 device 不可用时回退到 arch 路径
 #[macro_use]
 mod log;
+
+mod mm;
+mod device;
+mod fs;
+mod ipc;
 mod net;
+mod security;
+mod vfs;
 
 use crate::hal::arch::Arch;
 #[cfg(target_arch = "loongarch64")]

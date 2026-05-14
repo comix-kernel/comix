@@ -27,8 +27,11 @@ fn main() {
     println!("cargo:rerun-if-changed=../user");
     println!("cargo:rerun-if-changed=../scripts/make_init_simple_fs.py");
 
-    // 步骤 1: 编译用户程序
-    if user_dir.exists() {
+    // 步骤 1: 编译用户程序（仅在目标架构上编译）
+    let target = env::var("TARGET").unwrap_or_default();
+    let is_target_arch = target.contains("riscv64") || target.contains("loongarch");
+
+    if is_target_arch && user_dir.exists() {
         println!("cargo:warning=[build.rs] Building user programs...");
         let status = Command::new("make")
             .current_dir(&user_dir)
@@ -57,8 +60,13 @@ fn main() {
                 );
             }
         }
-    } else {
+    } else if is_target_arch {
         println!("cargo:warning=[build.rs] User directory not found, skipping user build");
+    } else {
+        println!(
+            "cargo:warning=[build.rs] Skipping user program build (target: {})",
+            target
+        );
     }
 
     // 步骤 2: 打包 simple_fs 镜像 (暂时禁用，直接创建空镜像)
@@ -135,8 +143,8 @@ fn main() {
         println!("cargo:rustc-env=EXT4_FS_IMAGE={}", dummy_img.display());
     }
 
-    // 3.2: 非测试模式下创建完整的运行时镜像
-    if !is_test {
+    // 3.2: 非测试模式下创建完整的运行时镜像（仅目标架构）
+    if !is_test && is_target_arch {
         let target = env::var("TARGET").unwrap_or_default();
         let arch_key = match env::var("ARCH") {
             Ok(val) if !val.is_empty() => {
