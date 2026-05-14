@@ -243,6 +243,26 @@ mod mock_arch_impl {
             None
         }
 
+        fn on_task_switch(_trap_frame_ptr: usize, _cpu_ptr: usize) {}
+
+        fn get_ticks() -> usize {
+            0
+        }
+
+        fn get_time() -> usize {
+            0
+        }
+
+        fn get_time_ms() -> usize {
+            0
+        }
+
+        fn clock_freq() -> usize {
+            12_500_000
+        }
+
+        fn send_reschedule_ipi(_target_cpu: usize) {}
+
         fn power_off() -> ! {
             loop {
                 core::hint::spin_loop();

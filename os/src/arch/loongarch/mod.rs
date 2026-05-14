@@ -99,6 +99,30 @@ impl Arch for cpu_ops::LoongArch64 {
         Ok(max_len)
     }
 
+    fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
+        kernel::on_task_switch(trap_frame_ptr, cpu_ptr)
+    }
+
+    fn get_ticks() -> usize {
+        timer::get_ticks()
+    }
+
+    fn get_time() -> usize {
+        timer::get_time()
+    }
+
+    fn get_time_ms() -> usize {
+        timer::get_time_ms()
+    }
+
+    fn clock_freq() -> usize {
+        timer::clock_freq()
+    }
+
+    fn send_reschedule_ipi(target_cpu: usize) {
+        ipi::send_reschedule_ipi(target_cpu)
+    }
+
     fn name() -> &'static str {
         constant::ARCH
     }

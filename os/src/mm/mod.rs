@@ -20,7 +20,7 @@ pub mod page_table;
 pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
 
-use crate::arch::mm::vaddr_to_paddr;
+use crate::arch::ArchImpl;
 use crate::arch::platform::virt::MEMORY_END;
 use crate::config::PAGE_SIZE;
 use crate::earlyprintln;
@@ -46,7 +46,7 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     // 1. 初始化物理帧分配器
 
     // ekernel 是一个虚拟地址，需要转换为物理地址，以确定可分配物理内存的起始点。
-    let ekernel_paddr = unsafe { vaddr_to_paddr(ekernel as usize) };
+    let ekernel_paddr = unsafe { crate::arch::vaddr_to_paddr(ekernel as usize) };
 
     // 计算页对齐后的物理内存起始地址。
     // 分配器将管理 [start, end) 范围内的内存。

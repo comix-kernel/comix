@@ -571,7 +571,7 @@ fn poll_with_timeout(
     nfds: usize,
     timeout: Option<crate::uapi::time::TimeSpec>,
 ) -> isize {
-    use crate::arch::timer::{clock_freq, get_time};
+    use crate::arch::ArchImpl;
     use crate::uapi::errno::{EINTR, EINVAL};
 
     if nfds > 0 && fds == 0 {
@@ -587,8 +587,8 @@ fn poll_with_timeout(
                 return -(EINVAL as isize);
             }
             let duration_ns = (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64;
-            let duration_ticks = (duration_ns * clock_freq() as u64 / 1_000_000_000) as usize;
-            Some(get_time() + duration_ticks)
+            let duration_ticks = (duration_ns * crate::arch::clock_freq() as u64 / 1_000_000_000) as usize;
+            Some(crate::arch::get_time() + duration_ticks)
         }
     };
 
@@ -681,7 +681,7 @@ fn poll_with_timeout(
 
         // Check if woken by timeout
         if let Some(trigger) = timeout_trigger
-            && get_time() >= trigger
+            && crate::arch::get_time() >= trigger
         {
             return 0;
         }
@@ -733,9 +733,9 @@ pub fn pselect6(
         if ts.is_zero() {
             Some(0) // Poll mode (no wait)
         } else {
-            use crate::arch::timer::{clock_freq, get_time};
-            let duration_ticks = ts.into_freq(clock_freq());
-            Some(get_time() + duration_ticks)
+            use crate::arch::ArchImpl;
+            let duration_ticks = ts.into_freq(crate::arch::clock_freq());
+            Some(crate::arch::get_time() + duration_ticks)
         }
     };
 
@@ -765,9 +765,9 @@ pub fn select(
         if tv.is_zero() {
             Some(0) // Poll mode (no wait)
         } else {
-            use crate::arch::timer::{clock_freq, get_time};
-            let duration_ticks = tv.into_freq(clock_freq());
-            Some(get_time() + duration_ticks)
+            use crate::arch::ArchImpl;
+            let duration_ticks = tv.into_freq(crate::arch::clock_freq());
+            Some(crate::arch::get_time() + duration_ticks)
         }
     };
 
@@ -927,8 +927,7 @@ fn select_common(
             crate::net::socket::poll_network_and_dispatch();
 
             if let Some(trigger) = timeout_trigger {
-                use crate::arch::timer::get_time;
-                if get_time() >= trigger {
+                if crate::arch::get_time() >= trigger {
                     return 0;
                 }
             }

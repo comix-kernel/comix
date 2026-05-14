@@ -88,7 +88,7 @@ impl Cpu {
             use core::sync::atomic::Ordering;
             task.lock().trap_frame_ptr.load(Ordering::SeqCst) as usize
         };
-        crate::arch::kernel::cpu::on_task_switch(tf_usize, self as *const _ as usize);
+        crate::arch::on_task_switch(tf_usize, self as *const _ as usize);
     }
 
     /// 切换当前内存空间
@@ -134,11 +134,11 @@ mod tests {
 
     /// 测试 cpu_id() 函数
     test_case!(test_cpu_id, {
-        use crate::arch::kernel::cpu::cpu_id;
+        use crate::arch::ArchImpl;
         use crate::sync::PreemptGuard;
 
         let _guard = PreemptGuard::new();
-        let id = cpu_id();
+        let id = crate::arch::cpu_id();
         kassert!(id < unsafe { NUM_CPU });
     });
 
@@ -188,7 +188,7 @@ mod tests {
         let num_cpu = unsafe { NUM_CPU };
         let current_id = {
             let _guard = PreemptGuard::new();
-            crate::arch::kernel::cpu::cpu_id()
+            crate::arch::cpu_id()
         };
 
         for cpu_id in 0..num_cpu {

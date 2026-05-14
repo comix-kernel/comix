@@ -9,7 +9,7 @@ pub struct UptimeGenerator;
 impl ContentGenerator for UptimeGenerator {
     fn generate(&self) -> Result<Vec<u8>, FsError> {
         // 获取系统运行时间（秒）
-        let uptime_ms = crate::arch::timer::get_time_ms();
+        let uptime_ms = crate::arch::get_time_ms();
         let uptime_sec = uptime_ms / 1000;
         let uptime_frac = (uptime_ms % 1000) / 10; // 保留2位小数
 

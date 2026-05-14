@@ -331,14 +331,14 @@ pub fn clone(
         .add_task(child_task);
 
     // 如果目标 CPU 不是当前 CPU，发送 IPI
-    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    let current_cpu = crate::arch::cpu_id();
     if target_cpu != current_cpu {
         crate::pr_debug!(
             "[SMP] Sending IPI from CPU {} to CPU {}",
             current_cpu,
             target_cpu
         );
-        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+        crate::arch::send_reschedule_ipi(target_cpu);
     }
 
     tid as c_int
