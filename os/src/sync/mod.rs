@@ -3,6 +3,7 @@
 //! 向其它内核模块提供基本的锁和同步原语
 //! 包括自旋锁、睡眠锁、中断保护等
 mod intr_guard;
+#[cfg(feature = "proc")]
 mod mutex;
 mod per_cpu;
 mod preempt;
@@ -12,6 +13,7 @@ mod rwlock;
 mod spin_lock;
 mod ticket_lock;
 
+#[cfg(feature = "proc")]
 pub use mutex::*;
 pub use per_cpu::PerCpu;
 pub use preempt::PreemptGuard;

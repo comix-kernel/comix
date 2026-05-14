@@ -42,4 +42,3 @@ pub const VIRTIO_BLK_SECTOR_SIZE: usize = 512;
 pub const FS_IMAGE_SIZE: usize = 1024 * 1024 * 1024; // 1 GB
 
 use crate::arch::constant::SV39_BOT_HALF_TOP;
-pub use crate::arch::platform::virt::*;

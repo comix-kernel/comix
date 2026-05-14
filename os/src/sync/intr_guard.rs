@@ -37,7 +37,7 @@ impl<CPU: CpuOps> IntrGuard<CPU> {
 
     /// 检查进入临界区前，中断是否处于启用状态。
     pub fn was_enabled(&self) -> bool {
-        self.flags & crate::arch::constant::SSTATUS_SIE != 0
+        CPU::interrupt_was_enabled(self.flags)
     }
 }
 
@@ -81,7 +81,7 @@ mod tests {
         {
             let guard = IntrGuard::<ArchImpl>::new();
             kassert!(!are_interrupts_enabled());
-            kassert!(guard.flags & crate::arch::constant::SSTATUS_SIE != 0);
+            kassert!(ArchImpl::interrupt_was_enabled(guard.flags));
         }
 
         kassert!(are_interrupts_enabled());

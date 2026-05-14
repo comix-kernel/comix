@@ -1,8 +1,9 @@
 use core::cmp::Ordering;
 
 use crate::arch::mm::{paddr_to_vaddr, vaddr_to_paddr};
+use crate::arch::platform::virt::MEMORY_END;
 use crate::config::{
-    MAX_USER_HEAP_SIZE, MEMORY_END, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
+    MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
     USER_STACK_TOP,
 };
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};

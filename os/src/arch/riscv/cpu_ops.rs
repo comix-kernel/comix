@@ -71,4 +71,9 @@ impl CpuOps for Riscv64 {
     fn enable_interrupts() {
         unsafe { sstatus::set_sie() };
     }
+
+    #[inline]
+    fn interrupt_was_enabled(flags: usize) -> bool {
+        flags & crate::arch::constant::SSTATUS_SIE != 0
+    }
 }

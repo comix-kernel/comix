@@ -21,7 +21,8 @@ pub use frame_allocator::init_frame_allocator;
 pub use global_allocator::init_heap;
 
 use crate::arch::mm::vaddr_to_paddr;
-use crate::config::{MEMORY_END, PAGE_SIZE};
+use crate::arch::platform::virt::MEMORY_END;
+use crate::config::PAGE_SIZE;
 use crate::earlyprintln;
 use crate::mm::address::{Ppn, UsizeConvert};
 use crate::sync::SpinLock;

@@ -58,6 +58,8 @@ redundant_clone = "deny"
 
 [profile.dev]
 opt-level = 1  # 启用基本优化以减小代码体积
+panic = "abort"
 
 [profile.test]
 opt-level = 1  # 测试模式也启用基本优化
+panic = "abort"

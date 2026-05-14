@@ -95,4 +95,9 @@ impl CpuOps for LoongArch64 {
             );
         }
     }
+
+    #[inline]
+    fn interrupt_was_enabled(flags: usize) -> bool {
+        flags & SSTATUS_SIE != 0
+    }
 }

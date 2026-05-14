@@ -10,6 +10,8 @@
 //! - `arch/` 外部代码应通过 `crate::arch::*` 暴露的统一接口/钩子访问架构差异，
 //!   避免直接依赖 `riscv`、`loongArch64` 等架构专用 crate 或寄存器操作。
 
+// ---- 目标架构：RISC-V / LoongArch ----
+
 #[cfg(target_arch = "loongarch64")]
 mod loongarch;
 
@@ -21,6 +23,14 @@ pub use loongarch::*;
 
 #[cfg(target_arch = "riscv64")]
 pub use riscv::*;
+
+// ---- 非目标架构（宿主测试）：Mock Stubs ----
+
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+pub mod mock_stubs;
+
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+pub use mock_stubs::*;
 
 // 重导出 Arch trait，以便通过 ArchImpl 调用其方法
 pub use crate::hal::arch::Arch;
