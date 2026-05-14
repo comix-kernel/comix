@@ -8,7 +8,7 @@ use core::{
 
 use crate::{
     arch::{
-        lib::sbi::shutdown,
+        lib::shutdown,
         timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
     },
     kernel::{

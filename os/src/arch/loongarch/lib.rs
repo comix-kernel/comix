@@ -6,7 +6,7 @@
 //! 兼容性别名 `sbi` 模块用于共享代码调用路径的过渡，
 //! 待 HAL trait 覆盖这些功能后可移除。
 
-use super::super::platform::virt::UART_BASE;
+use super::platform::UART_BASE;
 
 /// 通过 DMW0 映射的 UART 虚拟地址
 /// DMW0: 0x8000_xxxx_xxxx_xxxx -> 物理地址 (uncached, 用于 MMIO)

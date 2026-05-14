@@ -1,7 +1,7 @@
 //! PCIe 模块
 
 use crate::{
-    arch::platform::virt::{VirtDevice, mmio_of},
+    arch::platform::{VirtDevice, mmio_of},
     device::{block::virtio_blk, device_tree::FDT, net::virtio_net},
     kernel::current_memory_space,
     mm::{

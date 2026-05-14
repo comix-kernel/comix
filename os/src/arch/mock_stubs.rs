@@ -625,57 +625,58 @@ pub mod timer {
 // ---- platform ----
 
 pub mod platform {
+    pub const MEMORY_END: usize = 0x8800_0000;
+    pub const VIRT_CPUS_MAX: usize = 4;
+
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    pub enum VirtDevice {
+        VirtDebug,
+        VirtMrom,
+        VirtTest,
+        VirtRtc,
+        VirtClint,
+        VirtAclintSswi,
+        VirtPlic,
+        VirtAplicM,
+        VirtAplicS,
+        VirtUart0,
+        VirtVirtio,
+        VirtFwCfg,
+        VirtImsicM,
+        VirtImsicS,
+        VirtFlash,
+        VirtPciePio,
+        VirtIommuSys,
+        VirtPlatformBus,
+        VirtPcieEcam,
+        VirtPcieMmio,
+        VirtDram,
+    }
+
+    pub fn mmio_of(_dev: VirtDevice) -> Option<(usize, usize)> {
+        None
+    }
+
+    pub fn init() {}
+
+    /// 兼容性模块别名
     pub mod virt {
-        pub const MEMORY_END: usize = 0x8800_0000;
-        pub const VIRT_CPUS_MAX: usize = 4;
-
-        #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-        pub enum VirtDevice {
-            VirtDebug,
-            VirtMrom,
-            VirtTest,
-            VirtRtc,
-            VirtClint,
-            VirtAclintSswi,
-            VirtPlic,
-            VirtAplicM,
-            VirtAplicS,
-            VirtUart0,
-            VirtVirtio,
-            VirtFwCfg,
-            VirtImsicM,
-            VirtImsicS,
-            VirtFlash,
-            VirtPciePio,
-            VirtIommuSys,
-            VirtPlatformBus,
-            VirtPcieEcam,
-            VirtPcieMmio,
-            VirtDram,
-        }
-
-        pub fn mmio_of(_dev: VirtDevice) -> Option<(usize, usize)> {
-            None
-        }
-
-        pub fn init() {}
+        pub use super::*;
     }
 }
 
 // ---- lib ----
 
 pub mod lib {
-    pub mod sbi {
-        pub fn shutdown(_failure: bool) -> ! {
-            loop {
-                core::hint::spin_loop();
-            }
+    pub fn shutdown(_failure: bool) -> ! {
+        loop {
+            core::hint::spin_loop();
         }
-
-        pub fn send_ipi(_hart_mask: usize) {}
-
-        pub fn set_timer(_time: usize) {}
     }
+
+    pub fn send_ipi(_hart_mask: usize) {}
+
+    pub fn set_timer(_time: usize) {}
 }
 
 // ---- syscall ----

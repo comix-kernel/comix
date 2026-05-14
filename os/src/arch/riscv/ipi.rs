@@ -55,7 +55,7 @@ pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
 
     // 2. 通过 SBI 触发软件中断
     let hart_mask = 1usize << target_cpu;
-    crate::arch::lib::sbi::send_ipi(hart_mask);
+    crate::arch::lib::send_ipi(hart_mask);
 
     // 3. 检查目标CPU的sip寄存器（仅用于调试）
     if target_cpu == crate::arch::kernel::cpu::cpu_id() {
@@ -88,7 +88,7 @@ pub fn send_ipi_many(hart_mask: usize, ipi_type: IpiType) {
     }
 
     // 一次性发送到所有目标 CPU
-    crate::arch::lib::sbi::send_ipi(hart_mask);
+    crate::arch::lib::send_ipi(hart_mask);
 }
 
 /// 发送调度 IPI

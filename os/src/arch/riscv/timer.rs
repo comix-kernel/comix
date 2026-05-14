@@ -3,7 +3,7 @@
 //! 包含定时器初始化、时间获取和定时器中断设置等功能
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{arch::lib::sbi::set_timer, kernel::CLOCK_FREQ};
+use crate::{arch::lib::set_timer, kernel::CLOCK_FREQ};
 use riscv::register::time;
 
 /// 每秒的时钟中断次数
