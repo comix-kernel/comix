@@ -124,8 +124,7 @@ impl CharDeviceFile {
             }
             8 | 9 => {
                 // /dev/random, /dev/urandom: 简单实现（使用时间戳）
-                use crate::arch::timer::get_ticks;
-                let mut seed = get_ticks() as u32;
+                let mut seed = crate::arch::get_ticks() as u32;
                 for byte in buf.iter_mut() {
                     // 简单的 LCG 随机数生成器
                     seed = seed.wrapping_mul(1103515245).wrapping_add(12345);

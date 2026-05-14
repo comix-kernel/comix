@@ -84,7 +84,7 @@ pub trait Scheduler {
 
 /// 获取当前 CPU 的调度器
 pub fn current_scheduler() -> &'static SpinLock<RRScheduler> {
-    let cpu_id = crate::arch::kernel::cpu::cpu_id();
+    let cpu_id = crate::arch::cpu_id();
     &SCHEDULERS[cpu_id]
 }
 
@@ -102,7 +102,7 @@ pub fn pick_cpu() -> usize {
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
     // 读取并禁用中断，保护整个调度过程，并在返回时恢复原状态
-    let flags = unsafe { crate::arch::intr::read_and_disable_interrupts() };
+    let flags = crate::arch::disable_interrupts();
 
     // 快速路径：如果运行队列为空且当前任务仍是 Running，就无需进入调度器
     let should_try_switch = {
@@ -135,7 +135,7 @@ pub fn schedule() {
     }
 
     // 恢复进入前的中断状态
-    unsafe { crate::arch::intr::restore_interrupts(flags) };
+    crate::arch::restore_interrupt_state(flags);
 }
 
 /// 主动放弃 CPU
@@ -154,7 +154,7 @@ pub fn yield_task() {
 pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
     let cpu_id = {
         let t = task.lock();
-        t.on_cpu.unwrap_or_else(crate::arch::kernel::cpu::cpu_id)
+        t.on_cpu.unwrap_or_else(crate::arch::cpu_id)
     };
     scheduler_of(cpu_id).lock().sleep_task(task, receive_signal);
 }
@@ -165,7 +165,7 @@ pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
 /// * `task`: 需要唤醒的任务
 pub fn wake_up_with_block(task: SharedTask) {
     let target_cpu = pick_cpu();
-    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    let current_cpu = crate::arch::cpu_id();
     let task_tid = { task.lock().tid };
 
     // 关键：多核下 wake 可能被重复触发（不同 CPU/不同事件源），必须做到“全局幂等”：
@@ -205,7 +205,7 @@ pub fn wake_up_with_block(task: SharedTask) {
             target_cpu,
             task_tid
         );
-        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+        crate::arch::send_reschedule_ipi(target_cpu);
     }
 }
 
@@ -216,7 +216,7 @@ pub fn wake_up_with_block(task: SharedTask) {
 pub fn exit_task_with_block(task: SharedTask) {
     let cpu_id = {
         let t = task.lock();
-        t.on_cpu.unwrap_or_else(crate::arch::kernel::cpu::cpu_id)
+        t.on_cpu.unwrap_or_else(crate::arch::cpu_id)
     };
     scheduler_of(cpu_id).lock().exit_task(task);
 }
@@ -234,7 +234,7 @@ pub fn sleep_task_with_guard_and_block(
     stask: SharedTask,
     receive_signal: bool,
 ) {
-    let cpu_id = task.on_cpu.unwrap_or_else(crate::arch::kernel::cpu::cpu_id);
+    let cpu_id = task.on_cpu.unwrap_or_else(crate::arch::cpu_id);
     scheduler_of(cpu_id)
         .lock()
         .sleep_task_with_guard(task, stask, receive_signal);

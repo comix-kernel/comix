@@ -46,3 +46,85 @@ pub use loongarch::cpu_ops::LoongArch64 as ArchImpl;
 // 宿主（非目标架构）使用 Mock 实现
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 pub use crate::hal::mock::MockArch as ArchImpl;
+
+// ---- 便捷包装函数 ----
+// 将 Arch trait 方法暴露为普通函数，避免调用者显式导入 trait。
+// 内部委托给 ArchImpl，保持与旧代码的兼容性。
+
+use crate::hal::arch::Arch as ArchTrait;
+use crate::hal::cpu_ops::CpuOps as CpuOpsTrait;
+
+/// 启用中断
+#[inline]
+pub fn enable_interrupts() {
+    ArchImpl::enable_interrupts()
+}
+
+/// 禁用中断并返回之前的中断状态
+#[inline]
+pub fn disable_interrupts() -> usize {
+    ArchImpl::disable_interrupts()
+}
+
+/// 恢复中断状态
+#[inline]
+pub fn restore_interrupt_state(flags: usize) {
+    ArchImpl::restore_interrupt_state(flags)
+}
+
+/// 获取当前 CPU ID
+#[inline]
+pub fn cpu_id() -> usize {
+    ArchImpl::id()
+}
+
+/// 任务切换时更新 trap frame CPU 指针
+#[inline]
+pub fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
+    ArchImpl::on_task_switch(trap_frame_ptr, cpu_ptr)
+}
+
+/// 获取系统节拍
+#[inline]
+pub fn get_ticks() -> usize {
+    ArchImpl::get_ticks()
+}
+
+/// 获取系统时间（节拍）
+#[inline]
+pub fn get_time() -> usize {
+    ArchImpl::get_time()
+}
+
+/// 获取系统时间（毫秒）
+#[inline]
+pub fn get_time_ms() -> usize {
+    ArchImpl::get_time_ms()
+}
+
+/// 获取时钟频率
+#[inline]
+pub fn clock_freq() -> usize {
+    ArchImpl::clock_freq()
+}
+
+/// 发送重调度 IPI
+#[inline]
+pub fn send_reschedule_ipi(target: usize) {
+    ArchImpl::send_reschedule_ipi(target)
+}
+
+/// 物理地址 → 虚拟地址（直接映射）
+#[inline]
+pub fn paddr_to_vaddr(paddr: usize) -> usize {
+    ArchImpl::paddr_to_vaddr(paddr)
+}
+
+/// 虚拟地址 → 物理地址（直接映射）
+///
+/// # Safety
+/// 调用者需确保 vaddr 处于直接映射区域。
+#[inline]
+pub unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
+    unsafe { ArchImpl::vaddr_to_paddr(vaddr) }
+}

@@ -173,11 +173,11 @@ unsafe impl Send for Paddr {}
 
 impl ConvertablePaddr for Paddr {
     fn is_valid_paddr(&self) -> bool {
-        self.as_usize() == unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) }
+        self.as_usize() == unsafe { crate::arch::vaddr_to_paddr(self.as_usize()) }
     }
 
     fn to_vaddr(&self) -> Vaddr {
-        Vaddr::from_usize(crate::arch::mm::paddr_to_vaddr(self.as_usize()))
+        Vaddr::from_usize(crate::arch::paddr_to_vaddr(self.as_usize()))
     }
 }
 
@@ -217,11 +217,11 @@ unsafe impl Send for Vaddr {}
 
 impl ConvertableVaddr for Vaddr {
     fn is_valid_vaddr(&self) -> bool {
-        self.as_usize() == crate::arch::mm::paddr_to_vaddr(self.as_usize())
+        self.as_usize() == crate::arch::paddr_to_vaddr(self.as_usize())
     }
 
     fn to_paddr(&self) -> Paddr {
-        Paddr::from_usize(unsafe { crate::arch::mm::vaddr_to_paddr(self.as_usize()) })
+        Paddr::from_usize(unsafe { crate::arch::vaddr_to_paddr(self.as_usize()) })
     }
 }
 
@@ -486,7 +486,7 @@ impl From<crate::hal::address::VA> for Vaddr {
 mod address_basic_tests {
     use super::*;
     // 假设 arch 模块提供了 paddr_to_vaddr 的桩实现
-    use crate::arch::mm::paddr_to_vaddr;
+    use crate::arch::ArchImpl::paddr_to_vaddr;
     use crate::{kassert, test_case};
 
     // 1.1 Paddr/Vaddr 创建和转换测试

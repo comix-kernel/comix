@@ -109,9 +109,9 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         .add_task(task);
 
     // 如果目标 CPU 不是当前 CPU，发送 IPI
-    let current_cpu = crate::arch::kernel::cpu::cpu_id();
+    let current_cpu = crate::arch::cpu_id();
     if target_cpu != current_cpu {
-        crate::arch::ipi::send_reschedule_ipi(target_cpu);
+        crate::arch::send_reschedule_ipi(target_cpu);
     }
 
     tid
@@ -310,8 +310,8 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         }
         let tlbr_entry_vaddr = tlb_refill_entry as usize;
         let tlbr_entry_paddr =
-            unsafe { crate::arch::mm::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
-        let tlbr_entry_dm_vaddr = crate::arch::mm::paddr_to_vaddr(tlbr_entry_paddr);
+            unsafe { crate::arch::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
+        let tlbr_entry_dm_vaddr = crate::arch::paddr_to_vaddr(tlbr_entry_paddr);
         crate::pr_debug!(
             "[kernel_execve] va translate: entry={:?}, sp={:?}",
             space.translate(entry_va),

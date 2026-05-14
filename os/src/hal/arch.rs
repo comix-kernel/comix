@@ -89,6 +89,50 @@ pub trait Arch: CpuOps + VirtualMemory {
 
     // ---- 电源管理 ----
 
+    // ---- 任务切换辅助 ----
+
+    /// 任务切换时更新 trap frame 中的 CPU 指针
+    ///
+    /// 当任务在不同 CPU 之间迁移时，需要更新 trap frame 中的 `cpu_ptr` 字段，
+    /// 确保 trap_entry 恢复正确的 tp 寄存器值。
+    fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize);
+
+    // ---- 时间接口 ----
+
+    /// 获取系统节拍计数
+    fn get_ticks() -> usize;
+
+    /// 获取系统启动以来的时间（节拍数）
+    fn get_time() -> usize;
+
+    /// 获取系统启动以来的时间（毫秒）
+    fn get_time_ms() -> usize;
+
+    /// 获取时钟频率（Hz）
+    fn clock_freq() -> usize;
+
+    // ---- IPI ----
+
+    /// 向目标 CPU 发送重调度 IPI
+    fn send_reschedule_ipi(target_cpu: usize);
+
+    // ---- 地址翻译 ----
+
+    /// 物理地址 → 虚拟地址（直接映射区域）
+    fn paddr_to_vaddr(paddr: usize) -> usize {
+        paddr + Self::PAGE_OFFSET
+    }
+
+    /// 虚拟地址 → 物理地址（直接映射区域）
+    ///
+    /// # Safety
+    /// 调用者需确保 `vaddr` 处于直接映射范围内。
+    unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
+        vaddr - Self::PAGE_OFFSET
+    }
+
+    // ---- 电源管理 ----
+
     /// 关机，永不返回
     fn power_off() -> !;
 
