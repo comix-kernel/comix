@@ -571,7 +571,6 @@ fn poll_with_timeout(
     nfds: usize,
     timeout: Option<crate::uapi::time::TimeSpec>,
 ) -> isize {
-    use crate::arch::ArchImpl;
     use crate::uapi::errno::{EINTR, EINVAL};
 
     if nfds > 0 && fds == 0 {
@@ -733,7 +732,6 @@ pub fn pselect6(
         if ts.is_zero() {
             Some(0) // Poll mode (no wait)
         } else {
-            use crate::arch::ArchImpl;
             let duration_ticks = ts.into_freq(crate::arch::clock_freq());
             Some(crate::arch::get_time() + duration_ticks)
         }
@@ -765,7 +763,6 @@ pub fn select(
         if tv.is_zero() {
             Some(0) // Poll mode (no wait)
         } else {
-            use crate::arch::ArchImpl;
             let duration_ticks = tv.into_freq(crate::arch::clock_freq());
             Some(crate::arch::get_time() + duration_ticks)
         }

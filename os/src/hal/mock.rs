@@ -7,6 +7,7 @@
 
 use alloc::vec::Vec;
 
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 use crate::hal::arch::Arch;
 use crate::hal::cpu_ops::CpuOps;
 use crate::hal::virtual_memory::{
@@ -18,7 +19,7 @@ use crate::sync::SpinLock;
 // 在非目标架构上，MockArch 的 UserContext 应等于 arch::kernel::context::Context，
 // 这样才能与 scheduler 传递的 Context 类型匹配。
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-pub type MockUserContext = crate::arch::mock_stubs::kernel::context::Context;
+pub type MockUserContext = crate::arch::mock::kernel::context::Context;
 
 // ============================================================================
 // MockCpuOps

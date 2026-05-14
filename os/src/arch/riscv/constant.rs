@@ -1,5 +1,5 @@
 //! RISC-V 架构相关的常量定义
-#![allow(unused)]
+#![allow(dead_code)]
 
 /// 架构名称字符串
 pub const ARCH: &str = "riscv64";
@@ -27,7 +27,6 @@ pub const STACK_ALIGN_MASK: usize = 0xF;
 pub const USER_BASE: usize = 0x0000_0000_0000_0000;
 pub const USER_TOP: usize = 0x0000_003f_ffff_ffff;
 
-pub const IRQ_MIN: usize = usize::MAX / 2;
 pub const IRQ_MAX: usize = usize::MAX;
 
 /// 软件中断（用于 IPI）

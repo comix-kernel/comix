@@ -10,6 +10,12 @@
 //! - `arch/` 外部代码应通过 `crate::arch::*` 暴露的统一接口/钩子访问架构差异，
 //!   避免直接依赖 `riscv`、`loongArch64` 等架构专用 crate 或寄存器操作。
 
+// ---- 共享模块（架构无关） ----
+
+pub mod syscall;
+mod memory_impl;
+mod arch_impl;
+
 // ---- 目标架构：RISC-V / LoongArch ----
 
 #[cfg(target_arch = "loongarch64")]
@@ -27,10 +33,10 @@ pub use riscv::*;
 // ---- 非目标架构（宿主测试）：Mock Stubs ----
 
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-pub mod mock_stubs;
+mod mock;
 
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-pub use mock_stubs::*;
+pub use mock::*;
 
 // 重导出 Arch trait，以便通过 ArchImpl 调用其方法
 pub use crate::hal::arch::Arch;
@@ -51,8 +57,7 @@ pub use crate::hal::mock::MockArch as ArchImpl;
 // 将 Arch trait 方法暴露为普通函数，避免调用者显式导入 trait。
 // 内部委托给 ArchImpl，保持与旧代码的兼容性。
 
-use crate::hal::arch::Arch as ArchTrait;
-use crate::hal::cpu_ops::CpuOps as CpuOpsTrait;
+use crate::hal::cpu_ops::CpuOps as _;
 
 /// 启用中断
 #[inline]

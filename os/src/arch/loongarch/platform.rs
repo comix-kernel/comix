@@ -62,7 +62,3 @@ pub fn init() {
     crate::device::console::init();
 }
 
-/// 兼容性模块别名
-pub mod virt {
-    pub use super::*;
-}
