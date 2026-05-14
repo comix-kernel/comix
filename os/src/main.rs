@@ -16,7 +16,6 @@ extern crate alloc;
 mod arch;
 mod config;
 mod console;
-mod hal;
 mod kernel;
 mod sync;
 mod test;

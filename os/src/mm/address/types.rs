@@ -155,14 +155,14 @@ pub trait ConvertablePaddr {
 /// 通过 sealed trait 模式在编译期防止地址空间混用。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Paddr(pub crate::hal::address::PA);
+pub struct Paddr(pub crate::arch::address::PA);
 
 impl UsizeConvert for Paddr {
     fn as_usize(&self) -> usize {
         self.0.as_usize()
     }
     fn from_usize(value: usize) -> Self {
-        Self(crate::hal::address::PA::from_usize(value))
+        Self(crate::arch::address::PA::from_usize(value))
     }
 }
 crate::impl_calc_ops!(Paddr);
@@ -199,14 +199,14 @@ pub trait ConvertableVaddr {
 /// 通过 sealed trait 模式在编译期防止地址空间混用。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Vaddr(pub crate::hal::address::VA);
+pub struct Vaddr(pub crate::arch::address::VA);
 
 impl UsizeConvert for Vaddr {
     fn as_usize(&self) -> usize {
         self.0.as_usize()
     }
     fn from_usize(value: usize) -> Self {
-        Self(crate::hal::address::VA::from_usize(value))
+        Self(crate::arch::address::VA::from_usize(value))
     }
 }
 crate::impl_calc_ops!(Vaddr);
@@ -458,26 +458,26 @@ pub type VaddrRange = AddressRange<Vaddr>;
 // 与 hal::address 的类型转换
 // ============================================================================
 
-impl From<Paddr> for crate::hal::address::PA {
+impl From<Paddr> for crate::arch::address::PA {
     fn from(p: Paddr) -> Self {
         p.0
     }
 }
 
-impl From<crate::hal::address::PA> for Paddr {
-    fn from(a: crate::hal::address::PA) -> Self {
+impl From<crate::arch::address::PA> for Paddr {
+    fn from(a: crate::arch::address::PA) -> Self {
         Paddr(a)
     }
 }
 
-impl From<Vaddr> for crate::hal::address::VA {
+impl From<Vaddr> for crate::arch::address::VA {
     fn from(v: Vaddr) -> Self {
         v.0
     }
 }
 
-impl From<crate::hal::address::VA> for Vaddr {
-    fn from(a: crate::hal::address::VA) -> Self {
+impl From<crate::arch::address::VA> for Vaddr {
+    fn from(a: crate::arch::address::VA) -> Self {
         Vaddr(a)
     }
 }
