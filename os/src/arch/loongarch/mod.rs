@@ -19,8 +19,8 @@ pub mod trap;
 use crate::hal::virtual_memory::VirtualMemory;
 use crate::mm::address::Ppn;
 use crate::sync::SpinLock;
-use memory::address_space::LoongArch64ProcessAddressSpace;
-use memory::mmu::LoongArch64KernelAddressSpace;
+use memory::LoongArch64ProcessAddressSpace;
+use memory::LoongArch64KernelAddressSpace;
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -100,7 +100,7 @@ impl Arch for cpu_ops::LoongArch64 {
     }
 
     fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
-        kernel::on_task_switch(trap_frame_ptr, cpu_ptr)
+        kernel::cpu::on_task_switch(trap_frame_ptr, cpu_ptr)
     }
 
     fn get_ticks() -> usize {
@@ -128,11 +128,11 @@ impl Arch for cpu_ops::LoongArch64 {
     }
 
     fn console_putchar(c: u8) {
-        lib::platform::console_putchar(c as usize);
+        lib::console_putchar(c as usize);
     }
 
     fn console_getchar() -> Option<u8> {
-        let ch = lib::platform::console_getchar();
+        let ch = lib::console_getchar();
         if ch == usize::MAX {
             None
         } else {
@@ -149,10 +149,10 @@ impl Arch for cpu_ops::LoongArch64 {
     }
 
     fn power_off() -> ! {
-        lib::platform::shutdown(false)
+        lib::shutdown(false)
     }
 
     fn restart() -> ! {
-        lib::platform::restart()
+        lib::restart()
     }
 }

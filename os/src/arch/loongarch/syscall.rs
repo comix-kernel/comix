@@ -1,6 +1,6 @@
-//! 系统调用号定义
+//! LoongArch64 系统调用号定义
 //!
-//! 系统调用号遵循 Linux RISC-V 64 架构规范
+//! 系统调用号遵循 Linux LoongArch 64 架构规范
 #![allow(dead_code)]
 /// AIO (Asynchronous I/O)
 pub const SYS_IO_SETUP: usize = 0;
@@ -200,8 +200,6 @@ pub const SYS_GETSID: usize = 156;
 pub const SYS_SETSID: usize = 157;
 pub const SYS_GETGROUPS: usize = 158;
 pub const SYS_SETGROUPS: usize = 159;
-
-/// 系统信息 (System Information)
 pub const SYS_UNAME: usize = 160;
 pub const SYS_SETHOSTNAME: usize = 161;
 pub const SYS_SETDOMAINNAME: usize = 162;
@@ -213,7 +211,7 @@ pub const SYS_PRCTL: usize = 167;
 pub const SYS_GETCPU: usize = 168;
 pub const SYS_GETTIMEOFDAY: usize = 169;
 pub const SYS_SETTIMEOFDAY: usize = 170;
-pub const SYS_ADJTIMEX: usize = 171;
+pub const SYS_ADJTIME: usize = 171;
 pub const SYS_GETPID: usize = 172;
 pub const SYS_GETPPID: usize = 173;
 pub const SYS_GETUID: usize = 174;
@@ -223,35 +221,8 @@ pub const SYS_GETEGID: usize = 177;
 pub const SYS_GETTID: usize = 178;
 pub const SYS_SYSINFO: usize = 179;
 
-/// IPC (Inter-Process Communication) - Message Queues
-pub const SYS_MQ_OPEN: usize = 180;
-pub const SYS_MQ_UNLINK: usize = 181;
-pub const SYS_MQ_TIMEDSEND: usize = 182;
-pub const SYS_MQ_TIMEDRECEIVE: usize = 183;
-pub const SYS_MQ_NOTIFY: usize = 184;
-pub const SYS_MQ_GETSETATTR: usize = 185;
-
-/// IPC - System V Messages
-pub const SYS_MSGGET: usize = 186;
-pub const SYS_MSGCTL: usize = 187;
-pub const SYS_MSGRCV: usize = 188;
-pub const SYS_MSGSND: usize = 189;
-
-/// IPC - System V Semaphores
-pub const SYS_SEMGET: usize = 190;
-pub const SYS_SEMCTL: usize = 191;
-pub const SYS_SEMTIMEDOP: usize = 192;
-pub const SYS_SEMOP: usize = 193;
-
-/// IPC - System V Shared Memory
-pub const SYS_SHMGET: usize = 194;
-pub const SYS_SHMCTL: usize = 195;
-pub const SYS_SHMAT: usize = 196;
-pub const SYS_SHMDT: usize = 197;
-
 /// 网络 (Networking/Sockets)
 pub const SYS_SOCKET: usize = 198;
-pub const SYS_SOCKETPAIR: usize = 199;
 pub const SYS_BIND: usize = 200;
 pub const SYS_LISTEN: usize = 201;
 pub const SYS_ACCEPT: usize = 202;
@@ -263,121 +234,35 @@ pub const SYS_RECVFROM: usize = 207;
 pub const SYS_SETSOCKOPT: usize = 208;
 pub const SYS_GETSOCKOPT: usize = 209;
 pub const SYS_SHUTDOWN: usize = 210;
-pub const SYS_SENDMSG: usize = 211;
-pub const SYS_RECVMSG: usize = 212;
-
-/// 内存管理 (Memory Management)
-pub const SYS_READAHEAD: usize = 213;
-pub const SYS_BRK: usize = 214;
-pub const SYS_MUNMAP: usize = 215;
-pub const SYS_MREMAP: usize = 216;
-
-/// 密钥 (Keys)
-pub const SYS_ADD_KEY: usize = 217;
-pub const SYS_REQUEST_KEY: usize = 218;
-pub const SYS_KEYCTL: usize = 219;
 
 /// 进程创建/执行 (Process Creation/Execution)
 pub const SYS_CLONE: usize = 220;
 pub const SYS_EXECVE: usize = 221;
 
-/// 内存映射与保护 (Memory Mapping and Protection)
-pub const SYS_MMAP: usize = 222;
-pub const SYS_FADVISE64: usize = 223;
-pub const SYS_SWAPON: usize = 224;
-pub const SYS_SWAPOFF: usize = 225;
-pub const SYS_MPROTECT: usize = 226;
-pub const SYS_MSYNC: usize = 227;
-pub const SYS_MLOCK: usize = 228;
-pub const SYS_MUNLOCK: usize = 229;
-pub const SYS_MLOCKALL: usize = 230;
-pub const SYS_MUNLOCKALL: usize = 231;
-pub const SYS_MINCORE: usize = 232;
-pub const SYS_MADVISE: usize = 233;
-pub const SYS_REMAP_FILE_PAGES: usize = 234;
-
-/// NUMA
-pub const SYS_MBIND: usize = 235;
-pub const SYS_GET_MEMPOLICY: usize = 236;
-pub const SYS_SET_MEMPOLICY: usize = 237;
-pub const SYS_MIGRATE_PAGES: usize = 238;
-pub const SYS_MOVE_PAGES: usize = 239;
-
-/// 信号队列
-pub const SYS_RT_TGSIGQUEUEINFO: usize = 240;
-
-/// 性能事件
-pub const SYS_PERF_EVENT_OPEN: usize = 241;
-
 /// 网络/I/O (续)
 pub const SYS_ACCEPT4: usize = 242;
-pub const SYS_RECVMMSG: usize = 243;
-pub const SYS_ARCH_SPECIFIC_SYSCALL: usize = 244; // RISC-V 架构特定系统调用的基数
 
 /// 进程与控制 (续)
 pub const SYS_WAIT4: usize = 260;
 pub const SYS_PRLIMIT64: usize = 261;
 
-/// 文件通知
-pub const SYS_FANOTIFY_INIT: usize = 262;
-pub const SYS_FANOTIFY_MARK: usize = 263;
-pub const SYS_NAME_TO_HANDLE_AT: usize = 264;
-pub const SYS_OPEN_BY_HANDLE_AT: usize = 265;
+/// 内存管理 (Memory Management)
+pub const SYS_MMAP: usize = 222;
+pub const SYS_MPROTECT: usize = 226;
+pub const SYS_MUNMAP: usize = 215;
+pub const SYS_BRK: usize = 214;
 
-/// 时间
-pub const SYS_CLOCK_ADJTIME: usize = 266;
-
-/// 文件系统同步
+/// 文件系统同步 (续)
 pub const SYS_SYNCFS: usize = 267;
 
-/// 命名空间
-pub const SYS_SETNS: usize = 268;
-
-/// 网络 (续)
-pub const SYS_SENDMMSG: usize = 269;
-
-/// 进程内存访问
-pub const SYS_PROCESS_VM_READV: usize = 270;
-pub const SYS_PROCESS_VM_WRITEV: usize = 271;
-
-/// 内核比较
-pub const SYS_KCMP: usize = 272;
-pub const SYS_FINIT_MODULE: usize = 273;
-
 /// 调度 (续)
-pub const SYS_SCHED_SETATTR: usize = 274;
-pub const SYS_SCHED_GETATTR: usize = 275;
 pub const SYS_RENAMEAT2: usize = 276;
-pub const SYS_SECCOMP: usize = 277;
 
 /// 随机数与内存文件
 pub const SYS_GETRANDOM: usize = 278;
-pub const SYS_MEMFD_CREATE: usize = 279;
 
-/// BPF
-pub const SYS_BPF: usize = 280;
-
-/// 进程执行
-pub const SYS_EXECVEAT: usize = 281;
-
-/// 内存故障处理
-pub const SYS_USERFAULTFD: usize = 282;
-pub const SYS_MEMBARRIER: usize = 283;
-pub const SYS_MLOCK2: usize = 284;
-pub const SYS_COPY_FILE_RANGE: usize = 285;
-pub const SYS_PREADV2: usize = 286;
-pub const SYS_PWRITEV2: usize = 287;
-
-/// 内存保护密钥
-pub const SYS_PKEY_MPROTECT: usize = 288;
-pub const SYS_PKEY_ALLOC: usize = 289;
-pub const SYS_PKEY_FREE: usize = 290;
+/// 扩展文件元数据 (Extended File Attributes)
 pub const SYS_STATX: usize = 291;
 
-/// RISC-V 架构特定系统调用
-pub const SYS_SYSRISCV: usize = SYS_ARCH_SPECIFIC_SYSCALL; // 244
-pub const SYS_RISCV_FLUSH_ICACHE: usize = 259; // 244 + 15
-
-/// 获取网络接口地址列表
-/// XXX: Linux RISC-V 中不存在该调用号?
-pub const SYS_GETIFADDRS: usize = 500;
+/// 获取网络接口地址列表 (非标准系统调用)
+pub const SYS_GETIFADDRS: usize = 1000;

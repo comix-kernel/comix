@@ -16,8 +16,8 @@ pub mod trap;
 use crate::hal::virtual_memory::VirtualMemory;
 use crate::mm::address::Ppn;
 use crate::sync::SpinLock;
-use memory::address_space::Riscv64ProcessAddressSpace;
-use memory::mmu::Riscv64KernelAddressSpace;
+use memory::Riscv64ProcessAddressSpace;
+use memory::Riscv64KernelAddressSpace;
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -125,11 +125,11 @@ impl Arch for cpu_ops::Riscv64 {
     }
 
     fn console_putchar(c: u8) {
-        lib::sbi::console_putchar(c as usize);
+        lib::console_putchar(c as usize);
     }
 
     fn console_getchar() -> Option<u8> {
-        let ch = lib::sbi::console_getchar();
+        let ch = lib::console_getchar();
         if ch == usize::MAX {
             None
         } else {
@@ -146,7 +146,7 @@ impl Arch for cpu_ops::Riscv64 {
     }
 
     fn power_off() -> ! {
-        lib::sbi::shutdown(false)
+        lib::shutdown(false)
     }
 
     fn restart() -> ! {

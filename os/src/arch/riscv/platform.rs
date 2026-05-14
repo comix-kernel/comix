@@ -48,7 +48,6 @@ pub enum VirtDevice {
     VirtDram,
 }
 
-/// 可扩展尺寸计算（如后续按 CPU 数量调整）
 const fn plic_size(_cpus_x2: usize) -> usize {
     VIRT_PLIC_SIZE
 }
@@ -76,7 +75,7 @@ pub const MMIO: &[(VirtDevice, usize, usize)] = &[
         VirtDevice::VirtAplicM,
         0x0D00_0000,
         aplic_size(VIRT_CPUS_MAX),
-    ), // XXX: 有重叠？QEMU源码如此
+    ),
     (
         VirtDevice::VirtAplicS,
         0x0E00_0000,
@@ -90,7 +89,7 @@ pub const MMIO: &[(VirtDevice, usize, usize)] = &[
     (VirtDevice::VirtImsicS, 0x2800_0000, VIRT_IMSIC_MAX_SIZE),
     (VirtDevice::VirtPcieEcam, 0x3000_0000, 0x1000_0000),
     (VirtDevice::VirtPcieMmio, 0x4000_0000, 0x4000_0000),
-    (VirtDevice::VirtDram, 0x8000_0000, 0), // size 0 表示"由内存探测或外部传入"
+    (VirtDevice::VirtDram, 0x8000_0000, 0),
 ];
 
 /// 查找设备的 (base, size)
@@ -98,4 +97,9 @@ pub fn mmio_of(dev: VirtDevice) -> Option<(usize, usize)> {
     MMIO.iter()
         .find(|(d, _, _)| *d as u32 == dev as u32)
         .map(|(_, b, s)| (*b, *s))
+}
+
+/// 兼容性模块别名
+pub mod virt {
+    pub use super::*;
 }

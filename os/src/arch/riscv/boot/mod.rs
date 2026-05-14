@@ -586,7 +586,7 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
             start_paddr
         );
 
-        let ret = crate::arch::lib::sbi::hart_start(hartid, start_paddr, hartid);
+        let ret = crate::arch::lib::hart_start(hartid, start_paddr, hartid);
         if ret.error != 0 {
             // HSM 不支持或被拒绝等，降级单核/少核而不是 panic
             pr_err!(
