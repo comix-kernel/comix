@@ -41,6 +41,9 @@ pub mod cpu {
 }
 
 pub mod task {
+    use crate::arch::task::ExecStackLayout;
+    use crate::mm::memory_space::MemorySpace;
+
     pub fn setup_stack_layout(
         sp: usize,
         _argv: &[&str],
@@ -53,6 +56,42 @@ pub mod task {
     ) -> (usize, usize, usize, usize) {
         let sp = sp & !(core::mem::size_of::<usize>() - 1);
         (sp - 1024, 0, 0, 0)
+    }
+
+    pub fn setup_exec_stack_layout(
+        _space: &MemorySpace,
+        sp: usize,
+        argv: &[&str],
+        envp: &[&str],
+        phdr_addr: usize,
+        phnum: usize,
+        phent: usize,
+        at_base: usize,
+        at_entry: usize,
+    ) -> ExecStackLayout {
+        let (sp, argc, argv, envp) =
+            setup_stack_layout(sp, argv, envp, phdr_addr, phnum, phent, at_base, at_entry);
+        ExecStackLayout {
+            sp,
+            argc,
+            argv,
+            envp,
+            tls: 0,
+        }
+    }
+
+    pub unsafe fn forkret_restore(
+        tf_ptr: *mut crate::arch::trap::TrapFrame,
+        _is_kernel_thread: bool,
+    ) {
+        unsafe { crate::arch::trap::restore(&*tf_ptr) };
+    }
+
+    pub unsafe fn prepare_user_restore(
+        _tfp: *mut crate::arch::trap::TrapFrame,
+        _initial_pc: usize,
+        _user_sp_high: usize,
+    ) {
     }
 }
 

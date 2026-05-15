@@ -593,24 +593,17 @@ impl MemorySpace {
 
         // 检查架构
         let machine = elf.header.pt2.machine().as_machine();
-        #[cfg(target_arch = "riscv64")]
-        if machine != xmas_elf::header::Machine::RISC_V {
-            crate::pr_err!(
-                "[from_elf] machine mismatch: expected RISC-V, got {:?}",
-                machine
-            );
-            return Err(PagingError::InvalidAddress);
-        }
-        #[cfg(target_arch = "loongarch64")]
+        let machine_number = match machine {
+            xmas_elf::header::Machine::RISC_V => Some(crate::arch::abi::EM_RISCV),
+            xmas_elf::header::Machine::Other(value) => Some(value),
+            _ => None,
+        };
+        if !machine_number
+            .map(crate::arch::abi::is_supported_elf_machine)
+            .unwrap_or(false)
         {
-            const EM_LOONGARCH: u16 = 258;
-            if machine != xmas_elf::header::Machine::Other(EM_LOONGARCH) {
-                crate::pr_err!(
-                    "[from_elf] machine mismatch: expected LoongArch (EM=258), got {:?}",
-                    machine
-                );
-                return Err(PagingError::InvalidAddress);
-            }
+            crate::pr_err!("[from_elf] machine mismatch: got {:?}", machine);
+            return Err(PagingError::InvalidAddress);
         }
 
         // 对 ET_DYN (PIE/static-pie) 采用固定 load bias，避免把可执行映射放到 VA=0。
@@ -730,14 +723,11 @@ impl MemorySpace {
             }
         }
 
-        // 1.5 对静态 PIE/PIE 应用最小化重定位：R_RISCV_RELATIVE
+        // 1.5 对静态 PIE/PIE 应用最小化重定位：RELATIVE/64
         //
-        // 典型的 riscv64 static-pie（如 data/bin/iperf3）会把 GOT/函数指针以 0 填充，
+        // 典型的 static-pie（如 data/bin/iperf3）会把 GOT/函数指针以 0 填充，
         // 依赖 .rela.dyn 的 RELATIVE relocations 在加载时写入正确地址。
         // 如果不做这一步，程序往往会在某个间接调用点跳到 sepc=0 执行到 ELF header。
-        const R_RISCV_64: u32 = 2;
-        const R_RISCV_RELATIVE: u32 = 3;
-
         enum Symtab64<'a> {
             Dyn(&'a [xmas_elf::symbol_table::DynEntry64]),
             Std(&'a [xmas_elf::symbol_table::Entry64]),
@@ -791,14 +781,23 @@ impl MemorySpace {
 
                 let target_va = load_bias + r_offset;
 
-                let value = match r_type {
-                    R_RISCV_RELATIVE => (load_bias as isize + addend) as usize,
-                    R_RISCV_64 => {
-                        let sym_val = if r_sym == 0 {
-                            0usize
+                let kind = match crate::arch::abi::classify_relocation(r_type) {
+                    Some(kind) => kind,
+                    None => {
+                        pr_err!("[ELF] Unsupported relocation type: {}", r_type);
+                        return Err(PagingError::InvalidAddress);
+                    }
+                };
+                let sym_val = match kind {
+                    crate::arch::abi::RelocationKind::Relative => 0,
+                    crate::arch::abi::RelocationKind::Absolute64 => {
+                        if r_sym == 0 {
+                            0
                         } else {
                             let Some(symtab) = symtab.as_ref() else {
-                                pr_err!("[ELF] R_RISCV_64 requires symtab, but sh_link is missing");
+                                pr_err!(
+                                    "[ELF] absolute relocation requires symtab, but sh_link is missing"
+                                );
                                 return Err(PagingError::InvalidAddress);
                             };
                             match symtab {
@@ -811,15 +810,11 @@ impl MemorySpace {
                                         as usize
                                 }
                             }
-                        };
-                        let s = load_bias + sym_val;
-                        (s as isize + addend) as usize
-                    }
-                    _ => {
-                        pr_err!("[ELF] Unsupported relocation type: {}", r_type);
-                        return Err(PagingError::InvalidAddress);
+                        }
                     }
                 };
+                let value =
+                    crate::arch::abi::resolve_relocation_value(kind, load_bias, sym_val, addend);
 
                 write_usize_at(target_va, value)?;
             }

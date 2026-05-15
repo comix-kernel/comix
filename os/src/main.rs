@@ -37,8 +37,6 @@ mod security;
 mod vfs;
 
 use crate::arch::Platform;
-#[cfg(target_arch = "loongarch64")]
-use core::arch::asm;
 use core::panic::PanicInfo;
 #[cfg(test)]
 use test::test_runner;

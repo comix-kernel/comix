@@ -169,6 +169,29 @@ impl TrapFrame {
         );
     }
 
+    /// 设置用户态 TrapFrame（架构无关 execve 包装）。
+    pub fn set_exec_trap_frame_from_layout(
+        &mut self,
+        entry: usize,
+        kernel_sp: usize,
+        layout: &crate::arch::task::ExecStackLayout,
+    ) {
+        self.set_exec_trap_frame(
+            entry,
+            layout.sp,
+            kernel_sp,
+            layout.argc,
+            layout.argv,
+            layout.envp,
+            layout.tls,
+        );
+    }
+
+    /// 设置用户态 TLS/thread pointer。
+    pub fn set_tls(&mut self, tls: usize) {
+        self.regs[2] = tls;
+    }
+
     /// 设置克隆线程的 TrapFrame
     pub unsafe fn set_clone_trap_frame(
         &mut self,

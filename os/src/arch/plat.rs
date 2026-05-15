@@ -28,7 +28,9 @@ pub trait Platform: VirtualMemory {
 
     /// 物理地址 → 虚拟地址（直接映射区域）
     fn paddr_to_vaddr(paddr: usize) -> usize {
-        paddr + Self::PAGE_OFFSET
+        paddr
+            .checked_add(Self::PAGE_OFFSET)
+            .expect("paddr_to_vaddr: direct-map address overflow")
     }
 
     /// 虚拟地址 → 物理地址（直接映射区域）
@@ -36,6 +38,10 @@ pub trait Platform: VirtualMemory {
     /// # Safety
     /// 调用者需确保 `vaddr` 处于直接映射范围内。
     unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
+        assert!(
+            vaddr >= Self::PAGE_OFFSET,
+            "vaddr_to_paddr: address is below direct-map base"
+        );
         vaddr - Self::PAGE_OFFSET
     }
 

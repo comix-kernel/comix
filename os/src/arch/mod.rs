@@ -12,10 +12,12 @@
 
 // ---- trait 定义 ----
 
+pub mod abi;
 pub mod address;
 pub mod arch;
 pub mod cpu_ops;
 pub mod plat;
+pub mod task;
 pub mod virtual_memory;
 
 pub use arch::Arch;

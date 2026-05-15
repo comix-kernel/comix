@@ -205,24 +205,44 @@ mod mock_arch_impl {
 
         unsafe fn context_switch(_old: *mut Self::UserContext, _new: *const Self::UserContext) {}
 
-        unsafe fn copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
+        unsafe fn copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
+            if len != 0 && (src == 0 || dst.is_null()) {
+                return Err(());
+            }
+            unsafe { core::ptr::copy_nonoverlapping(src as *const u8, dst, len) };
             Ok(())
         }
 
-        unsafe fn try_copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
-            Ok(())
+        unsafe fn try_copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
+            unsafe { Self::copy_from_user(src, dst, len) }
         }
 
-        unsafe fn copy_to_user(_src: *const u8, _dst: usize, _len: usize) -> Result<(), ()> {
+        unsafe fn copy_to_user(src: *const u8, dst: usize, len: usize) -> Result<(), ()> {
+            if len != 0 && (src.is_null() || dst == 0) {
+                return Err(());
+            }
+            unsafe { core::ptr::copy_nonoverlapping(src, dst as *mut u8, len) };
             Ok(())
         }
 
         unsafe fn copy_strn_from_user(
-            _src: usize,
-            _dst: *mut u8,
-            _max_len: usize,
+            src: usize,
+            dst: *mut u8,
+            max_len: usize,
         ) -> Result<usize, ()> {
-            Ok(0)
+            if max_len != 0 && (src == 0 || dst.is_null()) {
+                return Err(());
+            }
+            let mut i = 0;
+            while i < max_len {
+                let byte = unsafe { core::ptr::read((src + i) as *const u8) };
+                unsafe { *dst.add(i) = byte };
+                if byte == 0 {
+                    return Ok(i);
+                }
+                i += 1;
+            }
+            Ok(max_len)
         }
 
         fn name() -> &'static str {
