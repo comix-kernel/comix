@@ -324,8 +324,10 @@ impl MappingArea {
 
                         // 复制数据到新帧
                         unsafe {
-                            let src_va = crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                            let dst_va = crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
+                            let src_va =
+                                crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                            let dst_va =
+                                crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
 
                             core::ptr::copy_nonoverlapping(
                                 src_va as *const u8,
@@ -359,8 +361,10 @@ impl MappingArea {
 
                             // 复制数据到新帧
                             unsafe {
-                                let src_va = crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                                let dst_va = crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
+                                let src_va =
+                                    crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
+                                let dst_va =
+                                    crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
 
                                 core::ptr::copy_nonoverlapping(
                                     src_va as *const u8,

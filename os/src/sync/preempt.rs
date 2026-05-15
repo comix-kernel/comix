@@ -8,8 +8,8 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::arch::ArchImpl;
-use crate::config::MAX_CPU_COUNT;
 use crate::arch::CpuOps;
+use crate::config::MAX_CPU_COUNT;
 
 /// 缓存行对齐的原子计数器
 #[repr(align(64))]

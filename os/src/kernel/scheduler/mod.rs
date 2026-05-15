@@ -8,9 +8,9 @@ mod wait_queue;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
+    arch::Arch,
     arch::kernel::context::Context,
     config::MAX_CPU_COUNT,
-    arch::Arch,
     kernel::{TaskState, TaskStruct, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
     sync::{SpinLock, SpinLockGuard},
 };

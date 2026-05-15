@@ -32,7 +32,7 @@ pub mod cpu {
     pub fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
         if trap_frame_ptr != 0 {
             unsafe {
-                if let Some(tf) = (trap_frame_ptr as *mut super::trap::TrapFrame).as_mut() {
+                if let Some(tf) = (trap_frame_ptr as *mut crate::arch::trap::TrapFrame).as_mut() {
                     tf.cpu_ptr = cpu_ptr;
                 }
             }

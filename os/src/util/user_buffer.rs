@@ -6,8 +6,8 @@
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
-use crate::arch::constant::USER_TOP;
 use crate::arch::Arch;
+use crate::arch::constant::USER_TOP;
 
 /// 向用户空间写入数据
 /// # 参数
@@ -34,12 +34,8 @@ pub fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
     let size = core::mem::size_of::<T>();
     let mut val = MaybeUninit::<T>::uninit();
     unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            user_ptr as usize,
-            val.as_mut_ptr() as *mut u8,
-            size,
-        )
-        .ok();
+        crate::arch::ArchImpl::copy_from_user(user_ptr as usize, val.as_mut_ptr() as *mut u8, size)
+            .ok();
         val.assume_init()
     }
 }
@@ -71,12 +67,8 @@ impl UserBuffer {
         let mut vec = Vec::with_capacity(self.len);
         unsafe {
             vec.set_len(self.len);
-            crate::arch::ArchImpl::copy_from_user(
-                self.data as usize,
-                vec.as_mut_ptr(),
-                self.len,
-            )
-            .ok();
+            crate::arch::ArchImpl::copy_from_user(self.data as usize, vec.as_mut_ptr(), self.len)
+                .ok();
         }
         vec
     }

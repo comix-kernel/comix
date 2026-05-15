@@ -1,7 +1,7 @@
 //! 工具函数模块 - UTS 命名空间
 
-use crate::arch::ArchImpl;
 use crate::arch::Arch;
+use crate::arch::ArchImpl;
 
 /// UTS 名称最大长度
 pub const UTS_NAME_LEN: usize = 65;

@@ -9,7 +9,7 @@ use crate::{
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Fn()]) {
-    use crate::arch::Arch;
+    use crate::arch::Platform;
     use crate::{earlyprintln, test::macros::TEST_FAILED};
     use core::sync::atomic::Ordering;
     earlyprintln!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());

@@ -6,8 +6,8 @@
 //! 页码是地址空间中页 (Page) 的索引，它将内存管理抽象与底层硬件地址解耦。
 
 use crate::config::PAGE_SIZE;
-use crate::mm::address::types::{Address, Paddr, Vaddr};
 use crate::mm::address::operations::{AlignOps, CalcOps, UsizeConvert};
+use crate::mm::address::types::{Address, Paddr, Vaddr};
 use core::ops::Range;
 
 /// [PageNum] Trait

@@ -4,6 +4,7 @@
 //! 以及与 CPU 相关的操作
 //! 实现内核的核心功能
 
+pub mod boot;
 mod cpu;
 mod scheduler;
 mod task;

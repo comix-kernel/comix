@@ -1,13 +1,11 @@
-//! Arch trait 实现生成宏
+//! Arch / Platform trait 实现生成宏
 //!
-//! 为不同架构生成 `VirtualMemory` 和 `Arch` 的通用方法实现。
-//! 两个架构的绝大多数方法完全相同，仅 `restart` 有架构差异。
+//! 为不同架构生成 `VirtualMemory`、`Arch` 和 `Platform` 的通用方法实现。
+//! 两个架构的绝大多数方法完全相同，可通过宏复用。
 
-/// 为指定架构生成 `VirtualMemory` impl 和 `Arch` impl 的通用方法。
-///
-/// `restart` 方法不在此宏中生成——每个架构需单独提供。
+/// 为指定架构生成 `VirtualMemory` impl 和 `Arch` impl。
 #[macro_export]
-macro_rules! impl_arch_common {
+macro_rules! impl_arch {
     ($arch:ty, $process_space:ty, $kernel_space:ty) => {
         use $crate::arch::virtual_memory::VirtualMemory;
         use $crate::mm::address::Ppn;
@@ -39,18 +37,11 @@ macro_rules! impl_arch_common {
                 ctx
             }
 
-            unsafe fn context_switch(
-                old: *mut Self::UserContext,
-                new: *const Self::UserContext,
-            ) {
+            unsafe fn context_switch(old: *mut Self::UserContext, new: *const Self::UserContext) {
                 unsafe { kernel::switch(old, new) };
             }
 
-            unsafe fn copy_from_user(
-                src: usize,
-                dst: *mut u8,
-                len: usize,
-            ) -> Result<(), ()> {
+            unsafe fn copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
                 if src > constant::USER_TOP
                     || src.checked_add(len).ok_or(())? > constant::USER_TOP + 1
                 {
@@ -61,19 +52,11 @@ macro_rules! impl_arch_common {
                 Ok(())
             }
 
-            unsafe fn try_copy_from_user(
-                src: usize,
-                dst: *mut u8,
-                len: usize,
-            ) -> Result<(), ()> {
+            unsafe fn try_copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
                 unsafe { Self::copy_from_user(src, dst, len) }
             }
 
-            unsafe fn copy_to_user(
-                src: *const u8,
-                dst: usize,
-                len: usize,
-            ) -> Result<(), ()> {
+            unsafe fn copy_to_user(src: *const u8, dst: usize, len: usize) -> Result<(), ()> {
                 if dst > constant::USER_TOP
                     || dst.checked_add(len).ok_or(())? > constant::USER_TOP + 1
                 {
@@ -95,8 +78,7 @@ macro_rules! impl_arch_common {
                 let _guard = trap::SumGuard::new();
                 let mut i = 0;
                 while i < max_len {
-                    let byte =
-                        unsafe { core::ptr::read_volatile((src + i) as *const u8) };
+                    let byte = unsafe { core::ptr::read_volatile((src + i) as *const u8) };
                     unsafe { *dst.add(i) = byte };
                     if byte == 0 {
                         return Ok(i);
@@ -131,6 +113,20 @@ macro_rules! impl_arch_common {
                 constant::ARCH
             }
 
+            fn cpu_count() -> usize {
+                unsafe { $crate::kernel::NUM_CPU }
+            }
+        }
+    };
+}
+
+/// 为指定架构生成 `Platform` impl。
+///
+/// 此宏依赖 `lib` 和 `device` 模块提供底层实现。
+#[macro_export]
+macro_rules! impl_platform {
+    ($arch:ty) => {
+        impl $crate::arch::plat::Platform for $arch {
             fn console_putchar(c: u8) {
                 lib::console_putchar(c as usize);
             }
@@ -142,10 +138,6 @@ macro_rules! impl_arch_common {
                 } else {
                     Some(ch as u8)
                 }
-            }
-
-            fn cpu_count() -> usize {
-                unsafe { $crate::kernel::NUM_CPU }
             }
 
             fn get_cmdline() -> Option<alloc::string::String> {

@@ -1,21 +1,27 @@
 //! Arch trait — 顶层架构抽象
 //!
 //! 组合 `CpuOps + VirtualMemory`，并添加进程管理、信号处理、
-//! 用户/内核内存复制、系统信息、电源管理等高层操作。
+//! 用户/内核内存复制等高层 CPU/MMU 操作。
+//!
+//! 平台级操作（控制台 I/O、电源管理、地址映射）已移至 [`crate::arch::platform::Platform`]。
 //!
 //! 注意：此 trait 使用关联类型来避免直接引用内核数据结构，
 //! 确保架构层与内核其余部分的解耦。
 
 use crate::arch::cpu_ops::CpuOps;
 use crate::arch::virtual_memory::VirtualMemory;
+
 /// 顶层架构抽象 trait。
 ///
 /// 组合了 `CpuOps` 和 `VirtualMemory`，并添加了进程管理、信号处理、
-/// 用户/内核内存复制等高层架构特定操作。
+/// 用户/内核内存复制、时间、IPI 等架构级操作。
 ///
 /// # 移植要点
 ///
 /// 这是移植新架构时需要实现的第三个 trait（在 `CpuOps` 和 `VirtualMemory` 之后）。
+/// [`Platform`] 应同时实现以覆盖控制台、电源等平台操作。
+///
+/// [`Platform`]: crate::arch::platform::Platform
 pub trait Arch: CpuOps + VirtualMemory {
     /// 用户上下文类型（保存/恢复寄存器状态）
     type UserContext: Sized + Send + Sync + Clone;
@@ -66,16 +72,6 @@ pub trait Arch: CpuOps + VirtualMemory {
     /// 同上
     unsafe fn copy_strn_from_user(src: usize, dst: *mut u8, max_len: usize) -> Result<usize, ()>;
 
-    // ---- 控制台 I/O ----
-
-    /// 向调试控制台输出一个字节
-    fn console_putchar(c: u8);
-
-    /// 从调试控制台读取一个字节（非阻塞）
-    ///
-    /// 返回 `None` 表示没有可用输入。
-    fn console_getchar() -> Option<u8>;
-
     // ---- 系统信息 ----
 
     /// 架构名称（如 "riscv64", "loongarch64"）
@@ -83,11 +79,6 @@ pub trait Arch: CpuOps + VirtualMemory {
 
     /// CPU 核心数量
     fn cpu_count() -> usize;
-
-    /// 获取内核命令行参数
-    fn get_cmdline() -> Option<alloc::string::String>;
-
-    // ---- 电源管理 ----
 
     // ---- 任务切换辅助 ----
 
@@ -115,27 +106,4 @@ pub trait Arch: CpuOps + VirtualMemory {
 
     /// 向目标 CPU 发送重调度 IPI
     fn send_reschedule_ipi(target_cpu: usize);
-
-    // ---- 地址翻译 ----
-
-    /// 物理地址 → 虚拟地址（直接映射区域）
-    fn paddr_to_vaddr(paddr: usize) -> usize {
-        paddr + Self::PAGE_OFFSET
-    }
-
-    /// 虚拟地址 → 物理地址（直接映射区域）
-    ///
-    /// # Safety
-    /// 调用者需确保 `vaddr` 处于直接映射范围内。
-    unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
-        vaddr - Self::PAGE_OFFSET
-    }
-
-    // ---- 电源管理 ----
-
-    /// 关机，永不返回
-    fn power_off() -> !;
-
-    /// 重启，永不返回
-    fn restart() -> !;
 }
