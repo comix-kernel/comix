@@ -815,7 +815,10 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
 
         let result = {
             let mut kernel_buf = alloc::vec![0u8; len];
-            unsafe { crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), len).ok(); }
+            unsafe {
+                crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), len)
+                    .ok();
+            }
             file.write(&kernel_buf)
         };
 
@@ -869,7 +872,10 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
             let mut kernel_buf = alloc::vec![0u8; len];
             match file.read(&mut kernel_buf) {
                 Ok(n) => {
-                    unsafe { crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok(); }
+                    unsafe {
+                        crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n)
+                            .ok();
+                    }
                     Ok(n)
                 }
                 Err(e) => Err(e),
@@ -921,7 +927,9 @@ fn copy_c_str_from_user(ptr: *const c_char) -> Option<String> {
         return None;
     }
     let mut buf = [0u8; 256];
-    match unsafe { crate::arch::ArchImpl::copy_strn_from_user(ptr as usize, buf.as_mut_ptr(), buf.len()) } {
+    match unsafe {
+        crate::arch::ArchImpl::copy_strn_from_user(ptr as usize, buf.as_mut_ptr(), buf.len())
+    } {
         Ok(len) if len > 0 => {
             let s = core::str::from_utf8(&buf[..len]).ok()?;
             Some(s.to_string())
@@ -972,7 +980,9 @@ fn get_interface_stats(ifname: *const c_char, stats: *mut u8, size: usize) -> is
 
     // 清零整个统计结构 (struct rtnl_link_stats64)
     let zero_buf = alloc::vec![0u8; size];
-    unsafe { crate::arch::ArchImpl::copy_to_user(zero_buf.as_ptr(), stats as usize, size).ok(); }
+    unsafe {
+        crate::arch::ArchImpl::copy_to_user(zero_buf.as_ptr(), stats as usize, size).ok();
+    }
 
     0 // 成功
 }
@@ -1157,7 +1167,9 @@ pub fn getifaddrs(ifap: *mut *mut u8) -> isize {
     // 最后一个节点的 next 指针已经填充为 0（初始化时）
 
     // 复制整个结构到用户空间
-    unsafe { crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), user_mem_start, total_size).ok(); }
+    unsafe {
+        crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), user_mem_start, total_size).ok();
+    }
 
     // 返回第一个 ifaddrs 的地址给用户
     write_to_user(ifap, first_ifaddrs_addr as *mut u8);
@@ -1405,7 +1417,9 @@ pub fn getsockopt(
                 // Return a dummy congestion control name. iperf3 mainly uses this for display.
                 let cc = b"cubic\0";
                 let n = core::cmp::min(available_len, cc.len());
-                unsafe { crate::arch::ArchImpl::copy_to_user(cc.as_ptr(), optval as usize, n).ok(); }
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(cc.as_ptr(), optval as usize, n).ok();
+                }
                 written_len = n;
             }
             TCP_INFO => {
@@ -1413,7 +1427,9 @@ pub fn getsockopt(
                 let info = TcpInfo::dummy_established();
                 let src = &info as *const TcpInfo as *const u8;
                 let n = core::cmp::min(available_len, core::mem::size_of::<TcpInfo>());
-                unsafe { crate::arch::ArchImpl::copy_to_user(src, optval as usize, n).ok(); }
+                unsafe {
+                    crate::arch::ArchImpl::copy_to_user(src, optval as usize, n).ok();
+                }
                 written_len = n;
             }
             _ => return -(ENOPROTOOPT as isize),
@@ -1499,7 +1515,9 @@ pub fn sendto(
     use crate::net::socket::socket_sendto;
     let result = {
         let mut kernel_buf = alloc::vec![0u8; len];
-        unsafe { crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), len).ok(); }
+        unsafe {
+            crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), len).ok();
+        }
         socket_sendto(handle, &kernel_buf, endpoint)
     };
     match result {
@@ -1547,7 +1565,10 @@ pub fn recvfrom(
             let mut kernel_buf = alloc::vec![0u8; len];
             match file.recvfrom(&mut kernel_buf) {
                 Ok((n, addr)) => {
-                    unsafe { crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok(); }
+                    unsafe {
+                        crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n)
+                            .ok();
+                    }
                     Ok((n, addr))
                 }
                 Err(e) => Err(e),
@@ -1559,7 +1580,14 @@ pub fn recvfrom(
                 if !src_addr.is_null() && !addrlen.is_null() {
                     let user_addrlen = read_from_user(addrlen as *const u32) as usize;
                     let copy_len = user_addrlen.min(addr_buf.len());
-                    unsafe { crate::arch::ArchImpl::copy_to_user(addr_buf.as_ptr(), src_addr as usize, copy_len).ok(); }
+                    unsafe {
+                        crate::arch::ArchImpl::copy_to_user(
+                            addr_buf.as_ptr(),
+                            src_addr as usize,
+                            copy_len,
+                        )
+                        .ok();
+                    }
                     write_to_user(addrlen, copy_len as u32);
                 }
                 pr_debug!(

@@ -36,7 +36,7 @@ impl TestEnvGuard {
             TestEnvironment::None => {}
             TestEnvironment::Interrupt(_handler) => {
                 crate::arch::enable_interrupts();
-            },
+            }
         }
 
         guard

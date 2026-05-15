@@ -10,7 +10,7 @@ use crate::arch::arch::Arch;
 use crate::arch::cpu_ops::CpuOps;
 use crate::arch::virtual_memory::{
     KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions, UserAddressSpace,
-    VirtualMemory, VirtMemoryRegion,
+    VirtMemoryRegion, VirtualMemory,
 };
 use crate::sync::SpinLock;
 
@@ -192,6 +192,7 @@ impl VirtualMemory for MockArch {
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 mod mock_arch_impl {
     use super::*;
+    use crate::arch::plat::Platform;
 
     impl Arch for MockArch {
         type UserContext = MockUserContext;
@@ -232,16 +233,6 @@ mod mock_arch_impl {
             1
         }
 
-        fn get_cmdline() -> Option<alloc::string::String> {
-            None
-        }
-
-        fn console_putchar(_c: u8) {}
-
-        fn console_getchar() -> Option<u8> {
-            None
-        }
-
         fn on_task_switch(_trap_frame_ptr: usize, _cpu_ptr: usize) {}
 
         fn get_ticks() -> usize {
@@ -261,6 +252,18 @@ mod mock_arch_impl {
         }
 
         fn send_reschedule_ipi(_target_cpu: usize) {}
+    }
+
+    impl Platform for MockArch {
+        fn console_putchar(_c: u8) {}
+
+        fn console_getchar() -> Option<u8> {
+            None
+        }
+
+        fn get_cmdline() -> Option<alloc::string::String> {
+            None
+        }
 
         fn power_off() -> ! {
             loop {

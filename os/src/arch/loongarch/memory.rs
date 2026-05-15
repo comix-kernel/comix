@@ -4,4 +4,7 @@
 
 use crate::impl_virtual_memory;
 
-impl_virtual_memory!(LoongArch64ProcessAddressSpace, LoongArch64KernelAddressSpace);
+impl_virtual_memory!(
+    LoongArch64ProcessAddressSpace,
+    LoongArch64KernelAddressSpace
+);

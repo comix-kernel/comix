@@ -345,8 +345,10 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
     }
 
     let mut buf = [0u8; SOCKADDR_IN_SIZE];
-    unsafe { crate::arch::ArchImpl::copy_from_user(addr as usize, buf.as_mut_ptr(), SOCKADDR_IN_SIZE) }
-        .map_err(|_| ())?;
+    unsafe {
+        crate::arch::ArchImpl::copy_from_user(addr as usize, buf.as_mut_ptr(), SOCKADDR_IN_SIZE)
+    }
+    .map_err(|_| ())?;
 
     let family = u16::from_ne_bytes([buf[0], buf[1]]);
     if family != AF_INET {
@@ -415,7 +417,8 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
     let mut tmp = [0u8; SOCKADDR_IN_SIZE];
     write_sockaddr_in_to_buf(&mut tmp, endpoint)?;
     let n = core::cmp::min(len, SOCKADDR_IN_SIZE);
-    unsafe { crate::arch::ArchImpl::copy_to_user(tmp.as_ptr(), addr as usize, n) }.map_err(|_| ())?;
+    unsafe { crate::arch::ArchImpl::copy_to_user(tmp.as_ptr(), addr as usize, n) }
+        .map_err(|_| ())?;
 
     Ok(())
 }

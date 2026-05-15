@@ -6,7 +6,6 @@ use crate::arch::Arch;
 use alloc::string::ToString;
 
 use crate::{
-    util::user_buffer::write_to_user,
     kernel::{
         current_task,
         syscall::util::{
@@ -19,6 +18,7 @@ use crate::{
         fs::{AtFlags, F_OK, FileSystemType, LinuxStatFs, R_OK, W_OK, X_OK},
         time::TimeSpec,
     },
+    util::user_buffer::write_to_user,
     vfs::{
         DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, Statx,
         split_path, vfs_lookup,
@@ -321,7 +321,8 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
 
     // 复制到用户态缓冲区
     unsafe {
-        crate::arch::ArchImpl::copy_to_user(path_bytes.as_ptr(), buf as usize, path_bytes.len()).ok();
+        crate::arch::ArchImpl::copy_to_user(path_bytes.as_ptr(), buf as usize, path_bytes.len())
+            .ok();
         write_to_user(buf.add(path_bytes.len()), 0u8);
     }
 
@@ -630,7 +631,8 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
     unsafe {
-        crate::arch::ArchImpl::copy_to_user(target.as_bytes().as_ptr(), buf as usize, bytes_read).ok();
+        crate::arch::ArchImpl::copy_to_user(target.as_bytes().as_ptr(), buf as usize, bytes_read)
+            .ok();
     }
 
     bytes_read as isize

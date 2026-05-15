@@ -13,10 +13,12 @@ pub mod platform;
 pub mod timer;
 pub mod trap;
 
-use crate::impl_arch_common;
+use crate::{impl_arch, impl_platform};
 
-impl_arch_common!(
+impl_arch!(
     cpu_ops::LoongArch64,
     memory::LoongArch64ProcessAddressSpace,
     memory::LoongArch64KernelAddressSpace
 );
+
+impl_platform!(cpu_ops::LoongArch64);

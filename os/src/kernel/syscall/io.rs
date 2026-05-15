@@ -5,7 +5,9 @@ use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
-use crate::util::user_buffer::{read_from_user, validate_user_ptr, validate_user_ptr_mut, write_to_user};
+use crate::util::user_buffer::{
+    read_from_user, validate_user_ptr, validate_user_ptr_mut, write_to_user,
+};
 use crate::vfs::File;
 
 /// 向文件描述符写入数据
@@ -19,12 +21,8 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 
         let mut kernel_buf = alloc::vec![0u8; count];
         unsafe {
-            crate::arch::ArchImpl::copy_from_user(
-                buf as usize,
-                kernel_buf.as_mut_ptr(),
-                count,
-            )
-            .ok();
+            crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), count)
+                .ok();
         }
 
         let result = match file.write(&kernel_buf) {
@@ -64,12 +62,7 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
         let result = match file.read(&mut kernel_buf) {
             Ok(n) => {
                 unsafe {
-                    crate::arch::ArchImpl::copy_to_user(
-                        kernel_buf.as_ptr(),
-                        buf as usize,
-                        n,
-                    )
-                    .ok();
+                    crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok();
                 }
                 n as isize
             }
@@ -113,7 +106,8 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
             iov as usize,
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
-        ).ok();
+        )
+        .ok();
     }
 
     let task = current_task();
@@ -144,7 +138,8 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
                         kernel_buf.as_ptr(),
                         vec.iov_base as usize,
                         n,
-                    ).ok();
+                    )
+                    .ok();
                 }
                 total_read += n;
                 if n < vec.iov_len {
@@ -181,7 +176,8 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
             iov as usize,
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
-        ).ok();
+        )
+        .ok();
     }
 
     let task = current_task();
@@ -210,7 +206,8 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
                 vec.iov_base as usize,
                 kernel_buf.as_mut_ptr(),
                 vec.iov_len,
-            ).ok();
+            )
+            .ok();
         }
         match file.write(&kernel_buf) {
             Ok(n) => {
@@ -253,11 +250,7 @@ pub fn pread64(fd: usize, buf: *mut u8, count: usize, offset: i64) -> isize {
     match file.read_at(offset as usize, &mut kernel_buf) {
         Ok(n) => {
             unsafe {
-                crate::arch::ArchImpl::copy_to_user(
-                    kernel_buf.as_ptr(),
-                    buf as usize,
-                    n,
-                ).ok();
+                crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok();
             }
             n as isize
         }
@@ -284,11 +277,7 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
 
     let mut kernel_buf = alloc::vec![0u8; count];
     unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            buf as usize,
-            kernel_buf.as_mut_ptr(),
-            count,
-        ).ok();
+        crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), count).ok();
     }
     match file.write_at(offset as usize, &kernel_buf) {
         Ok(n) => n as isize,
@@ -325,7 +314,8 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
             iov as usize,
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
-        ).ok();
+        )
+        .ok();
     }
 
     let mut total_read = 0usize;
@@ -351,7 +341,8 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
                         kernel_buf.as_ptr(),
                         vec.iov_base as usize,
                         n,
-                    ).ok();
+                    )
+                    .ok();
                 }
                 total_read += n;
                 current_offset += n;
@@ -401,7 +392,8 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
             iov as usize,
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
-        ).ok();
+        )
+        .ok();
     }
 
     let mut total_written = 0usize;
@@ -425,7 +417,8 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
                 vec.iov_base as usize,
                 kernel_buf.as_mut_ptr(),
                 vec.iov_len,
-            ).ok();
+            )
+            .ok();
         }
         match file.write_at(current_offset, &kernel_buf) {
             Ok(n) => {
@@ -586,7 +579,8 @@ fn poll_with_timeout(
                 return -(EINVAL as isize);
             }
             let duration_ns = (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64;
-            let duration_ticks = (duration_ns * crate::arch::clock_freq() as u64 / 1_000_000_000) as usize;
+            let duration_ticks =
+                (duration_ns * crate::arch::clock_freq() as u64 / 1_000_000_000) as usize;
             Some(crate::arch::get_time() + duration_ticks)
         }
     };
@@ -606,7 +600,8 @@ fn poll_with_timeout(
                     fds,
                     pollfds_buf.as_mut_ptr() as *mut u8,
                     size,
-                ).ok();
+                )
+                .ok();
             }
 
             for pollfd in pollfds_buf.iter_mut() {
@@ -640,11 +635,8 @@ fn poll_with_timeout(
 
             // Write revents back to user space
             unsafe {
-                crate::arch::ArchImpl::copy_to_user(
-                    pollfds_buf.as_ptr() as *const u8,
-                    fds,
-                    size,
-                ).ok();
+                crate::arch::ArchImpl::copy_to_user(pollfds_buf.as_ptr() as *const u8, fds, size)
+                    .ok();
             }
         }
 
@@ -698,7 +690,8 @@ pub fn ppoll(fds: usize, nfds: usize, timeout: usize, _sigmask: usize) -> isize 
     let timeout_spec = if timeout == 0 {
         None
     } else {
-        let ts: crate::uapi::time::TimeSpec = read_from_user(timeout as *const crate::uapi::time::TimeSpec);
+        let ts: crate::uapi::time::TimeSpec =
+            read_from_user(timeout as *const crate::uapi::time::TimeSpec);
         if ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
             return -(EINVAL as isize);
         }

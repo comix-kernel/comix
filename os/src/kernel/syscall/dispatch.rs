@@ -201,7 +201,9 @@ macro_rules! impl_syscall {
     // noreturn, 6 args
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             let a0 = frame.arg0() as $t0;
             let a1 = frame.arg1() as $t1;
             let a2 = frame.arg2() as $t2;
@@ -215,20 +217,26 @@ macro_rules! impl_syscall {
     // noreturn, 0..5 args
     ($sys_name:ident, $kernel:path, noreturn, ()) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(_frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            _frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             $kernel()
         }
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             let a0 = frame.arg0() as $t0;
             $kernel(a0)
         }
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             let a0 = frame.arg0() as $t0;
             let a1 = frame.arg1() as $t1;
             $kernel(a0, a1)
@@ -236,7 +244,9 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             let a0 = frame.arg0() as $t0;
             let a1 = frame.arg1() as $t1;
             let a2 = frame.arg2() as $t2;
@@ -245,7 +255,9 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty, $t3:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             let a0 = frame.arg0() as $t0;
             let a1 = frame.arg1() as $t1;
             let a2 = frame.arg2() as $t2;
@@ -255,7 +267,9 @@ macro_rules! impl_syscall {
     };
     ($sys_name:ident, $kernel:path, noreturn, ($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty)) => {
         #[allow(non_snake_case)]
-        pub fn $sys_name(frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame) -> ! {
+        pub fn $sys_name(
+            frame: &mut impl $crate::kernel::syscall::syscall_frame::SyscallFrame,
+        ) -> ! {
             let a0 = frame.arg0() as $t0;
             let a1 = frame.arg1() as $t1;
             let a2 = frame.arg2() as $t2;

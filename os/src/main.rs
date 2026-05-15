@@ -28,15 +28,15 @@ mod util;
 #[macro_use]
 mod log;
 
-mod mm;
 mod device;
 mod fs;
 mod ipc;
+mod mm;
 mod net;
 mod security;
 mod vfs;
 
-use crate::arch::Arch;
+use crate::arch::Platform;
 #[cfg(target_arch = "loongarch64")]
 use core::arch::asm;
 use core::panic::PanicInfo;

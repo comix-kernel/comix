@@ -16,10 +16,7 @@ mod sealed {
 }
 
 /// 内存地址种类标记 trait（sealed — 外部无法实现）
-pub trait MemKind:
-    sealed::Sealed + Ord + Clone + Copy + PartialEq + Eq + core::fmt::Debug
-{
-}
+pub trait MemKind: sealed::Sealed + Ord + Clone + Copy + PartialEq + Eq + core::fmt::Debug {}
 
 // ============================================================================
 // 地址种类标记类型

@@ -2,8 +2,7 @@ use core::cmp::Ordering;
 
 use crate::arch::platform::MEMORY_END;
 use crate::config::{
-    MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
-    USER_STACK_TOP,
+    MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE, USER_STACK_TOP,
 };
 use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
