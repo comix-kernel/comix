@@ -31,6 +31,16 @@ pub extern "C" fn secondary_debug_entry(hartid: usize) {
 
 /// RISC-V 主核启动入口
 pub fn main(hartid: usize) {
+    // 提前设置 tp 指向一个临时值，确保 mm::init 期间 IntrGuard::new() 调用
+    // CPU::id() 时 tp 已指向有效内存（cpuid = 0）。后续在 CPUS 初始化完成后
+    // 会重新指向真正的 Cpu 结构体。
+    {
+        static BOOT_CPU_DUMMY: usize = 0;
+        unsafe {
+            core::arch::asm!("mv tp, {}", in(reg) &raw const BOOT_CPU_DUMMY);
+        }
+    }
+
     kernel::boot::clear_bss();
 
     run_early_tests();

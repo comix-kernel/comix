@@ -4,9 +4,7 @@
 //! 故此模块变得相对简单，主要负责适配传统的进程概念与内核任务之间的关系。
 
 use crate::{
-    kernel::{
-        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, notify_parent, wake_up_with_block,
-    },
+    kernel::{SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, notify_parent, wake_up_task},
     uapi::signal::SignalFlags,
 };
 
@@ -77,7 +75,7 @@ pub fn send_signal_process(task: &SharedTask, sig: usize) {
             t.state == TaskState::Interruptible && !t.blocked.contains(flag)
         };
         if should_wake {
-            wake_up_with_block(thr);
+            wake_up_task(thr);
             break;
         }
     }

@@ -13,12 +13,13 @@ use crate::sync::intr_guard::IntrGuard;
 use core::{
     hint,
     marker::PhantomData,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 /// 自旋锁结构体，提供互斥访问临界区的能力。
 pub struct RawSpinLock<CPU: CpuOps = ArchImpl> {
     lock: AtomicBool,
+    saved_intr_flags: AtomicUsize,
     _marker: PhantomData<CPU>,
 }
 
@@ -34,6 +35,7 @@ impl<CPU: CpuOps> RawSpinLock<CPU> {
     pub const fn new() -> Self {
         RawSpinLock {
             lock: AtomicBool::new(false),
+            saved_intr_flags: AtomicUsize::new(0),
             _marker: PhantomData,
         }
     }
@@ -103,6 +105,52 @@ impl<CPU: CpuOps> Drop for RawSpinLockGuard<'_, CPU> {
         self.lock.unlock();
     }
 }
+
+unsafe impl<CPU: CpuOps> lock_api::RawMutex for RawSpinLock<CPU> {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = Self::new();
+
+    type GuardMarker = lock_api::GuardNoSend;
+
+    fn lock(&self) {
+        let flags = CPU::disable_interrupts();
+
+        while self
+            .lock
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+
+        self.saved_intr_flags.store(flags, Ordering::Release);
+    }
+
+    fn try_lock(&self) -> bool {
+        let flags = CPU::disable_interrupts();
+
+        if self
+            .lock
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            self.saved_intr_flags.store(flags, Ordering::Release);
+            true
+        } else {
+            CPU::restore_interrupt_state(flags);
+            false
+        }
+    }
+
+    unsafe fn unlock(&self) {
+        let flags = self.saved_intr_flags.load(Ordering::Acquire);
+        self.lock.store(false, Ordering::Release);
+        CPU::restore_interrupt_state(flags);
+    }
+}
+
+unsafe impl<CPU: CpuOps> Send for RawSpinLock<CPU> {}
+unsafe impl<CPU: CpuOps> Sync for RawSpinLock<CPU> {}
 
 #[cfg(test)]
 mod tests {

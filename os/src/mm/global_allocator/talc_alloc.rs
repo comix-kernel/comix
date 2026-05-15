@@ -8,18 +8,18 @@
 //! - 由链接器符号定义的堆内存区域。
 //! - 用于设置堆的初始化函数。
 
-use crate::{earlyprintln, sync::RawSpinLockWithoutGuard};
+use crate::{earlyprintln, sync::RawSpinLock};
 use talc::{Span, Talc, Talck};
 
 /// 全局堆分配器实例
 ///
-/// 使用 talc 的基于锁的分配器 (**Talck**) 和我们自定义的 **`RawSpinLockWithoutGuard`**。
+/// 使用 talc 的基于锁的分配器 (**Talck**) 和我们自定义的 **`RawSpinLock`**。
 /// 此锁实现了 `lock_api::RawMutex` 并提供了中断保护，
 /// 以防止当中断处理程序尝试分配内存时发生死锁。
 ///
 /// 初始化时使用一个空范围 (**Span::empty()**)；实际内存将在 `init_heap()` 中声明。
 #[global_allocator]
-static ALLOCATOR: Talck<RawSpinLockWithoutGuard, talc::ClaimOnOom> =
+static ALLOCATOR: Talck<RawSpinLock, talc::ClaimOnOom> =
     Talc::new(unsafe { talc::ClaimOnOom::new(Span::empty()) }).lock();
 
 /// 使用链接器脚本中定义的堆内存区域初始化堆分配器

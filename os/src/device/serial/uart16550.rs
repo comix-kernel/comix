@@ -80,11 +80,11 @@ pub fn init(node: &FdtNode) {
         serial_port: SpinLock::new(serial_port),
     });
     DRIVERS.write().push(driver.clone());
-    SERIAL_DRIVERS.write().push(driver.clone());
+    SERIAL_DRIVERS.lock().push(driver.clone());
     uart_console::init(driver);
     pr_info!("[Device] Serial driver (uart16550) is initialized");
 }
 
 pub fn driver_init() {
-    DEVICE_TREE_REGISTRY.write().insert("ns16550a", init);
+    DEVICE_TREE_REGISTRY.lock().insert("ns16550a", init);
 }

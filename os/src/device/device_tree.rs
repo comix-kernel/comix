@@ -5,7 +5,7 @@ use crate::{
     kernel::{CLOCK_FREQ, NUM_CPU},
     mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
     pr_info, pr_warn,
-    sync::RwLock,
+    sync::SpinLock,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 use fdt::{Fdt, node::FdtNode};
@@ -27,14 +27,14 @@ lazy_static::lazy_static! {
     /// Compatible 字符串到探测函数的映射表
     /// 键为设备的 compatible 字符串，值为对应的探测函数
     /// 用于在设备树中查找和初始化设备
-    pub static ref DEVICE_TREE_REGISTRY: RwLock<BTreeMap<&'static str, fn(&FdtNode)>> =
-        RwLock::new(BTreeMap::new());
+    pub static ref DEVICE_TREE_REGISTRY: SpinLock<BTreeMap<&'static str, fn(&FdtNode)>> =
+        SpinLock::new(BTreeMap::new());
 
     /// 设备树中断控制器映射表
     /// 键为中断控制器的 phandle，值为对应的中断控制器驱动程序
     /// 用于在设备树中查找和管理中断控制器
-    pub static ref DEVICE_TREE_INTC: RwLock<BTreeMap<u32, Arc<dyn IntcDriver>>> =
-        RwLock::new(BTreeMap::new());
+    pub static ref DEVICE_TREE_INTC: SpinLock<BTreeMap<u32, Arc<dyn IntcDriver>>> =
+        SpinLock::new(BTreeMap::new());
 }
 
 /// 早期初始化: 只解析 CPU 数量和时钟频率
@@ -110,7 +110,7 @@ fn walk_dt(fdt: &Fdt, intc_only: bool) {
             && node.property("interrupt-controller").is_some() == intc_only
         {
             pr_info!("[Device] Found device: {}", node.name);
-            let registry = DEVICE_TREE_REGISTRY.read();
+            let registry = DEVICE_TREE_REGISTRY.lock();
             for c in compatible.all() {
                 if let Some(f) = registry.get(c) {
                     f(&node);
