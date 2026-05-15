@@ -355,12 +355,13 @@ mod tests {
         kassert!(!rr.run_queue.contains(&t));
     });
 
-    // 时间片更新：手动将 current_slice 置 1，update 后应返回 true 并重置为 time_slice
+    // 时间片更新：手动将 current_slice 置 1，update 后应递减到 0 并报告到期。
+    // update_time_slice 自身不重置时间片，重置由 reset_time_slice 负责。
     test_case!(test_rr_update_time_slice, {
         let mut rr = RRScheduler::new();
-        rr.current_slice = 1; // 直接操纵以触发用尽路径
+        rr.current_slice = 1;
         let expired = rr.update_time_slice();
         kassert!(expired);
-        kassert!(rr.current_slice == rr.time_slice);
+        kassert!(rr.current_slice == 0);
     });
 }

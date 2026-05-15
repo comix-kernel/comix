@@ -1464,7 +1464,7 @@ impl Drop for MemorySpace {
 #[cfg(test)]
 mod memory_space_tests {
     use super::*;
-    use crate::mm::address::{Vpn, VpnRange};
+    use crate::mm::address::{PA, Vpn, VpnRange};
     use crate::mm::page_table::UniversalPTEFlag;
     use crate::{kassert, println, test_case};
 
@@ -1475,10 +1475,12 @@ mod memory_space_tests {
         // 应该已初始化页表
     });
 
-    // 2. 直接映射
+    // 2. 直接映射：VA 必须 >= PAGE_OFFSET，从已知 PA 经 pa_to_va 计算 Vpn
     test_case!(test_direct_mapping, {
         let mut ms = MemorySpace::new();
-        let vpn_range = VpnRange::new(Vpn::from_usize(0x80000), Vpn::from_usize(0x80010));
+        let va_base = crate::arch::pa_to_va(PA::from_usize(0x8000_0000));
+        let vpn_start = Vpn::from_addr_ceil(va_base);
+        let vpn_range = VpnRange::new(vpn_start, Vpn::from_usize(vpn_start.as_usize() + 0x10));
 
         let area = MappingArea::new(
             vpn_range,
@@ -1833,8 +1835,10 @@ mod memory_space_tests {
     test_case!(test_unmap_mmio_wrong_type, {
         let mut ms = MemorySpace::new();
 
-        // 映射一个非MMIO区域
-        let vpn_range = VpnRange::new(Vpn::from_usize(0xb000), Vpn::from_usize(0xb010));
+        // 映射一个非MMIO区域：Direct 映射的 VA 必须 >= PAGE_OFFSET
+        let va_base = crate::arch::pa_to_va(PA::from_usize(0xb000_0000));
+        let vpn_start = Vpn::from_addr_ceil(va_base);
+        let vpn_range = VpnRange::new(vpn_start, Vpn::from_usize(vpn_start.as_usize() + 0x10));
         let area = MappingArea::new(
             vpn_range,
             AreaType::KernelData,
@@ -1847,7 +1851,7 @@ mod memory_space_tests {
         println!("Testing unmap_mmio with wrong area type");
 
         // 尝试用 unmap_mmio 取消映射非MMIO区域
-        let vaddr = Vpn::from_usize(0xb000).start_addr();
+        let vaddr = vpn_start.start_addr();
         let result = ms.unmap_mmio(vaddr, 0x1000);
 
         // 应该返回错误
@@ -2038,7 +2042,7 @@ mod memory_space_tests {
         println!("  Created area with R/W permissions");
 
         // 修改为只读
-        let start = vpn_range.start().start_addr().as_usize();
+        let start = vpn_range.start().start_addr();
         let len = (vpn_range.end().as_usize() - vpn_range.start().as_usize()) * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
 
@@ -2060,17 +2064,25 @@ mod memory_space_tests {
         let mut ms = MemorySpace::new();
 
         // 测试未对齐的地址
-        let result = ms.mprotect(0x1001, PAGE_SIZE, UniversalPTEFlag::user_read());
+        let result = ms.mprotect(
+            VA::from_usize(0x1001),
+            PAGE_SIZE,
+            UniversalPTEFlag::user_read(),
+        );
         kassert!(result.is_err());
         println!("  Correctly rejected unaligned address");
 
         // 测试未映射的区域
-        let result = ms.mprotect(0x5000 * PAGE_SIZE, PAGE_SIZE, UniversalPTEFlag::user_read());
+        let result = ms.mprotect(
+            VA::from_usize(0x5000 * PAGE_SIZE),
+            PAGE_SIZE,
+            UniversalPTEFlag::user_read(),
+        );
         kassert!(result.is_err());
         println!("  Correctly rejected unmapped region");
 
         // 测试 len=0
-        let result = ms.mprotect(0x1000, 0, UniversalPTEFlag::user_read());
+        let result = ms.mprotect(VA::from_usize(0x1000), 0, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
         println!("  Correctly handled len=0");
 
@@ -2108,7 +2120,7 @@ mod memory_space_tests {
         println!("  Created 2 consecutive areas");
 
         // 修改跨越两个区域的权限
-        let start = vpn_range1.start().start_addr().as_usize();
+        let start = vpn_range1.start().start_addr();
         let len = (vpn_range2.end().as_usize() - vpn_range1.start().as_usize()) * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
 
@@ -2138,7 +2150,7 @@ mod memory_space_tests {
         println!("  Created 4-page area with RW permissions");
 
         // 只修改前2页的权限为只读
-        let start = vpn_range.start().start_addr().as_usize();
+        let start = vpn_range.start().start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2188,7 +2200,7 @@ mod memory_space_tests {
         println!("  Created 4-page area with RW permissions");
 
         // 只修改后2页的权限为只读
-        let start = Vpn::from_usize(0x8002).start_addr().as_usize();
+        let start = Vpn::from_usize(0x8002).start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2238,7 +2250,7 @@ mod memory_space_tests {
         println!("  Created 6-page area with RW permissions");
 
         // 只修改中间2页（第2-3页，索引从0开始）的权限为只读
-        let start = Vpn::from_usize(0x9002).start_addr().as_usize();
+        let start = Vpn::from_usize(0x9002).start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2296,7 +2308,7 @@ mod memory_space_tests {
         println!("  Created 4-page area with RW permissions");
 
         // 修改前2页的权限为只读
-        let start = vpn_range.start().start_addr().as_usize();
+        let start = vpn_range.start().start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2351,7 +2363,7 @@ mod memory_space_tests {
         println!("  Created 3-page area with RW permissions");
 
         // 只修改中间1页的权限为只读
-        let start = Vpn::from_usize(0xb001).start_addr().as_usize();
+        let start = Vpn::from_usize(0xb001).start_addr();
         let len = PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());

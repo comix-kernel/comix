@@ -306,13 +306,11 @@ impl ProcInode {
 impl Inode for ProcInode {
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
         let mut meta = self.metadata.lock().clone();
-        // 对符号链接，返回更符合 Linux 预期的 size（目标路径长度）。
+        // 对静态符号链接，返回目标路径长度；动态符号链接的 size 保持创建时的值（动态解析需要 task 上下文）
         if meta.inode_type == InodeType::Symlink {
-            meta.size = match &self.content {
-                ProcInodeContent::Symlink(target) => target.len(),
-                ProcInodeContent::DynamicSymlink(generator) => generator().len(),
-                _ => meta.size,
-            };
+            if let ProcInodeContent::Symlink(target) = &self.content {
+                meta.size = target.len();
+            }
         }
         Ok(meta)
     }
