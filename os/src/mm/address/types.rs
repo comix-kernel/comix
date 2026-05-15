@@ -486,7 +486,7 @@ impl From<crate::arch::address::VA> for Vaddr {
 mod address_basic_tests {
     use super::*;
     // 假设 arch 模块提供了 paddr_to_vaddr 的桩实现
-    use crate::arch::paddr_to_vaddr;
+    use crate::arch::{Platform, PlatformImpl};
     use crate::{kassert, test_case};
 
     // 1.1 Paddr/Vaddr 创建和转换测试
@@ -528,7 +528,7 @@ mod address_basic_tests {
             let vaddr = paddr.to_vaddr();
             let back = vaddr.to_paddr();
             kassert!(back.as_usize() == paddr_val);
-            kassert!(vaddr.as_usize() == paddr_to_vaddr(paddr_val));
+            kassert!(vaddr.as_usize() == PlatformImpl::paddr_to_vaddr(paddr_val));
         }
     });
 
