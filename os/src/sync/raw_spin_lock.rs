@@ -193,7 +193,7 @@ mod tests {
         drop(guard1);
 
         let guard2 = lock.lock();
-        let second_lock_failed = if lock.is_locked() { false } else { true };
+        let second_lock_failed = !lock.is_locked();
 
         kassert!(!second_lock_failed);
         drop(guard2);

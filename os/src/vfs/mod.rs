@@ -173,7 +173,7 @@ pub use impls::{PipeFile, RegFile, create_stdio_files};
 pub use inode::{DirEntry, FileMode, Inode, InodeMetadata, InodeType};
 pub use mount::{MOUNT_TABLE, MountFlags, get_root_dentry};
 pub use path::{
-    normalize_path, parse_path, split_path, vfs_lookup, vfs_lookup_from, vfs_lookup_no_follow,
+    normalize_path, split_path, vfs_lookup, vfs_lookup_from, vfs_lookup_no_follow,
     vfs_lookup_no_follow_from,
 };
 

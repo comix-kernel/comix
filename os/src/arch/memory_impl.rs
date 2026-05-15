@@ -11,17 +11,17 @@ macro_rules! impl_virtual_memory {
     ($process_type:ident, $kernel_type:ident) => {
         use alloc::vec::Vec;
 
-        use crate::arch::virtual_memory::{
-            KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions,
-            UserAddressSpace, VirtMemoryRegion,
-        };
-        use crate::config::PAGE_SIZE;
         use crate::mm::address::{
             ConvertablePA, PA, PageNum, Ppn, UsizeConvert, VA, Vpn, VpnRange,
         };
         use crate::mm::memory_space::{MemorySpace, with_kernel_space};
         use crate::mm::page_table::PageTableInner;
         use crate::mm::page_table::{PageSize, UniversalPTEFlag};
+        use $crate::arch::virtual_memory::{
+            KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions,
+            UserAddressSpace, VirtMemoryRegion,
+        };
+        use $crate::config::PAGE_SIZE;
 
         pub struct $process_type {
             #[allow(dead_code)]
