@@ -266,6 +266,28 @@ impl TrapFrame {
         // x1_ra is 0
     }
 
+    /// 设置用户态 TrapFrame（架构无关 execve 包装）。
+    pub fn set_exec_trap_frame_from_layout(
+        &mut self,
+        entry: usize,
+        kernel_sp: usize,
+        layout: &crate::arch::task::ExecStackLayout,
+    ) {
+        self.set_exec_trap_frame(
+            entry,
+            layout.sp,
+            kernel_sp,
+            layout.argc,
+            layout.argv,
+            layout.envp,
+        );
+    }
+
+    /// 设置用户态 TLS/thread pointer。
+    pub fn set_tls(&mut self, tls: usize) {
+        self.x4_tp = tls;
+    }
+
     /// 设置 fork 后子进程的 TrapFrame
     /// # 参数:
     /// * `tpr`: 父进程的 TrapFrame 引用

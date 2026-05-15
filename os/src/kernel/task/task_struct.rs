@@ -8,7 +8,7 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
-        kernel::{context::Context, task::setup_stack_layout},
+        kernel::{context::Context, task::setup_exec_stack_layout},
         trap::TrapFrame,
     },
     ipc::{SignalHandlerTable, SignalPending},
@@ -292,46 +292,23 @@ impl Task {
         //      也就是说，new_memory_space 已经被激活（切换 satp）
         //      否则必须实现类似 copy_to_user 的函数来完成拷贝,不然会引发页错误
         // 3. 设置用户栈布局，包含命令行参数和环境变量
-        #[cfg(target_arch = "loongarch64")]
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp) = {
+        let stack_layout = {
             let space = self
                 .memory_space
                 .as_ref()
                 .expect("execve: memory_space not set")
                 .lock();
-            setup_stack_layout(
+            setup_exec_stack_layout(
                 &space, sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
             )
         };
-        #[cfg(target_arch = "riscv64")]
-        let (new_sp, argc, argv_vec_ptr, envp_vec_ptr) = setup_stack_layout(
-            sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
-        );
 
         // 4. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
-            #[cfg(target_arch = "loongarch64")]
-            (*tf_ptr).set_exec_trap_frame(
-                initial_pc,
-                new_sp,
-                self.kstack_base,
-                argc,
-                argv_vec_ptr,
-                envp_vec_ptr,
-                tls_tp,
-            );
-            #[cfg(target_arch = "riscv64")]
-            (*tf_ptr).set_exec_trap_frame(
-                initial_pc,
-                new_sp,
-                self.kstack_base,
-                argc,
-                argv_vec_ptr,
-                envp_vec_ptr,
-            );
+            (*tf_ptr).set_exec_trap_frame_from_layout(initial_pc, self.kstack_base, &stack_layout);
             let cpu_ptr = {
                 let _guard = crate::sync::PreemptGuard::new();
                 crate::kernel::current_cpu() as *const _ as usize

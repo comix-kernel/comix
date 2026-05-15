@@ -42,9 +42,8 @@ macro_rules! impl_arch {
             }
 
             unsafe fn copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
-                if src > constant::USER_TOP
-                    || src.checked_add(len).ok_or(())? > constant::USER_TOP + 1
-                {
+                validate_user_copy_range(src, len, false)?;
+                if len != 0 && dst.is_null() {
                     return Err(());
                 }
                 let _guard = trap::SumGuard::new();
@@ -57,9 +56,8 @@ macro_rules! impl_arch {
             }
 
             unsafe fn copy_to_user(src: *const u8, dst: usize, len: usize) -> Result<(), ()> {
-                if dst > constant::USER_TOP
-                    || dst.checked_add(len).ok_or(())? > constant::USER_TOP + 1
-                {
+                validate_user_copy_range(dst, len, true)?;
+                if len != 0 && src.is_null() {
                     return Err(());
                 }
                 let _guard = trap::SumGuard::new();
@@ -72,13 +70,18 @@ macro_rules! impl_arch {
                 dst: *mut u8,
                 max_len: usize,
             ) -> Result<usize, ()> {
-                if src > constant::USER_TOP {
+                if src < constant::USER_BASE || src > constant::USER_TOP {
+                    return Err(());
+                }
+                if max_len != 0 && dst.is_null() {
                     return Err(());
                 }
                 let _guard = trap::SumGuard::new();
                 let mut i = 0;
                 while i < max_len {
-                    let byte = unsafe { core::ptr::read_volatile((src + i) as *const u8) };
+                    let cur = src.checked_add(i).ok_or(())?;
+                    validate_user_copy_range(cur, 1, false)?;
+                    let byte = unsafe { core::ptr::read_volatile(cur as *const u8) };
                     unsafe { *dst.add(i) = byte };
                     if byte == 0 {
                         return Ok(i);
@@ -116,6 +119,47 @@ macro_rules! impl_arch {
             fn cpu_count() -> usize {
                 unsafe { $crate::kernel::NUM_CPU }
             }
+        }
+
+        fn validate_user_copy_range(start: usize, len: usize, write: bool) -> Result<(), ()> {
+            use $crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn};
+            use $crate::mm::page_table::{PageTableInner, UniversalPTEFlag};
+
+            if len == 0 {
+                return Ok(());
+            }
+            if start < constant::USER_BASE || start > constant::USER_TOP {
+                return Err(());
+            }
+            let end = start.checked_add(len).ok_or(())?;
+            let last = end.checked_sub(1).ok_or(())?;
+            if last > constant::USER_TOP {
+                return Err(());
+            }
+
+            let space = $crate::kernel::current_memory_space();
+            let guard = space.lock();
+            let mut cur = start;
+            while cur < end {
+                let vpn = Vpn::from_addr_floor(Vaddr::from_usize(cur));
+                let (_, _, flags) = guard.page_table().walk(vpn).map_err(|_| ())?;
+                let required = UniversalPTEFlag::VALID | UniversalPTEFlag::USER_ACCESSIBLE;
+                if !flags.contains(required) {
+                    return Err(());
+                }
+                if write {
+                    if !flags.contains(UniversalPTEFlag::WRITEABLE) {
+                        return Err(());
+                    }
+                } else if !flags.contains(UniversalPTEFlag::READABLE) {
+                    return Err(());
+                }
+                let next_page = (cur & !($crate::config::PAGE_SIZE - 1))
+                    .checked_add($crate::config::PAGE_SIZE)
+                    .ok_or(())?;
+                cur = core::cmp::min(next_page, end);
+            }
+            Ok(())
         }
     };
 }

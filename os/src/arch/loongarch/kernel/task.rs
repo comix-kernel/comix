@@ -5,7 +5,7 @@ use core::{mem::size_of, ptr};
 
 use super::context::TaskContext;
 use crate::{
-    arch::{constant::STACK_ALIGN_MASK, mm::paddr_to_vaddr},
+    arch::{constant::STACK_ALIGN_MASK, mm::paddr_to_vaddr, task::ExecStackLayout},
     config::PAGE_SIZE,
     mm::{
         address::{UsizeConvert, Vaddr},
@@ -192,6 +192,159 @@ pub fn setup_stack_layout(
         envp_vec_ptr
     );
     (sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp)
+}
+
+/// Architecture-neutral wrapper for `execve` stack setup.
+pub fn setup_exec_stack_layout(
+    space: &MemorySpace,
+    sp: usize,
+    argv: &[&str],
+    envp: &[&str],
+    phdr_addr: usize,
+    phnum: usize,
+    phent: usize,
+    at_base: usize,
+    at_entry: usize,
+) -> ExecStackLayout {
+    let (sp, argc, argv, envp, tls) = setup_stack_layout(
+        space, sp, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
+    );
+    ExecStackLayout {
+        sp,
+        argc,
+        argv,
+        envp,
+        tls,
+    }
+}
+
+/// Restore a freshly scheduled task for the first time.
+pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, is_kernel_thread: bool) {
+    if is_kernel_thread {
+        let (entry, sp) = unsafe { ((*tf_ptr).era, (*tf_ptr).kernel_sp) };
+        unsafe {
+            core::arch::asm!(
+                "addi.d $sp, {sp}, 0",
+                "jirl $zero, {entry}, 0",
+                sp = in(reg) sp,
+                entry = in(reg) entry,
+                options(noreturn)
+            );
+        }
+    }
+    crate::arch::trap::restore(unsafe { &*tf_ptr });
+}
+
+/// Final architecture-specific preparation before restoring to user mode.
+pub unsafe fn prepare_user_restore(
+    tfp: *mut crate::arch::trap::TrapFrame,
+    initial_pc: usize,
+    user_sp_high: usize,
+) {
+    if tfp.is_null() {
+        crate::pr_err!("[kernel_execve] trap_frame_ptr is null");
+        panic!("kernel_execve: null trap_frame_ptr");
+    }
+    crate::pr_debug!("[kernel_execve] trap_frame_ptr={:#x}", tfp as usize);
+    unsafe {
+        crate::pr_debug!(
+            "[kernel_execve] trapframe: era={:#x}, sp={:#x}, prmd={:#x}, crmd={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
+            (*tfp).get_sepc(),
+            (*tfp).get_sp(),
+            (*tfp).prmd,
+            (*tfp).crmd,
+            (*tfp).get_a0(),
+            (*tfp).regs[5],
+            (*tfp).regs[6],
+        );
+    }
+
+    use crate::mm::address::PageNum;
+    use crate::mm::address::{UsizeConvert, Vaddr};
+    let tlbrent: usize;
+    let crmd: usize;
+    let pgdl: usize;
+    let pgdh: usize;
+    let ecfg: usize;
+    let ks0: usize;
+    let asid: usize;
+    let tlbrehi: usize;
+    let tlbrelo0: usize;
+    let tlbrelo1: usize;
+    unsafe {
+        core::arch::asm!("csrrd {0}, 0x88", out(reg) tlbrent, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x0", out(reg) crmd, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x19", out(reg) pgdl, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x1a", out(reg) pgdh, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x4", out(reg) ecfg, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x30", out(reg) ks0, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x18", out(reg) asid, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x8e", out(reg) tlbrehi, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x8c", out(reg) tlbrelo0, options(nostack, preserves_flags));
+        core::arch::asm!("csrrd {0}, 0x8d", out(reg) tlbrelo1, options(nostack, preserves_flags));
+    }
+    let space = crate::kernel::current_memory_space();
+    let space = space.lock();
+    let root_ppn = space.root_ppn();
+    let root_paddr = root_ppn.start_addr().as_usize();
+    let entry_va = <Vaddr as UsizeConvert>::from_usize(initial_pc);
+    let sp_va = <Vaddr as UsizeConvert>::from_usize(user_sp_high);
+    unsafe extern "C" {
+        fn tlb_refill_entry();
+    }
+    let tlbr_entry_vaddr = tlb_refill_entry as usize;
+    let tlbr_entry_paddr = unsafe { crate::arch::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
+    let tlbr_entry_dm_vaddr = crate::arch::paddr_to_vaddr(tlbr_entry_paddr);
+    crate::pr_debug!(
+        "[kernel_execve] va translate: entry={:?}, sp={:?}",
+        space.translate(entry_va),
+        space.translate(sp_va)
+    );
+    use crate::mm::address::Vpn;
+    use crate::mm::page_table::PageTableInner;
+    let entry_vpn = Vpn::from_addr_floor(entry_va);
+    if let Ok((ppn, _, flags)) = space.page_table().walk(entry_vpn) {
+        crate::pr_debug!(
+            "[kernel_execve] entry PTE: vpn={:#x}, ppn={:#x}, flags={:?}",
+            entry_vpn.0,
+            ppn.0,
+            flags
+        );
+    } else {
+        crate::pr_err!("[kernel_execve] entry page not mapped!");
+    }
+    crate::pr_debug!(
+        "[kernel_execve] root_ppn={:#x}, root_paddr={:#x}",
+        root_ppn.0,
+        root_paddr
+    );
+    crate::pr_debug!(
+        "[kernel_execve] tlbrent={:#x}, crmd={:#x}, pgdl={:#x}, pgdh={:#x}, ecfg={:#x}, ks0={:#x}",
+        tlbrent,
+        crmd,
+        pgdl,
+        pgdh,
+        ecfg,
+        ks0
+    );
+    crate::pr_debug!(
+        "[kernel_execve] asid={:#x} (full_csr={:#x}), tlbrehi={:#x}, tlbrelo0={:#x}, tlbrelo1={:#x}",
+        asid & 0x3ff,
+        asid,
+        tlbrehi,
+        tlbrelo0,
+        tlbrelo1
+    );
+    crate::pr_debug!(
+        "[kernel_execve] tlb_refill_entry: vaddr={:#x}, paddr={:#x}, dm_vaddr={:#x}",
+        tlbr_entry_vaddr,
+        tlbr_entry_paddr,
+        tlbr_entry_dm_vaddr
+    );
+    unsafe {
+        core::arch::asm!("csrwr {0}, 0x30", in(reg) tfp as usize, options(nostack, preserves_flags));
+        core::arch::asm!("csrwr $zero, 0x8b", options(nostack, preserves_flags));
+    }
 }
 
 fn write_user_usize(space: &MemorySpace, dst: usize, val: usize) {

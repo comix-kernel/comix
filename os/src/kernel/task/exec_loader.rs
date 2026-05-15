@@ -2,6 +2,7 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::arch::abi::{RelocationKind, classify_relocation, resolve_relocation_value};
 use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn};
 use crate::mm::memory_space::MemorySpace;
 use crate::mm::memory_space::mapping_area::AreaType;
@@ -34,9 +35,6 @@ const ELFDATA2LSB: u8 = 1;
 
 const ET_DYN: u16 = 3;
 
-const EM_RISCV: u16 = 243;
-const EM_LOONGARCH: u16 = 258;
-
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
@@ -52,14 +50,6 @@ const DT_RELA: i64 = 7;
 const DT_RELASZ: i64 = 8;
 const DT_RELAENT: i64 = 9;
 const DT_SYMENT: i64 = 11;
-
-// riscv64 relocations
-const R_RISCV_64: u32 = 2;
-const R_RISCV_RELATIVE: u32 = 3;
-
-// loongarch64 relocations
-const R_LARCH_64: u32 = 2;
-const R_LARCH_RELATIVE: u32 = 3;
 
 #[derive(Clone, Copy, Debug)]
 struct ElfHdr {
@@ -123,12 +113,7 @@ fn parse_elf_header(inode: &dyn Inode) -> Result<ElfHdr, ExecImageError> {
     let e_phentsize = le_u16(&hdr[54..56]);
     let e_phnum = le_u16(&hdr[56..58]);
 
-    #[cfg(target_arch = "riscv64")]
-    if e_machine != EM_RISCV {
-        return Err(ExecImageError::InvalidElf);
-    }
-    #[cfg(target_arch = "loongarch64")]
-    if e_machine != EM_LOONGARCH {
+    if !crate::arch::abi::is_supported_elf_machine(e_machine) {
         return Err(ExecImageError::InvalidElf);
     }
     if e_phentsize as usize != 56 {
@@ -417,10 +402,10 @@ fn apply_static_pie_relocs(
         let r_sym = (r_info >> 32) as usize;
 
         let target_va = load_bias + r_offset;
-        #[cfg(target_arch = "riscv64")]
-        let value = match r_type {
-            R_RISCV_RELATIVE => (load_bias as isize + r_addend) as usize,
-            R_RISCV_64 => {
+        let kind = classify_relocation(r_type).ok_or(ExecImageError::InvalidElf)?;
+        let symbol_value = match kind {
+            RelocationKind::Relative => 0,
+            RelocationKind::Absolute64 => {
                 if dt_symtab == 0 {
                     return Err(ExecImageError::InvalidElf);
                 }
@@ -428,29 +413,10 @@ fn apply_static_pie_relocs(
                 let st_value = space
                     .read_u64_at(sym_addr + 8)
                     .map_err(ExecImageError::Paging)? as usize;
-                let s = load_bias + st_value;
-                (s as isize + r_addend) as usize
+                st_value
             }
-            _ => return Err(ExecImageError::InvalidElf),
         };
-        #[cfg(target_arch = "loongarch64")]
-        let value = match r_type {
-            R_LARCH_RELATIVE => (load_bias as isize + r_addend) as usize,
-            R_LARCH_64 => {
-                if dt_symtab == 0 {
-                    return Err(ExecImageError::InvalidElf);
-                }
-                let sym_addr = load_bias + dt_symtab + r_sym * dt_syment;
-                let st_value = space
-                    .read_u64_at(sym_addr + 8)
-                    .map_err(ExecImageError::Paging)? as usize;
-                let s = load_bias + st_value;
-                (s as isize + r_addend) as usize
-            }
-            _ => return Err(ExecImageError::InvalidElf),
-        };
-        #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-        let value = 0usize;
+        let value = resolve_relocation_value(kind, load_bias, symbol_value, r_addend);
 
         space
             .write_usize_at(target_va, value)

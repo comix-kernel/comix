@@ -1,6 +1,7 @@
 //! LoongArch64 架构模块
 
 pub mod boot;
+pub mod compiler_builtins;
 pub mod constant;
 pub mod cpu_ops;
 pub mod intr;
