@@ -114,8 +114,13 @@ fn install_trap_entry() {
         );
         // TLB refill 入口使用独立处理，进行软件页表遍历与 tlbfill
         // TLBRENT 必须使用物理地址，因为 TLB refill 时 CPU 处于直接地址翻译模式
-        let tlbr_entry_paddr =
-            unsafe { crate::arch::mm::vaddr_to_paddr(tlb_refill_entry as usize) } & !0xfff;
+        let tlbr_entry_paddr = unsafe {
+            crate::arch::mm::va_to_pa(crate::arch::address::VA::from_usize(
+                tlb_refill_entry as usize,
+            ))
+        }
+        .as_usize()
+            & !0xfff;
         core::arch::asm!(
             "csrwr {val}, {csr}",
             val = in(reg) tlbr_entry_paddr,

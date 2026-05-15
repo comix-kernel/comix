@@ -140,15 +140,21 @@ pub fn send_reschedule_ipi(target: usize) {
 
 /// 物理地址 → 虚拟地址（直接映射）
 #[inline]
-pub fn paddr_to_vaddr(paddr: usize) -> usize {
-    PlatformImpl::paddr_to_vaddr(paddr)
+pub fn pa_to_va(pa: address::PA) -> address::VA {
+    PlatformImpl::pa_to_va(pa)
 }
 
 /// 虚拟地址 → 物理地址（直接映射）
 ///
 /// # Safety
-/// 调用者需确保 vaddr 处于直接映射区域。
+/// 调用者需确保 `va` 处于直接映射区域。
 #[inline]
-pub unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
-    unsafe { PlatformImpl::vaddr_to_paddr(vaddr) }
+pub unsafe fn va_to_pa(va: address::VA) -> address::PA {
+    unsafe { PlatformImpl::va_to_pa(va) }
+}
+
+/// 判断虚拟地址是否位于直接映射区域。
+#[inline]
+pub fn is_direct_mapped_va(va: address::VA) -> bool {
+    va.as_usize() >= <PlatformImpl as virtual_memory::VirtualMemory>::PAGE_OFFSET
 }

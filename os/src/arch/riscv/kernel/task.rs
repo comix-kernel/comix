@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use riscv::register::sstatus;
 
 use crate::arch::constant::STACK_ALIGN_MASK;
-use crate::arch::task::ExecStackLayout;
+use crate::arch::{address::VA, task::ExecStackLayout};
 use crate::mm::memory_space::MemorySpace;
 
 /// 为新任务设置用户栈布局，包含命令行参数和环境变量
@@ -184,23 +184,31 @@ pub fn setup_stack_layout(
 /// Architecture-neutral wrapper for `execve` stack setup.
 pub fn setup_exec_stack_layout(
     _space: &MemorySpace,
-    sp: usize,
+    sp: VA,
     argv: &[&str],
     envp: &[&str],
-    phdr_addr: usize,
+    phdr_addr: VA,
     phnum: usize,
     phent: usize,
-    at_base: usize,
-    at_entry: usize,
+    at_base: VA,
+    at_entry: VA,
 ) -> ExecStackLayout {
-    let (sp, argc, argv, envp) =
-        setup_stack_layout(sp, argv, envp, phdr_addr, phnum, phent, at_base, at_entry);
-    ExecStackLayout {
-        sp,
-        argc,
+    let (sp, argc, argv, envp) = setup_stack_layout(
+        sp.as_usize(),
         argv,
         envp,
-        tls: 0,
+        phdr_addr.as_usize(),
+        phnum,
+        phent,
+        at_base.as_usize(),
+        at_entry.as_usize(),
+    );
+    ExecStackLayout {
+        sp: VA::from_usize(sp),
+        argc,
+        argv: VA::from_usize(argv),
+        envp: VA::from_usize(envp),
+        tls: VA::null(),
     }
 }
 
@@ -212,8 +220,8 @@ pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, _is_ker
 /// Final architecture-specific preparation before restoring to user mode.
 pub unsafe fn prepare_user_restore(
     tfp: *mut crate::arch::trap::TrapFrame,
-    _initial_pc: usize,
-    _user_sp_high: usize,
+    _initial_pc: VA,
+    _user_sp_high: VA,
 ) {
     unsafe {
         crate::pr_info!(

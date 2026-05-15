@@ -6,7 +6,10 @@
 //!
 //! 默认物理→虚拟地址映射使用 `PAGE_OFFSET` 偏移，架构可覆写。
 
-use crate::arch::virtual_memory::VirtualMemory;
+use crate::arch::{
+    address::{PA, VA},
+    virtual_memory::VirtualMemory,
+};
 
 /// 平台抽象 trait。
 ///
@@ -27,22 +30,24 @@ pub trait Platform: VirtualMemory {
     fn get_cmdline() -> Option<alloc::string::String>;
 
     /// 物理地址 → 虚拟地址（直接映射区域）
-    fn paddr_to_vaddr(paddr: usize) -> usize {
-        paddr
-            .checked_add(Self::PAGE_OFFSET)
-            .expect("paddr_to_vaddr: direct-map address overflow")
+    fn pa_to_va(pa: PA) -> VA {
+        VA::from_usize(
+            pa.as_usize()
+                .checked_add(Self::PAGE_OFFSET)
+                .expect("pa_to_va: direct-map address overflow"),
+        )
     }
 
     /// 虚拟地址 → 物理地址（直接映射区域）
     ///
     /// # Safety
-    /// 调用者需确保 `vaddr` 处于直接映射范围内。
-    unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
+    /// 调用者需确保 `va` 处于直接映射范围内。
+    unsafe fn va_to_pa(va: VA) -> PA {
         assert!(
-            vaddr >= Self::PAGE_OFFSET,
-            "vaddr_to_paddr: address is below direct-map base"
+            va.as_usize() >= Self::PAGE_OFFSET,
+            "va_to_pa: address is below direct-map base"
         );
-        vaddr - Self::PAGE_OFFSET
+        PA::from_usize(va.as_usize() - Self::PAGE_OFFSET)
     }
 
     /// 关机，永不返回

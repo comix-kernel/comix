@@ -8,7 +8,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use crate::config::PAGE_SIZE;
-use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
+use crate::mm::address::{ConvertablePA, PageNum};
 use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::sync::{Mutex, SpinLock};
 use crate::uapi::time::TimeSpec;
@@ -226,7 +226,7 @@ impl Inode for TmpfsInode {
             } else {
                 // 通过内核直接映射读取
                 let frame = data[page_index].as_ref().unwrap();
-                let kernel_vaddr = frame.ppn().start_addr().to_vaddr();
+                let kernel_vaddr = frame.ppn().start_addr().to_va();
 
                 unsafe {
                     core::ptr::copy_nonoverlapping(
@@ -286,7 +286,7 @@ impl Inode for TmpfsInode {
 
             // 通过内核直接映射写入
             let frame = data[page_index].as_ref().unwrap();
-            let kernel_vaddr = frame.ppn().start_addr().to_vaddr();
+            let kernel_vaddr = frame.ppn().start_addr().to_va();
 
             unsafe {
                 core::ptr::copy_nonoverlapping(

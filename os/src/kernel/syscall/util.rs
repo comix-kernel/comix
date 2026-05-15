@@ -26,8 +26,12 @@ const PATH_MAX: usize = 4096;
 fn copy_str_from_user(user_ptr: usize) -> Result<String, &'static str> {
     let mut buf = [0u8; PATH_MAX];
     let len = unsafe {
-        crate::arch::ArchImpl::copy_strn_from_user(user_ptr, buf.as_mut_ptr(), PATH_MAX)
-            .map_err(|_| "Failed to read string from user space")?
+        crate::arch::ArchImpl::copy_strn_from_user(
+            crate::arch::address::UA::from_usize(user_ptr),
+            buf.as_mut_ptr(),
+            PATH_MAX,
+        )
+        .map_err(|_| "Failed to read string from user space")?
     };
     if len == PATH_MAX {
         return Err("Path exceeds PATH_MAX");
@@ -75,7 +79,7 @@ pub fn get_args_safe(ptr_array: usize, name: &str) -> Result<Vec<String>, String
             let mut val = 0usize;
             unsafe {
                 crate::arch::ArchImpl::copy_from_user(
-                    ptr_array + offset,
+                    crate::arch::address::UA::from_usize(ptr_array + offset),
                     (&mut val) as *mut usize as *mut u8,
                     core::mem::size_of::<usize>(),
                 )

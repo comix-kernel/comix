@@ -4,7 +4,7 @@
 //! 通过该接口，可以实现对页表的创建、映射、解除映射、翻译等操作。
 #![allow(dead_code)]
 use super::{PageSize, PageTableEntry, PagingResult, UniversalPTEFlag};
-use crate::mm::address::{Paddr, Ppn, Vaddr, Vpn};
+use crate::mm::address::{PA, Ppn, VA, Vpn};
 
 pub trait PageTableInner<T>
 where
@@ -30,7 +30,7 @@ where
 
     fn get_entry(&self, vpn: Vpn, level: usize) -> Option<(T, PageSize)>;
 
-    fn translate(&self, vaddr: Vaddr) -> Option<Paddr>;
+    fn translate(&self, vaddr: VA) -> Option<PA>;
 
     fn map(
         &mut self,

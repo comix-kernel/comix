@@ -5,7 +5,7 @@ use crate::{
     device::{block::virtio_blk, device_tree::FDT, net::virtio_net},
     kernel::current_memory_space,
     mm::{
-        address::{ConvertablePaddr, Paddr, UsizeConvert},
+        address::{ConvertablePA, PA, VA},
         page_table::PagingError,
     },
     pr_info, pr_warn,
@@ -31,13 +31,13 @@ pub struct PciDriver {}
 #[derive(Clone, Copy)]
 pub struct PcieHost {
     /// ECAM 物理地址
-    ecam_paddr: usize,
+    ecam_paddr: PA,
     /// ECAM 虚拟地址
-    ecam_vaddr: usize,
+    ecam_vaddr: VA,
     /// ECAM 大小
     ecam_size: usize,
     /// MMIO 基地址
-    mmio_base: usize,
+    mmio_base: PA,
     /// MMIO 大小
     mmio_size: usize,
     /// 总线起始号
@@ -248,13 +248,15 @@ impl PcieHost {
             mmio_size
         );
 
-        let ecam_vaddr = Paddr::to_vaddr(&Paddr::from_usize(ecam_base)).as_usize();
+        let ecam_paddr = PA::from_usize(ecam_base);
+        let ecam_vaddr = ecam_paddr.to_va();
+        let mmio_paddr = PA::from_usize(mmio_base);
 
         Some(Self {
-            ecam_paddr: ecam_base,
+            ecam_paddr,
             ecam_vaddr,
             ecam_size,
-            mmio_base,
+            mmio_base: mmio_paddr,
             mmio_size,
             bus_start,
             bus_end,
@@ -265,13 +267,14 @@ impl PcieHost {
     pub fn from_platform_defaults() -> Option<Self> {
         let (ecam_base, ecam_size) = mmio_of(VirtDevice::VirtPcieEcam)?;
         let (mmio_base, mmio_size) = mmio_of(VirtDevice::VirtPcieMmio)?;
-        let ecam_vaddr = Paddr::to_vaddr(&Paddr::from_usize(ecam_base)).as_usize();
+        let ecam_paddr = PA::from_usize(ecam_base);
+        let ecam_vaddr = ecam_paddr.to_va();
 
         Some(Self {
-            ecam_paddr: ecam_base,
+            ecam_paddr,
             ecam_vaddr,
             ecam_size,
-            mmio_base,
+            mmio_base: PA::from_usize(mmio_base),
             mmio_size,
             bus_start: 0,
             bus_end: 255, // 后续可由 FDT 的 bus-range 收缩
@@ -286,7 +289,7 @@ impl PcieHost {
             | ((dev as usize) << 15)
             | ((func as usize) << 12)
             | ((offset as usize) & 0xfff);
-        (self.ecam_vaddr + off) as *mut u32
+        (self.ecam_vaddr.as_usize() + off) as *mut u32
     }
 
     /// 读取 PCIe 配置空间
@@ -305,9 +308,9 @@ impl PcieHost {
     pub fn enumerate(&self) {
         pr_info!(
             "[PCIe] ECAM @ {:#x} (size {:#x}), MMIO @ {:#x} (size {:#x})",
-            self.ecam_paddr,
+            self.ecam_paddr.as_usize(),
             self.ecam_size,
-            self.mmio_base,
+            self.mmio_base.as_usize(),
             self.mmio_size
         );
 
@@ -377,19 +380,19 @@ pub fn init_virtio_pci() {
 
     let ecam_vaddr = match current_memory_space()
         .lock()
-        .map_mmio(Paddr::from_usize(host.ecam_paddr), host.ecam_size)
+        .map_mmio(host.ecam_paddr, host.ecam_size)
     {
         Ok(vaddr) => vaddr.as_usize(),
-        Err(PagingError::AlreadyMapped) => crate::arch::paddr_to_vaddr(host.ecam_paddr),
+        Err(PagingError::AlreadyMapped) => crate::arch::pa_to_va(host.ecam_paddr).as_usize(),
         Err(e) => {
             pr_warn!("[PCIe] failed to map ECAM: {:?}", e);
-            crate::arch::paddr_to_vaddr(host.ecam_paddr)
+            crate::arch::pa_to_va(host.ecam_paddr).as_usize()
         }
     };
 
     match current_memory_space()
         .lock()
-        .map_mmio(Paddr::from_usize(host.mmio_base), host.mmio_size)
+        .map_mmio(host.mmio_base, host.mmio_size)
     {
         Ok(_) | Err(PagingError::AlreadyMapped) => {}
         Err(e) => {
@@ -400,7 +403,7 @@ pub fn init_virtio_pci() {
     let cam = unsafe { MmioCam::new(ecam_vaddr as *mut u8, Cam::Ecam) };
     let mut root = PciRoot::new(cam);
     let mut next_mmio = host.mmio_base;
-    let mmio_end = host.mmio_base.saturating_add(host.mmio_size);
+    let mmio_end = PA::from_usize(host.mmio_base.as_usize().saturating_add(host.mmio_size));
 
     for bus in host.bus_start..=host.bus_end {
         for (df, info) in root.enumerate_bus(bus) {
@@ -444,8 +447,8 @@ pub fn init_virtio_pci() {
 fn allocate_bars(
     root: &mut PciRoot<MmioCam<'_>>,
     df: virtio_drivers::transport::pci::bus::DeviceFunction,
-    next_mmio: &mut usize,
-    mmio_end: usize,
+    next_mmio: &mut PA,
+    mmio_end: PA,
 ) {
     let bars = match root.bars(df) {
         Ok(bars) => bars,
@@ -483,8 +486,8 @@ fn allocate_bars(
             }
             let size_usize = size as usize;
             let align = size_usize.max(0x1000);
-            let base = align_up(*next_mmio, align);
-            if base.saturating_add(size_usize) > mmio_end {
+            let base = align_up(next_mmio.as_usize(), align);
+            if base.saturating_add(size_usize) > mmio_end.as_usize() {
                 pr_warn!(
                     "[PCIe] MMIO window exhausted for BAR{} (need {:#x} bytes)",
                     bar_index,
@@ -497,7 +500,7 @@ fn allocate_bars(
                 MemoryBarType::Width64 => root.set_bar_64(df, bar_index, base as u64),
                 _ => root.set_bar_32(df, bar_index, base as u32),
             }
-            *next_mmio = base.saturating_add(size_usize);
+            *next_mmio = PA::from_usize(base.saturating_add(size_usize));
         }
 
         bar_index += step;

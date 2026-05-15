@@ -21,8 +21,12 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
 
         let mut kernel_buf = alloc::vec![0u8; count];
         unsafe {
-            crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), count)
-                .ok();
+            crate::arch::ArchImpl::copy_from_user(
+                crate::arch::address::UA::from_usize(buf as usize),
+                kernel_buf.as_mut_ptr(),
+                count,
+            )
+            .ok();
         }
 
         let result = match file.write(&kernel_buf) {
@@ -62,7 +66,12 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
         let result = match file.read(&mut kernel_buf) {
             Ok(n) => {
                 unsafe {
-                    crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok();
+                    crate::arch::ArchImpl::copy_to_user(
+                        kernel_buf.as_ptr(),
+                        crate::arch::address::UA::from_usize(buf as usize),
+                        n,
+                    )
+                    .ok();
                 }
                 n as isize
             }
@@ -103,7 +112,7 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
     unsafe {
         iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
-            iov as usize,
+            crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
         )
@@ -136,7 +145,7 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
                 unsafe {
                     crate::arch::ArchImpl::copy_to_user(
                         kernel_buf.as_ptr(),
-                        vec.iov_base as usize,
+                        crate::arch::address::UA::from_usize(vec.iov_base as usize),
                         n,
                     )
                     .ok();
@@ -173,7 +182,7 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
     unsafe {
         iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
-            iov as usize,
+            crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
         )
@@ -203,7 +212,7 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
         unsafe {
             crate::arch::ArchImpl::copy_from_user(
-                vec.iov_base as usize,
+                crate::arch::address::UA::from_usize(vec.iov_base as usize),
                 kernel_buf.as_mut_ptr(),
                 vec.iov_len,
             )
@@ -250,7 +259,12 @@ pub fn pread64(fd: usize, buf: *mut u8, count: usize, offset: i64) -> isize {
     match file.read_at(offset as usize, &mut kernel_buf) {
         Ok(n) => {
             unsafe {
-                crate::arch::ArchImpl::copy_to_user(kernel_buf.as_ptr(), buf as usize, n).ok();
+                crate::arch::ArchImpl::copy_to_user(
+                    kernel_buf.as_ptr(),
+                    crate::arch::address::UA::from_usize(buf as usize),
+                    n,
+                )
+                .ok();
             }
             n as isize
         }
@@ -277,7 +291,12 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
 
     let mut kernel_buf = alloc::vec![0u8; count];
     unsafe {
-        crate::arch::ArchImpl::copy_from_user(buf as usize, kernel_buf.as_mut_ptr(), count).ok();
+        crate::arch::ArchImpl::copy_from_user(
+            crate::arch::address::UA::from_usize(buf as usize),
+            kernel_buf.as_mut_ptr(),
+            count,
+        )
+        .ok();
     }
     match file.write_at(offset as usize, &kernel_buf) {
         Ok(n) => n as isize,
@@ -311,7 +330,7 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
     unsafe {
         iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
-            iov as usize,
+            crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
         )
@@ -339,7 +358,7 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
                 unsafe {
                     crate::arch::ArchImpl::copy_to_user(
                         kernel_buf.as_ptr(),
-                        vec.iov_base as usize,
+                        crate::arch::address::UA::from_usize(vec.iov_base as usize),
                         n,
                     )
                     .ok();
@@ -389,7 +408,7 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
     unsafe {
         iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
-            iov as usize,
+            crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
             iovcnt * core::mem::size_of::<IoVec>(),
         )
@@ -414,7 +433,7 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
         unsafe {
             crate::arch::ArchImpl::copy_from_user(
-                vec.iov_base as usize,
+                crate::arch::address::UA::from_usize(vec.iov_base as usize),
                 kernel_buf.as_mut_ptr(),
                 vec.iov_len,
             )
@@ -597,7 +616,7 @@ fn poll_with_timeout(
             unsafe {
                 pollfds_buf.set_len(nfds);
                 crate::arch::ArchImpl::copy_from_user(
-                    fds,
+                    crate::arch::address::UA::from_usize(fds),
                     pollfds_buf.as_mut_ptr() as *mut u8,
                     size,
                 )
@@ -635,8 +654,12 @@ fn poll_with_timeout(
 
             // Write revents back to user space
             unsafe {
-                crate::arch::ArchImpl::copy_to_user(pollfds_buf.as_ptr() as *const u8, fds, size)
-                    .ok();
+                crate::arch::ArchImpl::copy_to_user(
+                    pollfds_buf.as_ptr() as *const u8,
+                    crate::arch::address::UA::from_usize(fds),
+                    size,
+                )
+                .ok();
             }
         }
 

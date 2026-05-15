@@ -41,7 +41,12 @@ macro_rules! impl_arch {
                 unsafe { kernel::switch(old, new) };
             }
 
-            unsafe fn copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
+            unsafe fn copy_from_user(
+                src: $crate::arch::address::UA,
+                dst: *mut u8,
+                len: usize,
+            ) -> Result<(), ()> {
+                let src = src.as_usize();
                 validate_user_copy_range(src, len, false)?;
                 if len != 0 && dst.is_null() {
                     return Err(());
@@ -51,11 +56,20 @@ macro_rules! impl_arch {
                 Ok(())
             }
 
-            unsafe fn try_copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
+            unsafe fn try_copy_from_user(
+                src: $crate::arch::address::UA,
+                dst: *mut u8,
+                len: usize,
+            ) -> Result<(), ()> {
                 unsafe { Self::copy_from_user(src, dst, len) }
             }
 
-            unsafe fn copy_to_user(src: *const u8, dst: usize, len: usize) -> Result<(), ()> {
+            unsafe fn copy_to_user(
+                src: *const u8,
+                dst: $crate::arch::address::UA,
+                len: usize,
+            ) -> Result<(), ()> {
+                let dst = dst.as_usize();
                 validate_user_copy_range(dst, len, true)?;
                 if len != 0 && src.is_null() {
                     return Err(());
@@ -66,10 +80,11 @@ macro_rules! impl_arch {
             }
 
             unsafe fn copy_strn_from_user(
-                src: usize,
+                src: $crate::arch::address::UA,
                 dst: *mut u8,
                 max_len: usize,
             ) -> Result<usize, ()> {
+                let src = src.as_usize();
                 if src < constant::USER_BASE || src > constant::USER_TOP {
                     return Err(());
                 }
@@ -122,7 +137,7 @@ macro_rules! impl_arch {
         }
 
         fn validate_user_copy_range(start: usize, len: usize, write: bool) -> Result<(), ()> {
-            use $crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn};
+            use $crate::mm::address::{PageNum, VA, Vpn};
             use $crate::mm::page_table::{PageTableInner, UniversalPTEFlag};
 
             if len == 0 {
@@ -141,7 +156,7 @@ macro_rules! impl_arch {
             let guard = space.lock();
             let mut cur = start;
             while cur < end {
-                let vpn = Vpn::from_addr_floor(Vaddr::from_usize(cur));
+                let vpn = Vpn::from_addr_floor(VA::from_usize(cur));
                 let (_, _, flags) = guard.page_table().walk(vpn).map_err(|_| ())?;
                 let required = UniversalPTEFlag::VALID | UniversalPTEFlag::USER_ACCESSIBLE;
                 if !flags.contains(required) {

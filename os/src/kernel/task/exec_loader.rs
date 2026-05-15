@@ -3,7 +3,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::arch::abi::{RelocationKind, classify_relocation, resolve_relocation_value};
-use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn};
+use crate::mm::address::{PageNum, VA, Vpn};
 use crate::mm::memory_space::MemorySpace;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::{PagingError, UniversalPTEFlag};
@@ -19,13 +19,13 @@ pub enum ExecImageError {
 pub struct PreparedExecImage {
     pub space: MemorySpace,
     /// 初始 PC：无动态链接器时为程序入口；有 PT_INTERP 时为动态链接器入口
-    pub initial_pc: usize,
-    pub user_sp_high: usize,
+    pub initial_pc: VA,
+    pub user_sp_high: VA,
     /// auxv AT_BASE：动态链接器 load bias（无动态链接器时为 0）
-    pub at_base: usize,
+    pub at_base: VA,
     /// auxv AT_ENTRY：主程序入口（非动态链接器入口）
-    pub at_entry: usize,
-    pub phdr_addr: usize,
+    pub at_entry: VA,
+    pub phdr_addr: VA,
     pub phnum: usize,
     pub phent: usize,
 }
@@ -224,7 +224,7 @@ fn load_segments_into_space(
             let map_start = space
                 .find_free_region(total_size, crate::config::PAGE_SIZE)
                 .ok_or(ExecImageError::Paging(PagingError::OutOfMemory))?;
-            map_start.saturating_sub(seg_start)
+            map_start.as_usize().saturating_sub(seg_start)
         }
     } else {
         0
@@ -253,8 +253,8 @@ fn load_segments_into_space(
         }
 
         let vpn_range = crate::mm::address::VpnRange::new(
-            Vpn::from_addr_floor(Vaddr::from_usize(start_va)),
-            Vpn::from_addr_ceil(Vaddr::from_usize(end_va)),
+            Vpn::from_addr_floor(VA::from_usize(start_va)),
+            Vpn::from_addr_ceil(VA::from_usize(end_va)),
         );
 
         let mut perm = UniversalPTEFlag::USER_ACCESSIBLE | UniversalPTEFlag::VALID;
@@ -456,14 +456,14 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
     )?;
 
     // Heap starts after end of main segments
-    let heap_start_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(main_max_end));
+    let heap_start_vpn = Vpn::from_addr_ceil(VA::from_usize(main_max_end));
     space.set_heap_start(heap_start_vpn);
 
     // User stack
-    let user_stack_bottom = Vpn::from_addr_floor(Vaddr::from_usize(
+    let user_stack_bottom = Vpn::from_addr_floor(VA::from_usize(
         crate::config::USER_STACK_TOP - crate::config::USER_STACK_SIZE,
     ));
-    let user_stack_top = Vpn::from_addr_ceil(Vaddr::from_usize(crate::config::USER_STACK_TOP));
+    let user_stack_top = Vpn::from_addr_ceil(VA::from_usize(crate::config::USER_STACK_TOP));
     space
         .insert_framed_area(
             crate::mm::address::VpnRange::new(user_stack_bottom, user_stack_top),
@@ -506,11 +506,11 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
 
     Ok(PreparedExecImage {
         space,
-        initial_pc,
-        user_sp_high: crate::config::USER_STACK_TOP,
-        at_base,
-        at_entry,
-        phdr_addr,
+        initial_pc: VA::from_usize(initial_pc),
+        user_sp_high: VA::from_usize(crate::config::USER_STACK_TOP),
+        at_base: VA::from_usize(at_base),
+        at_entry: VA::from_usize(at_entry),
+        phdr_addr: VA::from_usize(phdr_addr),
         phnum,
         phent,
     })
