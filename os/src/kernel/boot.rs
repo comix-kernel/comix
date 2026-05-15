@@ -47,12 +47,14 @@ pub fn clear_bss() {
         fn ebss();
     }
 
-    let sbss_paddr = unsafe { crate::arch::vaddr_to_paddr(sbss as usize) };
-    let ebss_paddr = unsafe { crate::arch::vaddr_to_paddr(ebss as usize) };
+    let sbss_paddr =
+        unsafe { crate::arch::va_to_pa(crate::arch::address::VA::from_usize(sbss as usize)) };
+    let ebss_paddr =
+        unsafe { crate::arch::va_to_pa(crate::arch::address::VA::from_usize(ebss as usize)) };
 
-    (sbss_paddr..ebss_paddr).for_each(|a| unsafe {
-        let va = crate::arch::paddr_to_vaddr(a);
-        (va as *mut u8).write_volatile(0)
+    (sbss_paddr.as_usize()..ebss_paddr.as_usize()).for_each(|a| unsafe {
+        let va = crate::arch::pa_to_va(crate::arch::address::PA::from_usize(a));
+        (va.as_usize() as *mut u8).write_volatile(0)
     });
 }
 
@@ -99,7 +101,7 @@ pub fn rest_init() {
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
         core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base);
+        (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base.as_usize());
     }
 
     task.memory_space = Some(current_memory_space());
@@ -182,7 +184,7 @@ fn create_kthreadd() {
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
         core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base);
+        (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base.as_usize());
     }
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
@@ -220,7 +222,7 @@ pub fn create_idle_task(cpu_id: usize, idle_fn: fn() -> !) -> crate::kernel::Sha
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
         core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(idle_fn as usize, 0, task.kstack_base);
+        (*tf).set_kernel_trap_frame(idle_fn as usize, 0, task.kstack_base.as_usize());
     }
 
     task.on_cpu = Some(cpu_id);

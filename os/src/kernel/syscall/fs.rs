@@ -321,8 +321,12 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
 
     // 复制到用户态缓冲区
     unsafe {
-        crate::arch::ArchImpl::copy_to_user(path_bytes.as_ptr(), buf as usize, path_bytes.len())
-            .ok();
+        crate::arch::ArchImpl::copy_to_user(
+            path_bytes.as_ptr(),
+            crate::arch::address::UA::from_usize(buf as usize),
+            path_bytes.len(),
+        )
+        .ok();
         write_to_user(buf.add(path_bytes.len()), 0u8);
     }
 
@@ -428,7 +432,7 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
         unsafe {
             crate::arch::ArchImpl::copy_to_user(
                 name_bytes.as_ptr(),
-                dirp as usize + name_offset,
+                crate::arch::address::UA::from_usize(dirp as usize + name_offset),
                 name_bytes.len(),
             )
             .ok();
@@ -631,8 +635,12 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
 
     // 复制到用户空间（注意：readlink 不添加 null 终止符）
     unsafe {
-        crate::arch::ArchImpl::copy_to_user(target.as_bytes().as_ptr(), buf as usize, bytes_read)
-            .ok();
+        crate::arch::ArchImpl::copy_to_user(
+            target.as_bytes().as_ptr(),
+            crate::arch::address::UA::from_usize(buf as usize),
+            bytes_read,
+        )
+        .ok();
     }
 
     bytes_read as isize

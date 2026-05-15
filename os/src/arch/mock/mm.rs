@@ -1,15 +1,15 @@
-use crate::mm::address::{Paddr, Ppn, UsizeConvert, Vaddr, Vpn};
+use crate::mm::address::{PA, Ppn, UsizeConvert, VA, Vpn};
 use crate::mm::page_table::{
     PageSize, PageTableEntry as PageTableEntryTrait, PageTableInner as PageTableInnerTrait,
     PagingError, PagingResult, UniversalPTEFlag,
 };
 
-pub fn paddr_to_vaddr(pa: usize) -> usize {
-    pa + super::constant::SV39_BOT_HALF_TOP
+pub fn pa_to_va(pa: PA) -> VA {
+    VA::from_usize(pa.as_usize() + super::constant::SV39_BOT_HALF_TOP)
 }
 
-pub unsafe fn vaddr_to_paddr(va: usize) -> usize {
-    va - super::constant::SV39_BOT_HALF_TOP
+pub unsafe fn va_to_pa(va: VA) -> PA {
+    PA::from_usize(va.as_usize() - super::constant::SV39_BOT_HALF_TOP)
 }
 
 // ---- Mock PageTableEntry ----
@@ -149,7 +149,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         None
     }
 
-    fn translate(&self, _vaddr: Vaddr) -> Option<Paddr> {
+    fn translate(&self, _vaddr: VA) -> Option<PA> {
         None
     }
 

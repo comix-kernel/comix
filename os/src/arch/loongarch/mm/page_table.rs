@@ -12,7 +12,7 @@
 //! 每级页表有 512 个条目（2^9），每个条目 8 字节。
 
 use super::PageTableEntry;
-use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn};
+use crate::mm::address::{ConvertablePA, PA, PageNum, Ppn, UsizeConvert, VA, Vpn};
 use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::mm::page_table::{
     PageSize, PageTableEntry as PageTableEntryTrait, PageTableInner as PageTableInnerTrait,
@@ -231,7 +231,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     }
 
     /// 虚拟地址转物理地址
-    fn translate(&self, vaddr: Vaddr) -> Option<Paddr> {
+    fn translate(&self, vaddr: VA) -> Option<PA> {
         let vpn = Vpn::from_addr_floor(vaddr);
         let offset = vaddr.as_usize() & 0xfff; // 页内偏移
 
@@ -241,7 +241,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                     PageSize::Size4K => ppn.start_addr().as_usize(),
                     _ => ppn.start_addr().as_usize(), // 暂时按 4K 处理
                 };
-                Some(Paddr::from_usize(paddr_base + offset))
+                Some(PA::from_usize(paddr_base + offset))
             }
             Err(_) => None,
         }
@@ -496,7 +496,7 @@ impl PageTableInner {
     fn read_pte(ppn: Ppn, index: usize) -> PageTableEntry {
         let pte_array = unsafe {
             core::slice::from_raw_parts(
-                ppn.start_addr().to_vaddr().as_usize() as *const PageTableEntry,
+                ppn.start_addr().to_va().as_usize() as *const PageTableEntry,
                 512,
             )
         };
@@ -508,7 +508,7 @@ impl PageTableInner {
     fn write_pte(ppn: Ppn, index: usize, pte: PageTableEntry) {
         let pte_array = unsafe {
             core::slice::from_raw_parts_mut(
-                ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
+                ppn.start_addr().to_va().as_usize() as *mut PageTableEntry,
                 512,
             )
         };
@@ -519,7 +519,7 @@ impl PageTableInner {
     fn clear_page_table(ppn: Ppn) {
         let pte_array = unsafe {
             core::slice::from_raw_parts_mut(
-                ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
+                ppn.start_addr().to_va().as_usize() as *mut PageTableEntry,
                 512,
             )
         };

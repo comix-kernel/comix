@@ -184,7 +184,9 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
     let mut expected_mask: usize = 1;
     for hartid in 1..num_cpus {
         let start_vaddr = secondary_sbi_entry as usize;
-        let start_paddr = unsafe { crate::arch::mm::vaddr_to_paddr(start_vaddr) };
+        let start_paddr =
+            unsafe { crate::arch::mm::va_to_pa(crate::arch::address::VA::from_usize(start_vaddr)) }
+                .as_usize();
         pr_info!(
             "[SMP] Starting hart {} at vaddr=0x{:x}, paddr=0x{:x}",
             hartid,

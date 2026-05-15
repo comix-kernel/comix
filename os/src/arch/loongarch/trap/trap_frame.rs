@@ -178,12 +178,12 @@ impl TrapFrame {
     ) {
         self.set_exec_trap_frame(
             entry,
-            layout.sp,
+            layout.sp.as_usize(),
             kernel_sp,
             layout.argc,
-            layout.argv,
-            layout.envp,
-            layout.tls,
+            layout.argv.as_usize(),
+            layout.envp.as_usize(),
+            layout.tls.as_usize(),
         );
     }
 

@@ -205,7 +205,12 @@ mod mock_arch_impl {
 
         unsafe fn context_switch(_old: *mut Self::UserContext, _new: *const Self::UserContext) {}
 
-        unsafe fn copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
+        unsafe fn copy_from_user(
+            src: crate::arch::address::UA,
+            dst: *mut u8,
+            len: usize,
+        ) -> Result<(), ()> {
+            let src = src.as_usize();
             if len != 0 && (src == 0 || dst.is_null()) {
                 return Err(());
             }
@@ -213,11 +218,20 @@ mod mock_arch_impl {
             Ok(())
         }
 
-        unsafe fn try_copy_from_user(src: usize, dst: *mut u8, len: usize) -> Result<(), ()> {
+        unsafe fn try_copy_from_user(
+            src: crate::arch::address::UA,
+            dst: *mut u8,
+            len: usize,
+        ) -> Result<(), ()> {
             unsafe { Self::copy_from_user(src, dst, len) }
         }
 
-        unsafe fn copy_to_user(src: *const u8, dst: usize, len: usize) -> Result<(), ()> {
+        unsafe fn copy_to_user(
+            src: *const u8,
+            dst: crate::arch::address::UA,
+            len: usize,
+        ) -> Result<(), ()> {
+            let dst = dst.as_usize();
             if len != 0 && (src.is_null() || dst == 0) {
                 return Err(());
             }
@@ -226,10 +240,11 @@ mod mock_arch_impl {
         }
 
         unsafe fn copy_strn_from_user(
-            src: usize,
+            src: crate::arch::address::UA,
             dst: *mut u8,
             max_len: usize,
         ) -> Result<usize, ()> {
+            let src = src.as_usize();
             if max_len != 0 && (src == 0 || dst.is_null()) {
                 return Err(());
             }

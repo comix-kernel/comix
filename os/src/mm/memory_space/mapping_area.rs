@@ -3,7 +3,7 @@ use core::cmp::min;
 
 use crate::arch::mm::TlbBatchContext;
 use crate::config::PAGE_SIZE;
-use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
+use crate::mm::address::{PA, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::page_table::{
@@ -162,8 +162,8 @@ impl MappingArea {
             MapType::Direct => {
                 // 对于直接映射，VPN 等于 PPN + 偏移量
                 let vaddr = vpn.start_addr();
-                let paddr = unsafe { crate::arch::vaddr_to_paddr(vaddr.as_usize()) };
-                Ppn::from_addr_floor(Paddr::from_usize(paddr))
+                let paddr = unsafe { crate::arch::va_to_pa(vaddr) };
+                Ppn::from_addr_floor(paddr)
             }
             MapType::Framed => {
                 // 分配一个新的帧
@@ -267,8 +267,8 @@ impl MappingArea {
 
             // 复制数据到物理页
             unsafe {
-                let dst_va = crate::arch::paddr_to_vaddr(paddr);
-                let dst = dst_va as *mut u8;
+                let dst_va = crate::arch::pa_to_va(PA::from_usize(paddr));
+                let dst = dst_va.as_usize() as *mut u8;
                 let src = data.as_ptr().add(copied);
                 core::ptr::copy_nonoverlapping(src, dst, to_copy);
             }
@@ -324,14 +324,12 @@ impl MappingArea {
 
                         // 复制数据到新帧
                         unsafe {
-                            let src_va =
-                                crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                            let dst_va =
-                                crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
+                            let src_va = crate::arch::pa_to_va(src_ppn.start_addr());
+                            let dst_va = crate::arch::pa_to_va(new_ppn.start_addr());
 
                             core::ptr::copy_nonoverlapping(
-                                src_va as *const u8,
-                                dst_va as *mut u8,
+                                src_va.as_usize() as *const u8,
+                                dst_va.as_usize() as *mut u8,
                                 crate::config::PAGE_SIZE,
                             );
                         }
@@ -361,14 +359,12 @@ impl MappingArea {
 
                             // 复制数据到新帧
                             unsafe {
-                                let src_va =
-                                    crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                                let dst_va =
-                                    crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
+                                let src_va = crate::arch::pa_to_va(src_ppn.start_addr());
+                                let dst_va = crate::arch::pa_to_va(new_ppn.start_addr());
 
                                 core::ptr::copy_nonoverlapping(
-                                    src_va as *const u8,
-                                    dst_va as *mut u8,
+                                    src_va.as_usize() as *const u8,
+                                    dst_va.as_usize() as *mut u8,
                                     crate::config::PAGE_SIZE,
                                 );
                             }
@@ -405,8 +401,8 @@ impl MappingArea {
                     //
                     //    // 复制数据到新帧
                     //    unsafe {
-                    //        let src_va = crate::arch::paddr_to_vaddr(src_ppn.start_addr().as_usize());
-                    //        let dst_va = crate::arch::paddr_to_vaddr(new_ppn.start_addr().as_usize());
+                    //        let src_va = crate::arch::pa_to_va(src_ppn.start_addr().as_usize());
+                    //        let dst_va = crate::arch::pa_to_va(new_ppn.start_addr().as_usize());
                     //
                     //        core::ptr::copy_nonoverlapping(
                     //            src_va as *const u8,
@@ -861,9 +857,10 @@ impl MappingArea {
                 };
 
                 let paddr = ppn.start_addr();
-                let kernel_vaddr = crate::arch::paddr_to_vaddr(paddr.as_usize());
-                let buffer =
-                    unsafe { core::slice::from_raw_parts_mut(kernel_vaddr as *mut u8, PAGE_SIZE) };
+                let kernel_vaddr = crate::arch::pa_to_va(paddr);
+                let buffer = unsafe {
+                    core::slice::from_raw_parts_mut(kernel_vaddr.as_usize() as *mut u8, PAGE_SIZE)
+                };
 
                 // 计算实际读取长度（处理文件末尾）
                 let read_len = min(
@@ -948,9 +945,9 @@ impl MappingArea {
                     };
 
                     let paddr = ppn.start_addr();
-                    let kernel_vaddr = crate::arch::paddr_to_vaddr(paddr.as_usize());
+                    let kernel_vaddr = crate::arch::pa_to_va(paddr);
                     let buffer = unsafe {
-                        core::slice::from_raw_parts(kernel_vaddr as *const u8, PAGE_SIZE)
+                        core::slice::from_raw_parts(kernel_vaddr.as_usize() as *const u8, PAGE_SIZE)
                     };
 
                     // 计算实际写入长度（处理文件末尾）

@@ -17,7 +17,7 @@ use crate::{
         task::{forkret, task_state::TaskState},
     },
     mm::{
-        address::{ConvertablePaddr, PageNum, UsizeConvert},
+        address::{ConvertablePA, PageNum, UA, VA},
         frame_allocator::{FrameRangeTracker, FrameTracker},
         memory_space::MemorySpace,
     },
@@ -89,7 +89,7 @@ pub struct Task {
     /// 任务的等待队列
     pub wait_child: Arc<SpinLock<WaitQueue>>,
     /// 内核栈基址
-    pub kstack_base: usize,
+    pub kstack_base: VA,
     /// 中断上下文。指向当前任务内核栈上的 TrapFrame，仅在任务被中断时有效。
     pub trap_frame_ptr: AtomicPtr<TrapFrame>,
     /// 任务的内存空间
@@ -121,11 +121,11 @@ pub struct Task {
     /// 资源限制结构体
     pub rlimit: Arc<SpinLock<RlimitStruct>>,
     /// 健壮列表头地址及其大小
-    pub robust_list: Option<usize>,
+    pub robust_list: Option<UA>,
     /// 线程ID地址
-    pub set_child_tid: usize,
+    pub set_child_tid: Option<UA>,
     /// 线程退出时清除的线程ID地址
-    pub clear_child_tid: usize,
+    pub clear_child_tid: Option<UA>,
 
     // === 权限和凭证 ===
     /// 任务凭证（用户、组、能力）
@@ -202,7 +202,7 @@ impl Task {
             fs,
         );
         task.context
-            .set_init_context(forkret as usize, task.kstack_base);
+            .set_init_context(forkret as usize, task.kstack_base.as_usize());
         task
     }
 
@@ -252,7 +252,7 @@ impl Task {
             fs,
         );
         task.context
-            .set_init_context(forkret as usize, task.kstack_base);
+            .set_init_context(forkret as usize, task.kstack_base.as_usize());
         task
     }
 
@@ -266,15 +266,15 @@ impl Task {
     pub fn execve(
         &mut self,
         new_memory_space: Arc<SpinLock<MemorySpace>>,
-        initial_pc: usize,
-        sp_high: usize,
+        initial_pc: VA,
+        sp_high: VA,
         argv: &[&str],
         envp: &[&str],
-        phdr_addr: usize,
+        phdr_addr: VA,
         phnum: usize,
         phent: usize,
-        at_base: usize,
-        at_entry: usize,
+        at_base: VA,
+        at_entry: VA,
     ) {
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
@@ -308,7 +308,11 @@ impl Task {
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
-            (*tf_ptr).set_exec_trap_frame_from_layout(initial_pc, self.kstack_base, &stack_layout);
+            (*tf_ptr).set_exec_trap_frame_from_layout(
+                initial_pc.as_usize(),
+                self.kstack_base.as_usize(),
+                &stack_layout,
+            );
             let cpu_ptr = {
                 let _guard = crate::sync::PreemptGuard::new();
                 crate::kernel::current_cpu() as *const _ as usize
@@ -386,8 +390,8 @@ impl Task {
         fd_table: Arc<FDTable>,
         fs: Arc<SpinLock<FsStruct>>,
     ) -> Self {
-        let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_vaddr().as_usize();
-        let kstack_base = kstack_tracker.end_ppn().start_addr().to_vaddr().as_usize();
+        let trap_frame_ptr = trap_frame_tracker.ppn().start_addr().to_va().as_usize();
+        let kstack_base = kstack_tracker.end_ppn().start_addr().to_va();
 
         Task {
             context: Context::zero_init(),
@@ -419,8 +423,8 @@ impl Task {
             pending: SignalPending::empty(),
             shared_pending,
             robust_list: None,
-            set_child_tid: 0,
-            clear_child_tid: 0,
+            set_child_tid: None,
+            clear_child_tid: None,
             credential: super::Credential::root(),
             umask: 0o022,
             fd_table,

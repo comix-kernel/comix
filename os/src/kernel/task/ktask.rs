@@ -83,7 +83,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
         (*tf).set_kernel_trap_frame(
             entry_point as usize,
             super::terminate_task as usize,
-            task.kstack_base,
+            task.kstack_base.as_usize(),
         );
         let cpu_ptr = {
             let _guard = crate::sync::PreemptGuard::new();
@@ -168,9 +168,9 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
         super::prepare_exec_image_from_path(path).expect("kernel_execve: failed to prepare image");
     crate::pr_info!(
         "[kernel_execve] Prepared image, pc=0x{:x}, at_base=0x{:x}, at_entry=0x{:x}",
-        prepared.initial_pc,
-        prepared.at_base,
-        prepared.at_entry
+        prepared.initial_pc.as_usize(),
+        prepared.at_base.as_usize(),
+        prepared.at_entry.as_usize()
     );
 
     // 2. 包装内存空间

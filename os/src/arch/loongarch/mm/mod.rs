@@ -25,6 +25,7 @@
 mod page_table;
 mod page_table_entry;
 
+use crate::arch::address::{PA, VA};
 pub use page_table::{PageTableInner, TlbBatchContext};
 pub use page_table_entry::PageTableEntry;
 
@@ -52,8 +53,8 @@ pub const PADDR_MASK: usize = 0x0000_FFFF_FFFF_FFFF;
 ///
 /// 调用者必须确保虚拟地址在直接映射区域内。
 #[inline]
-pub const unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
-    vaddr & PADDR_MASK
+pub const unsafe fn va_to_pa(va: VA) -> PA {
+    PA::from_usize(va.as_usize() & PADDR_MASK)
 }
 
 /// 物理地址转虚拟地址
@@ -66,6 +67,6 @@ pub const unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
 ///
 /// 对应的虚拟地址（在直接映射区域内）
 #[inline]
-pub const fn paddr_to_vaddr(paddr: usize) -> usize {
-    paddr | VADDR_START
+pub const fn pa_to_va(pa: PA) -> VA {
+    VA::from_usize(pa.as_usize() | VADDR_START)
 }

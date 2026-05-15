@@ -9,6 +9,7 @@ use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
+        address::UA,
         timer::{clock_freq, get_time},
         trap::restore,
     },
@@ -22,7 +23,7 @@ use crate::{
         yield_task,
     },
     mm::{
-        address::{UsizeConvert, Vaddr},
+        address::VA,
         frame_allocator::{alloc_contig_frames, alloc_frame},
         memory_space::MemorySpace,
     },
@@ -100,15 +101,11 @@ fn clear_child_tid_and_wake() {
     let task = current_task();
     let clear_addr = {
         let mut t = task.lock();
-        let addr = t.clear_child_tid;
         // 避免重复清理
-        t.clear_child_tid = 0;
-        addr
+        t.clear_child_tid.take()
     };
 
-    if clear_addr == 0 {
-        return;
-    }
+    let Some(clear_addr) = clear_addr else { return };
 
     // If the task has already dropped its user address space (e.g. forced exit paths),
     // we cannot touch userspace or translate the address. Best-effort: just skip.
@@ -122,13 +119,13 @@ fn clear_child_tid_and_wake() {
 
     // 1) write 0 to userspace tid address
     unsafe {
-        write_to_user(clear_addr as *mut c_int, 0);
+        write_to_user(clear_addr.as_usize() as *mut c_int, 0);
     }
 
     // 2) futex wake
     let Some(paddr) = memory_space
         .lock()
-        .translate(Vaddr::from_usize(clear_addr as usize))
+        .translate(VA::from_usize(clear_addr.as_usize()))
         .map(|p| p.as_usize())
     else {
         return;
@@ -282,16 +279,16 @@ pub fn clone(
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        (*tf).set_clone_trap_frame(&*ptf, child_task.kstack_base, stack as usize);
+        (*tf).set_clone_trap_frame(&*ptf, child_task.kstack_base.as_usize(), stack as usize);
         if requested_flags.contains(CloneFlags::SETTLS) {
             (*tf).set_tls(tls as usize);
         }
     }
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
-        child_task.set_child_tid = ctid as usize;
+        child_task.set_child_tid = Some(UA::from_usize(ctid as usize));
     }
     if requested_flags.contains(CloneFlags::CHILD_CLEARTID) {
-        child_task.clear_child_tid = ctid as usize;
+        child_task.clear_child_tid = Some(UA::from_usize(ctid as usize));
     }
     let child_task = child_task.into_shared();
     current_task()
@@ -1030,7 +1027,7 @@ pub fn futex(
                 .clone();
             let paddr = if let Some(paddr) = memory_space
                 .lock()
-                .translate(Vaddr::from_usize(uaddr as usize))
+                .translate(VA::from_usize(uaddr as usize))
             {
                 paddr.as_usize()
             } else {
@@ -1095,7 +1092,7 @@ pub fn futex(
                     .clone();
                 if let Some(paddr) = memory_space
                     .lock()
-                    .translate(Vaddr::from_usize(uaddr as usize))
+                    .translate(VA::from_usize(uaddr as usize))
                 {
                     paddr.as_usize()
                 } else {
@@ -1126,7 +1123,7 @@ pub fn futex(
 /// - 返回当前线程的线程 ID (TID)
 pub fn set_tid_address(tidptr: *mut c_int) -> c_int {
     let task = current_task();
-    task.lock().clear_child_tid = tidptr as usize;
+    task.lock().clear_child_tid = Some(UA::from_usize(tidptr as usize));
     current_task().lock().tid as c_int
 }
 
@@ -1150,7 +1147,7 @@ pub fn get_robust_list(pid: c_int, head_ptr: *mut *mut RobustListHead, sizep: *m
     let (head, size) = {
         let t = task.lock();
         let head = match t.robust_list {
-            Some(h) => h as *mut RobustListHead,
+            Some(h) => h.as_usize() as *mut RobustListHead,
             None => core::ptr::null_mut(),
         };
         let size = size_of::<RobustListHead>() as SizeT;
@@ -1174,7 +1171,7 @@ pub fn set_robust_list(head: *const RobustListHead, size: SizeT) -> c_int {
         return -EINVAL;
     }
     let task = current_task();
-    task.lock().robust_list = Some(head as usize);
+    task.lock().robust_list = Some(UA::from_usize(head as usize));
     0
 }
 
@@ -1230,19 +1227,7 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
 fn do_execve_prepare(
     path: &str,
-) -> Result<
-    (
-        Arc<SpinLock<MemorySpace>>,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-    ),
-    c_int,
-> {
+) -> Result<(Arc<SpinLock<MemorySpace>>, VA, VA, VA, usize, usize, VA, VA), c_int> {
     let prepared = match crate::kernel::task::prepare_exec_image_from_path(path) {
         Ok(p) => p,
         Err(crate::kernel::task::ExecImageError::Fs(FsError::NotFound)) => return Err(-ENOENT),
@@ -1271,16 +1256,16 @@ fn do_execve_prepare(
 /// 注意：此函数不会返回！
 fn do_execve_switch(
     space: Arc<SpinLock<MemorySpace>>,
-    initial_pc: usize,
-    sp: usize,
+    initial_pc: VA,
+    sp: VA,
     exe_path: alloc::string::String,
     argv: Vec<alloc::string::String>,
     envp: Vec<alloc::string::String>,
-    phdr_addr: usize,
+    phdr_addr: VA,
     phnum: usize,
     phent: usize,
-    at_base: usize,
-    at_entry: usize,
+    at_base: VA,
+    at_entry: VA,
 ) -> c_int {
     let task = current_task();
 

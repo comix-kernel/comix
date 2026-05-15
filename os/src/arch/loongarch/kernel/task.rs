@@ -5,13 +5,9 @@ use core::{mem::size_of, ptr};
 
 use super::context::TaskContext;
 use crate::{
-    arch::{constant::STACK_ALIGN_MASK, mm::paddr_to_vaddr, task::ExecStackLayout},
+    arch::{address::VA, constant::STACK_ALIGN_MASK, task::ExecStackLayout},
     config::PAGE_SIZE,
-    mm::{
-        address::{UsizeConvert, Vaddr},
-        frame_allocator::FrameTracker,
-        memory_space::MemorySpace,
-    },
+    mm::{frame_allocator::FrameTracker, memory_space::MemorySpace},
 };
 
 /// 初始化内核任务上下文
@@ -197,24 +193,32 @@ pub fn setup_stack_layout(
 /// Architecture-neutral wrapper for `execve` stack setup.
 pub fn setup_exec_stack_layout(
     space: &MemorySpace,
-    sp: usize,
+    sp: VA,
     argv: &[&str],
     envp: &[&str],
-    phdr_addr: usize,
+    phdr_addr: VA,
     phnum: usize,
     phent: usize,
-    at_base: usize,
-    at_entry: usize,
+    at_base: VA,
+    at_entry: VA,
 ) -> ExecStackLayout {
     let (sp, argc, argv, envp, tls) = setup_stack_layout(
-        space, sp, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
-    );
-    ExecStackLayout {
-        sp,
-        argc,
+        space,
+        sp.as_usize(),
         argv,
         envp,
-        tls,
+        phdr_addr.as_usize(),
+        phnum,
+        phent,
+        at_base.as_usize(),
+        at_entry.as_usize(),
+    );
+    ExecStackLayout {
+        sp: VA::from_usize(sp),
+        argc,
+        argv: VA::from_usize(argv),
+        envp: VA::from_usize(envp),
+        tls: VA::from_usize(tls),
     }
 }
 
@@ -238,8 +242,8 @@ pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, is_kern
 /// Final architecture-specific preparation before restoring to user mode.
 pub unsafe fn prepare_user_restore(
     tfp: *mut crate::arch::trap::TrapFrame,
-    initial_pc: usize,
-    user_sp_high: usize,
+    initial_pc: VA,
+    user_sp_high: VA,
 ) {
     if tfp.is_null() {
         crate::pr_err!("[kernel_execve] trap_frame_ptr is null");
@@ -260,7 +264,6 @@ pub unsafe fn prepare_user_restore(
     }
 
     use crate::mm::address::PageNum;
-    use crate::mm::address::{UsizeConvert, Vaddr};
     let tlbrent: usize;
     let crmd: usize;
     let pgdl: usize;
@@ -287,14 +290,16 @@ pub unsafe fn prepare_user_restore(
     let space = space.lock();
     let root_ppn = space.root_ppn();
     let root_paddr = root_ppn.start_addr().as_usize();
-    let entry_va = <Vaddr as UsizeConvert>::from_usize(initial_pc);
-    let sp_va = <Vaddr as UsizeConvert>::from_usize(user_sp_high);
+    let entry_va = initial_pc;
+    let sp_va = user_sp_high;
     unsafe extern "C" {
         fn tlb_refill_entry();
     }
     let tlbr_entry_vaddr = tlb_refill_entry as usize;
-    let tlbr_entry_paddr = unsafe { crate::arch::vaddr_to_paddr(tlbr_entry_vaddr) } & !0xfff;
-    let tlbr_entry_dm_vaddr = crate::arch::paddr_to_vaddr(tlbr_entry_paddr);
+    let tlbr_entry_paddr =
+        unsafe { crate::arch::va_to_pa(VA::from_usize(tlbr_entry_vaddr)) }.as_usize() & !0xfff;
+    let tlbr_entry_dm_vaddr =
+        crate::arch::pa_to_va(crate::arch::address::PA::from_usize(tlbr_entry_paddr)).as_usize();
     crate::pr_debug!(
         "[kernel_execve] va translate: entry={:?}, sp={:?}",
         space.translate(entry_va),
@@ -355,15 +360,15 @@ fn write_user_usize(space: &MemorySpace, dst: usize, val: usize) {
 fn write_user_bytes(space: &MemorySpace, dst: usize, data: &[u8]) {
     let mut offset = 0usize;
     while offset < data.len() {
-        let vaddr = <Vaddr as UsizeConvert>::from_usize(dst + offset);
+        let vaddr = VA::from_usize(dst + offset);
         let paddr = space
             .translate(vaddr)
             .expect("write_user_bytes: translate failed");
         let page_off = (dst + offset) & (PAGE_SIZE - 1);
         let chunk = core::cmp::min(PAGE_SIZE - page_off, data.len() - offset);
         unsafe {
-            let dst_va = paddr_to_vaddr(paddr.as_usize());
-            let dst_ptr = dst_va as *mut u8;
+            let dst_va = crate::arch::pa_to_va(paddr);
+            let dst_ptr = dst_va.as_usize() as *mut u8;
             let src_ptr = data.as_ptr().add(offset);
             for i in 0..chunk {
                 ptr::write(dst_ptr.add(i), ptr::read(src_ptr.add(i)));

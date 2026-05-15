@@ -2,7 +2,7 @@ use core::ffi::c_void;
 
 use crate::config::PAGE_SIZE;
 use crate::kernel::{current_memory_space, current_task};
-use crate::mm::address::{PageNum, UsizeConvert, Vaddr, Vpn, VpnRange};
+use crate::mm::address::{PageNum, VA, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
@@ -30,7 +30,7 @@ pub fn brk(new_brk: usize) -> isize {
     let mut space = memory_space.lock();
 
     // 获取当前的 brk 值
-    let current = space.current_brk().unwrap_or(0);
+    let current = space.current_brk().map(|addr| addr.as_usize()).unwrap_or(0);
 
     // 如果 new_brk 为 0，返回当前 brk（查询模式）
     if new_brk == 0 {
@@ -38,8 +38,8 @@ pub fn brk(new_brk: usize) -> isize {
     }
 
     // 尝试设置新的 brk
-    match space.brk(new_brk) {
-        Ok(addr) => addr as isize,
+    match space.brk(VA::from_usize(new_brk)) {
+        Ok(addr) => addr.as_usize() as isize,
         Err(e) => {
             pr_err!(
                 "brk failed: {:?}, new_brk=0x{:x}, current=0x{:x}",
@@ -177,7 +177,7 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
 
     let start_addr = if map_flags.contains(MapFlags::FIXED) {
         // MAP_FIXED: 强制使用指定地址，覆盖现有映射
-        match space.munmap(hint, len) {
+        match space.munmap(VA::from_usize(hint), len) {
             Ok(_) => hint,
             Err(e) => {
                 pr_err!("mmap: MAP_FIXED munmap failed: {:?}", e);
@@ -191,8 +191,8 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
             return -EINVAL as isize;
         }
 
-        let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(hint));
-        let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(hint + len));
+        let start_vpn = Vpn::from_addr_floor(VA::from_usize(hint));
+        let end_vpn = Vpn::from_addr_ceil(VA::from_usize(hint + len));
         let range = VpnRange::new(start_vpn, end_vpn);
 
         // 检查是否与现有区域重叠
@@ -209,7 +209,7 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
         if hint == 0 {
             // hint == 0: 内核选择地址
             match space.find_free_region(len, PAGE_SIZE) {
-                Some(addr) => addr,
+                Some(addr) => addr.as_usize(),
                 None => {
                     pr_err!("mmap: out of memory");
                     return -ENOMEM as isize;
@@ -219,8 +219,8 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
             // hint != 0: 尝试使用 hint，失败则内核选择
             let aligned_hint = hint & !(PAGE_SIZE - 1);
 
-            let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(aligned_hint));
-            let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(aligned_hint + len));
+            let start_vpn = Vpn::from_addr_floor(VA::from_usize(aligned_hint));
+            let end_vpn = Vpn::from_addr_ceil(VA::from_usize(aligned_hint + len));
             let range = VpnRange::new(start_vpn, end_vpn);
 
             let hint_available = !space.areas().iter().any(|a| a.vpn_range().overlaps(&range));
@@ -230,7 +230,7 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
             } else {
                 // hint 不可用，内核选择
                 match space.find_free_region(len, PAGE_SIZE) {
-                    Some(addr) => addr,
+                    Some(addr) => addr.as_usize(),
                     None => {
                         pr_err!("mmap: out of memory");
                         return -ENOMEM as isize;
@@ -266,8 +266,8 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
     }
 
     // 创建映射
-    let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start_addr));
-    let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start_addr + len));
+    let start_vpn = Vpn::from_addr_floor(VA::from_usize(start_addr));
+    let end_vpn = Vpn::from_addr_ceil(VA::from_usize(start_addr + len));
     let vpn_range = VpnRange::new(start_vpn, end_vpn);
 
     // 插入映射区域（PROT_NONE 用 Reserved 占位，不建立页表映射）
@@ -301,7 +301,7 @@ pub fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, offse
             fd
         );
         // 加载失败，清理已创建的映射
-        if let Err(unmap_err) = space.munmap(start_addr, len) {
+        if let Err(unmap_err) = space.munmap(VA::from_usize(start_addr), len) {
             pr_warn!(
                 "mmap: failed to clean up mapping on load error: {:?}",
                 unmap_err
@@ -339,7 +339,7 @@ pub fn munmap(addr: *mut c_void, len: usize) -> isize {
     let memory_space = current_memory_space();
     let mut space = memory_space.lock();
 
-    match space.munmap(start, len) {
+    match space.munmap(VA::from_usize(start), len) {
         Ok(()) => 0,
         Err(e) => {
             pr_err!(
@@ -414,7 +414,7 @@ pub fn mprotect(addr: *mut c_void, len: usize, prot: i32) -> isize {
     let memory_space = current_memory_space();
     let mut space = memory_space.lock();
 
-    match space.mprotect(start, len, pte_flags) {
+    match space.mprotect(VA::from_usize(start), len, pte_flags) {
         Ok(()) => 0,
         Err(e) => {
             pr_err!(

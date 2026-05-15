@@ -1,6 +1,6 @@
 //! Address Operations Module
 //!
-//! 此模块定义了用于自定义地址类型（如 Paddr 和 Vaddr）的数学、位操作和对齐 Trait。
+//! 此模块定义了用于自定义地址类型（如 PA 和 VA）的数学、位操作和对齐 Trait。
 //! 目标是使强类型地址在使用时具备与 `usize` 相同的运算能力，同时保持类型安全。
 
 use crate::config::PAGE_SIZE;
@@ -12,7 +12,7 @@ use core::ops::{
 /// [UsizeConvert] Trait
 /// ---------------------
 /// 允许类型与 usize 之间互相转换。
-/// 任何自定义的地址或页码类型 (例如 Paddr, Vaddr) 必须实现此 Trait，
+/// 任何自定义的地址或页码类型 (例如 PA, VA) 必须实现此 Trait，
 /// 以便进行底层数值操作。
 pub trait UsizeConvert: Copy + Clone + PartialEq + PartialOrd + Eq + Ord {
     /// 将类型转换为 usize。

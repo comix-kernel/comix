@@ -3,7 +3,7 @@
 use crate::{
     device::{CMDLINE, irq::IntcDriver},
     kernel::{CLOCK_FREQ, NUM_CPU},
-    mm::address::{ConvertablePaddr, Paddr, UsizeConvert},
+    mm::address::{ConvertablePA, PA},
     pr_info, pr_warn,
     sync::SpinLock,
 };
@@ -19,7 +19,7 @@ lazy_static::lazy_static! {
     /// XXX: 是否需要这个?
     pub static ref FDT: Fdt<'static> = {
         unsafe {
-            let addr = Paddr::to_vaddr(&Paddr::from_usize(DTP));
+            let addr = PA::to_va(&PA::from_usize(DTP));
             fdt::Fdt::from_ptr(addr.as_usize() as *mut u8).expect("Failed to parse device tree")
         }
     };
