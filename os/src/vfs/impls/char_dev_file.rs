@@ -379,7 +379,9 @@ impl CharDeviceFile {
                 }
 
                 let winsize = *self.winsize.lock();
-                let zeroed = unsafe { core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init() };
+                let zeroed = unsafe {
+                    core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init()
+                };
                 unsafe { write_to_user(winsize_ptr, zeroed) };
                 unsafe { write_to_user(winsize_ptr, winsize) };
                 Ok(0)
@@ -444,7 +446,8 @@ impl CharDeviceFile {
                             tm_isdst: 0,
                         };
 
-                        let zeroed = unsafe { core::mem::MaybeUninit::<RtcTime>::zeroed().assume_init() };
+                        let zeroed =
+                            unsafe { core::mem::MaybeUninit::<RtcTime>::zeroed().assume_init() };
                         unsafe { write_to_user(rtc_time_ptr, zeroed) };
                         unsafe { write_to_user(rtc_time_ptr, rtc_time) };
                         return Ok(0);

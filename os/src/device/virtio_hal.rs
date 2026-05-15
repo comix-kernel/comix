@@ -1,6 +1,6 @@
 //! HAL (硬件抽象层) 实现，用于适配 virtio-drivers 0.12.0 库
 
-use crate::mm::address::{ConvertablePaddr, PageNum, UsizeConvert};
+use crate::mm::address::{ConvertablePA, PA, PageNum, VA};
 use crate::mm::frame_allocator::FrameRangeTracker;
 use crate::sync::SpinLock;
 use alloc::collections::btree_map::BTreeMap;
@@ -36,7 +36,7 @@ unsafe impl Hal for VirtIOHal {
         let phys_addr = PhysAddr::from(start_ppn.start_addr().as_usize() as u64);
 
         // 将物理地址转换为虚拟地址
-        let virt_addr = unsafe { start_ppn.start_addr().to_vaddr().as_mut_ptr::<u8>() };
+        let virt_addr = start_ppn.start_addr().to_va().as_mut_ptr::<u8>();
         let virt_ptr = NonNull::new(virt_addr).unwrap();
 
         // 清零 DMA 缓冲区（VirtIO HAL trait 要求）
@@ -77,20 +77,20 @@ unsafe impl Hal for VirtIOHal {
     /// 将MMIO物理地址转换为虚拟地址
     unsafe fn mmio_phys_to_virt(paddr: PhysAddr, _size: usize) -> NonNull<u8> {
         // 提取物理地址值并使用架构特定的转换函数
-        let phys_addr = paddr as usize;
-        let virt = crate::arch::paddr_to_vaddr(phys_addr);
+        let phys_addr = PA::from_usize(paddr as usize);
+        let virt = crate::arch::pa_to_va(phys_addr);
 
         // 验证虚拟地址的合法性
 
-        NonNull::new(virt as *mut u8).expect("mmio_phys_to_virt returned null pointer")
+        NonNull::new(virt.as_usize() as *mut u8).expect("mmio_phys_to_virt returned null pointer")
     }
 
     /// 共享内存区域给设备，并返回设备可访问的物理地址
     unsafe fn share(buffer: NonNull<[u8]>, _direction: BufferDirection) -> PhysAddr {
         let vaddr = buffer.as_ptr() as *const u8 as usize;
-        let paddr = unsafe { crate::arch::vaddr_to_paddr(vaddr) };
+        let paddr = unsafe { crate::arch::va_to_pa(VA::from_usize(vaddr)) };
 
-        PhysAddr::from(paddr as u64)
+        PhysAddr::from(paddr.as_usize() as u64)
     }
 
     /// 取消共享内存区域，并在必要时将数据复制回原始缓冲区

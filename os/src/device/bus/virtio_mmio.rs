@@ -17,13 +17,13 @@ use crate::{
         net::virtio_net,
     },
     kernel::current_memory_space,
-    mm::address::{Paddr, UsizeConvert},
+    mm::address::PA,
     pr_warn,
 };
 
 pub fn driver_init() {
     DEVICE_TREE_REGISTRY
-        .write()
+        .lock()
         .insert("virtio,mmio", virtio_probe);
 }
 
@@ -46,7 +46,7 @@ fn virtio_probe(node: &FdtNode) {
         //判 断 virtio 设 备 类 型
         let vaddr = current_memory_space()
             .lock()
-            .map_mmio(Paddr::from_usize(paddr), size)
+            .map_mmio(PA::from_usize(paddr), size)
             .ok()
             .expect("Failed to map MMIO region");
         let header = NonNull::new(vaddr.as_usize() as *mut VirtIOHeader).unwrap();

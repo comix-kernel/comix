@@ -15,6 +15,7 @@ pub mod virtio_hal;
 pub mod device_tree;
 
 use crate::sync::RwLock;
+use crate::sync::SpinLock;
 use alloc::sync::Arc;
 pub use block::ram_disk::RamDisk;
 
@@ -101,8 +102,8 @@ lazy_static! {
     pub static ref DRIVERS: RwLock<Vec<Arc<dyn Driver>>> = RwLock::new(Vec::new());
     pub static ref BLK_DRIVERS: RwLock<Vec<Arc<dyn BlockDriver>>> = RwLock::new(Vec::new());
     pub static ref RTC_DRIVERS: RwLock<Vec<Arc<dyn RtcDriver>>> = RwLock::new(Vec::new());
-    pub static ref SERIAL_DRIVERS: RwLock<Vec<Arc<dyn SerialDriver>>> = RwLock::new(Vec::new());
-    pub static ref IRQ_MANAGER: RwLock<irq::IrqManager> = RwLock::new(irq::IrqManager::new(true));
+    pub static ref SERIAL_DRIVERS: SpinLock<Vec<Arc<dyn SerialDriver>>> = SpinLock::new(Vec::new());
+    pub static ref IRQ_MANAGER: SpinLock<irq::IrqManager> = SpinLock::new(irq::IrqManager::new(true));
 }
 
 lazy_static! {

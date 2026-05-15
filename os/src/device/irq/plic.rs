@@ -8,9 +8,9 @@ use crate::device::device_tree::{DEVICE_TREE_INTC, DEVICE_TREE_REGISTRY};
 use crate::device::irq::IntcDriver;
 use crate::device::{DeviceType, Driver, IRQ_MANAGER};
 use crate::kernel::current_memory_space;
-use crate::mm::address::{Paddr, UsizeConvert};
+use crate::mm::address::{PA, VA};
 use crate::{pr_info, pr_warn};
-use crate::{sync::SpinLock as Mutex, util::read, util::write};
+use crate::{sync::SpinLock, util::read, util::write};
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -18,8 +18,8 @@ use fdt::node::FdtNode;
 
 /// Platform Level Interrupt Controller (PLIC) 结构体
 pub struct Plic {
-    base: usize,
-    manager: Mutex<IrqManager>,
+    base: VA,
+    manager: SpinLock<IrqManager>,
 }
 
 impl Driver for Plic {
@@ -29,12 +29,13 @@ impl Driver for Plic {
     /// # 返回值
     /// 如果中断被处理则返回 true，否则返回 false
     fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
-        let pending: u32 = read(self.base + 0x1000);
+        let base = self.base.as_usize();
+        let pending: u32 = read(base + 0x1000);
         if pending != 0 {
-            let claim: u32 = read(self.base + 0x201004);
+            let claim: u32 = read(base + 0x201004);
             let manager = self.manager.lock();
             let res = manager.try_handle_interrupt(Some(claim as usize));
-            write(self.base + 0x201004, claim);
+            write(base + 0x201004, claim);
             res
         } else {
             false
@@ -52,7 +53,7 @@ impl Driver for Plic {
     /// # 返回值
     /// 设备标识符字符串
     fn get_id(&self) -> String {
-        format!("plic_{}", self.base)
+        format!("plic_{:#x}", self.base.as_usize())
     }
 }
 
@@ -63,10 +64,10 @@ impl IntcDriver for Plic {
     /// * `driver` - 要注册的驱动程序
     fn register_local_irq(&self, irq: usize, driver: Arc<dyn Driver>) {
         write(
-            self.base + 0x2080,
-            read::<u32>(self.base + 0x2080) | (1 << irq),
+            self.base.as_usize() + 0x2080,
+            read::<u32>(self.base.as_usize() + 0x2080) | (1 << irq),
         );
-        write(self.base + irq * 4, 7);
+        write(self.base.as_usize() + irq * 4, 7);
         let mut manager = self.manager.lock();
         manager.register_irq(irq, driver);
     }
@@ -85,7 +86,7 @@ pub fn init_dt(dt: &FdtNode) {
         }
         let vaddr = current_memory_space()
             .lock()
-            .map_mmio(Paddr::from_usize(paddr), size)
+            .map_mmio(PA::from_usize(paddr), size)
             .ok()
             .expect("Failed to map MMIO region");
         let phandle = dt
@@ -93,22 +94,21 @@ pub fn init_dt(dt: &FdtNode) {
             .unwrap()
             .as_usize()
             .expect("Failed to convert 'phandle' property to usize");
-        let base = vaddr.as_usize();
         let plic = Arc::new(Plic {
-            base,
-            manager: Mutex::new(IrqManager::new(false)),
+            base: vaddr,
+            manager: SpinLock::new(IrqManager::new(false)),
         });
 
         // set prio threshold to 0 for context 1
-        write(base + 0x201000, 0);
+        write(vaddr.as_usize() + 0x201000, 0);
         DRIVERS.write().push(plic.clone());
         // register under root irq manager
         IRQ_MANAGER
-            .write()
+            .lock()
             .register_irq(SUPERVISOR_EXTERNAL, plic.clone());
         // register interrupt controller
         DEVICE_TREE_INTC
-            .write()
+            .lock()
             .insert(phandle.try_into().unwrap(), plic);
     } else {
         pr_warn!(
@@ -124,5 +124,5 @@ pub fn init_dt(dt: &FdtNode) {
 
 /// 注册 PLIC 驱动初始化函数
 pub fn driver_init() {
-    DEVICE_TREE_REGISTRY.write().insert("riscv,plic0", init_dt);
+    DEVICE_TREE_REGISTRY.lock().insert("riscv,plic0", init_dt);
 }

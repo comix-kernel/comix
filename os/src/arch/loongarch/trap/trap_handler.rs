@@ -5,14 +5,14 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::arch::constant::{
     CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK, CSR_TLBRENT,
 };
-use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::arch::timer::{
     TIMER_TICKS, ack_timer_interrupt, clock_freq, get_time, set_next_trigger,
 };
 use crate::arch::trap::restore;
 use crate::earlyprintln;
 use crate::ipc::check_signal;
-use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
+use crate::kernel::syscall::dispatch::dispatch_syscall;
+use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_task};
 
 use super::TrapFrame;
 
@@ -114,8 +114,13 @@ fn install_trap_entry() {
         );
         // TLB refill 入口使用独立处理，进行软件页表遍历与 tlbfill
         // TLBRENT 必须使用物理地址，因为 TLB refill 时 CPU 处于直接地址翻译模式
-        let tlbr_entry_paddr =
-            unsafe { crate::arch::mm::vaddr_to_paddr(tlb_refill_entry as usize) } & !0xfff;
+        let tlbr_entry_paddr = unsafe {
+            crate::arch::mm::va_to_pa(crate::arch::address::VA::from_usize(
+                tlb_refill_entry as usize,
+            ))
+        }
+        .as_usize()
+            & !0xfff;
         core::arch::asm!(
             "csrwr {val}, {csr}",
             val = in(reg) tlbr_entry_paddr,
@@ -250,7 +255,7 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
 fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
-        wake_up_with_block(task);
+        wake_up_task(task);
     }
     while let Some(entry) = TIMER.lock().pop_due_entry(get_time()) {
         send_signal_process(&entry.task, entry.sig);

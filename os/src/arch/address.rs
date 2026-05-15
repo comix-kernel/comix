@@ -16,10 +16,7 @@ mod sealed {
 }
 
 /// 内存地址种类标记 trait（sealed — 外部无法实现）
-pub trait MemKind:
-    sealed::Sealed + Ord + Clone + Copy + PartialEq + Eq + core::fmt::Debug
-{
-}
+pub trait MemKind: sealed::Sealed + Ord + Clone + Copy + PartialEq + Eq + core::fmt::Debug {}
 
 // ============================================================================
 // 地址种类标记类型
@@ -77,11 +74,6 @@ pub type VA = Address<Virtual, ()>;
 /// 无类型标记的用户空间地址
 pub type UA = Address<User, ()>;
 
-/// 带类型标记的物理地址指针
-pub type TPA<T> = Address<Physical, T>;
-/// 带类型标记的虚拟地址指针
-pub type TVA<T> = Address<Virtual, T>;
-
 // ============================================================================
 // Address 基本方法
 // ============================================================================
@@ -138,18 +130,18 @@ impl<K: MemKind, T> Address<K, T> {
     }
 
     /// 增加字节偏移
-    pub fn add(self, offset: usize) -> Self {
+    pub fn add_bytes(self, offset: usize) -> Self {
         Self::from_usize(self.inner + offset)
     }
 
     /// 减去字节偏移
-    pub fn sub(self, offset: usize) -> Self {
+    pub fn sub_bytes(self, offset: usize) -> Self {
         Self::from_usize(self.inner - offset)
     }
 
     /// 增加页数
     pub fn add_pages(self, count: usize) -> Self {
-        self.add(count * crate::config::PAGE_SIZE)
+        self.add_bytes(count * crate::config::PAGE_SIZE)
     }
 
     /// 计算与另一地址的差值
@@ -168,8 +160,8 @@ impl<T> Address<Physical, T> {
     /// # Safety
     ///
     /// 裸物理地址访问需要显式承诺：调用者必须确保物理地址有效且已映射。
-    pub unsafe fn as_ptr(&self) -> *const T {
-        self.inner as *const T
+    pub unsafe fn as_ptr<U>(&self) -> *const U {
+        self.inner as *const U
     }
 
     /// 将物理地址转换为可变裸指针
@@ -178,8 +170,8 @@ impl<T> Address<Physical, T> {
     ///
     /// 裸物理地址访问需要显式承诺：调用者必须确保物理地址有效且已映射，
     /// 并且没有其他活跃引用指向同一内存。
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut T {
-        self.inner as *mut T
+    pub unsafe fn as_mut_ptr<U>(&mut self) -> *mut U {
+        self.inner as *mut U
     }
 }
 
@@ -191,13 +183,13 @@ impl<T> Address<Virtual, T> {
     /// 将虚拟地址转换为裸指针（只读）
     ///
     /// 虚拟地址已通过 MMU 映射，因此此操作不是 unsafe。
-    pub fn as_ptr(&self) -> *const T {
-        self.inner as *const T
+    pub fn as_ptr<U>(&self) -> *const U {
+        self.inner as *const U
     }
 
     /// 将虚拟地址转换为可变裸指针
-    pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.inner as *mut T
+    pub fn as_mut_ptr<U>(&mut self) -> *mut U {
+        self.inner as *mut U
     }
 
     /// 将虚拟地址转换为不可变引用
@@ -205,8 +197,8 @@ impl<T> Address<Virtual, T> {
     /// # Safety
     ///
     /// 调用者必须确保地址指向的内存已初始化且未被其他可变引用借用。
-    pub unsafe fn as_ref<'a>(&self) -> &'a T {
-        unsafe { &*(self.inner as *const T) }
+    pub unsafe fn as_ref<'a, U>(&self) -> &'a U {
+        unsafe { &*(self.inner as *const U) }
     }
 
     /// 将虚拟地址转换为可变引用
@@ -214,8 +206,20 @@ impl<T> Address<Virtual, T> {
     /// # Safety
     ///
     /// 调用者必须确保地址指向的内存已初始化且无其他活跃引用。
-    pub unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
-        unsafe { &mut *(self.inner as *mut T) }
+    pub unsafe fn as_mut<'a, U>(&mut self) -> &'a mut U {
+        unsafe { &mut *(self.inner as *mut U) }
+    }
+}
+
+impl Address<Virtual, ()> {
+    /// 从一个不可变引用创建虚拟地址。
+    pub fn from_ref<T>(r: &T) -> Self {
+        Self::from_ptr(r as *const T)
+    }
+
+    /// 从一个常量指针创建虚拟地址。
+    pub fn from_ptr<T>(p: *const T) -> Self {
+        Self::from_usize(p as usize)
     }
 }
 
@@ -230,25 +234,6 @@ impl<T> Address<User, T> {
     pub fn as_ptr(&self) -> *const T {
         panic!("UA::as_ptr() is forbidden; use copy_from_user/copy_to_user")
     }
-}
-
-// ============================================================================
-// AddressTranslator — 跨地址空间转换
-// ============================================================================
-
-/// 地址转换器 trait。
-///
-/// 只有通过 `Translator` 才能跨地址空间转换。
-///
-/// # 类型参数
-///
-/// * `T` - 要转换的地址携带的数据类型
-pub trait AddressTranslator<T>: 'static + Send + Sync {
-    /// 虚拟地址 → 物理地址
-    fn virt_to_phys(va: TVA<T>) -> TPA<T>;
-
-    /// 物理地址 → 虚拟地址
-    fn phys_to_virt(pa: TPA<T>) -> TVA<T>;
 }
 
 // ============================================================================

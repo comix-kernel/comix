@@ -4,7 +4,7 @@ use crate::{
     config::PAGE_SIZE,
     fs::proc::ContentGenerator,
     kernel::TaskStruct,
-    mm::address::{PageNum, UsizeConvert},
+    mm::address::PageNum,
     mm::memory_space::mapping_area::{AreaType, MapType},
     sync::SpinLock,
     vfs::FsError,

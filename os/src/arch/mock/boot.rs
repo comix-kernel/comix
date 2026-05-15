@@ -1,5 +1,3 @@
 pub fn main(_hartid: usize) -> ! {
-    loop {
-        core::hint::spin_loop();
-    }
+    crate::kernel::boot::idle_loop()
 }

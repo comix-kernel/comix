@@ -5,7 +5,7 @@
 //! 在超出作用域时自动被回收。
 
 use crate::config::PAGE_SIZE;
-use crate::mm::address::{ConvertablePaddr, PageNum, Ppn, PpnRange, UsizeConvert};
+use crate::mm::address::{ConvertablePA, PageNum, Ppn, PpnRange, UsizeConvert};
 use crate::sync::SpinLock;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
@@ -33,7 +33,7 @@ impl FrameTracker {
 fn clear_frame(ppn: Ppn) {
     unsafe {
         // 将 Ppn 转换为虚拟地址指针
-        let va = ppn.start_addr().to_vaddr().as_mut_ptr::<u8>();
+        let va = ppn.start_addr().to_va().as_mut_ptr::<u8>();
         // 写入 PAGE_SIZE 字节的 0
         core::ptr::write_bytes(va, 0, PAGE_SIZE);
     }

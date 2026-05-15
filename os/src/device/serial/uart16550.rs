@@ -10,7 +10,7 @@ use crate::{
         device_tree::DEVICE_TREE_REGISTRY, serial::SerialDriver,
     },
     kernel::current_memory_space,
-    mm::address::{Paddr, UsizeConvert},
+    mm::address::PA,
     pr_info, pr_warn,
     sync::SpinLock,
 };
@@ -71,7 +71,7 @@ pub fn init(node: &FdtNode) {
     }
     let vaddr = current_memory_space()
         .lock()
-        .map_mmio(Paddr::from_usize(paddr), size)
+        .map_mmio(PA::from_usize(paddr), size)
         .ok()
         .expect("Failed to map MMIO region");
     let mut serial_port = unsafe { MmioSerialPort::new(vaddr.as_usize()) };
@@ -80,11 +80,11 @@ pub fn init(node: &FdtNode) {
         serial_port: SpinLock::new(serial_port),
     });
     DRIVERS.write().push(driver.clone());
-    SERIAL_DRIVERS.write().push(driver.clone());
+    SERIAL_DRIVERS.lock().push(driver.clone());
     uart_console::init(driver);
     pr_info!("[Device] Serial driver (uart16550) is initialized");
 }
 
 pub fn driver_init() {
-    DEVICE_TREE_REGISTRY.write().insert("ns16550a", init);
+    DEVICE_TREE_REGISTRY.lock().insert("ns16550a", init);
 }

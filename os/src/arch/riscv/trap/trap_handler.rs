@@ -11,11 +11,11 @@ use riscv::register::sstatus::SPP;
 use riscv::register::{sepc, sscratch, sstatus, stval};
 
 use crate::arch::constant::SUPERVISOR_EXTERNAL;
-use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::arch::timer::{TIMER_TICKS, clock_freq, get_time};
 use crate::arch::trap::restore;
 use crate::device::IRQ_MANAGER;
-use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
+use crate::kernel::syscall::dispatch::dispatch_syscall;
+use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_task};
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，
@@ -336,7 +336,7 @@ pub fn check_timer() {
     crate::kernel::syscall::io::wake_poll_waiters();
 
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
-        wake_up_with_block(task);
+        wake_up_task(task);
     }
     while let Some(entry) = TIMER.lock().pop_due_entry(get_time()) {
         send_signal_process(&entry.task, entry.sig);
@@ -359,6 +359,6 @@ pub fn check_timer() {
 /// 处理设备中断
 pub fn check_device() {
     IRQ_MANAGER
-        .read()
+        .lock()
         .try_handle_interrupt(Some(SUPERVISOR_EXTERNAL));
 }

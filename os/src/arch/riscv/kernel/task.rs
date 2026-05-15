@@ -6,6 +6,8 @@ use alloc::vec::Vec;
 use riscv::register::sstatus;
 
 use crate::arch::constant::STACK_ALIGN_MASK;
+use crate::arch::{address::VA, task::ExecStackLayout};
+use crate::mm::memory_space::MemorySpace;
 
 /// 为新任务设置用户栈布局，包含命令行参数和环境变量
 /// 返回新的栈指针位置，以及 argc, argv, envp 的地址
@@ -177,4 +179,59 @@ pub fn setup_stack_layout(
     // 6. 最终 sp 应该已经是 16 字节对齐的
     // sp &= !STACK_ALIGN_MASK;
     (sp, argc, argv_vec_ptr, envp_vec_ptr)
+}
+
+/// Architecture-neutral wrapper for `execve` stack setup.
+pub fn setup_exec_stack_layout(
+    _space: &MemorySpace,
+    sp: VA,
+    argv: &[&str],
+    envp: &[&str],
+    phdr_addr: VA,
+    phnum: usize,
+    phent: usize,
+    at_base: VA,
+    at_entry: VA,
+) -> ExecStackLayout {
+    let (sp, argc, argv, envp) = setup_stack_layout(
+        sp.as_usize(),
+        argv,
+        envp,
+        phdr_addr.as_usize(),
+        phnum,
+        phent,
+        at_base.as_usize(),
+        at_entry.as_usize(),
+    );
+    ExecStackLayout {
+        sp: VA::from_usize(sp),
+        argc,
+        argv: VA::from_usize(argv),
+        envp: VA::from_usize(envp),
+        tls: VA::null(),
+    }
+}
+
+/// Restore a freshly scheduled task for the first time.
+pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, _is_kernel_thread: bool) {
+    unsafe { crate::arch::trap::restore(&*tf_ptr) };
+}
+
+/// Final architecture-specific preparation before restoring to user mode.
+pub unsafe fn prepare_user_restore(
+    tfp: *mut crate::arch::trap::TrapFrame,
+    _initial_pc: VA,
+    _user_sp_high: VA,
+) {
+    unsafe {
+        crate::pr_info!(
+            "[kernel_execve] trapframe: sepc={:#x}, sp={:#x}, sstatus={:#x}, a0={:#x}, a1={:#x}, a2={:#x}",
+            (*tfp).sepc,
+            (*tfp).x2_sp,
+            (*tfp).sstatus,
+            (*tfp).x10_a0,
+            (*tfp).x11_a1,
+            (*tfp).x12_a2,
+        );
+    }
 }

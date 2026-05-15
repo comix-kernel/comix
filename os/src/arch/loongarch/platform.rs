@@ -61,4 +61,3 @@ pub fn init() {
     crate::device::bus::pcie::init_virtio_pci();
     crate::device::console::init();
 }
-

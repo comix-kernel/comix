@@ -3,8 +3,12 @@ target = "riscv64gc-unknown-none-elf"
 # target = "loongarch64-unknown-none"
 
 [unstable]
-build-std = ["core", "compiler_builtins", "alloc"]
-build-std-features = ["compiler-builtins-mem"]
+# build-std 与 cargo test 冲突会导致 "duplicate lang item" 错误
+# riscv64gc-unknown-none-elf 的预编译 target 库已包含所需的 core/alloc/compiler_builtins
+# 如需 build-std（例如启用 compiler-builtins-mem），可通过命令行覆盖:
+#   cargo build -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem
+# build-std = ["core", "compiler_builtins", "alloc"]
+# build-std-features = ["compiler-builtins-mem"]
 
 [target.riscv64gc-unknown-none-elf]
 rustflags = [

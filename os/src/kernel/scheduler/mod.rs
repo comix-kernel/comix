@@ -8,11 +8,11 @@ mod wait_queue;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
+    arch::Arch,
     arch::kernel::context::Context,
     config::MAX_CPU_COUNT,
-    arch::Arch,
     kernel::{TaskState, TaskStruct, scheduler::rr_scheduler::RRScheduler, task::SharedTask},
-    sync::{SpinLock, SpinLockGuard},
+    sync::SpinLock,
 };
 
 pub use task_queue::TaskQueue;
@@ -66,20 +66,19 @@ pub trait Scheduler {
     /// 参数:
     /// * `task`: 需要终止的任务
     fn exit_task(&mut self, task: SharedTask);
-    /// 带保护地阻塞任务
-    /// 修改任务状态并从运行队列中移除
-    /// 参数:
-    /// * `task`: 需要阻塞的任务（带锁保护）
-    /// * `stask`: 需要阻塞的任务（共享指针）
-    /// * `receive_signal`: 是否可被信号中断
-    /// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
-    ///       尽量不要使用该函数，除非你非常清楚自己在做什么
-    fn sleep_task_with_guard(
+    /// 原子地检查条件并睡眠
+    ///
+    /// 在持有调度器锁和 task 锁的情况下执行 `prepare` 闭包。
+    /// 如果 `prepare` 返回 `true`（条件满足，不需要睡眠），
+    /// 则任务保持唤醒并返回 `false`。
+    /// 如果 `prepare` 返回 `false`，则将任务设为睡眠态并从运行队列中移除，
+    /// 返回 `true`。
+    fn sleep_task_prepare(
         &mut self,
-        task: &mut SpinLockGuard<'_, TaskStruct>,
-        stask: SharedTask,
+        task: SharedTask,
         receive_signal: bool,
-    );
+        prepare: impl FnOnce(&mut crate::kernel::TaskStruct) -> bool,
+    ) -> bool;
 }
 
 /// 获取当前 CPU 的调度器
@@ -151,7 +150,7 @@ pub fn yield_task() {
 /// * `task`: 需要阻塞的任务
 /// * `receive_signal`: 是否可被信号中断
 /// 注意: 该函数仅设置状态，不负责切换任务
-pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
+pub fn sleep_task(task: SharedTask, receive_signal: bool) {
     let cpu_id = {
         let t = task.lock();
         t.on_cpu.unwrap_or_else(crate::arch::cpu_id)
@@ -163,7 +162,7 @@ pub fn sleep_task_with_block(task: SharedTask, receive_signal: bool) {
 /// 修改任务状态并将其添加到运行队列
 /// 参数:
 /// * `task`: 需要唤醒的任务
-pub fn wake_up_with_block(task: SharedTask) {
+pub fn wake_up_task(task: SharedTask) {
     let target_cpu = pick_cpu();
     let current_cpu = crate::arch::cpu_id();
     let task_tid = { task.lock().tid };
@@ -213,7 +212,7 @@ pub fn wake_up_with_block(task: SharedTask) {
 /// 修改任务状态并从调度器中移除
 /// 参数:
 /// * `task`: 需要终止的任务
-pub fn exit_task_with_block(task: SharedTask) {
+pub fn exit_task(task: SharedTask) {
     let cpu_id = {
         let t = task.lock();
         t.on_cpu.unwrap_or_else(crate::arch::cpu_id)
@@ -221,21 +220,24 @@ pub fn exit_task_with_block(task: SharedTask) {
     scheduler_of(cpu_id).lock().exit_task(task);
 }
 
-/// 带保护地阻塞任务
-/// 修改任务状态并从运行队列中移除
-/// 参数:
-/// * `task`: 需要阻塞的任务（带锁保护）
-/// * `stask`: 需要阻塞的任务（共享指针）
-/// * `receive_signal`: 是否可被信号中断
-/// HACK: 这个函数被设计用来避免信号处理过程中丢失唤醒的问题。
-///       尽量不要使用该函数，除非你非常清楚自己在做什么
-pub fn sleep_task_with_guard_and_block(
-    task: &mut SpinLockGuard<'_, TaskStruct>,
-    stask: SharedTask,
+/// 原子地检查条件并阻塞任务
+///
+/// 在持有调度器锁和 task 锁的情况下执行 `prepare` 闭包。
+/// 如果 `prepare` 返回 `true`（条件满足），任务保持唤醒并返回 `false`。
+/// 如果 `prepare` 返回 `false`，任务将被设为睡眠态并从运行队列移除，
+/// 返回 `true`。
+///
+/// 这消除了 TOCTOU 竞态条件：条件检查和状态转换在锁内原子地完成。
+pub fn sleep_task_prepare(
+    task: SharedTask,
     receive_signal: bool,
-) {
-    let cpu_id = task.on_cpu.unwrap_or_else(crate::arch::cpu_id);
+    prepare: impl FnOnce(&mut TaskStruct) -> bool,
+) -> bool {
+    let cpu_id = {
+        let t = task.lock();
+        t.on_cpu.unwrap_or_else(crate::arch::cpu_id)
+    };
     scheduler_of(cpu_id)
         .lock()
-        .sleep_task_with_guard(task, stask, receive_signal);
+        .sleep_task_prepare(task, receive_signal, prepare)
 }

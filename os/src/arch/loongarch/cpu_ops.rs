@@ -3,8 +3,8 @@
 //! 提供 `LoongArch64` 结构体，实现 `arch::CpuOps` trait。
 //! 将现有的 CSR 内联汇编操作映射到 trait 方法。
 
-use crate::arch::constant::{CSR_CRMD_IE, SSTATUS_SIE};
 use crate::arch::CpuOps;
+use crate::arch::constant::{CSR_CRMD_IE, SSTATUS_SIE};
 
 /// LoongArch64 架构标记类型
 pub struct LoongArch64;

@@ -18,7 +18,7 @@ use crate::{
     },
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
-        exit_process, exit_task_with_block, sleep_task_with_block, wake_up_with_block, yield_task,
+        exit_process, exit_task, sleep_task, wake_up_task, yield_task,
     },
     pr_err,
     uapi::signal::*,
@@ -264,7 +264,7 @@ fn sig_stop(sig_num: usize) {
         }
 
         // 从运行队列移除（不可被信号唤醒，外部需用 SIGCONT）
-        sleep_task_with_block(task, false);
+        sleep_task(task, false);
     }
     yield_task();
 }
@@ -283,7 +283,7 @@ fn sig_continue(sig_num: usize) {
             }
         }
         if resume {
-            wake_up_with_block(task);
+            wake_up_task(task);
         }
     }
 }

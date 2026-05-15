@@ -2,10 +2,9 @@ use core::cmp::Ordering;
 
 use crate::arch::platform::MEMORY_END;
 use crate::config::{
-    MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE,
-    USER_STACK_TOP,
+    MAX_USER_HEAP_SIZE, PAGE_SIZE, USER_SIGRETURN_TRAMPOLINE, USER_STACK_SIZE, USER_STACK_TOP,
 };
-use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange};
+use crate::mm::address::{PA, PageNum, Ppn, UsizeConvert, VA, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::{AreaType, MapType, MappingArea};
 use crate::mm::page_table::{ActivePageTableInner, PageTableInner, PagingError, UniversalPTEFlag};
@@ -109,12 +108,12 @@ impl MemorySpace {
     /// - 如果堆区域存在，返回堆的结束地址（current brk）
     /// - 如果堆区域不存在，返回堆的起始地址
     /// - 如果堆未初始化，返回 None
-    pub fn current_brk(&self) -> Option<usize> {
+    pub fn current_brk(&self) -> Option<VA> {
         self.areas
             .iter()
             .find(|a| a.area_type() == AreaType::UserHeap)
-            .map(|a| a.vpn_range().end().start_addr().as_usize())
-            .or_else(|| self.heap_start.map(|vpn| vpn.start_addr().as_usize()))
+            .map(|a| a.vpn_range().end().start_addr())
+            .or_else(|| self.heap_start.map(|vpn| vpn.start_addr()))
     }
 
     /// 创建一个新的用户地址空间，并克隆当前地址空间的内核映射。
@@ -163,8 +162,8 @@ impl MemorySpace {
             .checked_add(PAGE_SIZE)
             .ok_or(PagingError::InvalidAddress)?;
         let vpn_range = VpnRange::new(
-            Vpn::from_addr_floor(Vaddr::from_usize(start)),
-            Vpn::from_addr_ceil(Vaddr::from_usize(end)),
+            Vpn::from_addr_floor(VA::from_usize(start)),
+            Vpn::from_addr_ceil(VA::from_usize(end)),
         );
 
         // If already mapped (layout differences), don't fail hard.
@@ -199,14 +198,15 @@ impl MemorySpace {
             let cur_va = va.checked_add(written).ok_or(PagingError::InvalidAddress)?;
             let paddr = self
                 .page_table
-                .translate(Vaddr::from_usize(cur_va))
+                .translate(VA::from_usize(cur_va))
                 .ok_or(PagingError::InvalidAddress)?;
             let paddr_usize = paddr.as_usize();
             let page_base = paddr_usize & !(PAGE_SIZE - 1);
             let page_off = paddr_usize & (PAGE_SIZE - 1);
 
             let take = core::cmp::min(bytes.len() - written, PAGE_SIZE - page_off);
-            let dst = (crate::arch::paddr_to_vaddr(page_base) + page_off) as *mut u8;
+            let dst =
+                (crate::arch::pa_to_va(PA::from_usize(page_base)).as_usize() + page_off) as *mut u8;
             unsafe {
                 core::ptr::copy_nonoverlapping(bytes[written..].as_ptr(), dst, take);
             }
@@ -227,14 +227,15 @@ impl MemorySpace {
             let cur_va = va.checked_add(read).ok_or(PagingError::InvalidAddress)?;
             let paddr = self
                 .page_table
-                .translate(Vaddr::from_usize(cur_va))
+                .translate(VA::from_usize(cur_va))
                 .ok_or(PagingError::InvalidAddress)?;
             let paddr_usize = paddr.as_usize();
             let page_base = paddr_usize & !(PAGE_SIZE - 1);
             let page_off = paddr_usize & (PAGE_SIZE - 1);
 
             let take = core::cmp::min(out.len() - read, PAGE_SIZE - page_off);
-            let src = (crate::arch::paddr_to_vaddr(page_base) + page_off) as *const u8;
+            let src = (crate::arch::pa_to_va(PA::from_usize(page_base)).as_usize() + page_off)
+                as *const u8;
             unsafe {
                 core::ptr::copy_nonoverlapping(src, out[read..].as_mut_ptr(), take);
             }
@@ -354,12 +355,12 @@ impl MemorySpace {
         )?;
 
         // 5. 映射物理内存（从 ekernel 到 MEMORY_END 的直接映射）
-        let ekernel_paddr = unsafe { crate::arch::vaddr_to_paddr(ekernel as usize) };
-        let phys_mem_start_vaddr = crate::arch::paddr_to_vaddr(ekernel_paddr);
-        let phys_mem_end_vaddr = crate::arch::paddr_to_vaddr(MEMORY_END);
+        let ekernel_paddr = unsafe { crate::arch::va_to_pa(VA::from_usize(ekernel as usize)) };
+        let phys_mem_start_vaddr = crate::arch::pa_to_va(ekernel_paddr);
+        let phys_mem_end_vaddr = crate::arch::pa_to_va(PA::from_usize(MEMORY_END));
 
-        let phys_mem_start = Vpn::from_addr_ceil(Vaddr::from_usize(phys_mem_start_vaddr));
-        let phys_mem_end = Vpn::from_addr_floor(Vaddr::from_usize(phys_mem_end_vaddr));
+        let phys_mem_start = Vpn::from_addr_ceil(phys_mem_start_vaddr);
+        let phys_mem_end = Vpn::from_addr_floor(phys_mem_end_vaddr);
         let mut phys_mem_area = MappingArea::new(
             VpnRange::new(phys_mem_start, phys_mem_end),
             AreaType::KernelHeap,
@@ -374,7 +375,7 @@ impl MemorySpace {
         // 暂时移除自动 MMIO 映射
         // // 6. 映射 MMIO 区域
         // for &(_device, mmio_base, mmio_size) in crate::config::MMIO {
-        //     let mmio_vaddr = crate::arch::paddr_to_vaddr(mmio_base);
+        //     let mmio_vaddr = crate::arch::pa_to_va(mmio_base);
         //     self.map_mmio_region(mmio_vaddr, mmio_size)?;
         // }
 
@@ -522,8 +523,8 @@ impl MemorySpace {
         area_type: AreaType,
         flags: UniversalPTEFlag,
     ) -> Result<(), PagingError> {
-        let vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(start));
-        let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(end));
+        let vpn_start = Vpn::from_addr_floor(VA::from_usize(start));
+        let vpn_end = Vpn::from_addr_ceil(VA::from_usize(end));
 
         let mut area = MappingArea::new(
             VpnRange::new(vpn_start, vpn_end),
@@ -541,15 +542,15 @@ impl MemorySpace {
     /// 映射一个 MMIO 区域
     ///
     /// # 参数
-    /// - `addr`: MMIO 设备的虚拟地址（已通过 paddr_to_vaddr 转换）
+    /// - `addr`: MMIO 设备的虚拟地址（已通过 pa_to_va 转换）
     /// - `size`: MMIO 区域的大小（字节）
     ///
     /// # 返回
     /// - `Ok(())`: 映射成功
     /// - `Err(PagingError)`: 映射失败
-    pub fn map_mmio_region(&mut self, addr: usize, size: usize) -> Result<(), PagingError> {
-        let vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(addr));
-        let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(addr + size));
+    pub fn map_mmio_region(&mut self, addr: VA, size: usize) -> Result<(), PagingError> {
+        let vpn_start = Vpn::from_addr_floor(addr);
+        let vpn_end = Vpn::from_addr_ceil(VA::from_usize(addr.as_usize() + size));
 
         let mut area = MappingArea::new(
             VpnRange::new(vpn_start, vpn_end),
@@ -594,24 +595,17 @@ impl MemorySpace {
 
         // 检查架构
         let machine = elf.header.pt2.machine().as_machine();
-        #[cfg(target_arch = "riscv64")]
-        if machine != xmas_elf::header::Machine::RISC_V {
-            crate::pr_err!(
-                "[from_elf] machine mismatch: expected RISC-V, got {:?}",
-                machine
-            );
-            return Err(PagingError::InvalidAddress);
-        }
-        #[cfg(target_arch = "loongarch64")]
+        let machine_number = match machine {
+            xmas_elf::header::Machine::RISC_V => Some(crate::arch::abi::EM_RISCV),
+            xmas_elf::header::Machine::Other(value) => Some(value),
+            _ => None,
+        };
+        if !machine_number
+            .map(crate::arch::abi::is_supported_elf_machine)
+            .unwrap_or(false)
         {
-            const EM_LOONGARCH: u16 = 258;
-            if machine != xmas_elf::header::Machine::Other(EM_LOONGARCH) {
-                crate::pr_err!(
-                    "[from_elf] machine mismatch: expected LoongArch (EM=258), got {:?}",
-                    machine
-                );
-                return Err(PagingError::InvalidAddress);
-            }
+            crate::pr_err!("[from_elf] machine mismatch: got {:?}", machine);
+            return Err(PagingError::InvalidAddress);
         }
 
         // 对 ET_DYN (PIE/static-pie) 采用固定 load bias，避免把可执行映射放到 VA=0。
@@ -674,8 +668,8 @@ impl MemorySpace {
             }
 
             let vpn_range = VpnRange::new(
-                Vpn::from_addr_floor(Vaddr::from_usize(start_va)),
-                Vpn::from_addr_ceil(Vaddr::from_usize(end_va)),
+                Vpn::from_addr_floor(VA::from_usize(start_va)),
+                Vpn::from_addr_ceil(VA::from_usize(end_va)),
             );
 
             max_end_vpn = if max_end_vpn.as_usize() > vpn_range.end().as_usize() {
@@ -731,14 +725,11 @@ impl MemorySpace {
             }
         }
 
-        // 1.5 对静态 PIE/PIE 应用最小化重定位：R_RISCV_RELATIVE
+        // 1.5 对静态 PIE/PIE 应用最小化重定位：RELATIVE/64
         //
-        // 典型的 riscv64 static-pie（如 data/bin/iperf3）会把 GOT/函数指针以 0 填充，
+        // 典型的 static-pie（如 data/bin/iperf3）会把 GOT/函数指针以 0 填充，
         // 依赖 .rela.dyn 的 RELATIVE relocations 在加载时写入正确地址。
         // 如果不做这一步，程序往往会在某个间接调用点跳到 sepc=0 执行到 ELF header。
-        const R_RISCV_64: u32 = 2;
-        const R_RISCV_RELATIVE: u32 = 3;
-
         enum Symtab64<'a> {
             Dyn(&'a [xmas_elf::symbol_table::DynEntry64]),
             Std(&'a [xmas_elf::symbol_table::Entry64]),
@@ -747,12 +738,12 @@ impl MemorySpace {
         let write_usize_at = |va: usize, value: usize| -> Result<(), PagingError> {
             let paddr = space
                 .page_table
-                .translate(Vaddr::from_usize(va))
+                .translate(VA::from_usize(va))
                 .ok_or(PagingError::InvalidAddress)?;
             let paddr_usize = paddr.as_usize();
             let page_base = paddr_usize & !(PAGE_SIZE - 1);
             let off = paddr_usize & (PAGE_SIZE - 1);
-            let kva = crate::arch::paddr_to_vaddr(page_base) + off;
+            let kva = crate::arch::pa_to_va(PA::from_usize(page_base)).as_usize() + off;
             unsafe {
                 core::ptr::write_unaligned(kva as *mut usize, value);
             }
@@ -792,14 +783,23 @@ impl MemorySpace {
 
                 let target_va = load_bias + r_offset;
 
-                let value = match r_type {
-                    R_RISCV_RELATIVE => (load_bias as isize + addend) as usize,
-                    R_RISCV_64 => {
-                        let sym_val = if r_sym == 0 {
-                            0usize
+                let kind = match crate::arch::abi::classify_relocation(r_type) {
+                    Some(kind) => kind,
+                    None => {
+                        pr_err!("[ELF] Unsupported relocation type: {}", r_type);
+                        return Err(PagingError::InvalidAddress);
+                    }
+                };
+                let sym_val = match kind {
+                    crate::arch::abi::RelocationKind::Relative => 0,
+                    crate::arch::abi::RelocationKind::Absolute64 => {
+                        if r_sym == 0 {
+                            0
                         } else {
                             let Some(symtab) = symtab.as_ref() else {
-                                pr_err!("[ELF] R_RISCV_64 requires symtab, but sh_link is missing");
+                                pr_err!(
+                                    "[ELF] absolute relocation requires symtab, but sh_link is missing"
+                                );
                                 return Err(PagingError::InvalidAddress);
                             };
                             match symtab {
@@ -812,15 +812,11 @@ impl MemorySpace {
                                         as usize
                                 }
                             }
-                        };
-                        let s = load_bias + sym_val;
-                        (s as isize + addend) as usize
-                    }
-                    _ => {
-                        pr_err!("[ELF] Unsupported relocation type: {}", r_type);
-                        return Err(PagingError::InvalidAddress);
+                        }
                     }
                 };
+                let value =
+                    crate::arch::abi::resolve_relocation_value(kind, load_bias, sym_val, addend);
 
                 write_usize_at(target_va, value)?;
             }
@@ -831,8 +827,8 @@ impl MemorySpace {
 
         // 3. 映射用户栈（带保护页）
         let user_stack_bottom =
-            Vpn::from_addr_floor(Vaddr::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
-        let user_stack_top = Vpn::from_addr_ceil(Vaddr::from_usize(USER_STACK_TOP));
+            Vpn::from_addr_floor(VA::from_usize(USER_STACK_TOP - USER_STACK_SIZE));
+        let user_stack_top = Vpn::from_addr_ceil(VA::from_usize(USER_STACK_TOP));
 
         space.insert_framed_area(
             VpnRange::new(user_stack_bottom, user_stack_top),
@@ -884,22 +880,23 @@ impl MemorySpace {
     /// - 堆未初始化
     /// - 新的 brk 会超出 MAX_USER_HEAP_SIZE
     /// - 新的 brk 会与现有区域重叠
-    pub fn brk(&mut self, new_brk: usize) -> Result<usize, PagingError> {
+    pub fn brk(&mut self, new_brk: VA) -> Result<VA, PagingError> {
         let heap_bottom = self.heap_start.ok_or(PagingError::InvalidAddress)?;
-        let new_end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(new_brk));
+        let new_brk_usize = new_brk.as_usize();
+        let new_end_vpn = Vpn::from_addr_ceil(new_brk);
 
         // 边界检查
-        if new_brk < heap_bottom.start_addr().as_usize() {
+        if new_brk_usize < heap_bottom.start_addr().as_usize() {
             return Err(PagingError::InvalidAddress);
         }
 
-        let heap_size = new_brk - heap_bottom.start_addr().as_usize();
+        let heap_size = new_brk_usize - heap_bottom.start_addr().as_usize();
         if heap_size > MAX_USER_HEAP_SIZE {
             return Err(PagingError::InvalidAddress);
         }
 
         // 检查是否与栈重叠
-        if new_brk >= USER_STACK_TOP - USER_STACK_SIZE {
+        if new_brk_usize >= USER_STACK_TOP - USER_STACK_SIZE {
             return Err(PagingError::InvalidAddress);
         }
 
@@ -977,7 +974,7 @@ impl MemorySpace {
     /// # 返回值
     /// - `Some(addr)`: 找到的空闲区域起始地址（已对齐）
     /// - `None`: 没有足够大的空闲区域
-    pub fn find_free_region(&self, size: usize, align: usize) -> Option<usize> {
+    pub fn find_free_region(&self, size: usize, align: usize) -> Option<VA> {
         // 获取堆的起始和结束
         let heap_start = self.heap_start?.start_addr().as_usize();
 
@@ -1047,7 +1044,7 @@ impl MemorySpace {
                     if gap_end > lowest_ok && gap_end - lowest_ok >= size {
                         let candidate = align_down(gap_end - size, align);
                         if candidate >= lowest_ok {
-                            return Some(candidate);
+                            return Some(VA::from_usize(candidate));
                         }
                     }
                 }
@@ -1065,7 +1062,7 @@ impl MemorySpace {
         if gap_end >= heap_end + size {
             let candidate = align_down(gap_end - size, align);
             if candidate >= heap_end {
-                return Some(candidate);
+                return Some(VA::from_usize(candidate));
             }
         }
 
@@ -1093,6 +1090,7 @@ impl MemorySpace {
             // 内核选择地址：查找空闲区域
             self.find_free_region(len, crate::config::PAGE_SIZE)
                 .ok_or(PagingError::OutOfMemory)?
+                .as_usize()
         } else {
             // 用户指定地址
 
@@ -1106,8 +1104,8 @@ impl MemorySpace {
 
             // 检查对齐后的区域是否可用
             let vpn_range_check = VpnRange::new(
-                Vpn::from_addr_floor(Vaddr::from_usize(aligned_hint)),
-                Vpn::from_addr_ceil(Vaddr::from_usize(aligned_hint + len)),
+                Vpn::from_addr_floor(VA::from_usize(aligned_hint)),
+                Vpn::from_addr_ceil(VA::from_usize(aligned_hint + len)),
             );
 
             // 检查是否与现有区域重叠
@@ -1122,6 +1120,7 @@ impl MemorySpace {
                 // 更好的实现应该优先查找 hint 附近的区域
                 self.find_free_region(len, crate::config::PAGE_SIZE)
                     .ok_or(PagingError::AlreadyMapped)?
+                    .as_usize()
             } else {
                 aligned_hint
             }
@@ -1129,8 +1128,8 @@ impl MemorySpace {
 
         // 计算 VPN 范围（start 已经是页对齐的）
         let vpn_range = VpnRange::new(
-            Vpn::from_addr_floor(Vaddr::from_usize(start)),
-            Vpn::from_addr_ceil(Vaddr::from_usize(start + len)),
+            Vpn::from_addr_floor(VA::from_usize(start)),
+            Vpn::from_addr_ceil(VA::from_usize(start + len)),
         );
 
         // 最终重叠检查（防御性编程）
@@ -1162,15 +1161,15 @@ impl MemorySpace {
     /// - 如果范围跨越多个区域，会部分解除映射每个区域
     /// - 如果只覆盖区域的一部分，会拆分区域
     /// - 如果地址未映射，返回成功（幂等）
-    pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), PagingError> {
+    pub fn munmap(&mut self, start: VA, len: usize) -> Result<(), PagingError> {
         // 参数验证
         if len == 0 {
             return Ok(()); // POSIX: len=0 是合法的，什么都不做
         }
 
         // 计算需要解除映射的 VPN 范围
-        let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
-        let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start + len));
+        let start_vpn = Vpn::from_addr_floor(start);
+        let end_vpn = Vpn::from_addr_ceil(VA::from_usize(start.as_usize() + len));
         let unmap_range = VpnRange::new(start_vpn, end_vpn);
 
         // 收集需要处理的区域
@@ -1248,7 +1247,7 @@ impl MemorySpace {
     /// - 只能修改 Framed 类型的映射区域
     pub fn mprotect(
         &mut self,
-        start: usize,
+        start: VA,
         len: usize,
         prot: UniversalPTEFlag,
     ) -> Result<(), PagingError> {
@@ -1258,13 +1257,13 @@ impl MemorySpace {
         }
 
         // 检查地址对齐
-        if !start.is_multiple_of(PAGE_SIZE) {
+        if !start.as_usize().is_multiple_of(PAGE_SIZE) {
             return Err(PagingError::InvalidAddress);
         }
 
         // 计算需要修改权限的 VPN 范围
-        let start_vpn = Vpn::from_addr_floor(Vaddr::from_usize(start));
-        let end_vpn = Vpn::from_addr_ceil(Vaddr::from_usize(start + len));
+        let start_vpn = Vpn::from_addr_floor(start);
+        let end_vpn = Vpn::from_addr_ceil(VA::from_usize(start.as_usize() + len));
         let change_range = VpnRange::new(start_vpn, end_vpn);
 
         // 收集需要处理的区域
@@ -1353,14 +1352,14 @@ impl MemorySpace {
     }
 
     /// 进程手动映射MMIO区域
-    pub fn map_mmio(&mut self, paddr: Paddr, size: usize) -> Result<Vaddr, PagingError> {
+    pub fn map_mmio(&mut self, paddr: PA, size: usize) -> Result<VA, PagingError> {
         // 将物理地址转换为虚拟地址
-        let vaddr_usize = crate::arch::paddr_to_vaddr(paddr.as_usize());
-        let vaddr = Vaddr::from_usize(vaddr_usize);
+        let vaddr = crate::arch::pa_to_va(paddr);
+        let vaddr_usize = vaddr.as_usize();
 
         // 计算VPN范围
         let vpn_start = Vpn::from_addr_floor(vaddr);
-        let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(vaddr_usize + size));
+        let vpn_end = Vpn::from_addr_ceil(VA::from_usize(vaddr_usize + size));
 
         // 检查是否已经映射
         let mut some_unmapped = false;
@@ -1390,15 +1389,15 @@ impl MemorySpace {
         }
 
         // 如果没有映射,调用map_mmio_region进行映射
-        self.map_mmio_region(vaddr_usize, size)?;
+        self.map_mmio_region(VA::from_usize(vaddr_usize), size)?;
         Ok(vaddr)
     }
 
     /// 进程手动取消映射MMIO区域
-    pub fn unmap_mmio(&mut self, vaddr: Vaddr, size: usize) -> Result<(), PagingError> {
+    pub fn unmap_mmio(&mut self, vaddr: VA, size: usize) -> Result<(), PagingError> {
         // 计算VPN范围
         let vpn_start = Vpn::from_addr_floor(vaddr);
-        let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(vaddr.as_usize() + size));
+        let vpn_end = Vpn::from_addr_ceil(VA::from_usize(vaddr.as_usize() + size));
 
         // 使用 BTreeSet 以提高去重效率
         let mut areas_to_remove = alloc::collections::BTreeSet::new();
@@ -1438,7 +1437,7 @@ impl MemorySpace {
         Ok(())
     }
 
-    pub fn translate(&self, vaddr: Vaddr) -> Option<Paddr> {
+    pub fn translate(&self, vaddr: VA) -> Option<PA> {
         self.page_table.translate(vaddr)
     }
 }
@@ -1465,7 +1464,7 @@ impl Drop for MemorySpace {
 #[cfg(test)]
 mod memory_space_tests {
     use super::*;
-    use crate::mm::address::{Vpn, VpnRange};
+    use crate::mm::address::{PA, Vpn, VpnRange};
     use crate::mm::page_table::UniversalPTEFlag;
     use crate::{kassert, println, test_case};
 
@@ -1476,10 +1475,12 @@ mod memory_space_tests {
         // 应该已初始化页表
     });
 
-    // 2. 直接映射
+    // 2. 直接映射：VA 必须 >= PAGE_OFFSET，从已知 PA 经 pa_to_va 计算 Vpn
     test_case!(test_direct_mapping, {
         let mut ms = MemorySpace::new();
-        let vpn_range = VpnRange::new(Vpn::from_usize(0x80000), Vpn::from_usize(0x80010));
+        let va_base = crate::arch::pa_to_va(PA::from_usize(0x8000_0000));
+        let vpn_start = Vpn::from_addr_ceil(va_base);
+        let vpn_range = VpnRange::new(vpn_start, Vpn::from_usize(vpn_start.as_usize() + 0x10));
 
         let area = MappingArea::new(
             vpn_range,
@@ -1549,7 +1550,7 @@ mod memory_space_tests {
         );
 
         // 手动映射 MMIO 区域
-        let paddr = Paddr::from_usize(TEST_MMIO_PADDR);
+        let paddr = PA::from_usize(TEST_MMIO_PADDR);
         let result = ms.map_mmio(paddr, TEST_MMIO_SIZE);
         kassert!(result.is_ok());
 
@@ -1569,7 +1570,7 @@ mod memory_space_tests {
         }
 
         // 测试页表翻译
-        let translated_paddr = ms.page_table().translate(Vaddr::from_usize(mmio_vaddr));
+        let translated_paddr = ms.page_table().translate(VA::from_usize(mmio_vaddr));
         kassert!(translated_paddr.is_some());
 
         if let Some(paddr) = translated_paddr {
@@ -1605,7 +1606,7 @@ mod memory_space_tests {
     //         // XXX: 疑似因为不再使用KERNEL_SPACE作为全局内核页表导致这里失效
     //         with_kernel_space(|space| {
     //             // 手动映射 TEST 设备
-    //             let paddr = Paddr::from_usize(TEST_DEVICE_PADDR);
+    //             let paddr = PA::from_usize(TEST_DEVICE_PADDR);
     //             let result = space.map_mmio(paddr, TEST_DEVICE_SIZE);
     //             kassert!(result.is_ok());
 
@@ -1641,11 +1642,12 @@ mod memory_space_tests {
         const CUSTOM_MMIO_PADDR: usize = 0x5000_0000;
         const CUSTOM_MMIO_SIZE: usize = 0x1000;
 
-        let custom_vaddr = crate::arch::paddr_to_vaddr(CUSTOM_MMIO_PADDR);
+        let custom_vaddr = crate::arch::pa_to_va(PA::from_usize(CUSTOM_MMIO_PADDR));
 
         println!(
             "Adding custom MMIO mapping at PA=0x{:x}, VA=0x{:x}",
-            CUSTOM_MMIO_PADDR, custom_vaddr
+            CUSTOM_MMIO_PADDR,
+            custom_vaddr.as_usize()
         );
 
         // 动态添加 MMIO 映射
@@ -1653,7 +1655,7 @@ mod memory_space_tests {
         kassert!(result.is_ok());
 
         // 验证映射存在
-        let vpn = Vpn::from_addr_floor(Vaddr::from_usize(custom_vaddr));
+        let vpn = Vpn::from_addr_floor(custom_vaddr);
         let area = ms.find_area(vpn);
         kassert!(area.is_some());
 
@@ -1671,7 +1673,7 @@ mod memory_space_tests {
         const TEST_PADDR: usize = 0x6000_0000;
         const TEST_SIZE: usize = 0x2000;
 
-        let paddr = Paddr::from_usize(TEST_PADDR);
+        let paddr = PA::from_usize(TEST_PADDR);
 
         println!("Testing map_mmio with new mapping at PA=0x{:x}", TEST_PADDR);
 
@@ -1702,7 +1704,7 @@ mod memory_space_tests {
         const TEST_PADDR: usize = 0x7000_0000;
         const TEST_SIZE: usize = 0x1000;
 
-        let paddr = Paddr::from_usize(TEST_PADDR);
+        let paddr = PA::from_usize(TEST_PADDR);
 
         println!(
             "Testing map_mmio with existing mapping at PA=0x{:x}",
@@ -1737,10 +1739,10 @@ mod memory_space_tests {
         const TEST_PADDR: usize = 0x8000_0000;
         const TEST_SIZE: usize = 0x1000;
 
-        // 先通过 paddr_to_vaddr 获取虚拟地址
-        let test_vaddr = crate::arch::paddr_to_vaddr(TEST_PADDR);
-        let vpn_start = Vpn::from_addr_floor(Vaddr::from_usize(test_vaddr));
-        let vpn_end = Vpn::from_addr_ceil(Vaddr::from_usize(test_vaddr + TEST_SIZE));
+        // 先通过 pa_to_va 获取虚拟地址
+        let test_vaddr = crate::arch::pa_to_va(PA::from_usize(TEST_PADDR)).as_usize();
+        let vpn_start = Vpn::from_addr_floor(VA::from_usize(test_vaddr));
+        let vpn_end = Vpn::from_addr_ceil(VA::from_usize(test_vaddr + TEST_SIZE));
 
         println!(
             "Testing map_mmio conflict detection at VA=0x{:x}",
@@ -1759,7 +1761,7 @@ mod memory_space_tests {
         ms.insert_area(area).expect("Failed to insert test area");
 
         // 现在尝试用 map_mmio 映射同一物理地址
-        let paddr = Paddr::from_usize(TEST_PADDR);
+        let paddr = PA::from_usize(TEST_PADDR);
         let result = ms.map_mmio(paddr, TEST_SIZE);
 
         // 应该返回 AlreadyMapped 错误,因为该区域已经被映射为非MMIO类型
@@ -1785,7 +1787,7 @@ mod memory_space_tests {
         const TEST_PADDR: usize = 0x9000_0000;
         const TEST_SIZE: usize = 0x1000;
 
-        let paddr = Paddr::from_usize(TEST_PADDR);
+        let paddr = PA::from_usize(TEST_PADDR);
 
         println!(
             "Testing unmap_mmio with normal unmapping at PA=0x{:x}",
@@ -1817,7 +1819,7 @@ mod memory_space_tests {
         let mut ms = MemorySpace::new();
 
         // 尝试取消映射一个未映射的区域
-        let vaddr = Vaddr::from_usize(0xffff_ffc0_a000_0000);
+        let vaddr = VA::from_usize(0xffff_ffc0_a000_0000);
         const TEST_SIZE: usize = 0x1000;
 
         println!("Testing unmap_mmio with non-existent mapping");
@@ -1833,8 +1835,10 @@ mod memory_space_tests {
     test_case!(test_unmap_mmio_wrong_type, {
         let mut ms = MemorySpace::new();
 
-        // 映射一个非MMIO区域
-        let vpn_range = VpnRange::new(Vpn::from_usize(0xb000), Vpn::from_usize(0xb010));
+        // 映射一个非MMIO区域：Direct 映射的 VA 必须 >= PAGE_OFFSET
+        let va_base = crate::arch::pa_to_va(PA::from_usize(0xb000_0000));
+        let vpn_start = Vpn::from_addr_ceil(va_base);
+        let vpn_range = VpnRange::new(vpn_start, Vpn::from_usize(vpn_start.as_usize() + 0x10));
         let area = MappingArea::new(
             vpn_range,
             AreaType::KernelData,
@@ -1847,7 +1851,7 @@ mod memory_space_tests {
         println!("Testing unmap_mmio with wrong area type");
 
         // 尝试用 unmap_mmio 取消映射非MMIO区域
-        let vaddr = Vpn::from_usize(0xb000).start_addr();
+        let vaddr = vpn_start.start_addr();
         let result = ms.unmap_mmio(vaddr, 0x1000);
 
         // 应该返回错误
@@ -1869,8 +1873,8 @@ mod memory_space_tests {
         const REGION2_PADDR: usize = 0xd000_0000;
         const REGION_SIZE: usize = 0x1000;
 
-        let paddr1 = Paddr::from_usize(REGION1_PADDR);
-        let paddr2 = Paddr::from_usize(REGION2_PADDR);
+        let paddr1 = PA::from_usize(REGION1_PADDR);
+        let paddr2 = PA::from_usize(REGION2_PADDR);
 
         let vaddr1 = ms
             .map_mmio(paddr1, REGION_SIZE)
@@ -2038,7 +2042,7 @@ mod memory_space_tests {
         println!("  Created area with R/W permissions");
 
         // 修改为只读
-        let start = vpn_range.start().start_addr().as_usize();
+        let start = vpn_range.start().start_addr();
         let len = (vpn_range.end().as_usize() - vpn_range.start().as_usize()) * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
 
@@ -2060,17 +2064,25 @@ mod memory_space_tests {
         let mut ms = MemorySpace::new();
 
         // 测试未对齐的地址
-        let result = ms.mprotect(0x1001, PAGE_SIZE, UniversalPTEFlag::user_read());
+        let result = ms.mprotect(
+            VA::from_usize(0x1001),
+            PAGE_SIZE,
+            UniversalPTEFlag::user_read(),
+        );
         kassert!(result.is_err());
         println!("  Correctly rejected unaligned address");
 
         // 测试未映射的区域
-        let result = ms.mprotect(0x5000 * PAGE_SIZE, PAGE_SIZE, UniversalPTEFlag::user_read());
+        let result = ms.mprotect(
+            VA::from_usize(0x5000 * PAGE_SIZE),
+            PAGE_SIZE,
+            UniversalPTEFlag::user_read(),
+        );
         kassert!(result.is_err());
         println!("  Correctly rejected unmapped region");
 
         // 测试 len=0
-        let result = ms.mprotect(0x1000, 0, UniversalPTEFlag::user_read());
+        let result = ms.mprotect(VA::from_usize(0x1000), 0, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
         println!("  Correctly handled len=0");
 
@@ -2108,7 +2120,7 @@ mod memory_space_tests {
         println!("  Created 2 consecutive areas");
 
         // 修改跨越两个区域的权限
-        let start = vpn_range1.start().start_addr().as_usize();
+        let start = vpn_range1.start().start_addr();
         let len = (vpn_range2.end().as_usize() - vpn_range1.start().as_usize()) * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
 
@@ -2138,7 +2150,7 @@ mod memory_space_tests {
         println!("  Created 4-page area with RW permissions");
 
         // 只修改前2页的权限为只读
-        let start = vpn_range.start().start_addr().as_usize();
+        let start = vpn_range.start().start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2188,7 +2200,7 @@ mod memory_space_tests {
         println!("  Created 4-page area with RW permissions");
 
         // 只修改后2页的权限为只读
-        let start = Vpn::from_usize(0x8002).start_addr().as_usize();
+        let start = Vpn::from_usize(0x8002).start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2238,7 +2250,7 @@ mod memory_space_tests {
         println!("  Created 6-page area with RW permissions");
 
         // 只修改中间2页（第2-3页，索引从0开始）的权限为只读
-        let start = Vpn::from_usize(0x9002).start_addr().as_usize();
+        let start = Vpn::from_usize(0x9002).start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2296,7 +2308,7 @@ mod memory_space_tests {
         println!("  Created 4-page area with RW permissions");
 
         // 修改前2页的权限为只读
-        let start = vpn_range.start().start_addr().as_usize();
+        let start = vpn_range.start().start_addr();
         let len = 2 * PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());
@@ -2351,7 +2363,7 @@ mod memory_space_tests {
         println!("  Created 3-page area with RW permissions");
 
         // 只修改中间1页的权限为只读
-        let start = Vpn::from_usize(0xb001).start_addr().as_usize();
+        let start = Vpn::from_usize(0xb001).start_addr();
         let len = PAGE_SIZE;
         let result = ms.mprotect(start, len, UniversalPTEFlag::user_read());
         kassert!(result.is_ok());

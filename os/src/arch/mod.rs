@@ -12,20 +12,22 @@
 
 // ---- trait 定义 ----
 
+pub mod abi;
 pub mod address;
 pub mod arch;
 pub mod cpu_ops;
+pub mod plat;
+pub mod task;
 pub mod virtual_memory;
 
 pub use arch::Arch;
 pub use cpu_ops::CpuOps;
-pub use virtual_memory::{UserAddressSpace, KernAddressSpace, VirtualMemory};
+pub use plat::Platform;
 
 // ---- 共享模块（架构无关） ----
 
-pub mod syscall;
-mod memory_impl;
 mod arch_impl;
+mod memory_impl;
 
 // ---- 目标架构：RISC-V / LoongArch ----
 
@@ -61,11 +63,20 @@ pub use loongarch::cpu_ops::LoongArch64 as ArchImpl;
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 pub use crate::arch::mock::MockArch as ArchImpl;
 
-// ---- 便捷包装函数 ----
-// 将 Arch trait 方法暴露为普通函数，避免调用者显式导入 trait。
-// 内部委托给 ArchImpl，保持与旧代码的兼容性。
+// ---- PlatformImpl 类型别名 ----
+// 与 ArchImpl 对应，内核其余部分通过 PlatformImpl 访问平台功能。
 
-use crate::arch::cpu_ops::CpuOps as _;
+#[cfg(target_arch = "riscv64")]
+pub use riscv::cpu_ops::Riscv64 as PlatformImpl;
+
+#[cfg(target_arch = "loongarch64")]
+pub use loongarch::cpu_ops::LoongArch64 as PlatformImpl;
+
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+pub use crate::arch::mock::MockArch as PlatformImpl;
+
+// ---- 便捷包装函数 ----
+// 将 Arch / Platform trait 方法暴露为普通函数。
 
 /// 启用中断
 #[inline]
@@ -129,15 +140,21 @@ pub fn send_reschedule_ipi(target: usize) {
 
 /// 物理地址 → 虚拟地址（直接映射）
 #[inline]
-pub fn paddr_to_vaddr(paddr: usize) -> usize {
-    ArchImpl::paddr_to_vaddr(paddr)
+pub fn pa_to_va(pa: address::PA) -> address::VA {
+    PlatformImpl::pa_to_va(pa)
 }
 
 /// 虚拟地址 → 物理地址（直接映射）
 ///
 /// # Safety
-/// 调用者需确保 vaddr 处于直接映射区域。
+/// 调用者需确保 `va` 处于直接映射区域。
 #[inline]
-pub unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
-    unsafe { ArchImpl::vaddr_to_paddr(vaddr) }
+pub unsafe fn va_to_pa(va: address::VA) -> address::PA {
+    unsafe { PlatformImpl::va_to_pa(va) }
+}
+
+/// 判断虚拟地址是否位于直接映射区域。
+#[inline]
+pub fn is_direct_mapped_va(va: address::VA) -> bool {
+    va.as_usize() >= <PlatformImpl as virtual_memory::VirtualMemory>::PAGE_OFFSET
 }

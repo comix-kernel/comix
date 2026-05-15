@@ -6,8 +6,8 @@
 //! 页码是地址空间中页 (Page) 的索引，它将内存管理抽象与底层硬件地址解耦。
 
 use crate::config::PAGE_SIZE;
-use crate::mm::address::types::{Address, Paddr, Vaddr};
 use crate::mm::address::operations::{AlignOps, CalcOps, UsizeConvert};
+use crate::mm::address::types::{Address, PA, VA};
 use core::ops::Range;
 
 /// [PageNum] Trait
@@ -18,7 +18,7 @@ use core::ops::Range;
 pub trait PageNum:
     CalcOps + UsizeConvert + Copy + Clone + PartialEq + PartialOrd + Eq + Ord
 {
-    /// 此页码类型关联的地址类型（例如 Ppn 关联 Paddr，Vpn 关联 Vaddr）。
+    /// 此页码类型关联的地址类型（例如 Ppn 关联 PA，Vpn 关联 VA）。
     type TAddress: Address + AlignOps; // PageNum 的地址需要支持 AlignOps
 
     /// 将页码增加 1。
@@ -111,7 +111,7 @@ pub trait PageNum:
 /// #[repr(transparent)]
 /// #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 /// pub struct MyPpn(pub usize);
-/// impl_page_num!(MyPpn, Paddr); // Paddr 是关联的地址类型
+/// impl_page_num!(MyPpn, PA); // PA 是关联的地址类型
 /// ```
 #[macro_export]
 macro_rules! impl_page_num {
@@ -139,19 +139,19 @@ macro_rules! impl_page_num {
 
 /// [Ppn] (Physical Page Number)
 /// ---------------------
-/// 物理页码，对应物理地址 (Paddr)。
+/// 物理页码，对应物理地址 (PA)。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Ppn(pub usize);
-impl_page_num!(Ppn, Paddr);
+impl_page_num!(Ppn, PA);
 
 /// [Vpn] (Virtual Page Number)
 /// ---------------------
-/// 虚拟页码，对应虚拟地址 (Vaddr)。
+/// 虚拟页码，对应虚拟地址 (VA)。
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Vpn(pub usize);
-impl_page_num!(Vpn, Vaddr);
+impl_page_num!(Vpn, VA);
 
 /// [PageNumRange]
 /// ---------------------
@@ -292,7 +292,7 @@ pub type VpnRange = PageNumRange<Vpn>;
 #[cfg(test)]
 mod page_num_tests {
     use super::*;
-    use crate::mm::address::{Paddr, PageNum, Ppn, Vpn};
+    use crate::mm::address::{PA, PageNum, Ppn, Vpn};
     use crate::{kassert, test_case};
 
     // 1. Ppn/Vpn 基本转换测试
@@ -307,7 +307,7 @@ mod page_num_tests {
 
     // 2. 地址到页码的转换测试
     test_case!(test_pagenum_from_addr, {
-        let paddr = Paddr::from_usize(0x8000_1234);
+        let paddr = PA::from_usize(0x8000_1234);
 
         // 向下取整 (floor): 0x8000_1234 位于页 0x80001
         let ppn_floor = Ppn::from_addr_floor(paddr);
@@ -322,7 +322,7 @@ mod page_num_tests {
     test_case!(test_pagenum_to_addr, {
         let ppn = Ppn::from_usize(0x80000);
 
-        // 起始地址 (Paddr::from_usize(0x80000 * 0x1000))
+        // 起始地址 (PA::from_usize(0x80000 * 0x1000))
         let start = ppn.start_addr();
         kassert!(start.as_usize() == 0x8000_0000);
 
@@ -370,13 +370,13 @@ mod page_num_tests {
     // 7. floor 和 ceil 转换的差异测试
     test_case!(test_floor_ceil_difference, {
         // 对齐的地址: floor == ceil (页码一样)
-        let aligned = Paddr::from_usize(0x8000_0000);
+        let aligned = PA::from_usize(0x8000_0000);
         let floor1 = Ppn::from_addr_floor(aligned);
         let ceil1 = Ppn::from_addr_ceil(aligned);
         kassert!(floor1.as_usize() == ceil1.as_usize());
 
         // 未对齐的地址: ceil = floor + 1 (向上取整到下一页)
-        let unaligned = Paddr::from_usize(0x8000_0001);
+        let unaligned = PA::from_usize(0x8000_0001);
         let floor2 = Ppn::from_addr_floor(unaligned); // 0x80000
         let ceil2 = Ppn::from_addr_ceil(unaligned); // 0x80001
         kassert!(ceil2.as_usize() == floor2.as_usize() + 1);

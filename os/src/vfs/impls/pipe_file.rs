@@ -175,53 +175,30 @@ impl PipeFile {
 
 impl File for PipeFile {
     fn readable(&self) -> bool {
-        if self.end_type != PipeEnd::Read {
-            return false;
-        }
-        let buf = self.buffer.lock();
-        // Readable if buffer has data OR write end is closed (EOF)
-        !buf.buffer.is_empty() || buf.write_end_count == 0
+        // 读端始终可读；buffer 为空且写端未关闭时 read() 返回 Ok(0) 或 WouldBlock
+        self.end_type == PipeEnd::Read
     }
 
     fn writable(&self) -> bool {
         if self.end_type != PipeEnd::Write {
             return false;
         }
-        let buf = self.buffer.lock();
-        // Writable if buffer has space AND read end is open
-        buf.read_end_count > 0 && buf.buffer.len() < buf.capacity
+        // 写端可写当读端仍然打开（buffer 满时 write() 返回 Ok(0) 或 WouldBlock）
+        self.buffer.lock().read_end_count > 0
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
-        if !self.readable() {
+        if self.end_type != PipeEnd::Read {
             return Err(FsError::InvalidArgument);
         }
-
-        let mut ring_buf = self.buffer.lock();
-        let result = ring_buf.read(buf);
-        // Only wake up writers if we actually freed buffer space
-        if let Ok(bytes_read) = result
-            && bytes_read > 0
-        {
-            crate::kernel::syscall::io::wake_poll_waiters();
-        }
-        result
+        self.buffer.lock().read(buf)
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        if !self.writable() {
+        if self.end_type != PipeEnd::Write {
             return Err(FsError::InvalidArgument);
         }
-
-        let mut ring_buf = self.buffer.lock();
-        let result = ring_buf.write(buf);
-        // Only wake up readers if we actually wrote data
-        if let Ok(bytes_written) = result
-            && bytes_written > 0
-        {
-            crate::kernel::syscall::io::wake_poll_waiters();
-        }
-        result
+        self.buffer.lock().write(buf)
     }
 
     fn metadata(&self) -> Result<InodeMetadata, FsError> {
