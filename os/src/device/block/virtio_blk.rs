@@ -155,7 +155,6 @@ mod tests {
     use super::*;
     use crate::device::BLK_DRIVERS;
     use crate::{kassert, test_case};
-    use alloc::string::ToString;
 
     /// 通用校验：Driver 接口的基本行为
     fn check_common_driver_behavior(d: &dyn Driver) {

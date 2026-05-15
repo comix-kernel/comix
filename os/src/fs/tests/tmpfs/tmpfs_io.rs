@@ -3,7 +3,6 @@
 use super::*;
 use crate::{kassert, test_case};
 use alloc::vec;
-use alloc::vec::Vec;
 
 test_case!(test_tmpfs_large_write, {
     let fs = create_test_tmpfs();
