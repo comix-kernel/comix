@@ -219,19 +219,23 @@ impl Scheduler for RRScheduler {
         self.run_queue.remove_task(&task);
     }
 
-    fn sleep_task_with_guard(
+    fn sleep_task_prepare(
         &mut self,
-        task: &mut crate::sync::SpinLockGuard<'_, crate::kernel::TaskStruct>,
-        stask: SharedTask,
+        task: SharedTask,
         receive_signal: bool,
-    ) {
-        task.state = if receive_signal {
+        prepare: impl FnOnce(&mut crate::kernel::TaskStruct) -> bool,
+    ) -> bool {
+        let mut t = task.lock();
+        if prepare(&mut t) {
+            return false; // 条件满足，不需要睡眠
+        }
+        t.state = if receive_signal {
             TaskState::Interruptible
         } else {
             TaskState::Uninterruptible
         };
-
-        self.run_queue.remove_task(&stask);
+        self.run_queue.remove_task(&task);
+        true // 已进入睡眠
     }
 }
 

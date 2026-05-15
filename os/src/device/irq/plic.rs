@@ -10,7 +10,7 @@ use crate::device::{DeviceType, Driver, IRQ_MANAGER};
 use crate::kernel::current_memory_space;
 use crate::mm::address::{Paddr, UsizeConvert};
 use crate::{pr_info, pr_warn};
-use crate::{sync::SpinLock as Mutex, util::read, util::write};
+use crate::{sync::SpinLock, util::read, util::write};
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -19,7 +19,7 @@ use fdt::node::FdtNode;
 /// Platform Level Interrupt Controller (PLIC) 结构体
 pub struct Plic {
     base: usize,
-    manager: Mutex<IrqManager>,
+    manager: SpinLock<IrqManager>,
 }
 
 impl Driver for Plic {
@@ -96,7 +96,7 @@ pub fn init_dt(dt: &FdtNode) {
         let base = vaddr.as_usize();
         let plic = Arc::new(Plic {
             base,
-            manager: Mutex::new(IrqManager::new(false)),
+            manager: SpinLock::new(IrqManager::new(false)),
         });
 
         // set prio threshold to 0 for context 1
@@ -104,11 +104,11 @@ pub fn init_dt(dt: &FdtNode) {
         DRIVERS.write().push(plic.clone());
         // register under root irq manager
         IRQ_MANAGER
-            .write()
+            .lock()
             .register_irq(SUPERVISOR_EXTERNAL, plic.clone());
         // register interrupt controller
         DEVICE_TREE_INTC
-            .write()
+            .lock()
             .insert(phandle.try_into().unwrap(), plic);
     } else {
         pr_warn!(
@@ -124,5 +124,5 @@ pub fn init_dt(dt: &FdtNode) {
 
 /// 注册 PLIC 驱动初始化函数
 pub fn driver_init() {
-    DEVICE_TREE_REGISTRY.write().insert("riscv,plic0", init_dt);
+    DEVICE_TREE_REGISTRY.lock().insert("riscv,plic0", init_dt);
 }

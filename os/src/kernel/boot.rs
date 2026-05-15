@@ -10,8 +10,7 @@ use crate::{
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_memory_space,
-        current_task, kernel_execve, kthread_spawn, kworker, scheduler_of, sleep_task_with_block,
-        yield_task,
+        current_task, kernel_execve, kthread_spawn, kworker, scheduler_of, sleep_task, yield_task,
     },
     mm::frame_allocator::{alloc_contig_frames, alloc_frame},
     pr_err, pr_info, pr_warn,
@@ -142,7 +141,7 @@ fn init() {
 fn kthreadd() {
     kthread_spawn(kworker);
     loop {
-        sleep_task_with_block(current_task(), true);
+        sleep_task(current_task(), true);
         yield_task();
     }
 }

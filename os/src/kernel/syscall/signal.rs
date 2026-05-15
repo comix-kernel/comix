@@ -11,8 +11,8 @@ use crate::{
     arch::{timer::clock_freq, trap::restore},
     ipc::{create_siginfo_for_signal, do_sigpending},
     kernel::{
-        SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task,
-        sleep_task_with_guard_and_block, yield_task,
+        SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task, sleep_task_prepare,
+        yield_task,
     },
     sync::SpinLock,
     uapi::{
@@ -206,13 +206,12 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
         return -EINVAL;
     };
     let task = current_task();
-    let old_set;
-    {
-        let mut t = task.lock();
+    let mut old_set = SignalFlags::empty();
+    sleep_task_prepare(task.clone(), true, |t| {
         old_set = t.blocked;
         t.blocked = new_set;
-        sleep_task_with_guard_and_block(&mut t, task.clone(), true);
-    }
+        false
+    });
     yield_task();
     {
         let mut t = task.lock();
@@ -394,13 +393,13 @@ fn wait_for_signal(
     signal: SignalFlags,
     timeout: Option<TimeSpec>,
 ) -> Result<(usize, SigInfoT), i32> {
-    let mut t = task.lock();
     if let Some(timeout) = timeout {
         if timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1_000_000_000 {
             return Err(-EINVAL);
         }
         if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
             // 轮询, 不阻塞
+            let mut t = task.lock();
             if t.pending.has_deliverable_signal(signal)
                 || t.shared_pending.lock().has_deliverable_signal(signal)
             {
@@ -418,51 +417,58 @@ fn wait_for_signal(
         } else {
             // 带超时的阻塞等待
             let start = TimeSpec::now();
-            while !t.pending.has_deliverable_signal(signal)
-                && !t.shared_pending.lock().has_deliverable_signal(signal)
-            {
+            loop {
                 let now = TimeSpec::now();
                 if now - start > timeout {
                     return Err(-EAGAIN); // 超时返回
                 }
-                TIMER_QUEUE
-                    .lock()
-                    .push(timeout.into_freq(clock_freq()), task.clone());
-                sleep_task_with_guard_and_block(&mut t, task.clone(), true);
-                drop(t);
+                let slept = sleep_task_prepare(task.clone(), true, |t| {
+                    if t.pending.has_deliverable_signal(signal)
+                        || t.shared_pending.lock().has_deliverable_signal(signal)
+                    {
+                        return true; // 信号已到达，不睡眠
+                    }
+                    TIMER_QUEUE
+                        .lock()
+                        .push(timeout.into_freq(clock_freq()), task.clone());
+                    false // 进入睡眠
+                });
+                if !slept {
+                    TIMER_QUEUE.lock().remove_task(&task);
+                    let mut t = task.lock();
+                    let flag = t
+                        .pending
+                        .first_deliverable_signal(signal)
+                        .or_else(|| t.shared_pending.lock().first_deliverable_signal(signal))
+                        .unwrap();
+                    let sig_num = flag.to_signal_number();
+                    t.pending.signals.remove(flag);
+                    return Ok((sig_num, create_siginfo_for_signal(flag)));
+                }
                 yield_task();
-                t = task.lock();
             }
-            TIMER_QUEUE.lock().remove_task(&task);
-            let flag = t
-                .pending
-                .first_deliverable_signal(signal)
-                .or_else(|| t.shared_pending.lock().first_deliverable_signal(signal))
-                .unwrap();
-            let sig_num = flag.to_signal_number();
-            t.pending.signals.remove(flag);
-            Ok((sig_num, create_siginfo_for_signal(flag)))
         }
     } else {
         // 阻塞等待
-        while t
-            .pending
-            .first_target_signal(signal)
-            .or_else(|| t.shared_pending.lock().first_target_signal(signal))
-            .is_none()
-        {
-            sleep_task_with_guard_and_block(&mut t, task.clone(), true);
-            drop(t);
+        loop {
+            let slept = sleep_task_prepare(task.clone(), true, |t| {
+                t.pending
+                    .first_target_signal(signal)
+                    .or_else(|| t.shared_pending.lock().first_target_signal(signal))
+                    .is_some() // 信号已到达则不睡眠
+            });
+            if !slept {
+                let mut t = task.lock();
+                let flag = t
+                    .pending
+                    .first_target_signal(signal)
+                    .or_else(|| t.shared_pending.lock().first_target_signal(signal))
+                    .unwrap();
+                let sig_num = flag.to_signal_number();
+                t.pending.signals.remove(flag);
+                return Ok((sig_num, create_siginfo_for_signal(flag)));
+            }
             yield_task();
-            t = task.lock();
         }
-        let flag = t
-            .pending
-            .first_target_signal(signal)
-            .or_else(|| t.shared_pending.lock().first_target_signal(signal))
-            .unwrap();
-        let sig_num = flag.to_signal_number();
-        t.pending.signals.remove(flag);
-        Ok((sig_num, create_siginfo_for_signal(flag)))
     }
 }

@@ -23,7 +23,7 @@ use crate::{
 
 pub fn driver_init() {
     DEVICE_TREE_REGISTRY
-        .write()
+        .lock()
         .insert("virtio,mmio", virtio_probe);
 }
 

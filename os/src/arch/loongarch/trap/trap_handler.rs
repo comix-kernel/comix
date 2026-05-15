@@ -12,7 +12,7 @@ use crate::arch::trap::restore;
 use crate::earlyprintln;
 use crate::ipc::check_signal;
 use crate::kernel::syscall::dispatch::dispatch_syscall;
-use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_with_block};
+use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_task};
 
 use super::TrapFrame;
 
@@ -250,7 +250,7 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
 fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
-        wake_up_with_block(task);
+        wake_up_task(task);
     }
     while let Some(entry) = TIMER.lock().pop_due_entry(get_time()) {
         send_signal_process(&entry.task, entry.sig);

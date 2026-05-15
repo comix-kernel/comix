@@ -16,7 +16,7 @@ use crate::{
     kernel::{
         FUTEX_MANAGER, Scheduler, SharedTask, TASK_MANAGER, TIMER, TIMER_QUEUE, TaskManagerTrait,
         TaskState, TaskStruct, TimerEntry, current_cpu, current_task, exit_process, schedule,
-        sleep_task_with_block, sleep_task_with_guard_and_block,
+        sleep_task, sleep_task_prepare,
         syscall::util::{get_args_safe, get_path_safe},
         time::{REALTIME, realtime_now},
         yield_task,
@@ -529,23 +529,34 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
     };
 
     let task = loop {
-        {
-            let mut t = cur_task.lock();
+        let mut found: Option<SharedTask> = None;
+        let mut nohang = false;
+
+        let slept = sleep_task_prepare(cur_task.clone(), true, |t| {
             if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
                 crate::pr_debug!("wait4: found child pid={}", res.lock().pid);
+                found = Some(res);
+                return true;
+            }
+            if opt.contains(WaitFlags::NOHANG) {
+                nohang = true;
+                return true;
+            }
+            let mut wc = t.wait_child.lock();
+            if !wc.contains(&cur_task) {
+                wc.add_task(cur_task.clone());
+            }
+            false
+        });
+
+        if !slept {
+            if let Some(res) = found {
                 break res;
-            } else if opt.contains(WaitFlags::NOHANG) {
+            }
+            if nohang {
                 return 0;
             }
-            {
-                let mut wc = t.wait_child.lock();
-                if !wc.contains(&cur_task) {
-                    wc.add_task(cur_task.clone());
-                }
-            }
-            sleep_task_with_guard_and_block(&mut t, cur_task.clone(), true);
         }
-        // 在没有持有任何锁的情况下调用调度相关操作
         yield_task();
     };
 
@@ -793,7 +804,7 @@ pub fn nanosleep(duration: *const TimeSpec, rem: *mut TimeSpec) -> c_int {
 
     let mut timer_q = TIMER_QUEUE.lock();
     timer_q.push(trigger, task.clone());
-    sleep_task_with_block(task.clone(), true);
+    sleep_task(task.clone(), true);
     drop(timer_q);
     yield_task();
 
@@ -859,7 +870,7 @@ pub fn clock_nanosleep(
 
     let mut timer_q = TIMER_QUEUE.lock();
     timer_q.push(trigger, task.clone());
-    sleep_task_with_block(task.clone(), true);
+    sleep_task(task.clone(), true);
     drop(timer_q);
     yield_task();
 
@@ -1041,7 +1052,7 @@ pub fn futex(
             let task = current_task();
             let waitq = fm.get_wait_queue(paddr);
             waitq.sleep(task.clone());
-            sleep_task_with_block(task.clone(), true);
+            sleep_task(task.clone(), true);
 
             if !timeout.is_null() {
                 let ts = unsafe { read_from_user(timeout) };

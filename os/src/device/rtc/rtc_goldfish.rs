@@ -75,6 +75,6 @@ fn init_dt(dt: &FdtNode) {
 
 pub fn driver_init() {
     DEVICE_TREE_REGISTRY
-        .write()
+        .lock()
         .insert("google,goldfish-rtc", init_dt);
 }

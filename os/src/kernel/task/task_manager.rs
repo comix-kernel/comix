@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
-use crate::kernel::{TaskState, exit_task_with_block, wake_up_with_block};
+use crate::kernel::{TaskState, exit_task, wake_up_task};
 use crate::sync::SpinLock;
 use crate::uapi::signal::SignalFlags;
 
@@ -135,7 +135,7 @@ impl TaskManagerTrait for TaskManager {
             // 线程组共享的地址空间由 Arc 计数管理：最后一个线程退出时自动释放。
             task.memory_space = None;
         }
-        exit_task_with_block(task);
+        exit_task(task);
     }
 
     fn release_task(&mut self, task: SharedTask) {
@@ -177,7 +177,7 @@ impl TaskManagerTrait for TaskManager {
             t.pending.signals.insert(signal_flag);
             if t.state == TaskState::Interruptible {
                 drop(t);
-                wake_up_with_block(task.clone());
+                wake_up_task(task.clone());
             }
             true
         } else {
