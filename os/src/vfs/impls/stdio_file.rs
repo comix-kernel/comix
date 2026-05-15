@@ -312,7 +312,9 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             let winsize = *STDIO_WINSIZE.lock();
-            let zeroed = unsafe { core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init() };
+            let zeroed = unsafe {
+                core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init()
+            };
             unsafe { write_to_user(winsize_ptr, zeroed) };
             unsafe { write_to_user(winsize_ptr, winsize) };
 

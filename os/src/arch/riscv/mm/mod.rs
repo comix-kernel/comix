@@ -20,6 +20,7 @@
 mod page_table; // 模块：页表
 mod page_table_entry; // 模块：页表项
 
+use crate::arch::address::{PA, VA};
 pub use page_table::{PageTableInner, TlbBatchContext}; // 导出：页表内部结构和TLB批处理上下文
 pub use page_table_entry::PageTableEntry; // 导出：页表项结构体
 
@@ -48,8 +49,8 @@ pub const PADDR_MASK: usize = 0x0000_003f_ffff_ffff;
 /// # 注意
 ///
 /// 此函数必须在所有架构特定的内存管理模块中实现。
-pub const unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
-    vaddr & PADDR_MASK
+pub const unsafe fn va_to_pa(va: VA) -> PA {
+    PA::from_usize(va.as_usize() & PADDR_MASK)
 }
 
 /// 转换物理地址到虚拟地址
@@ -65,6 +66,6 @@ pub const unsafe fn vaddr_to_paddr(vaddr: usize) -> usize {
 /// # 注意
 ///
 /// 此函数必须在所有架构特定的内存管理模块中实现。
-pub const fn paddr_to_vaddr(paddr: usize) -> usize {
-    paddr | VADDR_START
+pub const fn pa_to_va(pa: PA) -> VA {
+    VA::from_usize(pa.as_usize() | VADDR_START)
 }

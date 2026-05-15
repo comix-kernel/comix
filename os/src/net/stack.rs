@@ -34,8 +34,7 @@ pub struct NetIfaceWrapper {
 
 impl NetIfaceWrapper {
     fn poll_smoltcp(&self, sockets: &SpinLock<SocketSet<'static>>) -> bool {
-        let timestamp =
-            smoltcp::time::Instant::from_millis(crate::arch::get_time_ms() as i64);
+        let timestamp = smoltcp::time::Instant::from_millis(crate::arch::get_time_ms() as i64);
         let mut dev = self.device.lock();
 
         let queue_len = dev.loopback_queue_len();

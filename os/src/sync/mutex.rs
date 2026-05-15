@@ -8,7 +8,6 @@
 //! * `T` - 被保护的数据类型
 //! * `CPU` - 实现 `CpuOps` 的类型，默认使用 `ArchImpl`
 
-#![allow(dead_code)]
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 

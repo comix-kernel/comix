@@ -1,7 +1,7 @@
 // TODO: 这个模块的安全性论证没有完成
 use super::PageTableEntry;
 use crate::arch::ipi::send_tlb_flush_ipi_all;
-use crate::mm::address::{ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn};
+use crate::mm::address::{ConvertablePA, PA, PageNum, Ppn, UsizeConvert, VA, Vpn};
 use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::mm::page_table::{
     PageSize, PageTableEntry as PageTableEntryTrait, PageTableInner as PageTableInnerTrait,
@@ -133,7 +133,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             // Unsafe: 将 PPN 转换为虚拟地址并获取页表项数组的不可变引用
             let pte_array = unsafe {
                 core::slice::from_raw_parts(
-                    ppn.start_addr().to_vaddr().as_usize() as *const PageTableEntry,
+                    ppn.start_addr().to_va().as_usize() as *const PageTableEntry,
                     512, // 每级页表有 512 个 PTE
                 )
             };
@@ -164,7 +164,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     }
 
     // 虚拟地址到物理地址的转换 (Translate)
-    fn translate(&self, vaddr: Vaddr) -> Option<Paddr> {
+    fn translate(&self, vaddr: VA) -> Option<PA> {
         // 注意：translate 必须使用 floor（页内地址应落在当前页），否则会把非对齐地址错误映射到下一页。
         let vpn = Vpn::from_addr_floor(vaddr);
         // 页内偏移量：低 12 位
@@ -189,7 +189,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                     _ => ppn.start_addr().as_usize(), // 默认按 4K 页处理基地址
                 };
                 // 物理地址 = 物理页基地址 + 页内偏移
-                Some(Paddr::from_usize(paddr_base + offset))
+                Some(PA::from_usize(paddr_base + offset))
             }
             Err(_) => None,
         }
@@ -229,7 +229,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             // Unsafe: 获取可变的页表项数组引用
             let pte_array = unsafe {
                 core::slice::from_raw_parts_mut(
-                    current_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
+                    current_ppn.start_addr().to_va().as_usize() as *mut PageTableEntry,
                     512,
                 )
             };
@@ -255,7 +255,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                     // Unsafe: 获取可变的页表项数组引用并清零
                     let new_table = unsafe {
                         core::slice::from_raw_parts_mut(
-                            new_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
+                            new_ppn.start_addr().to_va().as_usize() as *mut PageTableEntry,
                             512,
                         )
                     };
@@ -291,7 +291,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             // Unsafe: 获取可变的页表项数组引用
             let pte_array = unsafe {
                 core::slice::from_raw_parts_mut(
-                    current_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
+                    current_ppn.start_addr().to_va().as_usize() as *mut PageTableEntry,
                     512,
                 )
             };
@@ -341,7 +341,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             // Unsafe: 获取可变的页表项数组引用
             let pte_array = unsafe {
                 core::slice::from_raw_parts_mut(
-                    current_ppn.start_addr().to_vaddr().as_usize() as *mut PageTableEntry,
+                    current_ppn.start_addr().to_va().as_usize() as *mut PageTableEntry,
                     512,
                 )
             };
@@ -378,7 +378,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             // Unsafe: 获取页表项数组的不可变引用
             let pte_array = unsafe {
                 core::slice::from_raw_parts(
-                    ppn.start_addr().to_vaddr().as_usize() as *const PageTableEntry,
+                    ppn.start_addr().to_va().as_usize() as *const PageTableEntry,
                     512,
                 )
             };

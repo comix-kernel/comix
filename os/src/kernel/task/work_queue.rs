@@ -8,9 +8,7 @@
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
 use crate::{
-    kernel::{
-        SharedTask, TaskState, current_task, sleep_task_with_block, wake_up_with_block, yield_task,
-    },
+    kernel::{SharedTask, TaskState, current_task, sleep_task, wake_up_task, yield_task},
     sync::SpinLock,
 };
 
@@ -57,7 +55,7 @@ impl WorkQueue {
         if self.sleeping > 0 {
             for task in &self.worker {
                 if task.lock().state == TaskState::Interruptible {
-                    wake_up_with_block(task.clone());
+                    wake_up_task(task.clone());
                     break;
                 }
             }
@@ -80,7 +78,7 @@ pub fn kworker() {
             (work.task)();
         } else {
             queue.sleeping += 1;
-            sleep_task_with_block(current_task(), true);
+            sleep_task(current_task(), true);
             drop(queue);
             yield_task();
             GLOBAL_WORK_QUEUE.lock().sleeping -= 1;

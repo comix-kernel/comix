@@ -98,4 +98,3 @@ pub fn mmio_of(dev: VirtDevice) -> Option<(usize, usize)> {
         .find(|(d, _, _)| *d as u32 == dev as u32)
         .map(|(_, b, s)| (*b, *s))
 }
-

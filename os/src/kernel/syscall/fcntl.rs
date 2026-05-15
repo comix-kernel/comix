@@ -1,9 +1,9 @@
 //! fcntl 系统调用实现
 
 use crate::kernel::current_task;
-use crate::util::user_buffer::{read_from_user, write_to_user};
 use crate::uapi::errno::EINVAL;
 use crate::uapi::fcntl::{FcntlCmd, FdFlags, FileStatusFlags, Flock, LockType};
+use crate::util::user_buffer::{read_from_user, write_to_user};
 use crate::vfs::{FsError, OpenFlags, file_lock_manager};
 use alloc::sync::Arc;
 

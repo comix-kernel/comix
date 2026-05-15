@@ -307,8 +307,7 @@ fn handle_ifreq(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, ar
 
     // TODO: 实现实际的网络接口操作
     match request {
-        SIOCGIFADDR | SIOCGIFFLAGS | SIOCGIFNETMASK | SIOCGIFMTU | SIOCGIFHWADDR
-        | SIOCGIFINDEX => {
+        SIOCGIFADDR | SIOCGIFFLAGS | SIOCGIFNETMASK | SIOCGIFMTU | SIOCGIFHWADDR | SIOCGIFINDEX => {
             pr_debug!("ioctl: network get request {:#x} not implemented", request);
             -EOPNOTSUPP as isize
         }

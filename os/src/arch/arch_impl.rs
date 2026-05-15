@@ -1,13 +1,11 @@
-//! Arch trait 实现生成宏
+//! Arch / Platform trait 实现生成宏
 //!
-//! 为不同架构生成 `VirtualMemory` 和 `Arch` 的通用方法实现。
-//! 两个架构的绝大多数方法完全相同，仅 `restart` 有架构差异。
+//! 为不同架构生成 `VirtualMemory`、`Arch` 和 `Platform` 的通用方法实现。
+//! 两个架构的绝大多数方法完全相同，可通过宏复用。
 
-/// 为指定架构生成 `VirtualMemory` impl 和 `Arch` impl 的通用方法。
-///
-/// `restart` 方法不在此宏中生成——每个架构需单独提供。
+/// 为指定架构生成 `VirtualMemory` impl 和 `Arch` impl。
 #[macro_export]
-macro_rules! impl_arch_common {
+macro_rules! impl_arch {
     ($arch:ty, $process_space:ty, $kernel_space:ty) => {
         use $crate::arch::virtual_memory::VirtualMemory;
         use $crate::mm::address::Ppn;
@@ -39,21 +37,18 @@ macro_rules! impl_arch_common {
                 ctx
             }
 
-            unsafe fn context_switch(
-                old: *mut Self::UserContext,
-                new: *const Self::UserContext,
-            ) {
+            unsafe fn context_switch(old: *mut Self::UserContext, new: *const Self::UserContext) {
                 unsafe { kernel::switch(old, new) };
             }
 
             unsafe fn copy_from_user(
-                src: usize,
+                src: $crate::arch::address::UA,
                 dst: *mut u8,
                 len: usize,
             ) -> Result<(), ()> {
-                if src > constant::USER_TOP
-                    || src.checked_add(len).ok_or(())? > constant::USER_TOP + 1
-                {
+                let src = src.as_usize();
+                validate_user_copy_range(src, len, false)?;
+                if len != 0 && dst.is_null() {
                     return Err(());
                 }
                 let _guard = trap::SumGuard::new();
@@ -62,7 +57,7 @@ macro_rules! impl_arch_common {
             }
 
             unsafe fn try_copy_from_user(
-                src: usize,
+                src: $crate::arch::address::UA,
                 dst: *mut u8,
                 len: usize,
             ) -> Result<(), ()> {
@@ -71,12 +66,12 @@ macro_rules! impl_arch_common {
 
             unsafe fn copy_to_user(
                 src: *const u8,
-                dst: usize,
+                dst: $crate::arch::address::UA,
                 len: usize,
             ) -> Result<(), ()> {
-                if dst > constant::USER_TOP
-                    || dst.checked_add(len).ok_or(())? > constant::USER_TOP + 1
-                {
+                let dst = dst.as_usize();
+                validate_user_copy_range(dst, len, true)?;
+                if len != 0 && src.is_null() {
                     return Err(());
                 }
                 let _guard = trap::SumGuard::new();
@@ -85,18 +80,23 @@ macro_rules! impl_arch_common {
             }
 
             unsafe fn copy_strn_from_user(
-                src: usize,
+                src: $crate::arch::address::UA,
                 dst: *mut u8,
                 max_len: usize,
             ) -> Result<usize, ()> {
-                if src > constant::USER_TOP {
+                let src = src.as_usize();
+                if src < constant::USER_BASE || src > constant::USER_TOP {
+                    return Err(());
+                }
+                if max_len != 0 && dst.is_null() {
                     return Err(());
                 }
                 let _guard = trap::SumGuard::new();
                 let mut i = 0;
                 while i < max_len {
-                    let byte =
-                        unsafe { core::ptr::read_volatile((src + i) as *const u8) };
+                    let cur = src.checked_add(i).ok_or(())?;
+                    validate_user_copy_range(cur, 1, false)?;
+                    let byte = unsafe { core::ptr::read_volatile(cur as *const u8) };
                     unsafe { *dst.add(i) = byte };
                     if byte == 0 {
                         return Ok(i);
@@ -131,6 +131,61 @@ macro_rules! impl_arch_common {
                 constant::ARCH
             }
 
+            fn cpu_count() -> usize {
+                unsafe { $crate::kernel::NUM_CPU }
+            }
+        }
+
+        fn validate_user_copy_range(start: usize, len: usize, write: bool) -> Result<(), ()> {
+            use $crate::mm::address::{PageNum, VA, Vpn};
+            use $crate::mm::page_table::{PageTableInner, UniversalPTEFlag};
+
+            if len == 0 {
+                return Ok(());
+            }
+            if start < constant::USER_BASE || start > constant::USER_TOP {
+                return Err(());
+            }
+            let end = start.checked_add(len).ok_or(())?;
+            let last = end.checked_sub(1).ok_or(())?;
+            if last > constant::USER_TOP {
+                return Err(());
+            }
+
+            let space = $crate::kernel::current_memory_space();
+            let guard = space.lock();
+            let mut cur = start;
+            while cur < end {
+                let vpn = Vpn::from_addr_floor(VA::from_usize(cur));
+                let (_, _, flags) = guard.page_table().walk(vpn).map_err(|_| ())?;
+                let required = UniversalPTEFlag::VALID | UniversalPTEFlag::USER_ACCESSIBLE;
+                if !flags.contains(required) {
+                    return Err(());
+                }
+                if write {
+                    if !flags.contains(UniversalPTEFlag::WRITEABLE) {
+                        return Err(());
+                    }
+                } else if !flags.contains(UniversalPTEFlag::READABLE) {
+                    return Err(());
+                }
+                let next_page = (cur & !($crate::config::PAGE_SIZE - 1))
+                    .checked_add($crate::config::PAGE_SIZE)
+                    .ok_or(())?;
+                cur = core::cmp::min(next_page, end);
+            }
+            Ok(())
+        }
+    };
+}
+
+/// 为指定架构生成 `Platform` impl。
+///
+/// 此宏依赖 `lib` 和 `device` 模块提供底层实现。
+#[macro_export]
+macro_rules! impl_platform {
+    ($arch:ty) => {
+        impl $crate::arch::plat::Platform for $arch {
             fn console_putchar(c: u8) {
                 lib::console_putchar(c as usize);
             }
@@ -142,10 +197,6 @@ macro_rules! impl_arch_common {
                 } else {
                     Some(ch as u8)
                 }
-            }
-
-            fn cpu_count() -> usize {
-                unsafe { $crate::kernel::NUM_CPU }
             }
 
             fn get_cmdline() -> Option<alloc::string::String> {

@@ -152,7 +152,4 @@ pub const SYS_STATX: usize = 291;
 
 // ---- 自定义内核扩展 ----
 // 注意：此调用号在不同架构上可能不同
-#[cfg(target_arch = "loongarch64")]
-pub const SYS_GETIFADDRS: usize = 1000;
-#[cfg(not(target_arch = "loongarch64"))]
-pub const SYS_GETIFADDRS: usize = 500;
+pub const SYS_GETIFADDRS: usize = crate::arch::abi::SYS_GETIFADDRS;

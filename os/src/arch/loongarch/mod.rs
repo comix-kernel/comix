@@ -1,6 +1,7 @@
 //! LoongArch64 架构模块
 
 pub mod boot;
+pub mod compiler_builtins;
 pub mod constant;
 pub mod cpu_ops;
 pub mod intr;
@@ -13,10 +14,12 @@ pub mod platform;
 pub mod timer;
 pub mod trap;
 
-use crate::impl_arch_common;
+use crate::{impl_arch, impl_platform};
 
-impl_arch_common!(
+impl_arch!(
     cpu_ops::LoongArch64,
     memory::LoongArch64ProcessAddressSpace,
     memory::LoongArch64KernelAddressSpace
 );
+
+impl_platform!(cpu_ops::LoongArch64);

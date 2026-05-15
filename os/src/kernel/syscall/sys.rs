@@ -272,7 +272,7 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 unsafe {
                     crate::arch::ArchImpl::copy_to_user(
                         bytes.as_ptr(),
-                        bufp as usize + total_written,
+                        crate::arch::address::UA::from_usize(bufp as usize + total_written),
                         bytes.len(),
                     )
                     .ok();
@@ -311,7 +311,7 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 unsafe {
                     crate::arch::ArchImpl::copy_to_user(
                         bytes.as_ptr(),
-                        bufp as usize + total_written,
+                        crate::arch::address::UA::from_usize(bufp as usize + total_written),
                         bytes.len(),
                     )
                     .ok();
@@ -344,7 +344,7 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
                 unsafe {
                     crate::arch::ArchImpl::copy_to_user(
                         bytes.as_ptr(),
-                        bufp as usize + total_written,
+                        crate::arch::address::UA::from_usize(bufp as usize + total_written),
                         bytes.len(),
                     )
                     .ok();

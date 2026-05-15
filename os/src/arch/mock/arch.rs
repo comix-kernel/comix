@@ -10,7 +10,7 @@ use crate::arch::arch::Arch;
 use crate::arch::cpu_ops::CpuOps;
 use crate::arch::virtual_memory::{
     KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions, UserAddressSpace,
-    VirtualMemory, VirtMemoryRegion,
+    VirtMemoryRegion, VirtualMemory,
 };
 use crate::sync::SpinLock;
 
@@ -192,6 +192,7 @@ impl VirtualMemory for MockArch {
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 mod mock_arch_impl {
     use super::*;
+    use crate::arch::plat::Platform;
 
     impl Arch for MockArch {
         type UserContext = MockUserContext;
@@ -204,24 +205,59 @@ mod mock_arch_impl {
 
         unsafe fn context_switch(_old: *mut Self::UserContext, _new: *const Self::UserContext) {}
 
-        unsafe fn copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
+        unsafe fn copy_from_user(
+            src: crate::arch::address::UA,
+            dst: *mut u8,
+            len: usize,
+        ) -> Result<(), ()> {
+            let src = src.as_usize();
+            if len != 0 && (src == 0 || dst.is_null()) {
+                return Err(());
+            }
+            unsafe { core::ptr::copy_nonoverlapping(src as *const u8, dst, len) };
             Ok(())
         }
 
-        unsafe fn try_copy_from_user(_src: usize, _dst: *mut u8, _len: usize) -> Result<(), ()> {
-            Ok(())
+        unsafe fn try_copy_from_user(
+            src: crate::arch::address::UA,
+            dst: *mut u8,
+            len: usize,
+        ) -> Result<(), ()> {
+            unsafe { Self::copy_from_user(src, dst, len) }
         }
 
-        unsafe fn copy_to_user(_src: *const u8, _dst: usize, _len: usize) -> Result<(), ()> {
+        unsafe fn copy_to_user(
+            src: *const u8,
+            dst: crate::arch::address::UA,
+            len: usize,
+        ) -> Result<(), ()> {
+            let dst = dst.as_usize();
+            if len != 0 && (src.is_null() || dst == 0) {
+                return Err(());
+            }
+            unsafe { core::ptr::copy_nonoverlapping(src, dst as *mut u8, len) };
             Ok(())
         }
 
         unsafe fn copy_strn_from_user(
-            _src: usize,
-            _dst: *mut u8,
-            _max_len: usize,
+            src: crate::arch::address::UA,
+            dst: *mut u8,
+            max_len: usize,
         ) -> Result<usize, ()> {
-            Ok(0)
+            let src = src.as_usize();
+            if max_len != 0 && (src == 0 || dst.is_null()) {
+                return Err(());
+            }
+            let mut i = 0;
+            while i < max_len {
+                let byte = unsafe { core::ptr::read((src + i) as *const u8) };
+                unsafe { *dst.add(i) = byte };
+                if byte == 0 {
+                    return Ok(i);
+                }
+                i += 1;
+            }
+            Ok(max_len)
         }
 
         fn name() -> &'static str {
@@ -230,16 +266,6 @@ mod mock_arch_impl {
 
         fn cpu_count() -> usize {
             1
-        }
-
-        fn get_cmdline() -> Option<alloc::string::String> {
-            None
-        }
-
-        fn console_putchar(_c: u8) {}
-
-        fn console_getchar() -> Option<u8> {
-            None
         }
 
         fn on_task_switch(_trap_frame_ptr: usize, _cpu_ptr: usize) {}
@@ -261,6 +287,18 @@ mod mock_arch_impl {
         }
 
         fn send_reschedule_ipi(_target_cpu: usize) {}
+    }
+
+    impl Platform for MockArch {
+        fn console_putchar(_c: u8) {}
+
+        fn console_getchar() -> Option<u8> {
+            None
+        }
+
+        fn get_cmdline() -> Option<alloc::string::String> {
+            None
+        }
 
         fn power_off() -> ! {
             loop {

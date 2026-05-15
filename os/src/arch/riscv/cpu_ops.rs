@@ -14,13 +14,25 @@ impl CpuOps for Riscv64 {
     ///
     /// 从 tp 寄存器指向的 Cpu 结构体中读取首个字段 (cpu_id)。
     /// 在内核态，tp 指向 Cpu 结构体。
+    /// 如果 tp 为 0（尚未初始化），返回 0。
     #[inline]
     fn id() -> usize {
+        let tp_val: usize;
+        unsafe {
+            core::arch::asm!(
+                "mv {}, tp",
+                out(reg) tp_val
+            );
+        }
+        if tp_val == 0 {
+            return 0;
+        }
         let id: usize;
         unsafe {
             core::arch::asm!(
-                "ld {}, 0(tp)",
-                out(reg) id
+                "ld {}, 0({})",
+                out(reg) id,
+                in(reg) tp_val
             );
         }
         id

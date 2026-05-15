@@ -6,16 +6,16 @@
 //! # 地址类型
 //!
 //! - Address - 表示内存地址（物理或虚拟）的 Trait
-//! - [`Paddr`] - 物理地址类型
-//! - [`Vaddr`] - 虚拟地址类型
-//! - [`ConvertablePaddr`] - 将物理地址转换为虚拟地址的 Trait
-//! - ConvertableVaddr - 将虚拟地址转换为物理地址的 Trait
+//! - [`PA`] - 物理地址类型
+//! - [`VA`] - 虚拟地址类型
+//! - [`ConvertablePA`] - 将物理地址转换为虚拟地址的 Trait
+//! - ConvertableVA - 将虚拟地址转换为物理地址的 Trait
 //!
 //! # 地址范围
 //!
 //! - AddressRange - 泛型地址范围
-//! - PaddrRange - 物理地址范围的类型别名
-//! - VaddrRange - 虚拟地址范围的类型别名
+//! - PARange - 物理地址范围的类型别名
+//! - VARange - 虚拟地址范围的类型别名
 //! - AddressRangeIterator - 地址范围的迭代器
 //!
 //! # 页码
@@ -38,10 +38,13 @@
 //! - [`UsizeConvert`] - 在类型和 usize 之间进行转换
 //! - CalcOps - 算术和位操作
 //! - AlignOps - 地址对齐操作
-mod types;
 mod operations;
 mod page_num;
+mod types;
 
-pub use types::{ConvertablePaddr, Paddr, Vaddr};
 pub use operations::UsizeConvert;
 pub use page_num::{PageNum, Ppn, PpnRange, Vpn, VpnRange};
+#[allow(unused_imports)]
+pub use types::{
+    Address, AddressRange, ConvertablePA, ConvertableVA, PA, PARange, UA, VA, VARange,
+};

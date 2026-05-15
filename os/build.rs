@@ -114,34 +114,21 @@ fn main() {
     println!("cargo:rustc-env=SIMPLE_FS_IMAGE={}", img_path.display());
 
     // 步骤 3: 创建 ext4 镜像
-    // 检测是否为测试模式
-    // 注意: CARGO_CFG_TEST 只在运行测试时设置，编译时不会设置
-    // 因此我们检查 TEST 环境变量 (由 Makefile 传递) 或检查是否有测试相关的 cfg
+    // EXT4_FS_IMAGE 仅被 #[cfg(test)] 代码通过 include_bytes! 使用，
+    // 因此始终创建真实镜像也不会影响普通构建的二进制体积。
+    // 不再依赖环境变量检测 is_test，因为 cargo test 直接运行时
+    // build.rs 运行在库编译阶段（非 test cfg 阶段），CARGO_CFG_TEST 不可用。
+    let ext4_embed_img = PathBuf::from(&out_dir).join("ext4_test.img");
+    if !ext4_embed_img.exists() {
+        println!("cargo:warning=[build.rs] Creating ext4 test image for embedding (8MB)...");
+        create_ext4_test_image(&ext4_embed_img);
+    }
+    println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_embed_img.display());
+
+    // 检测是否为测试模式（用于跳过 3.2 的运行时镜像生成）
     let is_test = env::var("TEST").is_ok()
         || env::var("CARGO_CFG_TEST").is_ok()
         || env::var("PROFILE").map(|p| p == "test").unwrap_or(false);
-
-    // 3.1: 创建用于 include_bytes! 嵌入的镜像
-    let ext4_embed_img = PathBuf::from(&out_dir).join("ext4_test.img");
-    if is_test {
-        // 测试模式: 创建 8MB 镜像用于测试
-        // 只有在测试模式下才需要这个环境变量
-        println!("cargo:warning=[build.rs] Creating ext4 test image for embedding (8MB)...");
-        create_ext4_test_image(&ext4_embed_img);
-        println!("cargo:rustc-env=EXT4_FS_IMAGE={}", ext4_embed_img.display());
-    } else {
-        // IDE 修复: 即使不在测试模式下，也需要定义 EXT4_FS_IMAGE 环境变量
-        // 这里的代码会被 rust-analyzer 分析，如果缺少环境变量会报错
-        // 我们创建一个空的伪文件来满足 include_bytes! 的需求
-        let dummy_img = PathBuf::from(&out_dir).join("ext4_test_dummy.img");
-        if !dummy_img.exists() {
-            let _ = fs::write(&dummy_img, []);
-        }
-        println!(
-            "cargo:warning=[build.rs] Skipping real test image creation (using dummy for IDE)"
-        );
-        println!("cargo:rustc-env=EXT4_FS_IMAGE={}", dummy_img.display());
-    }
 
     // 3.2: 非测试模式下创建完整的运行时镜像（仅目标架构）
     if !is_test && is_target_arch {

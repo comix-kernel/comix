@@ -51,7 +51,7 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
                 // 串口设备：ttyS0-ttyS63 (minor 64-127)
                 let idx = (min - 64) as usize;
                 SERIAL_DRIVERS
-                    .read()
+                    .lock()
                     .get(idx)
                     .map(|d| d.clone() as Arc<dyn Driver>)
             } else {
@@ -64,7 +64,7 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
             // 控制台设备 (minor 1)
             // 使用第一个串口作为控制台
             SERIAL_DRIVERS
-                .read()
+                .lock()
                 .first()
                 .map(|d| d.clone() as Arc<dyn Driver>)
         }

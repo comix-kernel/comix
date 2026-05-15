@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
 use crate::arch::constant::USER_TOP;
-use crate::arch::Arch;
+use crate::arch::{Arch, address::UA};
 
 /// 向用户空间写入数据
 /// # 参数
@@ -18,7 +18,7 @@ pub fn write_to_user<T>(user_ptr: *mut T, value: T) {
     unsafe {
         crate::arch::ArchImpl::copy_to_user(
             (&value) as *const T as *const u8,
-            user_ptr as usize,
+            UA::from_usize(user_ptr as usize),
             size,
         )
         .ok();
@@ -35,7 +35,7 @@ pub fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
     let mut val = MaybeUninit::<T>::uninit();
     unsafe {
         crate::arch::ArchImpl::copy_from_user(
-            user_ptr as usize,
+            UA::from_usize(user_ptr as usize),
             val.as_mut_ptr() as *mut u8,
             size,
         )
@@ -46,7 +46,7 @@ pub fn read_from_user<T: Copy>(user_ptr: *const T) -> T {
 
 /// 用户缓冲区结构体
 pub struct UserBuffer {
-    data: *mut u8,
+    data: UA,
     len: usize,
 }
 
@@ -56,7 +56,10 @@ impl UserBuffer {
     /// - `data`: 指向用户缓冲区的指针
     /// - `len`: 缓冲区的长度
     pub fn new(data: *mut u8, len: usize) -> Self {
-        Self { data, len }
+        Self {
+            data: UA::from_usize(data as usize),
+            len,
+        }
     }
 
     /// 从用户缓冲区向内核缓冲区复制数据
@@ -70,13 +73,11 @@ impl UserBuffer {
         }
         let mut vec = Vec::with_capacity(self.len);
         unsafe {
+            let dst = vec.spare_capacity_mut().as_mut_ptr() as *mut u8;
+            if crate::arch::ArchImpl::copy_from_user(self.data, dst, self.len).is_err() {
+                return Vec::new();
+            }
             vec.set_len(self.len);
-            crate::arch::ArchImpl::copy_from_user(
-                self.data as usize,
-                vec.as_mut_ptr(),
-                self.len,
-            )
-            .ok();
         }
         vec
     }
@@ -92,14 +93,14 @@ impl UserBuffer {
         }
         let n = core::cmp::min(self.len, data.len());
         unsafe {
-            crate::arch::ArchImpl::copy_to_user(data.as_ptr(), self.data as usize, n).ok();
+            crate::arch::ArchImpl::copy_to_user(data.as_ptr(), self.data, n).ok();
         }
     }
 
     /// TODO: 运行时做一次”粗略”范围校验（不保证已映射，仅做地址区间与溢出检查）
     /// 建议在 syscall 层或结合 MemorySpace 做页表级校验。
     pub fn range_sane(&self) -> bool {
-        let start = self.data as usize;
+        let start = self.data.as_usize();
         let Some(end) = start.checked_add(self.len) else {
             return false;
         };

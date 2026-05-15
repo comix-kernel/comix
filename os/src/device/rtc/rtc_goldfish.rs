@@ -6,7 +6,7 @@ use crate::{
         DRIVERS, DeviceType, Driver, RTC_DRIVERS, device_tree::DEVICE_TREE_REGISTRY, rtc::RtcDriver,
     },
     kernel::current_memory_space,
-    mm::address::{Paddr, UsizeConvert},
+    mm::address::{PA, VA},
     pr_info, pr_warn,
     util::read,
 };
@@ -15,7 +15,7 @@ const TIMER_TIME_LOW: usize = 0x00;
 const TIMER_TIME_HIGH: usize = 0x04;
 
 pub struct RtcGoldfish {
-    base: usize,
+    base: VA,
 }
 
 impl Driver for RtcGoldfish {
@@ -39,8 +39,9 @@ impl Driver for RtcGoldfish {
 impl RtcDriver for RtcGoldfish {
     // read seconds since 1970-01-01
     fn read_epoch(&self) -> u64 {
-        let low: u32 = read(self.base + TIMER_TIME_LOW);
-        let high: u32 = read(self.base + TIMER_TIME_HIGH);
+        let base = self.base.as_usize();
+        let low: u32 = read(base + TIMER_TIME_LOW);
+        let high: u32 = read(base + TIMER_TIME_HIGH);
         let ns = ((high as u64) << 32) | (low as u64);
         ns / 1_000_000_000u64
     }
@@ -62,12 +63,10 @@ fn init_dt(dt: &FdtNode) {
     }
     let vaddr = current_memory_space()
         .lock()
-        .map_mmio(Paddr::from_usize(paddr), size)
+        .map_mmio(PA::from_usize(paddr), size)
         .ok()
         .expect("Failed to map MMIO region for goldfish-rtc");
-    let rtc = Arc::new(RtcGoldfish {
-        base: vaddr.as_usize(),
-    });
+    let rtc = Arc::new(RtcGoldfish { base: vaddr });
     DRIVERS.write().push(rtc.clone());
     RTC_DRIVERS.write().push(rtc);
     pr_info!("[Device] RTC Goldfish initialized");
@@ -75,6 +74,6 @@ fn init_dt(dt: &FdtNode) {
 
 pub fn driver_init() {
     DEVICE_TREE_REGISTRY
-        .write()
+        .lock()
         .insert("google,goldfish-rtc", init_dt);
 }

@@ -135,7 +135,7 @@ pub fn init(transport: MmioTransport<'static>) {
     let blk = VirtIOBlk::new(transport).expect("failed to init blk driver");
     let driver = Arc::new(VirtIOBlkDriver(Mutex::new(blk)));
     DRIVERS.write().push(driver.clone());
-    IRQ_MANAGER.write().register_all(driver.clone());
+    IRQ_MANAGER.lock().register_all(driver.clone());
     BLK_DRIVERS.write().push(driver);
     pr_info!("[Device] Block driver (virtio-blk) is initialized");
 }
@@ -145,7 +145,7 @@ pub fn init_pci(transport: PciTransport) {
     let blk = VirtIOBlk::new(transport).expect("failed to init pci blk driver");
     let driver = Arc::new(VirtIOBlkPciDriver(Mutex::new(blk)));
     DRIVERS.write().push(driver.clone());
-    IRQ_MANAGER.write().register_all(driver.clone());
+    IRQ_MANAGER.lock().register_all(driver.clone());
     BLK_DRIVERS.write().push(driver);
     pr_info!("[Device] Block driver (virtio-blk-pci) is initialized");
 }

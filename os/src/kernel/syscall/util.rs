@@ -26,15 +26,19 @@ const PATH_MAX: usize = 4096;
 fn copy_str_from_user(user_ptr: usize) -> Result<String, &'static str> {
     let mut buf = [0u8; PATH_MAX];
     let len = unsafe {
-        crate::arch::ArchImpl::copy_strn_from_user(user_ptr, buf.as_mut_ptr(), PATH_MAX)
-            .map_err(|_| "Failed to read string from user space")?
+        crate::arch::ArchImpl::copy_strn_from_user(
+            crate::arch::address::UA::from_usize(user_ptr),
+            buf.as_mut_ptr(),
+            PATH_MAX,
+        )
+        .map_err(|_| "Failed to read string from user space")?
     };
     if len == PATH_MAX {
         return Err("Path exceeds PATH_MAX");
     }
     // copy_strn_from_user 在遇到 '\0' 时返回其索引（含 '\0'）
-    let c_str = CStr::from_bytes_until_nul(&buf[..=len])
-        .map_err(|_| "String is not null-terminated")?;
+    let c_str =
+        CStr::from_bytes_until_nul(&buf[..=len]).map_err(|_| "String is not null-terminated")?;
     c_str
         .to_str()
         .map(|s| s.to_string())
@@ -61,10 +65,7 @@ pub fn get_path_safe(path: usize) -> Result<String, &'static str> {
 /// # 返回值
 /// - 成功时返回包含参数字符串的 `Vec<String>`
 /// - 失败时返回错误字符串
-pub fn get_args_safe(
-    ptr_array: usize,
-    name: &str,
-) -> Result<Vec<String>, String> {
+pub fn get_args_safe(ptr_array: usize, name: &str) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
 
     if ptr_array == 0 {
@@ -78,7 +79,7 @@ pub fn get_args_safe(
             let mut val = 0usize;
             unsafe {
                 crate::arch::ArchImpl::copy_from_user(
-                    ptr_array + offset,
+                    crate::arch::address::UA::from_usize(ptr_array + offset),
                     (&mut val) as *mut usize as *mut u8,
                     core::mem::size_of::<usize>(),
                 )
@@ -91,8 +92,8 @@ pub fn get_args_safe(
             break; // NULL 终止
         }
 
-        let s = copy_str_from_user(ptr_val)
-            .map_err(|e| format!("{}[{}]: {}", name, args.len(), e))?;
+        let s =
+            copy_str_from_user(ptr_val).map_err(|e| format!("{}[{}]: {}", name, args.len(), e))?;
 
         args.push(s);
         offset += core::mem::size_of::<usize>();

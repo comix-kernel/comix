@@ -12,6 +12,7 @@ mod ioctl;
 mod ipc;
 mod mm;
 mod network;
+pub mod numbers;
 mod signal;
 mod sys;
 pub mod syscall_frame;

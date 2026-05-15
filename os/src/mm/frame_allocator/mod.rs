@@ -17,7 +17,7 @@ mod allocator;
 use alloc::vec::Vec;
 pub use allocator::{FrameRangeTracker, FrameTracker, TrackedFrames};
 
-use crate::mm::address::{Paddr, PageNum, Ppn, UsizeConvert};
+use crate::mm::address::{PA, PageNum, Ppn};
 use allocator::FRAME_ALLOCATOR;
 
 /// 使用可用的物理内存范围初始化全局帧分配器。
@@ -26,11 +26,11 @@ use allocator::FRAME_ALLOCATOR;
 ///
 /// * `start_addr` - 可用物理内存的起始地址
 /// * `end_addr` - 可用物理内存的结束地址
-pub fn init_frame_allocator(start_addr: usize, end_addr: usize) {
+pub fn init_frame_allocator(start_addr: PA, end_addr: PA) {
     // 将起始地址向上取整到页号
-    let start_ppn = Ppn::from_addr_ceil(Paddr::from_usize(start_addr));
+    let start_ppn = Ppn::from_addr_ceil(start_addr);
     // 将结束地址向下取整到页号
-    let end_ppn = Ppn::from_addr_floor(Paddr::from_usize(end_addr));
+    let end_ppn = Ppn::from_addr_floor(end_addr);
 
     let mut allocator = FRAME_ALLOCATOR.lock();
     allocator.init(start_ppn, end_ppn);
@@ -135,7 +135,11 @@ pub fn get_stats() -> (usize, usize, usize, usize, usize) {
 #[cfg(test)]
 mod frame_allocator_tests {
     use super::*;
-    use crate::{kassert, mm::address::ConvertablePaddr, test_case};
+    use crate::{
+        kassert,
+        mm::address::{ConvertablePA, UsizeConvert},
+        test_case,
+    };
 
     // 1. 单帧分配测试
     test_case!(test_single_frame_alloc, {
@@ -145,7 +149,7 @@ mod frame_allocator_tests {
         kassert!(ppn.as_usize() > 0);
 
         // 帧已自动清零 - 需要转换为 vaddr 才能访问
-        let vaddr = ppn.start_addr().to_vaddr();
+        let vaddr = ppn.start_addr().to_va();
         let page_ptr = vaddr.as_ptr::<u64>();
         unsafe {
             for i in 0..512 {

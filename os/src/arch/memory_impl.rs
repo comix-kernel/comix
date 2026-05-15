@@ -11,15 +11,15 @@ macro_rules! impl_virtual_memory {
     ($process_type:ident, $kernel_type:ident) => {
         use alloc::vec::Vec;
 
-        use crate::config::PAGE_SIZE;
         use crate::arch::virtual_memory::{
             KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions,
             UserAddressSpace, VirtMemoryRegion,
         };
+        use crate::config::PAGE_SIZE;
         use crate::mm::address::{
-            ConvertablePaddr, Paddr, PageNum, Ppn, UsizeConvert, Vaddr, Vpn, VpnRange,
+            ConvertablePA, PA, PageNum, Ppn, UsizeConvert, VA, Vpn, VpnRange,
         };
-        use crate::mm::memory_space::{with_kernel_space, MemorySpace};
+        use crate::mm::memory_space::{MemorySpace, with_kernel_space};
         use crate::mm::page_table::PageTableInner;
         use crate::mm::page_table::{PageSize, UniversalPTEFlag};
 
@@ -64,7 +64,7 @@ macro_rules! impl_virtual_memory {
                 perms: PtePermissions,
             ) -> Result<(), ()> {
                 let ppn = Ppn::from_usize(page.ppn);
-                let vaddr = Vaddr::from_usize(va);
+                let vaddr = VA::from_usize(va);
                 let vpn = Vpn::from_addr_floor(vaddr);
                 let flags = UniversalPTEFlag::from_bits_truncate(perms.bits());
                 self.inner
@@ -74,10 +74,9 @@ macro_rules! impl_virtual_memory {
             }
 
             fn unmap(&mut self, va: usize) -> Result<PageFrame, ()> {
-                let vaddr = Vaddr::from_usize(va);
+                let vaddr = VA::from_usize(va);
                 let vpn = Vpn::from_addr_floor(vaddr);
-                let (ppn, _size, _flags) =
-                    self.inner.page_table().walk(vpn).map_err(|_| ())?;
+                let (ppn, _size, _flags) = self.inner.page_table().walk(vpn).map_err(|_| ())?;
                 self.inner.page_table_mut().unmap(vpn).map_err(|_| ())?;
                 Ok(PageFrame {
                     ppn: ppn.as_usize(),
@@ -100,10 +99,8 @@ macro_rules! impl_virtual_memory {
                 region: VirtMemoryRegion,
                 perms: PtePermissions,
             ) -> Result<(), ()> {
-                let start_vpn =
-                    Vpn::from_addr_floor(Vaddr::from_usize(region.start_va));
-                let end_vpn =
-                    Vpn::from_addr_ceil(Vaddr::from_usize(region.start_va + region.len));
+                let start_vpn = Vpn::from_addr_floor(VA::from_usize(region.start_va));
+                let end_vpn = Vpn::from_addr_ceil(VA::from_usize(region.start_va + region.len));
                 let flags = UniversalPTEFlag::from_bits_truncate(perms.bits());
 
                 for vpn in VpnRange::new(start_vpn, end_vpn) {
@@ -115,14 +112,9 @@ macro_rules! impl_virtual_memory {
                 Ok(())
             }
 
-            fn unmap_range(
-                &mut self,
-                region: VirtMemoryRegion,
-            ) -> Result<Vec<PageFrame>, ()> {
-                let start_vpn =
-                    Vpn::from_addr_floor(Vaddr::from_usize(region.start_va));
-                let end_vpn =
-                    Vpn::from_addr_ceil(Vaddr::from_usize(region.start_va + region.len));
+            fn unmap_range(&mut self, region: VirtMemoryRegion) -> Result<Vec<PageFrame>, ()> {
+                let start_vpn = Vpn::from_addr_floor(VA::from_usize(region.start_va));
+                let end_vpn = Vpn::from_addr_ceil(VA::from_usize(region.start_va + region.len));
                 let range = VpnRange::new(start_vpn, end_vpn);
 
                 let mut frames = Vec::new();
@@ -138,14 +130,16 @@ macro_rules! impl_virtual_memory {
             }
 
             fn translate(&self, va: usize) -> Option<PageInfo> {
-                let vaddr = Vaddr::from_usize(va);
+                let vaddr = VA::from_usize(va);
                 let vpn = Vpn::from_addr_floor(vaddr);
-                self.inner.page_table().walk(vpn).ok().map(
-                    |(ppn, _size, flags)| PageInfo {
+                self.inner
+                    .page_table()
+                    .walk(vpn)
+                    .ok()
+                    .map(|(ppn, _size, flags)| PageInfo {
                         ppn: ppn.as_usize(),
                         perms: PtePermissions::from_bits_truncate(flags.bits()),
-                    },
-                )
+                    })
             }
 
             fn protect_and_clone_region(
@@ -155,12 +149,11 @@ macro_rules! impl_virtual_memory {
                 perms: PtePermissions,
             ) -> Result<(), ()> {
                 let start_va = region.start_va & !(PAGE_SIZE - 1);
-                let end_va =
-                    (region.start_va + region.len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+                let end_va = (region.start_va + region.len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
                 let flags = UniversalPTEFlag::from_bits_truncate(perms.bits());
 
                 for va in (start_va..end_va).step_by(PAGE_SIZE) {
-                    let vaddr = Vaddr::from_usize(va);
+                    let vaddr = VA::from_usize(va);
                     let vpn = Vpn::from_addr_floor(vaddr);
                     if let Ok((ppn, _size, _flags)) = self.inner.page_table().walk(vpn) {
                         other
@@ -189,8 +182,8 @@ macro_rules! impl_virtual_memory {
 
         impl KernAddressSpace for $kernel_type {
             fn map_mmio(&mut self, region: PhysMemoryRegion) -> Result<usize, ()> {
-                let pa = Paddr::from_usize(region.start_pa);
-                let va = pa.to_vaddr();
+                let pa = PA::from_usize(region.start_pa);
+                let va = pa.to_va();
 
                 with_kernel_space(|ks| {
                     let start_pa = region.start_pa & !(PAGE_SIZE - 1);
@@ -199,15 +192,10 @@ macro_rules! impl_virtual_memory {
                     let mut cur_va = va.as_usize() & !(PAGE_SIZE - 1);
 
                     while cur_pa < end_pa {
-                        let ppn = Ppn::from_addr_floor(Paddr::from_usize(cur_pa));
-                        let vpn = Vpn::from_addr_floor(Vaddr::from_usize(cur_va));
+                        let ppn = Ppn::from_addr_floor(PA::from_usize(cur_pa));
+                        let vpn = Vpn::from_addr_floor(VA::from_usize(cur_va));
                         ks.page_table_mut()
-                            .map(
-                                vpn,
-                                ppn,
-                                PageSize::Size4K,
-                                UniversalPTEFlag::kernel_rw(),
-                            )
+                            .map(vpn, ppn, PageSize::Size4K, UniversalPTEFlag::kernel_rw())
                             .map_err(|_| ())?;
                         cur_pa += PAGE_SIZE;
                         cur_va += PAGE_SIZE;
@@ -231,10 +219,8 @@ macro_rules! impl_virtual_memory {
                     let mut offset = 0usize;
 
                     while start_pa + offset < end_pa {
-                        let ppn =
-                            Ppn::from_addr_floor(Paddr::from_usize(start_pa + offset));
-                        let vpn =
-                            Vpn::from_addr_floor(Vaddr::from_usize(start_va + offset));
+                        let ppn = Ppn::from_addr_floor(PA::from_usize(start_pa + offset));
+                        let vpn = Vpn::from_addr_floor(VA::from_usize(start_va + offset));
                         let flags = UniversalPTEFlag::from_bits_truncate(perms.bits());
                         ks.page_table_mut()
                             .map(vpn, ppn, PageSize::Size4K, flags)

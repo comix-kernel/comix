@@ -157,6 +157,26 @@ impl TrapFrame {
         self.x12_a2 = envp;
     }
 
+    pub fn set_exec_trap_frame_from_layout(
+        &mut self,
+        entry: usize,
+        kernel_sp: usize,
+        layout: &crate::arch::task::ExecStackLayout,
+    ) {
+        self.set_exec_trap_frame(
+            entry,
+            layout.sp.as_usize(),
+            kernel_sp,
+            layout.argc,
+            layout.argv.as_usize(),
+            layout.envp.as_usize(),
+        );
+    }
+
+    pub fn set_tls(&mut self, tls: usize) {
+        self.x4_tp = tls;
+    }
+
     pub unsafe fn set_fork_trap_frame(&mut self, parent_frame: &TrapFrame) {
         *self = *parent_frame;
         self.x10_a0 = 0;

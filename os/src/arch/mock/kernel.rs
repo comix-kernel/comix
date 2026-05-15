@@ -32,7 +32,7 @@ pub mod cpu {
     pub fn on_task_switch(trap_frame_ptr: usize, cpu_ptr: usize) {
         if trap_frame_ptr != 0 {
             unsafe {
-                if let Some(tf) = (trap_frame_ptr as *mut super::trap::TrapFrame).as_mut() {
+                if let Some(tf) = (trap_frame_ptr as *mut crate::arch::trap::TrapFrame).as_mut() {
                     tf.cpu_ptr = cpu_ptr;
                 }
             }
@@ -41,6 +41,9 @@ pub mod cpu {
 }
 
 pub mod task {
+    use crate::arch::{address::VA, task::ExecStackLayout};
+    use crate::mm::memory_space::MemorySpace;
+
     pub fn setup_stack_layout(
         sp: usize,
         _argv: &[&str],
@@ -53,6 +56,50 @@ pub mod task {
     ) -> (usize, usize, usize, usize) {
         let sp = sp & !(core::mem::size_of::<usize>() - 1);
         (sp - 1024, 0, 0, 0)
+    }
+
+    pub fn setup_exec_stack_layout(
+        _space: &MemorySpace,
+        sp: VA,
+        argv: &[&str],
+        envp: &[&str],
+        phdr_addr: VA,
+        phnum: usize,
+        phent: usize,
+        at_base: VA,
+        at_entry: VA,
+    ) -> ExecStackLayout {
+        let (sp, argc, argv, envp) = setup_stack_layout(
+            sp.as_usize(),
+            argv,
+            envp,
+            phdr_addr.as_usize(),
+            phnum,
+            phent,
+            at_base.as_usize(),
+            at_entry.as_usize(),
+        );
+        ExecStackLayout {
+            sp: VA::from_usize(sp),
+            argc,
+            argv: VA::from_usize(argv),
+            envp: VA::from_usize(envp),
+            tls: VA::null(),
+        }
+    }
+
+    pub unsafe fn forkret_restore(
+        tf_ptr: *mut crate::arch::trap::TrapFrame,
+        _is_kernel_thread: bool,
+    ) {
+        unsafe { crate::arch::trap::restore(&*tf_ptr) };
+    }
+
+    pub unsafe fn prepare_user_restore(
+        _tfp: *mut crate::arch::trap::TrapFrame,
+        _initial_pc: VA,
+        _user_sp_high: VA,
+    ) {
     }
 }
 
