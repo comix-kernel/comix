@@ -74,7 +74,7 @@ pub fn main(hartid: usize) {
     timer::init();
 
     // 创建 idle 并设为当前任务（sscratch 就绪）
-    let idle = kernel::boot::create_idle_task(0, idle_loop);
+    let idle = kernel::boot::create_idle_task(0, kernel::boot::idle_loop);
     {
         let _guard = PreemptGuard::new();
         current_cpu().idle_task = Some(idle.clone());
@@ -90,21 +90,7 @@ pub fn main(hartid: usize) {
     // 启用中断并进入 idle 循环
     // 时钟中断触发后调度器自动选中 init 并切换上下文
     unsafe { intr::enable_interrupts() };
-    idle_loop();
-}
-
-/// Idle 循环：WFI 等待中断
-fn idle_loop() -> ! {
-    loop {
-        if !crate::arch::intr::are_interrupts_enabled() {
-            unsafe {
-                crate::arch::intr::enable_interrupts();
-            }
-        }
-        unsafe {
-            core::arch::asm!("wfi");
-        }
-    }
+    kernel::boot::idle_loop();
 }
 
 // SBI HSM 从核入口（在 entry.S 中定义）
@@ -132,7 +118,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     pr_info!("[SMP] CPU {} is online", hartid);
 
     // 创建 idle 并设为当前任务
-    let idle_task = kernel::boot::create_idle_task(hartid, idle_loop);
+    let idle_task = kernel::boot::create_idle_task(hartid, kernel::boot::idle_loop);
     {
         let _guard = PreemptGuard::new();
         let cpu = current_cpu();
@@ -167,7 +153,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     }
 
     pr_debug!("[SMP] CPU {} entering idle loop", hartid);
-    idle_loop();
+    kernel::boot::idle_loop();
 }
 
 /// 启动从核（由主核调用）

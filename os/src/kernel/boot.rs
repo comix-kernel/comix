@@ -6,6 +6,7 @@
 use alloc::sync::Arc;
 
 use crate::{
+    arch::CpuOps,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_memory_space,
@@ -22,6 +23,21 @@ use crate::{
     },
     vfs::{create_stdio_files, fd_table::FDTable, get_root_dentry},
 };
+
+/// 架构无关的 idle 循环
+///
+/// 确保中断开启后持续等待中断，唤醒后立即重新等待。
+/// 使用 `ArchImpl::halt()` 执行具体的 halt 指令（wfi / idle 0）。
+pub fn idle_loop() -> ! {
+    loop {
+        if !crate::arch::intr::are_interrupts_enabled() {
+            unsafe {
+                crate::arch::intr::enable_interrupts();
+            }
+        }
+        crate::arch::ArchImpl::halt();
+    }
+}
 
 /// 清除 BSS 段
 ///

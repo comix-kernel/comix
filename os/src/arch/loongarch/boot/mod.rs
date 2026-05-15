@@ -45,7 +45,7 @@ pub fn main(hartid: usize) {
     timer::init();
 
     // 创建 idle 并设为当前任务（KScratch0 就绪）
-    let idle = kernel::boot::create_idle_task(0, idle_loop);
+    let idle = kernel::boot::create_idle_task(0, kernel::boot::idle_loop);
     {
         let _guard = PreemptGuard::new();
         current_cpu().idle_task = Some(idle.clone());
@@ -61,19 +61,5 @@ pub fn main(hartid: usize) {
     // 启用中断并进入 idle 循环
     // 时钟中断触发后调度器自动选中 init 并切换上下文
     unsafe { intr::enable_interrupts() };
-    idle_loop();
-}
-
-/// Idle 循环：idle 0 等待中断
-fn idle_loop() -> ! {
-    loop {
-        if !crate::arch::intr::are_interrupts_enabled() {
-            unsafe {
-                crate::arch::intr::enable_interrupts();
-            }
-        }
-        unsafe {
-            core::arch::asm!("idle 0");
-        }
-    }
+    kernel::boot::idle_loop();
 }

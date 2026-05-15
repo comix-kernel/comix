@@ -26,7 +26,6 @@ pub use plat::Platform;
 
 mod arch_impl;
 mod memory_impl;
-pub mod syscall;
 
 // ---- 目标架构：RISC-V / LoongArch ----
 

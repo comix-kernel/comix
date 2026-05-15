@@ -74,11 +74,6 @@ pub type VA = Address<Virtual, ()>;
 /// 无类型标记的用户空间地址
 pub type UA = Address<User, ()>;
 
-/// 带类型标记的物理地址指针
-pub type TPA<T> = Address<Physical, T>;
-/// 带类型标记的虚拟地址指针
-pub type TVA<T> = Address<Virtual, T>;
-
 // ============================================================================
 // Address 基本方法
 // ============================================================================
@@ -227,25 +222,6 @@ impl<T> Address<User, T> {
     pub fn as_ptr(&self) -> *const T {
         panic!("UA::as_ptr() is forbidden; use copy_from_user/copy_to_user")
     }
-}
-
-// ============================================================================
-// AddressTranslator — 跨地址空间转换
-// ============================================================================
-
-/// 地址转换器 trait。
-///
-/// 只有通过 `Translator` 才能跨地址空间转换。
-///
-/// # 类型参数
-///
-/// * `T` - 要转换的地址携带的数据类型
-pub trait AddressTranslator<T>: 'static + Send + Sync {
-    /// 虚拟地址 → 物理地址
-    fn virt_to_phys(va: TVA<T>) -> TPA<T>;
-
-    /// 物理地址 → 虚拟地址
-    fn phys_to_virt(pa: TPA<T>) -> TVA<T>;
 }
 
 // ============================================================================
