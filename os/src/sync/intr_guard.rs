@@ -43,6 +43,8 @@ static SAVED_INTR_FLAGS: [CacheAlignedAtomic; MAX_CPU_COUNT] =
 /// 支持嵌套：内部使用 per-CPU 引用计数。
 pub struct IntrGuard<CPU: CpuOps = ArchImpl> {
     _marker: PhantomData<CPU>,
+    /// 此 guard 创建时是否已处于临界区内（即是否嵌套）
+    was_nested: bool,
 }
 
 impl<CPU: CpuOps> IntrGuard<CPU> {
@@ -53,7 +55,8 @@ impl<CPU: CpuOps> IntrGuard<CPU> {
     pub fn new() -> Self {
         let cpu_id = CPU::id();
         let depth = INTR_DEPTH[cpu_id].0.load(Ordering::Relaxed);
-        if depth == 0 {
+        let was_nested = depth > 0;
+        if !was_nested {
             let flags = CPU::disable_interrupts();
             SAVED_INTR_FLAGS[cpu_id].0.store(flags, Ordering::Relaxed);
         }
@@ -61,13 +64,18 @@ impl<CPU: CpuOps> IntrGuard<CPU> {
         core::sync::atomic::fence(Ordering::Acquire);
         IntrGuard {
             _marker: PhantomData,
+            was_nested,
         }
     }
 
-    /// 检查进入最外层临界区前，中断是否处于启用状态。
+    /// 检查进入此临界区前，中断是否处于启用状态。
     ///
+    /// 嵌套 guard 创建时中断已被外层禁用，因此返回 false。
     /// 必须在创建该守卫的同一 CPU 上调用。
     pub fn was_enabled(&self) -> bool {
+        if self.was_nested {
+            return false;
+        }
         let cpu_id = CPU::id();
         let flags = SAVED_INTR_FLAGS[cpu_id].0.load(Ordering::Relaxed);
         CPU::interrupt_was_enabled(flags)

@@ -227,15 +227,15 @@ mod tests {
         Arc::new(SpinLock::new(task))
     }
 
-    // 通过 TaskManager 分配 tid：应从 1 开始递增
+    // 通过 TaskManager 分配 tid：TidAllocator 从 2 开始（1 保留给 init 进程）
     test_case!(test_task_manager_allocate_sequence, {
         let mut tm = TaskManager::new();
         let t1 = tm.allocate_tid();
         let t2 = tm.allocate_tid();
         let t3 = tm.allocate_tid();
-        kassert!(t1 == 1);
-        kassert!(t2 == 2);
-        kassert!(t3 == 3);
+        kassert!(t1 == 2);
+        kassert!(t2 == 3);
+        kassert!(t3 == 4);
     });
 
     // 对不存在的 tid 进行查询与退出

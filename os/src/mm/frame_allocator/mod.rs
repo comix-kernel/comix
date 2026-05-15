@@ -135,7 +135,11 @@ pub fn get_stats() -> (usize, usize, usize, usize, usize) {
 #[cfg(test)]
 mod frame_allocator_tests {
     use super::*;
-    use crate::{kassert, mm::address::ConvertablePA, test_case};
+    use crate::{
+        kassert,
+        mm::address::{ConvertablePA, UsizeConvert},
+        test_case,
+    };
 
     // 1. 单帧分配测试
     test_case!(test_single_frame_alloc, {
