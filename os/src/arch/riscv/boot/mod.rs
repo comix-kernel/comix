@@ -102,7 +102,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
         let root_ppn = kernel_space.lock().root_ppn();
         {
             let _guard = PreemptGuard::new();
-            current_cpu().switch_space(kernel_space.clone());
+            current_cpu().switch_space(kernel_space);
         }
         pr_info!(
             "[SMP] CPU {} switched to global kernel space, root PPN: 0x{:x}",

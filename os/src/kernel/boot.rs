@@ -112,12 +112,10 @@ pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
 /// 确保中断开启后持续等待中断，唤醒后立即重新等待。
 /// 使用 `ArchImpl::halt()` 执行具体的 halt 指令（wfi / idle 0）。
 pub fn idle_loop() -> ! {
-    loop {
-        if !crate::arch::interrupts_enabled() {
-            crate::arch::enable_interrupts();
-        }
-        crate::arch::ArchImpl::halt();
+    if !crate::arch::interrupts_enabled() {
+        crate::arch::enable_interrupts();
     }
+    crate::arch::ArchImpl::halt();
 }
 
 /// 清除 BSS 段
