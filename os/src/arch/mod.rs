@@ -84,6 +84,12 @@ pub fn enable_interrupts() {
     ArchImpl::enable_interrupts()
 }
 
+/// 当前中断是否处于启用状态
+#[inline]
+pub fn interrupts_enabled() -> bool {
+    ArchImpl::interrupts_enabled()
+}
+
 /// 禁用中断并返回之前的中断状态
 #[inline]
 pub fn disable_interrupts() -> usize {

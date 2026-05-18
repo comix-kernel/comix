@@ -44,6 +44,10 @@ impl CpuOps for MockCpuOps {
     fn restore_interrupt_state(_flags: usize) {}
 
     fn enable_interrupts() {}
+
+    fn interrupts_enabled() -> bool {
+        false
+    }
 }
 
 // ============================================================================
@@ -174,6 +178,9 @@ impl CpuOps for MockArch {
     }
     fn enable_interrupts() {
         MockCpuOps::enable_interrupts()
+    }
+    fn interrupts_enabled() -> bool {
+        MockCpuOps::interrupts_enabled()
     }
 }
 
