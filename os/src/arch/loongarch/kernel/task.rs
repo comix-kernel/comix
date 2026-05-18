@@ -223,20 +223,26 @@ pub fn setup_exec_stack_layout(
 }
 
 /// Restore a freshly scheduled task for the first time.
-pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, is_kernel_thread: bool) {
-    if is_kernel_thread {
-        let (entry, sp) = unsafe { ((*tf_ptr).era, (*tf_ptr).kernel_sp) };
+pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, _is_kernel_thread: bool) {
+    if unsafe { is_kernel_entry(tf_ptr) } {
+        let (entry, sp, ra) = unsafe { ((*tf_ptr).era, (*tf_ptr).kernel_sp, (*tf_ptr).regs[1]) };
         unsafe {
             core::arch::asm!(
                 "addi.d $sp, {sp}, 0",
+                "addi.d $ra, {ra}, 0",
                 "jirl $zero, {entry}, 0",
                 sp = in(reg) sp,
+                ra = in(reg) ra,
                 entry = in(reg) entry,
                 options(noreturn)
             );
         }
     }
     crate::arch::trap::restore(unsafe { &*tf_ptr });
+}
+
+unsafe fn is_kernel_entry(tf_ptr: *mut crate::arch::trap::TrapFrame) -> bool {
+    unsafe { (*tf_ptr).era >= crate::arch::constant::KERNEL_BASE }
 }
 
 /// Initialize the trap frame used to enter a kernel task.
