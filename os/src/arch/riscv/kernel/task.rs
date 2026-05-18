@@ -217,6 +217,24 @@ pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, _is_ker
     unsafe { crate::arch::trap::restore(&*tf_ptr) };
 }
 
+/// Initialize the trap frame used to enter a kernel task.
+pub unsafe fn init_kernel_trap_frame(
+    tf_ptr: *mut crate::arch::trap::TrapFrame,
+    entry: usize,
+    terminal: usize,
+    kernel_sp: usize,
+) {
+    unsafe {
+        core::ptr::write(tf_ptr, crate::arch::trap::TrapFrame::zero_init());
+        (*tf_ptr).set_kernel_trap_frame(entry, terminal, kernel_sp);
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
+        crate::arch::trap::set_trap_frame_cpu_ptr(tf_ptr, cpu_ptr);
+    }
+}
+
 /// Final architecture-specific preparation before restoring to user mode.
 pub unsafe fn prepare_user_restore(
     tfp: *mut crate::arch::trap::TrapFrame,
