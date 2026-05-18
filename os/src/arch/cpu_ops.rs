@@ -33,6 +33,9 @@ pub trait CpuOps: 'static {
     /// 显式启用中断
     fn enable_interrupts();
 
+    /// 当前中断是否处于启用状态
+    fn interrupts_enabled() -> bool;
+
     /// 检查 `disable_interrupts()` 返回的 flags 中中断是否处于启用状态
     ///
     /// 默认实现假定 flags 的 bit 0 表示中断启用状态。

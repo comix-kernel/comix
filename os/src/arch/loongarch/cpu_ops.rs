@@ -69,9 +69,7 @@ impl CpuOps for LoongArch64 {
     #[inline]
     fn restore_interrupt_state(flags: usize) {
         if flags & SSTATUS_SIE != 0 {
-            unsafe {
-                Self::enable_interrupts();
-            }
+            Self::enable_interrupts();
         }
     }
 
@@ -94,6 +92,19 @@ impl CpuOps for LoongArch64 {
                 options(nostack, preserves_flags)
             );
         }
+    }
+
+    #[inline]
+    fn interrupts_enabled() -> bool {
+        let crmd: usize;
+        unsafe {
+            core::arch::asm!(
+                "csrrd {crmd}, 0x0",
+                crmd = out(reg) crmd,
+                options(nostack, preserves_flags)
+            );
+        }
+        crmd & CSR_CRMD_IE != 0
     }
 
     #[inline]

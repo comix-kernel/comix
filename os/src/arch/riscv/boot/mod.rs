@@ -7,12 +7,11 @@ global_asm!(include_str!("entry.S"));
 
 use crate::mm::address::UsizeConvert;
 use crate::{
-    arch::{intr, platform, timer, trap},
+    arch::{timer, trap},
     earlyprintln,
-    kernel::{self, NUM_CPU, current_cpu, time},
-    mm, pr_debug, pr_err, pr_info, pr_warn,
+    kernel::{self, NUM_CPU, current_cpu},
+    pr_debug, pr_err, pr_info, pr_warn,
     sync::PreemptGuard,
-    test::run_early_tests,
 };
 
 /// 已上线 CPU 位掩码
@@ -31,26 +30,23 @@ pub extern "C" fn secondary_debug_entry(hartid: usize) {
 
 /// RISC-V 主核启动入口
 pub fn main(hartid: usize) {
-    // 提前设置 tp 指向一个临时值，确保 mm::init 期间 IntrGuard::new() 调用
-    // CPU::id() 时 tp 已指向有效内存（cpuid = 0）。后续在 CPUS 初始化完成后
-    // 会重新指向真正的 Cpu 结构体。
+    let mut ops = kernel::boot::PrimaryBootOps::new("RISC-V", "Hart");
+    ops.before_clear_bss = setup_boot_cpu_dummy;
+    ops.after_mm_init = setup_boot_cpu;
+    ops.after_time_init = boot_secondaries;
+    kernel::boot::run_primary_boot(hartid, ops);
+}
+
+fn setup_boot_cpu_dummy(_hartid: usize) {
     {
         static BOOT_CPU_DUMMY: usize = 0;
         unsafe {
             core::arch::asm!("mv tp, {}", in(reg) &raw const BOOT_CPU_DUMMY);
         }
     }
+}
 
-    kernel::boot::clear_bss();
-
-    run_early_tests();
-
-    earlyprintln!("[Boot] Hello, world!");
-    earlyprintln!("[Boot] RISC-V Hart {} is up!", hartid);
-
-    let kernel_space = mm::init();
-
-    // 初始化 CPUS 并设置 tp 指向 CPU 0
+fn setup_boot_cpu(_hartid: usize) {
     {
         use crate::kernel::CPUS;
         let cpu_ptr = CPUS.get_of(0) as *const _ as usize;
@@ -59,48 +55,13 @@ pub fn main(hartid: usize) {
         }
         earlyprintln!("[Boot] Initialized CPUS, tp = 0x{:x}", cpu_ptr);
     }
+}
 
-    // 激活内核地址空间
-    {
-        let _guard = PreemptGuard::new();
-        current_cpu().switch_space(kernel_space);
-        earlyprintln!("[Boot] Activated kernel address space");
-    }
-
-    #[cfg(test)]
-    crate::test_main();
-
-    // 早期引导陷阱（覆盖平台初始化窗口）
-    trap::init_boot_trap();
-    platform::init();
-    time::init();
-
-    // 启动从核
+fn boot_secondaries(_hartid: usize) {
     let num_cpus = unsafe { NUM_CPU };
     if num_cpus > 1 {
         boot_secondary_cpus(num_cpus);
     }
-
-    timer::init();
-
-    // 创建 idle 并设为当前任务（sscratch 就绪）
-    let idle = kernel::boot::create_idle_task(0, kernel::boot::idle_loop);
-    {
-        let _guard = PreemptGuard::new();
-        current_cpu().idle_task = Some(idle.clone());
-        current_cpu().switch_task(idle);
-    }
-
-    // 完整陷阱处理（sscratch 已有效）
-    trap::init();
-
-    // 创建 init 任务并入队（中断仍禁用，避免竞争）
-    kernel::boot::rest_init();
-
-    // 启用中断并进入 idle 循环
-    // 时钟中断触发后调度器自动选中 init 并切换上下文
-    unsafe { intr::enable_interrupts() };
-    kernel::boot::idle_loop();
 }
 
 // SBI HSM 从核入口（在 entry.S 中定义）
@@ -158,9 +119,7 @@ pub extern "C" fn secondary_start(hartid: usize) -> ! {
     // 完整陷阱 + 定时器 + 中断
     trap::init();
     timer::init();
-    unsafe {
-        intr::enable_interrupts();
-    }
+    crate::arch::enable_interrupts();
 
     pr_debug!("[SMP] CPU {} entering idle loop", hartid);
     kernel::boot::idle_loop();
