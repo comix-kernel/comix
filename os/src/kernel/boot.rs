@@ -178,12 +178,16 @@ pub fn rest_init() {
         fs,
     );
 
-    let tf = task
+    let task_frame = task
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base.as_usize());
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            task_frame,
+            init as usize,
+            0,
+            task.kstack_base.as_usize(),
+        );
     }
 
     task.memory_space = Some(current_memory_space());
@@ -261,12 +265,16 @@ fn create_kthreadd() {
         Arc::new(SpinLock::new(fs)),
     );
 
-    let tf = task
+    let task_frame = task
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base.as_usize());
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            task_frame,
+            kthreadd as usize,
+            0,
+            task.kstack_base.as_usize(),
+        );
     }
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
@@ -299,12 +307,16 @@ pub fn create_idle_task(cpu_id: usize, idle_fn: fn() -> !) -> crate::kernel::Sha
         Arc::new(SpinLock::new(FsStruct::new(None, None))),
     );
 
-    let tf = task
+    let task_frame = task
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(idle_fn as usize, 0, task.kstack_base.as_usize());
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            task_frame,
+            idle_fn as usize,
+            0,
+            task.kstack_base.as_usize(),
+        );
     }
 
     task.on_cpu = Some(cpu_id);
