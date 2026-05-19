@@ -4,7 +4,7 @@
 //! 将现有的 CSR 内联汇编操作映射到 trait 方法。
 
 use crate::arch::CpuOps;
-use crate::arch::constant::{CSR_CRMD_IE, SSTATUS_SIE};
+use crate::arch::constant::CSR_CRMD_IE;
 
 /// LoongArch64 架构标记类型
 pub struct LoongArch64;
@@ -68,7 +68,7 @@ impl CpuOps for LoongArch64 {
     /// 根据保存的 CRMD 值恢复 IE 位。
     #[inline]
     fn restore_interrupt_state(flags: usize) {
-        if flags & SSTATUS_SIE != 0 {
+        if flags & CSR_CRMD_IE != 0 {
             Self::enable_interrupts();
         }
     }
@@ -109,6 +109,6 @@ impl CpuOps for LoongArch64 {
 
     #[inline]
     fn interrupt_was_enabled(flags: usize) -> bool {
-        flags & SSTATUS_SIE != 0
+        flags & CSR_CRMD_IE != 0
     }
 }
