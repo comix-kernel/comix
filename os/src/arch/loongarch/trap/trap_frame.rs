@@ -126,8 +126,9 @@ impl TrapFrame {
     }
 
     /// 设置内核态陷阱帧
-    pub fn set_kernel_trap_frame(&mut self, entry: usize, _terminal: usize, kernel_sp: usize) {
+    pub fn set_kernel_trap_frame(&mut self, entry: usize, terminal: usize, kernel_sp: usize) {
         self.era = entry;
+        self.regs[1] = terminal; // ra
         self.regs[3] = kernel_sp; // sp
         self.kernel_sp = kernel_sp;
     }

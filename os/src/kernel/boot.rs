@@ -6,15 +6,19 @@
 use alloc::sync::Arc;
 
 use crate::{
-    arch::CpuOps,
+    arch::{CpuOps, platform, timer, trap},
+    earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
-        FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_memory_space,
-        current_task, kernel_execve, kthread_spawn, kworker, scheduler_of, sleep_task, yield_task,
+        FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
+        current_memory_space, current_task, kernel_execve, kthread_spawn, kworker, scheduler_of,
+        sleep_task, time, yield_task,
     },
+    mm,
     mm::frame_allocator::{alloc_contig_frames, alloc_frame},
     pr_err, pr_info, pr_warn,
-    sync::SpinLock,
+    sync::{PreemptGuard, SpinLock},
+    test::run_early_tests,
     uapi::{
         resource::{INIT_RLIMITS, RlimitStruct},
         signal::SignalFlags,
@@ -23,19 +27,95 @@ use crate::{
     vfs::{create_stdio_files, fd_table::FDTable, get_root_dentry},
 };
 
+fn noop_boot_hook(_hartid: usize) {}
+
+/// 架构主核启动差异点。
+///
+/// 架构代码只填充必要 hook，公共启动顺序由 `run_primary_boot()` 统一维护。
+pub struct PrimaryBootOps {
+    pub arch_name: &'static str,
+    pub cpu_label: &'static str,
+    pub before_clear_bss: fn(usize),
+    pub after_clear_bss: fn(usize),
+    pub after_mm_init: fn(usize),
+    pub after_time_init: fn(usize),
+}
+
+impl PrimaryBootOps {
+    pub const fn new(arch_name: &'static str, cpu_label: &'static str) -> Self {
+        Self {
+            arch_name,
+            cpu_label,
+            before_clear_bss: noop_boot_hook,
+            after_clear_bss: noop_boot_hook,
+            after_mm_init: noop_boot_hook,
+            after_time_init: noop_boot_hook,
+        }
+    }
+}
+
+/// 架构无关的主核启动流程。
+pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
+    (ops.before_clear_bss)(hartid);
+
+    clear_bss();
+
+    (ops.after_clear_bss)(hartid);
+
+    run_early_tests();
+
+    earlyprintln!("[Boot] Hello, world!");
+    earlyprintln!(
+        "[Boot] {} {} {} is up!",
+        ops.arch_name,
+        ops.cpu_label,
+        hartid
+    );
+
+    let kernel_space = mm::init();
+
+    (ops.after_mm_init)(hartid);
+
+    {
+        let _guard = PreemptGuard::new();
+        current_cpu().switch_space(kernel_space);
+        earlyprintln!("[Boot] Activated kernel address space");
+    }
+
+    #[cfg(test)]
+    crate::test_main();
+
+    trap::init_boot_trap();
+    platform::init();
+    time::init();
+
+    (ops.after_time_init)(hartid);
+
+    timer::init();
+
+    let idle = create_idle_task(0, idle_loop);
+    {
+        let _guard = PreemptGuard::new();
+        current_cpu().idle_task = Some(idle.clone());
+        current_cpu().switch_task(idle);
+    }
+
+    trap::init();
+    rest_init();
+
+    crate::arch::enable_interrupts();
+    idle_loop();
+}
+
 /// 架构无关的 idle 循环
 ///
 /// 确保中断开启后持续等待中断，唤醒后立即重新等待。
 /// 使用 `ArchImpl::halt()` 执行具体的 halt 指令（wfi / idle 0）。
 pub fn idle_loop() -> ! {
-    loop {
-        if !crate::arch::intr::are_interrupts_enabled() {
-            unsafe {
-                crate::arch::intr::enable_interrupts();
-            }
-        }
-        crate::arch::ArchImpl::halt();
+    if !crate::arch::interrupts_enabled() {
+        crate::arch::enable_interrupts();
     }
+    crate::arch::ArchImpl::halt();
 }
 
 /// 清除 BSS 段
@@ -96,12 +176,16 @@ pub fn rest_init() {
         fs,
     );
 
-    let tf = task
+    let task_frame = task
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(init as usize, 0, task.kstack_base.as_usize());
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            task_frame,
+            init as usize,
+            0,
+            task.kstack_base.as_usize(),
+        );
     }
 
     task.memory_space = Some(current_memory_space());
@@ -179,12 +263,16 @@ fn create_kthreadd() {
         Arc::new(SpinLock::new(fs)),
     );
 
-    let tf = task
+    let task_frame = task
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(kthreadd as usize, 0, task.kstack_base.as_usize());
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            task_frame,
+            kthreadd as usize,
+            0,
+            task.kstack_base.as_usize(),
+        );
     }
     let task = task.into_shared();
     TASK_MANAGER.lock().add_task(task.clone());
@@ -217,12 +305,16 @@ pub fn create_idle_task(cpu_id: usize, idle_fn: fn() -> !) -> crate::kernel::Sha
         Arc::new(SpinLock::new(FsStruct::new(None, None))),
     );
 
-    let tf = task
+    let task_frame = task
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(idle_fn as usize, 0, task.kstack_base.as_usize());
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            task_frame,
+            idle_fn as usize,
+            0,
+            task.kstack_base.as_usize(),
+        );
     }
 
     task.on_cpu = Some(cpu_id);

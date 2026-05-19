@@ -95,6 +95,19 @@ pub mod task {
         unsafe { crate::arch::trap::restore(&*tf_ptr) };
     }
 
+    pub unsafe fn init_kernel_trap_frame(
+        tf_ptr: *mut crate::arch::trap::TrapFrame,
+        entry: usize,
+        terminal: usize,
+        kernel_sp: usize,
+    ) {
+        unsafe {
+            core::ptr::write(tf_ptr, crate::arch::trap::TrapFrame::zero_init());
+            (*tf_ptr).set_kernel_trap_frame(entry, terminal, kernel_sp);
+            crate::arch::trap::set_trap_frame_cpu_ptr(tf_ptr, 0);
+        }
+    }
+
     pub unsafe fn prepare_user_restore(
         _tfp: *mut crate::arch::trap::TrapFrame,
         _initial_pc: VA,
