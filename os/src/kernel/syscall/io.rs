@@ -10,6 +10,13 @@ use crate::util::user_buffer::{
 };
 use crate::vfs::File;
 
+fn empty_iovec() -> IoVec {
+    IoVec {
+        iov_base: core::ptr::null_mut(),
+        iov_len: 0,
+    }
+}
+
 /// 向文件描述符写入数据
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     loop {
@@ -108,9 +115,8 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
     }
 
     // 读取 iovec 数组
-    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
     unsafe {
-        iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
             crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
@@ -178,9 +184,8 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EFAULT as isize);
     }
 
-    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
     unsafe {
-        iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
             crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
@@ -326,9 +331,8 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         Err(e) => return e.to_errno(),
     };
 
-    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
     unsafe {
-        iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
             crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
@@ -404,9 +408,8 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         Err(e) => return e.to_errno(),
     };
 
-    let mut iovec_array = alloc::vec::Vec::<IoVec>::with_capacity(iovcnt);
+    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
     unsafe {
-        iovec_array.set_len(iovcnt);
         crate::arch::ArchImpl::copy_from_user(
             crate::arch::address::UA::from_usize(iov as usize),
             iovec_array.as_mut_ptr() as *mut u8,
@@ -558,6 +561,14 @@ pub struct PollFd {
     pub revents: i16,
 }
 
+fn empty_pollfd() -> PollFd {
+    PollFd {
+        fd: 0,
+        events: 0,
+        revents: 0,
+    }
+}
+
 /// poll 事件标志
 pub const POLLIN: i16 = 0x0001;
 pub const POLLOUT: i16 = 0x0004;
@@ -612,9 +623,8 @@ fn poll_with_timeout(
 
         {
             let size = nfds * core::mem::size_of::<PollFd>();
-            let mut pollfds_buf = alloc::vec::Vec::<PollFd>::with_capacity(nfds);
+            let mut pollfds_buf = alloc::vec![empty_pollfd(); nfds];
             unsafe {
-                pollfds_buf.set_len(nfds);
                 crate::arch::ArchImpl::copy_from_user(
                     crate::arch::address::UA::from_usize(fds),
                     pollfds_buf.as_mut_ptr() as *mut u8,

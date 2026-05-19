@@ -223,20 +223,44 @@ pub fn setup_exec_stack_layout(
 }
 
 /// Restore a freshly scheduled task for the first time.
-pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, is_kernel_thread: bool) {
-    if is_kernel_thread {
-        let (entry, sp) = unsafe { ((*tf_ptr).era, (*tf_ptr).kernel_sp) };
+pub unsafe fn forkret_restore(tf_ptr: *mut crate::arch::trap::TrapFrame, _is_kernel_thread: bool) {
+    if unsafe { is_kernel_entry(tf_ptr) } {
+        let (entry, sp, ra) = unsafe { ((*tf_ptr).era, (*tf_ptr).kernel_sp, (*tf_ptr).regs[1]) };
         unsafe {
             core::arch::asm!(
                 "addi.d $sp, {sp}, 0",
+                "addi.d $ra, {ra}, 0",
                 "jirl $zero, {entry}, 0",
                 sp = in(reg) sp,
+                ra = in(reg) ra,
                 entry = in(reg) entry,
                 options(noreturn)
             );
         }
     }
     crate::arch::trap::restore(unsafe { &*tf_ptr });
+}
+
+unsafe fn is_kernel_entry(tf_ptr: *mut crate::arch::trap::TrapFrame) -> bool {
+    unsafe { (*tf_ptr).era >= crate::arch::constant::KERNEL_BASE }
+}
+
+/// Initialize the trap frame used to enter a kernel task.
+pub unsafe fn init_kernel_trap_frame(
+    tf_ptr: *mut crate::arch::trap::TrapFrame,
+    entry: usize,
+    terminal: usize,
+    kernel_sp: usize,
+) {
+    unsafe {
+        core::ptr::write(tf_ptr, crate::arch::trap::TrapFrame::zero_init());
+        (*tf_ptr).set_kernel_trap_frame(entry, terminal, kernel_sp);
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
+        crate::arch::trap::set_trap_frame_cpu_ptr(tf_ptr, cpu_ptr);
+    }
 }
 
 /// Final architecture-specific preparation before restoring to user mode.

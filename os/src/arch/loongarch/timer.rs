@@ -52,21 +52,15 @@ pub fn set_next_trigger() {
 
     unsafe {
         // 1. 先彻底关闭定时器并清除周期模式 (TCFG bit 0 and 1 = 0) 防止配置过程中的竞争
-        core::arch::asm!("csrwr $r0, 0x410");
+        core::arch::asm!("csrwr $r0, {tcfg}", tcfg = const CSR_TCFG);
 
-        // 2. 写入 TVAL (0x420)
-        // 在 En=0 时写入 TVAL 会直接重置当前倒计时器
+        // 2. 开启定时器，设为周期模式。
+        // TCFG[63:2] 存放初始计数值；TVAL 是只读当前计数值，不能用于重装。
+        let cfg = (delta & !0b11usize) | 0b11usize;
         core::arch::asm!(
-            "csrwr {val}, 0x420",
-            val = in(reg) delta
-        );
-
-        // 3. 开启定时器，设为单次触发模式 (En=1, Periodic=0)
-        // 这样定时器倒数到 0 后会停下并触发中断
-        let cfg = 0b01usize;
-        core::arch::asm!(
-            "csrwr {val}, 0x410",
-            val = in(reg) cfg
+            "csrwr {val}, {tcfg}",
+            val = in(reg) cfg,
+            tcfg = const CSR_TCFG
         );
     }
 }

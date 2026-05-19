@@ -1,5 +1,9 @@
 use crate::uapi::signal::MContextT;
 
+pub fn init_boot_trap() {}
+
+pub fn init() {}
+
 /// Mock trap frame for host compilation
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

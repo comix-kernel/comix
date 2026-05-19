@@ -9,7 +9,7 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use crate::{
-    arch::{intr::disable_interrupts, trap::restore},
+    arch::{disable_interrupts, trap::restore},
     kernel::{
         TaskState,
         cpu::current_cpu,
@@ -78,18 +78,12 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // SAFETY: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
-        // 先初始化 TrapFrame 为全 0
-        core::ptr::write(tf, crate::arch::trap::TrapFrame::zero_init());
-        (*tf).set_kernel_trap_frame(
+        crate::arch::kernel::task::init_kernel_trap_frame(
+            tf,
             entry_point as usize,
             super::terminate_task as usize,
             task.kstack_base.as_usize(),
         );
-        let cpu_ptr = {
-            let _guard = crate::sync::PreemptGuard::new();
-            crate::kernel::current_cpu() as *const _ as usize
-        };
-        crate::arch::trap::set_trap_frame_cpu_ptr(tf, cpu_ptr);
     }
     let tid = task.tid;
     let task = task.into_shared();
@@ -191,7 +185,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // execve伪造进程上下文用的trapframe和当前进程的是同一个
     // 这时候发生中断会破坏创建到一半/创建好的的上下文
     // 不必显式恢复中断，它会在restore中由sret指令自动恢复
-    unsafe { disable_interrupts() };
+    disable_interrupts();
     {
         let mut t = task.lock();
         t.exe_path = Some(path.to_string());

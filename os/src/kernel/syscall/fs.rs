@@ -3,7 +3,6 @@
 use core::ffi::c_char;
 
 use crate::arch::Arch;
-use alloc::string::ToString;
 
 use crate::{
     kernel::{
@@ -109,7 +108,7 @@ pub fn ftruncate(fd: usize, length: i64) -> isize {
 pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isize {
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -187,7 +186,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -217,7 +216,7 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
 pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -276,7 +275,7 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
 pub fn chdir(path: *const c_char) -> isize {
     // 解析路径
     let path_str = match get_path_safe(path as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -469,7 +468,7 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
 
     // 解析路径字符串
     let path_str = match get_path_safe(path as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -523,7 +522,7 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
 pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> isize {
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -604,7 +603,7 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
 
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -654,7 +653,7 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
 
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -710,7 +709,7 @@ pub fn statx(
 
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -762,7 +761,7 @@ pub fn statx(
 pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, flags: u32) -> isize {
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -855,7 +854,7 @@ pub fn renameat2(
 
     // 解析旧路径
     let old_path_str = match get_path_safe(oldpath as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -863,7 +862,7 @@ pub fn renameat2(
 
     // 解析新路径
     let new_path_str = match get_path_safe(newpath as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -1183,7 +1182,7 @@ pub fn mount(
 
     // 解析目标路径
     let target_str = match get_path_safe(target as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -1192,7 +1191,7 @@ pub fn mount(
     // 解析 source (可能为空)
     let source_str = if !source.is_null() {
         match get_path_safe(source as usize) {
-            Ok(s) => s.to_string(),
+            Ok(s) => s,
             Err(_) => {
                 return FsError::InvalidArgument.to_errno();
             }
@@ -1204,7 +1203,7 @@ pub fn mount(
     // 解析 filesystemtype (可能为空)
     let fstype_str = if !filesystemtype.is_null() {
         match get_path_safe(filesystemtype as usize) {
-            Ok(s) => s.to_string(),
+            Ok(s) => s,
             Err(_) => {
                 return FsError::InvalidArgument.to_errno();
             }
@@ -1362,7 +1361,7 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
 
     // 解析目标路径
     let target_str = match get_path_safe(target as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -1444,7 +1443,7 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
 
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -1512,7 +1511,7 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
 
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return -(EINVAL as isize);
         }
@@ -1556,7 +1555,7 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
 pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isize {
     // 安全地读取路径字符串
     let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -1607,7 +1606,7 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
 pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) -> isize {
     // 解析 target 路径
     let target_str = match get_path_safe(target as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
@@ -1615,7 +1614,7 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
 
     // 解析 linkpath 路径
     let link_str = match get_path_safe(linkpath as usize) {
-        Ok(s) => s.to_string(),
+        Ok(s) => s,
         Err(_) => {
             return FsError::InvalidArgument.to_errno();
         }
