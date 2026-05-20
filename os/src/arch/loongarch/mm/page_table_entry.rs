@@ -280,16 +280,6 @@ impl PageTableEntryTrait for PageTableEntry {
         (self.0 & LAPTEFlags::PRESENT.bits()) != 0
     }
 
-    /// 检查是否为巨页（Huge Page）
-    ///
-    /// LoongArch 中，需要通过页表级别来判断巨页，
-    /// 单独从 PTE 无法直接判断。这里返回 false 作为保守实现。
-    fn is_huge(&self) -> bool {
-        // LoongArch 不像 RISC-V 那样通过 R/W/X 位区分叶子节点
-        // 巨页检测需要结合页表级别信息
-        false
-    }
-
     fn is_empty(&self) -> bool {
         self.0 == 0
     }

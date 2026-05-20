@@ -92,15 +92,13 @@ impl Drop for FrameRangeTracker {
 }
 
 /// 跟踪的物理帧集合。
-/// 用于封装单个、多个不连续或多个连续的物理帧。
+/// 用于封装单个或多个不连续的物理帧。
 #[derive(Debug)]
 pub enum TrackedFrames {
     /// 单个物理帧。
     Single(FrameTracker),
     /// 多个不连续物理帧。
     Multiple(Vec<FrameTracker>),
-    /// 多个连续物理帧。
-    Contiguous(FrameRangeTracker),
 }
 
 lazy_static! {
