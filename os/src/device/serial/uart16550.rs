@@ -22,7 +22,7 @@ pub struct Uart16550 {
 
 impl Driver for Uart16550 {
     fn try_handle_interrupt(&self, _irq: Option<usize>) -> bool {
-        todo!()
+        false
     }
 
     fn device_type(&self) -> crate::device::DeviceType {

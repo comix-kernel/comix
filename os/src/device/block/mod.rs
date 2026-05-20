@@ -15,9 +15,7 @@ pub trait BlockDriver: Driver {
     /// * `buf` - 用于存储读取数据的缓冲区
     /// # 返回值：
     /// 如果读取成功则返回 true，否则返回 false
-    fn read_block(&self, _block_id: usize, _buf: &mut [u8]) -> bool {
-        unimplemented!("not a block driver")
-    }
+    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> bool;
 
     /// 写入块设备数据
     /// # 参数：
@@ -25,28 +23,20 @@ pub trait BlockDriver: Driver {
     /// * `buf` - 包含要写入数据的缓冲区
     /// # 返回值：
     /// 如果写入成功则返回 true，否则返回 false
-    fn write_block(&self, _block_id: usize, _buf: &[u8]) -> bool {
-        unimplemented!("not a block driver")
-    }
+    fn write_block(&self, block_id: usize, buf: &[u8]) -> bool;
 
     /// 刷新到磁盘
     /// # 返回值：
     /// 如果刷新成功则返回 true，否则返回 false
-    fn flush(&self) -> bool {
-        unimplemented!("not a block driver")
-    }
+    fn flush(&self) -> bool;
 
     /// 获取块大小（字节）
     /// # 返回值：
     /// 块大小
-    fn block_size(&self) -> usize {
-        unimplemented!("not a block driver")
-    }
+    fn block_size(&self) -> usize;
 
     /// 获取总块数
     /// # 返回值：
     /// 总块数
-    fn total_blocks(&self) -> usize {
-        unimplemented!("not a block driver")
-    }
+    fn total_blocks(&self) -> usize;
 }
