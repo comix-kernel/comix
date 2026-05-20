@@ -95,20 +95,6 @@ impl PageTableEntryTrait for PageTableEntry {
         (self.0 & SV39PTEFlags::VALID.bits() as u64) != 0
     }
 
-    // 检查页表项是否代表巨页 (Huge Page)
-    fn is_huge(&self) -> bool {
-        // 在 SV39 中，我们无法仅凭 PTE 自身直接判断巨页。
-        // 如果 PTE 带有 R/W/X 权限，则被视为叶子节点 (可能是巨页或普通页)，
-        // 否则它是一个指向下一级页表的中间节点。
-        let sv39_flags =
-            SV39PTEFlags::from_bits((self.0 & SV39_PTE_FLAG_MASK as u64) as usize).unwrap();
-        // 检查是否与 R 或 X 或 W 权限相交
-        sv39_flags.intersects(
-            SV39PTEFlags::union(SV39PTEFlags::READ, SV39PTEFlags::EXECUTE)
-                .union(SV39PTEFlags::WRITE),
-        )
-    }
-
     // 检查页表项是否为空 (所有位为零)
     fn is_empty(&self) -> bool {
         self.0 == 0

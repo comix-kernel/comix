@@ -14,11 +14,6 @@ pub type ActivePageTableInner = crate::arch::mm::PageTableInner;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageSize {
     Size4K = 0x1000,
-    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
-    Size2M = 0x20_0000,
-    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
-    Size1G = 0x4000_0000,
-    // 暂时禁止更大的页大小
 }
 
 /// 分页操作中可能发生的错误
@@ -30,9 +25,6 @@ pub enum PagingError {
     AlreadyMapped,
     /// 提供了无效的地址
     InvalidAddress,
-    /// 由于与现有的巨页（Huge Page）映射冲突，操作失败。
-    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
-    HugePageConflict,
     /// 提供了无效的标志（Flags）
     InvalidFlags,
     /// 帧（Frame）分配失败
@@ -43,9 +35,6 @@ pub enum PagingError {
     /// 区域不能收缩到其起始地址以下
     #[allow(dead_code)]
     ShrinkBelowStart,
-    /// 巨页拆分功能尚未实现
-    #[allow(dead_code)] // TODO(暂时注释): 大页支持已暂时禁用
-    HugePageSplitNotImplemented,
     /// 内存耗尽
     OutOfMemory,
 }

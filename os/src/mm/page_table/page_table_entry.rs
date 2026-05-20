@@ -20,10 +20,6 @@ bitflags::bitflags! {
             const GLOBAL = 1 << 5;              // 指示该页是否为全局页（Global）
             const ACCESSED = 1 << 6;            // 指示该页是否已被访问
             const DIRTY = 1 << 7;               // 指示该页是否已被写入（修改）
-
-            // ---- 额外的通用标志 ----
-            #[allow(dead_code)] // TODO(暂时注释): 巨页支持已暂时禁用
-            const HUGE = 1 << 8;                // 指示该页是否为巨页（Huge Page）
     }
 }
 
@@ -93,8 +89,6 @@ pub trait PageTableEntry {
 
     /// 检查页表项是否有效
     fn is_valid(&self) -> bool;
-    /// 检查页表项是否为巨页映射（如果支持）
-    fn is_huge(&self) -> bool;
     /// 检查页表项是否为空
     fn is_empty(&self) -> bool;
 

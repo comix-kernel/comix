@@ -145,14 +145,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
             if current_level == level {
                 // 已到达目标级别
-                // TODO(暂时注释): 当前仅支持4K页
-                // let page_size = match level {
-                //     2 => PageSize::Size1G,
-                //     1 => PageSize::Size2M,
-                //     0 => PageSize::Size4K,
-                //     _ => unreachable!(),
-                // };
-                let page_size = PageSize::Size4K; // 仅支持4K页
+                let page_size = PageSize::Size4K; // 当前仅启用 4K 页路径
                 return Some((*pte, page_size));
             }
 
@@ -170,24 +163,9 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         // 页内偏移量：低 12 位
         let offset = vaddr.as_usize() & 0xfff;
 
-        // TODO(暂时注释): 当前仅支持4K页，大页translation逻辑已禁用
         match self.walk(vpn) {
-            Ok((ppn, page_size, _flags)) => {
-                let paddr_base = match page_size {
-                    PageSize::Size4K => ppn.start_addr().as_usize(),
-                    // TODO(暂时注释): 大页偏移计算
-                    // PageSize::Size2M => {
-                    //     // 对于 2M 页，保留 vaddr 的低 21 位作为页内偏移
-                    //     let offset_2m = vaddr.as_usize() & 0x1f_ffff;
-                    //     ppn.start_addr().as_usize() + offset_2m - offset
-                    // }
-                    // PageSize::Size1G => {
-                    //     // 对于 1G 页，保留 vaddr 的低 30 位作为页内偏移
-                    //     let offset_1g = vaddr.as_usize() & 0x3fff_ffff;
-                    //     ppn.start_addr().as_usize() + offset_1g - offset
-                    // }
-                    _ => ppn.start_addr().as_usize(), // 默认按 4K 页处理基地址
-                };
+            Ok((ppn, _page_size, _flags)) => {
+                let paddr_base = ppn.start_addr().as_usize();
                 // 物理地址 = 物理页基地址 + 页内偏移
                 Some(PA::from_usize(paddr_base + offset))
             }
@@ -210,14 +188,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             return Err(PagingError::InvalidFlags);
         }
 
-        // TODO(暂时注释): 当前仅支持4K页，强制使用 level 0
-        // 根据页大小确定目标级别
-        // let target_level = match page_size {
-        //     PageSize::Size1G => 2,
-        //     PageSize::Size2M => 1,
-        //     PageSize::Size4K => 0,
-        // };
-        let target_level = 0; // 仅支持 4K 页
+        let target_level = 0; // 当前仅启用 4K 页路径
 
         let mut current_ppn = self.root;
         let vpn_value = vpn.as_usize();
@@ -266,9 +237,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                     // 更新当前级别的 PTE，指向新分配的页表 (VALID 标志在 new_table 中设置)
                     *pte = PageTableEntry::new_table(new_ppn);
                     self.frames.push(new_frame); // 将新帧加入向量，以便自动释放
-                } else if pte.is_huge() {
-                    // 此处已有一个巨页映射，产生冲突
-                    return Err(PagingError::HugePageConflict);
                 }
 
                 // 准备下一轮循环，进入下一级页表
@@ -301,8 +269,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 return Err(PagingError::NotMapped); // 未映射
             }
 
-            // 检查是否为叶子节点 (具有 R/W/X 权限或已到达 level 0)
-            if pte.is_huge() || level == 0 {
+            // 检查是否已到达叶子节点
+            if level == 0 {
                 // 清空 PTE 以解除映射
                 pte.clear();
                 return Ok(());
@@ -351,8 +319,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 return Err(PagingError::NotMapped); // 未映射
             }
 
-            // 检查是否为叶子节点
-            if pte.is_huge() || level == 0 {
+            // 检查是否已到达叶子节点
+            if level == 0 {
                 // 设置新的标志位 (VALID 必须保持设置)
                 pte.set_flags(flags | UniversalPTEFlag::VALID);
                 return Ok(());
@@ -388,17 +356,10 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 return Err(PagingError::NotMapped); // 无效 PTE
             }
 
-            // 检查是否为叶子节点
-            if pte.is_huge() || level == 0 {
+            // 检查是否已到达叶子节点
+            if level == 0 {
                 // 找到叶子节点
-                // TODO(暂时注释): 当前仅支持4K页
-                // let page_size = match level {
-                //     2 => PageSize::Size1G,
-                //     1 => PageSize::Size2M,
-                //     0 => PageSize::Size4K,
-                //     _ => unreachable!(),
-                // };
-                let page_size = PageSize::Size4K; // 仅支持 4K 页
+                let page_size = PageSize::Size4K; // 当前仅启用 4K 页路径
                 return Ok((pte.ppn(), page_size, pte.flags()));
             }
 

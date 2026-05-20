@@ -95,10 +95,6 @@ use crate::vfs::dev::makedev;
 use crate::vfs::devno::{blkdev_major, chrdev_major};
 use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
-// pub fn init_ext4() -> Result<(), crate::vfs::FsError> {
-//     unimplemented!()
-// }
-
 // lazy_static! {
 //     /// 根文件系统实例
 //     /// 在系统初始化时创建

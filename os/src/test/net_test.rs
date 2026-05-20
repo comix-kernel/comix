@@ -23,27 +23,6 @@ mod net_tests {
     use super::*;
     use crate::test_case;
 
-    /// 测试获取网络接口列表
-    test_case!(test_get_network_interfaces, {
-        println!("测试获取网络接口列表系统调用...");
-
-        // 在真实环境中，这里应该调用 sys_get_network_interfaces
-        // 由于是测试环境，我们仅模拟调用过程
-        println!("模拟调用 SYS_GET_NETWORK_INTERFACES");
-        println!("预期行为: 返回可用的网络接口列表");
-
-        // 在实际实现中，这里应该有断言来验证结果
-        // kassert!(result.is_ok());
-    });
-
-    /// 测试设置网络接口配置
-    test_case!(test_set_network_interface_config, {
-        println!("测试设置网络接口配置系统调用...");
-
-        println!("模拟调用 SYS_SET_NETWORK_INTERFACE_CONFIG");
-        println!("预期行为: 成功设置接口IP地址、子网掩码等配置");
-    });
-
     /// 测试套接字创建
     test_case!(test_socket_creation, {
         println!("测试套接字创建系统调用...");

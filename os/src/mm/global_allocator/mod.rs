@@ -6,7 +6,6 @@
 //!
 //! - [`init_heap`]：初始化全局堆分配器。
 
-mod heap;
 #[cfg(feature = "alloc")]
 mod talc_alloc;
 
