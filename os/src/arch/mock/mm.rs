@@ -50,10 +50,6 @@ impl PageTableEntryTrait for PageTableEntry {
         self.bits & (UniversalPTEFlag::VALID.bits() as u64) != 0
     }
 
-    fn is_huge(&self) -> bool {
-        false
-    }
-
     fn is_empty(&self) -> bool {
         self.bits == 0
     }

@@ -2,6 +2,7 @@
 TARGET := riscv64gc-unknown-none-elf
 BUILD_MODE := release
 BUILD_COMMAND := cargo build --$(BUILD_MODE) --target=$(TARGET)
+FALLBACK_CARGO_CONFIG := /tmp/comix-user-cargo-ustc-sparse.toml
 
 # 获取当前目录下除lib/外的所有子目录
 SUB_DIRS := $(shell find . -maxdepth 1 -type d ! -name '.' ! -name 'lib' ! -name 'bin' ! -path './.*')
@@ -22,7 +23,22 @@ build_all: $(SUB_DIRS)
 # 为每个子目录定义构建规则
 $(SUB_DIRS):
 	@echo "Building $@..."
-	@cd $@ && $(BUILD_COMMAND)
+	@cd $@ && ( \
+		$(BUILD_COMMAND) || ( \
+			echo "Official crates.io registry failed; retrying with USTC sparse mirror..." && \
+			printf '%s\n' \
+				'[source.crates-io]' \
+				"replace-with = 'ustc'" \
+				'' \
+				'[source.ustc]' \
+				'registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"' \
+				'' \
+				'[net]' \
+				'git-fetch-with-cli = true' \
+				> $(FALLBACK_CARGO_CONFIG) && \
+			$(BUILD_COMMAND) --config $(FALLBACK_CARGO_CONFIG) \
+		) \
+	)
 	@# 查找并移动可执行文件
 	@if [ -d "$@/target/$(TARGET)/$(BUILD_MODE)" ]; then \
 		for exe in $@/target/$(TARGET)/$(BUILD_MODE)/*; do \

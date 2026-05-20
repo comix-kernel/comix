@@ -9,11 +9,5 @@ build-std-features = ["compiler-builtins-mem"]
 # 用户程序不需要自定义链接脚本，使用默认链接器行为
 rustflags = ["-Cforce-frame-pointers=yes"]
 
-[source.crates-io]
-replace-with = 'ustc' 
-
-[source.ustc]
-registry = "https://mirrors.ustc.edu.cn/crates.io-index" 
-
 [net]
-git-fetch-with-cli = true
+retry = 3

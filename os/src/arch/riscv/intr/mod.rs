@@ -1,12 +1,13 @@
 //! RISC-V 架构的中断管理
-mod softirq;
+//!
+//! 当前没有接入软中断队列和调度路径，因此这里不保留 `raise_softirq` 这类
+//! 会 panic 或静默 no-op 的占位符。后续实现软中断时，应重新引入 softirq
+//! 模块，并补齐触发、挂起位管理和处理入口。
 
 use riscv::register::{
     sie,
     sstatus::{self},
 };
-#[allow(unused_imports)]
-pub use softirq::*;
 
 use crate::arch::constant::{SSTATUS_SIE, SUPERVISOR_EXTERNAL};
 

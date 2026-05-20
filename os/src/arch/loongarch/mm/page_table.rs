@@ -220,7 +220,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             }
 
             if current_level == level {
-                let page_size = PageSize::Size4K; // 当前仅支持 4K 页
+                let page_size = PageSize::Size4K; // 当前仅启用 4K 页路径
                 return Some((pte, page_size));
             }
 
@@ -236,11 +236,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         let offset = vaddr.as_usize() & 0xfff; // 页内偏移
 
         match self.walk(vpn) {
-            Ok((ppn, page_size, _flags)) => {
-                let paddr_base = match page_size {
-                    PageSize::Size4K => ppn.start_addr().as_usize(),
-                    _ => ppn.start_addr().as_usize(), // 暂时按 4K 处理
-                };
+            Ok((ppn, _page_size, _flags)) => {
+                let paddr_base = ppn.start_addr().as_usize();
                 Some(PA::from_usize(paddr_base + offset))
             }
             Err(_) => None,
@@ -262,7 +259,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             return Err(PagingError::InvalidFlags);
         }
 
-        // 当前仅支持 4K 页（level 0）
         let target_level = 0;
 
         let mut current_ppn = self.root_ppn;
@@ -299,8 +295,6 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                     self.frames.push(new_frame);
 
                     current_ppn = new_ppn;
-                } else if pte.is_huge() {
-                    return Err(PagingError::HugePageConflict);
                 } else {
                     current_ppn = pte.ppn();
                 }
@@ -323,7 +317,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 return Err(PagingError::NotMapped);
             }
 
-            if pte.is_huge() || level == 0 {
+            if level == 0 {
                 // 找到叶子节点，清除映射
                 Self::write_pte(current_ppn, idx, PageTableEntry::empty());
                 Self::tlb_flush(vpn);
@@ -361,7 +355,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 return Err(PagingError::NotMapped);
             }
 
-            if pte.is_huge() || level == 0 {
+            if level == 0 {
                 pte.set_flags(flags | UniversalPTEFlag::VALID);
                 Self::write_pte(current_ppn, idx, pte);
                 Self::tlb_flush(vpn);
@@ -387,8 +381,8 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
                 return Err(PagingError::NotMapped);
             }
 
-            if pte.is_huge() || level == 0 {
-                let page_size = PageSize::Size4K; // 当前仅支持 4K
+            if level == 0 {
+                let page_size = PageSize::Size4K; // 当前仅启用 4K 页路径
                 return Ok((pte.ppn(), page_size, pte.flags()));
             }
 
