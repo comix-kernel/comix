@@ -22,6 +22,7 @@ macro_rules! impl_arch {
             type KernelAddressSpace = $kernel_space;
 
             const PAGE_OFFSET: usize = mm::VADDR_START;
+            const USER_TOP: usize = constant::USER_TOP;
 
             fn kern_address_space() -> &'static SpinLock<Self::KernelAddressSpace> {
                 &KERN_ADDR_SPACE
@@ -85,7 +86,7 @@ macro_rules! impl_arch {
                 max_len: usize,
             ) -> Result<usize, ()> {
                 let src = src.as_usize();
-                if src < constant::USER_BASE || src > constant::USER_TOP {
+                if !(constant::USER_BASE..=<$arch as VirtualMemory>::USER_TOP).contains(&src) {
                     return Err(());
                 }
                 if max_len != 0 && dst.is_null() {
@@ -143,12 +144,12 @@ macro_rules! impl_arch {
             if len == 0 {
                 return Ok(());
             }
-            if start < constant::USER_BASE || start > constant::USER_TOP {
+            if !(constant::USER_BASE..=<$arch as VirtualMemory>::USER_TOP).contains(&start) {
                 return Err(());
             }
             let end = start.checked_add(len).ok_or(())?;
             let last = end.checked_sub(1).ok_or(())?;
-            if last > constant::USER_TOP {
+            if last > <$arch as VirtualMemory>::USER_TOP {
                 return Err(());
             }
 
