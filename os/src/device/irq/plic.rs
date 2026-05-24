@@ -3,7 +3,7 @@
 //! PLIC 提供对外设中断的集中管理，支持优先级和中断分发功能。
 
 use super::{super::DRIVERS, IrqManager};
-use crate::arch::constant::SUPERVISOR_EXTERNAL;
+use crate::arch::SUPERVISOR_EXTERNAL;
 use crate::device::device_tree::{DEVICE_TREE_INTC, DEVICE_TREE_REGISTRY};
 use crate::device::irq::IntcDriver;
 use crate::device::{DeviceType, Driver, IRQ_MANAGER};
