@@ -166,6 +166,9 @@ pub trait VirtualMemory: CpuOps + Sized {
     /// 对于直接映射，`paddr + PAGE_OFFSET = vaddr`。
     const PAGE_OFFSET: usize;
 
+    /// 用户地址空间最高可访问地址
+    const USER_TOP: usize;
+
     /// 获取全局内核地址空间
     fn kern_address_space() -> &'static SpinLock<Self::KernelAddressSpace>;
 }

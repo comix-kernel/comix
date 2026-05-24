@@ -189,6 +189,7 @@ impl VirtualMemory for MockArch {
     type ProcessAddressSpace = MockAddressSpace;
     type KernelAddressSpace = MockAddressSpace;
     const PAGE_OFFSET: usize = 0xffff_ffc0_0000_0000;
+    const USER_TOP: usize = super::constant::USER_TOP;
 
     fn kern_address_space() -> &'static SpinLock<Self::KernelAddressSpace> {
         static KERN_SPACE: SpinLock<MockAddressSpace> = SpinLock::new(MockAddressSpace::new());

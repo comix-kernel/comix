@@ -51,6 +51,8 @@ mod mock;
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 pub use mock::*;
 
+pub use constant::SUPERVISOR_EXTERNAL;
+
 // ---- ArchImpl 类型别名 ----
 // 内核其余部分通过 ArchImpl 访问架构特定功能，无需关心具体架构。
 #[cfg(target_arch = "riscv64")]
