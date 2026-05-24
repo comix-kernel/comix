@@ -2,7 +2,7 @@
 
 /// 这是一个安全且常见的 align_down 实现
 /// T 必须是整数类型
-pub fn align_down(addr: usize, align: usize) -> usize {
+pub const fn align_down(addr: usize, align: usize) -> usize {
     // 对齐值必须是 2 的幂，否则行为可能不正确
     debug_assert!(align.is_power_of_two());
 

@@ -6,8 +6,7 @@
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
-use crate::arch::constant::USER_TOP;
-use crate::arch::{Arch, address::UA};
+use crate::arch::{Arch, ArchImpl, address::UA, virtual_memory::VirtualMemory};
 
 /// 向用户空间写入数据
 /// # 参数
@@ -104,7 +103,7 @@ impl UserBuffer {
         let Some(end) = start.checked_add(self.len) else {
             return false;
         };
-        end <= USER_TOP
+        end <= <ArchImpl as VirtualMemory>::USER_TOP
     }
 
     /// 返回用户缓冲区长度
@@ -147,13 +146,13 @@ pub fn validate_user_ptr<T>(ptr: *const T) -> bool {
 
     // 检查起始地址是否在用户空间范围内
     // USER_BASE 为 0，所以只需检查上界
-    if addr > USER_TOP {
+    if addr > <ArchImpl as VirtualMemory>::USER_TOP {
         return false;
     }
 
     // 检查是否会溢出用户空间
     if let Some(end_addr) = addr.checked_add(size) {
-        if end_addr > USER_TOP + 1 {
+        if end_addr > <ArchImpl as VirtualMemory>::USER_TOP + 1 {
             return false;
         }
     } else {
