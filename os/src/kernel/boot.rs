@@ -7,7 +7,6 @@ use alloc::sync::Arc;
 
 use crate::{
     arch::{CpuOps, platform, timer, trap},
-    earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
@@ -64,8 +63,8 @@ pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
 
     run_early_tests();
 
-    earlyprintln!("[Boot] Hello, world!");
-    earlyprintln!(
+    crate::println!("[Boot] Hello, world!");
+    crate::println!(
         "[Boot] {} {} {} is up!",
         ops.arch_name,
         ops.cpu_label,
@@ -79,7 +78,7 @@ pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
     {
         let _guard = PreemptGuard::new();
         current_cpu().switch_space(kernel_space);
-        earlyprintln!("[Boot] Activated kernel address space");
+        crate::println!("[Boot] Activated kernel address space");
     }
 
     #[cfg(test)]
@@ -111,6 +110,7 @@ pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
 ///
 /// 确保中断开启后持续等待中断，唤醒后立即重新等待。
 /// 使用 `ArchImpl::halt()` 执行具体的 halt 指令（wfi / idle 0）。
+#[allow(clippy::never_loop)]
 pub fn idle_loop() -> ! {
     if !crate::arch::interrupts_enabled() {
         crate::arch::enable_interrupts();
@@ -180,7 +180,7 @@ pub fn rest_init() {
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             task_frame,
             init as usize,
             0,
@@ -267,7 +267,7 @@ fn create_kthreadd() {
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             task_frame,
             kthreadd as usize,
             0,
@@ -309,7 +309,7 @@ pub fn create_idle_task(cpu_id: usize, idle_fn: fn() -> !) -> crate::kernel::Sha
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             task_frame,
             idle_fn as usize,
             0,

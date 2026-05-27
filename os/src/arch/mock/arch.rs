@@ -210,6 +210,7 @@ mod mock_arch_impl {
 
     impl Arch for MockArch {
         type UserContext = MockUserContext;
+        type TrapFrame = crate::arch::mock::trap::TrapFrame;
 
         fn new_user_context(entry_point: usize, stack_top: usize) -> Self::UserContext {
             let mut ctx = MockUserContext::zero_init();

@@ -1,6 +1,5 @@
 //! 设备号管理测试
 
-use super::*;
 use crate::vfs::{dev::*, devno::*};
 use crate::{kassert, test_case};
 

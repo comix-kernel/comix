@@ -11,7 +11,7 @@ use core::{
 use bitflags::bitflags;
 
 use crate::{
-    arch::trap::TrapFrame,
+    arch::{HwTrapFrame, TrapFrame},
     uapi::types::{ClockT, PidT, SigSetT, SizeT, UidT},
 };
 
@@ -556,7 +556,7 @@ impl MContextT {
 
     /// 从 TrapFrame 创建 MContextT 实例
     pub fn from_trap_frame(tf: &TrapFrame) -> Self {
-        tf.to_mcontext()
+        <TrapFrame as HwTrapFrame>::to_mcontext(tf)
     }
 }
 

@@ -17,6 +17,13 @@ pub trait Console: Send + Sync {
     /// 向控制台写入字符串
     fn write_str(&self, s: &str);
 
+    /// 向控制台写入原始字节
+    fn write_bytes(&self, bytes: &[u8]) {
+        if let Ok(s) = core::str::from_utf8(bytes) {
+            self.write_str(s);
+        }
+    }
+
     /// 从控制台读取一个字符
     fn read_char(&self) -> char;
 
@@ -29,7 +36,12 @@ pub trait Console: Send + Sync {
 
 /// 初始化控制台设备
 pub fn init() {
-    MAIN_CONSOLE.write().replace(CONSOLES.read()[0].clone());
+    let Some(console) = CONSOLES.read().first().cloned() else {
+        crate::println!("[Console] No runtime console registered, keeping early console");
+        return;
+    };
+
+    MAIN_CONSOLE.write().replace(console);
     // frame_console::init();
 
     // 切换到运行时控制台

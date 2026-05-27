@@ -1,7 +1,7 @@
 /// use sbi call to putchar to console (qemu uart handler)
-pub fn console_putchar(c: usize) {
+pub fn console_putchar(c: u8) {
     #[allow(deprecated)]
-    sbi_rt::legacy::console_putchar(c);
+    sbi_rt::legacy::console_putchar(c as usize);
 }
 
 /// 使用 sbi 调用从控制台获取字符(qemu uart handler)

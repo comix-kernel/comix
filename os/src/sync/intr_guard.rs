@@ -97,65 +97,71 @@ impl<CPU: CpuOps> Drop for IntrGuard<CPU> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{arch::intr::*, kassert, println, test_case};
+    use crate::{
+        arch::{ArchImpl, CpuOps},
+        kassert, println, test_case,
+    };
 
     test_case!(test_guard_disables_interrupts, {
         println!("Testing: test_guard_disables_interrupts");
-        unsafe { enable_interrupts() };
-        kassert!(are_interrupts_enabled());
+        let initial_flags = ArchImpl::disable_interrupts();
+        ArchImpl::enable_interrupts();
+        kassert!(ArchImpl::interrupts_enabled());
 
         let guard = IntrGuard::<ArchImpl>::new();
 
         kassert!(guard.was_enabled());
-        kassert!(!are_interrupts_enabled());
+        kassert!(!ArchImpl::interrupts_enabled());
 
         drop(guard);
-        kassert!(are_interrupts_enabled());
+        kassert!(ArchImpl::interrupts_enabled());
+
+        ArchImpl::restore_interrupt_state(initial_flags);
     });
 
     test_case!(test_guard_restores_on_drop, {
         println!("Testing: test_guard_restores_on_drop");
-        let initial_flags: usize = {
-            let flags = unsafe { read_and_disable_interrupts() };
-            unsafe { enable_interrupts() };
-            flags
-        };
+        let initial_flags = ArchImpl::disable_interrupts();
+        ArchImpl::enable_interrupts();
 
-        kassert!(are_interrupts_enabled());
+        kassert!(ArchImpl::interrupts_enabled());
 
         {
             let guard = IntrGuard::<ArchImpl>::new();
-            kassert!(!are_interrupts_enabled());
+            kassert!(!ArchImpl::interrupts_enabled());
             kassert!(guard.was_enabled());
         }
 
-        kassert!(are_interrupts_enabled());
+        kassert!(ArchImpl::interrupts_enabled());
 
-        unsafe { restore_interrupts(initial_flags) };
+        ArchImpl::restore_interrupt_state(initial_flags);
     });
 
     test_case!(test_nested_intr_guard, {
         println!("Testing: test_nested_intr_guard");
-        unsafe { enable_interrupts() };
-        kassert!(are_interrupts_enabled());
+        let initial_flags = ArchImpl::disable_interrupts();
+        ArchImpl::enable_interrupts();
+        kassert!(ArchImpl::interrupts_enabled());
 
         {
             let outer = IntrGuard::<ArchImpl>::new();
-            kassert!(!are_interrupts_enabled());
+            kassert!(!ArchImpl::interrupts_enabled());
             kassert!(outer.was_enabled());
 
             {
                 let inner = IntrGuard::<ArchImpl>::new();
-                kassert!(!are_interrupts_enabled());
+                kassert!(!ArchImpl::interrupts_enabled());
                 // 内层守卫: 进入时中断已禁用, 所以 was_enabled 应该是 false
                 kassert!(!inner.was_enabled());
             }
 
             // 内层 drop 后中断仍应禁用 (因为外层还持有)
-            kassert!(!are_interrupts_enabled());
+            kassert!(!ArchImpl::interrupts_enabled());
         }
 
         // 外层 drop 后中断应恢复
-        kassert!(are_interrupts_enabled());
+        kassert!(ArchImpl::interrupts_enabled());
+
+        ArchImpl::restore_interrupt_state(initial_flags);
     });
 }

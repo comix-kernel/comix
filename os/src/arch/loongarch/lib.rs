@@ -6,19 +6,19 @@
 //! 兼容性别名 `sbi` 模块用于共享代码调用路径的过渡，
 //! 待 HAL trait 覆盖这些功能后可移除。
 
-use super::platform::UART_BASE;
+use super::{constant::DMW0_BASE, platform::UART_BASE};
 
 /// 通过 DMW0 映射的 UART 虚拟地址
 /// DMW0: 0x8000_xxxx_xxxx_xxxx -> 物理地址 (uncached, 用于 MMIO)
-const UART_VADDR: usize = UART_BASE | 0x8000_0000_0000_0000;
+const UART_VADDR: usize = UART_BASE | DMW0_BASE;
 
 /// 输出字符到控制台
-pub fn console_putchar(c: usize) {
+pub fn console_putchar(c: u8) {
     unsafe {
         // 等待 UART 发送缓冲区空闲 (LSR bit 5)
         let ptr = UART_VADDR as *mut u8;
         while ptr.add(5).read_volatile() & (1 << 5) == 0 {}
-        ptr.write_volatile(c as u8);
+        ptr.write_volatile(c);
     }
 }
 
@@ -51,7 +51,7 @@ const ACPI_GED_VALUE_REBOOT: u8 = 0x42; // reboot { value = <0x42> }
 /// 关机实现
 pub fn shutdown(_failure: bool) -> ! {
     // 映射到 LoongArch 的虚地址 (DMW0: 0x8000...)
-    let base_vaddr = VIRT_GED_REG_ADDR | 0x8000_0000_0000_0000;
+    let base_vaddr = VIRT_GED_REG_ADDR | DMW0_BASE;
 
     unsafe {
         let ptr = base_vaddr as *mut u8;
@@ -77,7 +77,7 @@ pub fn shutdown(_failure: bool) -> ! {
 
 /// 重启实现
 pub fn restart() -> ! {
-    let base_vaddr = VIRT_GED_REG_ADDR | 0x8000_0000_0000_0000;
+    let base_vaddr = VIRT_GED_REG_ADDR | DMW0_BASE;
 
     unsafe {
         let ptr = base_vaddr as *mut u8;

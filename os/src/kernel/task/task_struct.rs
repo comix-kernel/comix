@@ -8,8 +8,8 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
+        HwTrapFrame, TrapFrame,
         kernel::{context::Context, task::setup_exec_stack_layout},
-        trap::TrapFrame,
     },
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
@@ -308,7 +308,8 @@ impl Task {
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
             core::ptr::write_bytes(tf_ptr, 0, 1);
-            (*tf_ptr).set_exec_trap_frame_from_layout(
+            <TrapFrame as HwTrapFrame>::set_exec_trap_frame_from_layout(
+                &mut *tf_ptr,
                 initial_pc.as_usize(),
                 self.kstack_base.as_usize(),
                 &stack_layout,
@@ -317,7 +318,7 @@ impl Task {
                 let _guard = crate::sync::PreemptGuard::new();
                 crate::kernel::current_cpu() as *const _ as usize
             };
-            crate::arch::trap::set_trap_frame_cpu_ptr(tf_ptr, cpu_ptr);
+            crate::arch::set_trap_frame_cpu_ptr(tf_ptr, cpu_ptr);
         }
     }
 

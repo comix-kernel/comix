@@ -32,6 +32,7 @@ macro_rules! impl_arch {
 
         impl $crate::arch::arch::Arch for $arch {
             type UserContext = kernel::context::Context;
+            type TrapFrame = trap::TrapFrame;
 
             fn new_user_context(entry_point: usize, stack_top: usize) -> Self::UserContext {
                 let mut ctx = kernel::context::Context::zero_init();
@@ -193,7 +194,7 @@ macro_rules! impl_platform {
     ($arch:ty) => {
         impl $crate::arch::plat::Platform for $arch {
             fn console_putchar(c: u8) {
-                lib::console_putchar(c as usize);
+                lib::console_putchar(c);
             }
 
             fn console_getchar() -> Option<u8> {
