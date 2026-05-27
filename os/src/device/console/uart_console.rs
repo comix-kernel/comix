@@ -16,6 +16,10 @@ impl Console for UARTConsole {
         self.uart.write(s.as_bytes());
     }
 
+    fn write_bytes(&self, bytes: &[u8]) {
+        self.uart.write(bytes);
+    }
+
     fn read_char(&self) -> char {
         let byte = self.uart.read();
         self.uart.write(&[byte]); // 回显

@@ -8,7 +8,43 @@
 //! 注意：此 trait 使用关联类型来避免直接引用内核数据结构，
 //! 确保架构层与内核其余部分的解耦。
 
-use crate::arch::{address::UA, cpu_ops::CpuOps, virtual_memory::VirtualMemory};
+use core::fmt::Debug;
+
+use crate::{
+    arch::{address::UA, cpu_ops::CpuOps, task::ExecStackLayout, virtual_memory::VirtualMemory},
+    kernel::syscall::syscall_frame::SyscallFrame,
+    uapi::signal::MContextT,
+};
+
+/// 架构陷阱帧的统一接口。
+pub trait HwTrapFrame: Copy + Debug + Send + Sync + SyscallFrame + 'static {
+    fn zero_init() -> Self;
+    fn set_kernel_trap_frame(&mut self, entry: usize, terminal: usize, kernel_sp: usize);
+    fn set_exec_trap_frame_from_layout(
+        &mut self,
+        entry: usize,
+        kernel_sp: usize,
+        layout: &ExecStackLayout,
+    );
+    unsafe fn set_clone_trap_frame(
+        &mut self,
+        parent_frame: &Self,
+        kernel_sp: usize,
+        user_sp: usize,
+    );
+    unsafe fn set_fork_trap_frame(&mut self, parent_frame: &Self);
+    fn get_sp(&self) -> usize;
+    fn set_sp(&mut self, val: usize);
+    fn set_a0(&mut self, val: usize);
+    fn set_a1(&mut self, val: usize);
+    fn set_a2(&mut self, val: usize);
+    fn set_ra(&mut self, val: usize);
+    fn set_sepc(&mut self, pc: usize);
+    fn get_sepc(&self) -> usize;
+    fn set_tls(&mut self, tls: usize);
+    fn to_mcontext(&self) -> MContextT;
+    fn restore_from_mcontext(&mut self, mcontext: &MContextT);
+}
 
 /// 顶层架构抽象 trait。
 ///
@@ -24,6 +60,9 @@ use crate::arch::{address::UA, cpu_ops::CpuOps, virtual_memory::VirtualMemory};
 pub trait Arch: CpuOps + VirtualMemory {
     /// 用户上下文类型（保存/恢复寄存器状态）
     type UserContext: Sized + Send + Sync + Clone;
+
+    /// 硬件陷阱帧类型。
+    type TrapFrame: HwTrapFrame;
 
     // ---- 进程 / 上下文切换 ----
 

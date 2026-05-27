@@ -1,5 +1,9 @@
 //! IO 相关的系统调用实现
 
+// set_len 后立即通过 copy_from_user / copy_from_user_mut 从用户空间填充数据，
+// 在第一次读取前已完全初始化，符合安全语义。
+#![allow(clippy::uninit_vec)]
+
 use crate::arch::Arch;
 use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
@@ -949,10 +953,10 @@ fn select_common(
             // 被唤醒后再推进一次网络栈，并分发 UDP
             crate::net::socket::poll_network_and_dispatch();
 
-            if let Some(trigger) = timeout_trigger {
-                if crate::arch::get_time() >= trigger {
-                    return 0;
-                }
+            if let Some(trigger) = timeout_trigger
+                && crate::arch::get_time() >= trigger
+            {
+                return 0;
             }
         }
     }

@@ -40,12 +40,7 @@ impl<CPU: CpuOps> RawSpinLock<CPU> {
         }
     }
 
-    /// 尝试获取自旋锁，并返回一个 RAII 保护器。
-    ///
-    /// 内部原子地获取锁，并在当前 CPU 禁用本地中断。
-    pub fn lock(&self) -> RawSpinLockGuard<'_, CPU> {
-        let guard = IntrGuard::<CPU>::new();
-
+    fn acquire(&self) {
         while self
             .lock
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -53,6 +48,20 @@ impl<CPU: CpuOps> RawSpinLock<CPU> {
         {
             hint::spin_loop();
         }
+    }
+
+    fn try_acquire(&self) -> bool {
+        self.lock
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+    }
+
+    /// 尝试获取自旋锁，并返回一个 RAII 保护器。
+    ///
+    /// 内部原子地获取锁，并在当前 CPU 禁用本地中断。
+    pub fn lock(&self) -> RawSpinLockGuard<'_, CPU> {
+        let guard = IntrGuard::<CPU>::new();
+        self.acquire();
 
         RawSpinLockGuard {
             lock: self,
@@ -66,11 +75,7 @@ impl<CPU: CpuOps> RawSpinLock<CPU> {
     pub fn try_lock(&self) -> Option<RawSpinLockGuard<'_, CPU>> {
         let guard = IntrGuard::<CPU>::new();
 
-        if self
-            .lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-        {
+        if self.try_acquire() {
             Some(RawSpinLockGuard {
                 lock: self,
                 intr_guard: guard,
@@ -114,26 +119,14 @@ unsafe impl<CPU: CpuOps> lock_api::RawMutex for RawSpinLock<CPU> {
 
     fn lock(&self) {
         let flags = CPU::disable_interrupts();
-
-        while self
-            .lock
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            core::hint::spin_loop();
-        }
-
+        self.acquire();
         self.saved_intr_flags.store(flags, Ordering::Release);
     }
 
     fn try_lock(&self) -> bool {
         let flags = CPU::disable_interrupts();
 
-        if self
-            .lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-        {
+        if self.try_acquire() {
             self.saved_intr_flags.store(flags, Ordering::Release);
             true
         } else {
@@ -156,7 +149,7 @@ unsafe impl<CPU: CpuOps> Sync for RawSpinLock<CPU> {}
 mod tests {
     use super::*;
     use crate::{
-        arch::intr::{are_interrupts_enabled, read_and_disable_interrupts, restore_interrupts},
+        arch::{ArchImpl, CpuOps},
         kassert, test_case,
     };
 
@@ -193,26 +186,26 @@ mod tests {
         drop(guard1);
 
         let guard2 = lock.lock();
-        let second_lock_failed = if lock.is_locked() { false } else { true };
+        let second_lock_failed = !lock.is_locked();
 
         kassert!(!second_lock_failed);
         drop(guard2);
     });
 
     test_case!(test_interrupt_disable, {
-        let initial_flags = unsafe { read_and_disable_interrupts() };
-        unsafe { restore_interrupts(initial_flags | (1 << 1)) };
-        kassert!(are_interrupts_enabled());
+        let initial_flags = ArchImpl::disable_interrupts();
+        ArchImpl::enable_interrupts();
+        kassert!(ArchImpl::interrupts_enabled());
 
         let lock = RawSpinLock::<ArchImpl>::new();
         let guard = lock.lock();
 
-        kassert!(!are_interrupts_enabled());
+        kassert!(!ArchImpl::interrupts_enabled());
         kassert!(guard.intr_guard.was_enabled());
 
         drop(guard);
-        kassert!(are_interrupts_enabled());
+        kassert!(ArchImpl::interrupts_enabled());
 
-        unsafe { restore_interrupts(initial_flags) };
+        ArchImpl::restore_interrupt_state(initial_flags);
     });
 }

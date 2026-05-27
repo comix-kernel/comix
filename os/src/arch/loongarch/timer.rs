@@ -2,7 +2,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{arch::intr::enable_timer_interrupt, earlyprintln};
+use crate::arch::intr::enable_timer_interrupt;
 
 /// 定时器滴答计数
 pub static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
@@ -19,10 +19,10 @@ const CSR_TICLR: u32 = 0x44;
 
 /// 初始化定时器
 pub fn init() {
-    earlyprintln!("[Timer] Initializing timer");
+    crate::println!("[Timer] Initializing timer");
     // 允许外部在平台层设置真实频率；此处仅开启本地定时器中断
     unsafe { enable_timer_interrupt() };
-    earlyprintln!("[Timer] Timer interrupt enabled");
+    crate::println!("[Timer] Timer interrupt enabled");
     set_next_trigger();
 }
 
