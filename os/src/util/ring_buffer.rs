@@ -11,6 +11,11 @@ enum BufferStatus {
     NORMAL,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RingBufferError {
+    Full,
+}
+
 /// 环形缓冲区结构体
 pub struct RingBuffer {
     arr: [u8; RING_BUFFER_SIZE],
@@ -46,9 +51,9 @@ impl RingBuffer {
     }
 
     /// 向环形缓冲区写入一个字节
-    pub fn write_byte(&mut self, byte: u8) -> Result<(), ()> {
+    pub fn write_byte(&mut self, byte: u8) -> Result<(), RingBufferError> {
         if self.status == BufferStatus::FULL {
-            return Err(());
+            return Err(RingBufferError::Full);
         }
         self.arr[self.head] = byte;
         self.head = (self.head + 1) % RING_BUFFER_SIZE;

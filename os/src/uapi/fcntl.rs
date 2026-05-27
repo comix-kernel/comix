@@ -158,6 +158,19 @@ impl LockType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlockRangeError {
+    InvalidWhence,
+    NegativeStart,
+    NegativeLength,
+}
+
+impl FlockRangeError {
+    pub fn to_errno(self) -> isize {
+        -(crate::uapi::errno::EINVAL as isize)
+    }
+}
+
 /// 文件锁结构（对应 POSIX struct flock）
 ///
 /// 用于 F_GETLK / F_SETLK / F_SETLKW 系统调用
@@ -205,16 +218,16 @@ impl Flock {
         &self,
         current_offset: usize,
         file_size: usize,
-    ) -> Result<(usize, usize), ()> {
+    ) -> Result<(usize, usize), FlockRangeError> {
         let start = match self.l_whence as i32 {
             SEEK_SET => self.l_start,
             SEEK_CUR => current_offset as i64 + self.l_start,
             SEEK_END => file_size as i64 + self.l_start,
-            _ => return Err(()),
+            _ => return Err(FlockRangeError::InvalidWhence),
         };
 
         if start < 0 {
-            return Err(());
+            return Err(FlockRangeError::NegativeStart);
         }
 
         let start = start as usize;
@@ -224,7 +237,7 @@ impl Flock {
         } else if self.l_len > 0 {
             self.l_len as usize
         } else {
-            return Err(());
+            return Err(FlockRangeError::NegativeLength);
         };
 
         Ok((start, len))

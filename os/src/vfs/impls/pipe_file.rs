@@ -244,7 +244,7 @@ impl File for PipeFile {
         Ok(())
     }
 
-    // lseek 使用默认实现 (返回 NotSupported)
+    // lseek 使用默认实现 (返回 NotSeekable)
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }

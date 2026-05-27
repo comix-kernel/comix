@@ -5,6 +5,7 @@
 use alloc::vec::Vec;
 
 use crate::arch::cpu_ops::CpuOps;
+use crate::mm::page_table::PagingError;
 use crate::sync::SpinLock;
 
 // ============================================================================
@@ -84,7 +85,7 @@ pub struct PhysMemoryRegion {
 /// 这个 trait 完全解耦了进程地址空间的操作。架构相关实现只需填充方法。
 pub trait UserAddressSpace: Send + Sync {
     /// 新建空页表
-    fn new() -> Result<Self, ()>
+    fn new() -> Result<Self, PagingError>
     where
         Self: Sized;
 
@@ -95,10 +96,15 @@ pub trait UserAddressSpace: Send + Sync {
     fn deactivate(&self);
 
     /// 映射一页
-    fn map_page(&mut self, page: PageFrame, va: usize, perms: PtePermissions) -> Result<(), ()>;
+    fn map_page(
+        &mut self,
+        page: PageFrame,
+        va: usize,
+        perms: PtePermissions,
+    ) -> Result<(), PagingError>;
 
     /// 取消映射一页，返回被解除的页帧
-    fn unmap(&mut self, va: usize) -> Result<PageFrame, ()>;
+    fn unmap(&mut self, va: usize) -> Result<PageFrame, PagingError>;
 
     /// 重新映射一页（替换）
     fn remap(
@@ -106,13 +112,17 @@ pub trait UserAddressSpace: Send + Sync {
         va: usize,
         new_page: PageFrame,
         perms: PtePermissions,
-    ) -> Result<PageFrame, ()>;
+    ) -> Result<PageFrame, PagingError>;
 
     /// 保护一个内存范围
-    fn protect_range(&mut self, region: VirtMemoryRegion, perms: PtePermissions) -> Result<(), ()>;
+    fn protect_range(
+        &mut self,
+        region: VirtMemoryRegion,
+        perms: PtePermissions,
+    ) -> Result<(), PagingError>;
 
     /// 取消映射一个内存范围，返回被解除的所有页帧
-    fn unmap_range(&mut self, region: VirtMemoryRegion) -> Result<Vec<PageFrame>, ()>;
+    fn unmap_range(&mut self, region: VirtMemoryRegion) -> Result<Vec<PageFrame>, PagingError>;
 
     /// 翻译虚拟地址 → 页信息
     fn translate(&self, va: usize) -> Option<PageInfo>;
@@ -123,7 +133,7 @@ pub trait UserAddressSpace: Send + Sync {
         region: VirtMemoryRegion,
         other: &mut Self,
         perms: PtePermissions,
-    ) -> Result<(), ()>;
+    ) -> Result<(), PagingError>;
 }
 
 // ============================================================================
@@ -133,7 +143,7 @@ pub trait UserAddressSpace: Send + Sync {
 /// 内核地址空间抽象。
 pub trait KernAddressSpace: Send {
     /// 映射 MMIO 区域
-    fn map_mmio(&mut self, region: PhysMemoryRegion) -> Result<usize, ()>;
+    fn map_mmio(&mut self, region: PhysMemoryRegion) -> Result<usize, PagingError>;
 
     /// 映射普通内存区域
     fn map_normal(
@@ -141,7 +151,7 @@ pub trait KernAddressSpace: Send {
         phys_range: PhysMemoryRegion,
         virt_range: VirtMemoryRegion,
         perms: PtePermissions,
-    ) -> Result<(), ()>;
+    ) -> Result<(), PagingError>;
 }
 
 // ============================================================================

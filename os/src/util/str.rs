@@ -7,6 +7,12 @@ use alloc::{
 
 use crate::config::MAX_ARGV;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringCopyError {
+    InvalidUtf8,
+    TooLong,
+}
+
 /// 向指定地址写入内容
 /// # 参数：
 /// * `addr` - 目标地址
@@ -32,7 +38,7 @@ pub fn read<T>(addr: usize) -> T {
 
 /// 从以 NULL 结尾的 C 字符串指针拷贝并返回一个 owned String
 /// WARNING: 这个函数直接读取指针，调用者必须保证指针在内核可读
-pub unsafe fn copy_cstr_to_string(ptr: *const u8) -> Result<String, ()> {
+pub unsafe fn copy_cstr_to_string(ptr: *const u8) -> Result<String, StringCopyError> {
     const MAX_PATH_LEN: usize = 4096;
     let mut buf: Vec<u8> = Vec::new();
     let mut p = ptr;
@@ -42,17 +48,19 @@ pub unsafe fn copy_cstr_to_string(ptr: *const u8) -> Result<String, ()> {
         if b == 0 {
             return core::str::from_utf8(&buf)
                 .map(|s| s.to_string())
-                .map_err(|_| ());
+                .map_err(|_| StringCopyError::InvalidUtf8);
         }
         buf.push(b);
         p = unsafe { p.add(1) };
     }
-    Err(())
+    Err(StringCopyError::TooLong)
 }
 
 /// 把 NULL 终止的指针数组拷贝为 `Vec<String>`
 /// WARNING: 这个函数直接读取指针，调用者必须保证指针在内核可读
-pub unsafe fn ptr_array_to_vec_strings(ptrs: *const *const u8) -> Result<Vec<String>, ()> {
+pub unsafe fn ptr_array_to_vec_strings(
+    ptrs: *const *const u8,
+) -> Result<Vec<String>, StringCopyError> {
     let mut out: Vec<String> = Vec::new();
     if ptrs.is_null() {
         return Ok(out);
@@ -64,7 +72,7 @@ pub unsafe fn ptr_array_to_vec_strings(ptrs: *const *const u8) -> Result<Vec<Str
         }
         match unsafe { crate::util::copy_cstr_to_string(p) } {
             Ok(s) => out.push(s),
-            Err(_) => return Err(()),
+            Err(e) => return Err(e),
         }
     }
     Ok(out)

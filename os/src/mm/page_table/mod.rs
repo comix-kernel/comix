@@ -17,7 +17,7 @@ pub enum PageSize {
 }
 
 /// 分页操作中可能发生的错误
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PagingError {
     /// 虚拟地址未被映射
     NotMapped,
@@ -27,6 +27,8 @@ pub enum PagingError {
     InvalidAddress,
     /// 提供了无效的标志（Flags）
     InvalidFlags,
+    /// 页表权限不允许该访问
+    PermissionDenied,
     /// 帧（Frame）分配失败
     FrameAllocFailed,
     /// 此操作不支持此映射类型

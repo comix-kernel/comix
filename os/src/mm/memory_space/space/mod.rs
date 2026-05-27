@@ -30,7 +30,7 @@ unsafe extern "C" {
 lazy_static! {
     /// 全局内核内存空间（受 SpinLock 保护）
     static ref KERNEL_SPACE: SpinLock<MemorySpace> = {
-        SpinLock::new(MemorySpace::new_kernel())
+        SpinLock::new(MemorySpace::new_kernel().expect("failed to create kernel memory space"))
     };
 }
 

@@ -22,9 +22,13 @@ where
     fn activate(ppn: Ppn);
     fn activating_table_ppn() -> Ppn;
 
-    fn new() -> Self;
+    fn new() -> PagingResult<Self>
+    where
+        Self: Sized;
     fn from_ppn(ppn: Ppn) -> Self;
-    fn new_as_kernel_table() -> Self;
+    fn new_as_kernel_table() -> PagingResult<Self>
+    where
+        Self: Sized;
 
     fn root_ppn(&self) -> Ppn;
 

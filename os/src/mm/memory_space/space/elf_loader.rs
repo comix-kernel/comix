@@ -57,7 +57,7 @@ impl MemorySpace {
         let current_space = crate::kernel::current_memory_space();
         let current_locked = current_space.lock();
 
-        let mut space = MemorySpace::new();
+        let mut space = MemorySpace::new()?;
 
         // 只复制内核空间区域的元数据和映射
         for area in current_locked.areas.iter() {

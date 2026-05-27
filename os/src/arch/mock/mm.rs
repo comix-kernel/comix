@@ -116,11 +116,11 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         Ppn::from_usize(0)
     }
 
-    fn new() -> Self {
-        Self {
+    fn new() -> PagingResult<Self> {
+        Ok(Self {
             root: Ppn::from_usize(0x80000),
             is_user: true,
-        }
+        })
     }
 
     fn from_ppn(ppn: Ppn) -> Self {
@@ -130,11 +130,11 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         }
     }
 
-    fn new_as_kernel_table() -> Self {
-        Self {
+    fn new_as_kernel_table() -> PagingResult<Self> {
+        Ok(Self {
             root: Ppn::from_usize(0x80000),
             is_user: false,
-        }
+        })
     }
 
     fn root_ppn(&self) -> Ppn {
@@ -155,11 +155,11 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         _ppn: Ppn,
         _page_size: PageSize,
         _flags: UniversalPTEFlag,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         Ok(())
     }
 
-    fn unmap(&mut self, _vpn: Vpn) -> PagingResult<()> {
+    fn unmap(&mut self, _vpn: Vpn) -> Result<(), PagingError> {
         Ok(())
     }
 
@@ -169,12 +169,12 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         target_ppn: Ppn,
         _page_size: PageSize,
         _flags: UniversalPTEFlag,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         self.root = target_ppn;
         Ok(())
     }
 
-    fn update_flags(&mut self, _vpn: Vpn, _flags: UniversalPTEFlag) -> PagingResult<()> {
+    fn update_flags(&mut self, _vpn: Vpn, _flags: UniversalPTEFlag) -> Result<(), PagingError> {
         Ok(())
     }
 
@@ -193,7 +193,7 @@ impl PageTableInner {
         page_size: PageSize,
         flags: UniversalPTEFlag,
         _batch: Option<&mut TlbBatchContext>,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         <Self as PageTableInnerTrait<PageTableEntry>>::map(self, vpn, ppn, page_size, flags)
     }
 
@@ -201,7 +201,7 @@ impl PageTableInner {
         &mut self,
         vpn: Vpn,
         _batch: Option<&mut TlbBatchContext>,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         <Self as PageTableInnerTrait<PageTableEntry>>::unmap(self, vpn)
     }
 
@@ -210,7 +210,7 @@ impl PageTableInner {
         vpn: Vpn,
         flags: UniversalPTEFlag,
         _batch: Option<&mut TlbBatchContext>,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         <Self as PageTableInnerTrait<PageTableEntry>>::update_flags(self, vpn, flags)
     }
 }

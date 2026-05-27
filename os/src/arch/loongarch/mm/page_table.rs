@@ -159,18 +159,18 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     }
 
     /// 创建新的用户页表
-    fn new() -> Self {
-        let frame = alloc_frame().expect("Failed to allocate root page table frame");
+    fn new() -> PagingResult<Self> {
+        let frame = alloc_frame().ok_or(PagingError::FrameAllocFailed)?;
         let root_ppn = frame.ppn();
 
         // 清零根页表
         Self::clear_page_table(root_ppn);
 
-        Self {
+        Ok(Self {
             root_ppn,
             frames: alloc::vec![frame],
             is_user: true,
-        }
+        })
     }
 
     /// 从已有的 PPN 创建页表（不拥有帧所有权）
@@ -183,18 +183,18 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     }
 
     /// 创建新的内核页表
-    fn new_as_kernel_table() -> Self {
-        let frame = alloc_frame().expect("Failed to allocate kernel page table frame");
+    fn new_as_kernel_table() -> PagingResult<Self> {
+        let frame = alloc_frame().ok_or(PagingError::FrameAllocFailed)?;
         let root_ppn = frame.ppn();
 
         // 清零根页表
         Self::clear_page_table(root_ppn);
 
-        Self {
+        Ok(Self {
             root_ppn,
             frames: alloc::vec![frame],
             is_user: false,
-        }
+        })
     }
 
     fn root_ppn(&self) -> Ppn {
@@ -251,7 +251,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         ppn: Ppn,
         _page_size: PageSize,
         flags: UniversalPTEFlag,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         // 验证标志位：叶子节点必须至少设置可读或可执行
         if !flags.intersects(
             UniversalPTEFlag::READABLE | UniversalPTEFlag::WRITEABLE | UniversalPTEFlag::EXECUTABLE,
@@ -305,7 +305,7 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
     }
 
     /// 解除虚拟页的映射
-    fn unmap(&mut self, vpn: Vpn) -> PagingResult<()> {
+    fn unmap(&mut self, vpn: Vpn) -> Result<(), PagingError> {
         let mut current_ppn = self.root_ppn;
         let vpn_value = vpn.as_usize();
 
@@ -337,13 +337,13 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
         target_ppn: Ppn,
         page_size: PageSize,
         flags: UniversalPTEFlag,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         self.unmap(vpn)?;
         self.map(vpn, target_ppn, page_size, flags)
     }
 
     /// 更新页表项标志位
-    fn update_flags(&mut self, vpn: Vpn, flags: UniversalPTEFlag) -> PagingResult<()> {
+    fn update_flags(&mut self, vpn: Vpn, flags: UniversalPTEFlag) -> Result<(), PagingError> {
         let mut current_ppn = self.root_ppn;
         let vpn_value = vpn.as_usize();
 
@@ -402,7 +402,7 @@ impl PageTableInner {
         page_size: PageSize,
         flags: UniversalPTEFlag,
         _batch: Option<&mut TlbBatchContext>,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         <Self as PageTableInnerTrait<PageTableEntry>>::map(self, vpn, ppn, page_size, flags)?;
         <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
         Ok(())
@@ -413,7 +413,7 @@ impl PageTableInner {
         &mut self,
         vpn: Vpn,
         _batch: Option<&mut TlbBatchContext>,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         <Self as PageTableInnerTrait<PageTableEntry>>::unmap(self, vpn)?;
         <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
         Ok(())
@@ -425,7 +425,7 @@ impl PageTableInner {
         vpn: Vpn,
         flags: UniversalPTEFlag,
         _batch: Option<&mut TlbBatchContext>,
-    ) -> PagingResult<()> {
+    ) -> Result<(), PagingError> {
         <Self as PageTableInnerTrait<PageTableEntry>>::update_flags(self, vpn, flags)?;
         <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
         Ok(())
@@ -530,9 +530,16 @@ mod page_table_tests {
     use crate::mm::page_table::PageTableInner as PageTableInnerTrait;
     use crate::{kassert, test_case};
 
+    fn new_page_table() -> PageTableInner {
+        match PageTableInner::new() {
+            Ok(pt) => pt,
+            Err(err) => panic!("failed to create test page table: {:?}", err),
+        }
+    }
+
     // 1. 页表创建测试
     test_case!(test_pt_create, {
-        let pt = PageTableInner::new();
+        let pt = new_page_table();
         // 根 PPN 应该有效 (大于 0)
         kassert!(pt.root_ppn().as_usize() > 0);
         // 默认创建为用户页表
@@ -541,7 +548,7 @@ mod page_table_tests {
 
     // 2. 映射与转换测试
     test_case!(test_pt_map_translate, {
-        let mut pt = PageTableInner::new();
+        let mut pt = new_page_table();
         let vpn = Vpn::from_usize(0x1000);
         let ppn = Ppn::from_usize(0x80000);
 
@@ -560,7 +567,7 @@ mod page_table_tests {
 
     // 3. 解除映射测试
     test_case!(test_pt_unmap, {
-        let mut pt = PageTableInner::new();
+        let mut pt = new_page_table();
         let vpn = Vpn::from_usize(0x1000);
         let ppn = Ppn::from_usize(0x80000);
 
@@ -580,7 +587,7 @@ mod page_table_tests {
 
     // 4. 错误测试：已映射
     test_case!(test_pt_error_already_mapped, {
-        let mut pt = PageTableInner::new();
+        let mut pt = new_page_table();
         let vpn = Vpn::from_usize(0x1000);
 
         // 第一次映射成功
@@ -604,7 +611,7 @@ mod page_table_tests {
 
     // 5. 页表遍历 (Walk) 测试
     test_case!(test_pt_walk, {
-        let mut pt = PageTableInner::new();
+        let mut pt = new_page_table();
         let vpn = Vpn::from_usize(0x1000);
         let ppn = Ppn::from_usize(0x80000);
         let original_flags = UniversalPTEFlag::kernel_rw();
@@ -629,7 +636,7 @@ mod page_table_tests {
 
     // 6. 更新标志位测试
     test_case!(test_pt_update_flags, {
-        let mut pt = PageTableInner::new();
+        let mut pt = new_page_table();
         let vpn = Vpn::from_usize(0x1000);
         let ppn = Ppn::from_usize(0x80000);
 
@@ -652,7 +659,7 @@ mod page_table_tests {
 
     // 7. 多重映射测试
     test_case!(test_pt_multiple_mappings, {
-        let mut pt = PageTableInner::new();
+        let mut pt = new_page_table();
 
         // 映射多个 VPN
         for i in 0..10 {

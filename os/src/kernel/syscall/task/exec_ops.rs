@@ -13,12 +13,16 @@ pub fn execve(
 ) -> c_int {
     let path_str = match get_path_safe(path as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno() as i32;
-        }
+        Err(e) => return e.to_errno() as i32,
     };
-    let argv_strings = get_args_safe(argv as usize, "argv").unwrap_or_else(|_| Vec::new());
-    let envp_strings = get_args_safe(envp as usize, "envp").unwrap_or_else(|_| Vec::new());
+    let argv_strings = match get_args_safe(argv as usize, "argv") {
+        Ok(args) => args,
+        Err(e) => return e.to_errno() as i32,
+    };
+    let envp_strings = match get_args_safe(envp as usize, "envp") {
+        Ok(envp) => envp,
+        Err(e) => return e.to_errno() as i32,
+    };
 
     let mut exec_path_str = path_str.clone();
     let (argv_strings, envp_strings, exec_path_str) = {
@@ -64,19 +68,20 @@ pub fn execve(
         prefix.truncate(read_total);
 
         if prefix.len() >= 2 && prefix[0] == b'#' && prefix[1] == b'!' {
-            if let Ok((path, args)) = parse_hashbang(&prefix) {
-                let mut new_argv = Vec::new();
-                new_argv.push(path.to_string());
-                // XXX: 目前仅支持单个参数
-                if let Some(arg) = args {
-                    new_argv.push(arg.to_string());
+            match parse_hashbang(&prefix) {
+                Ok((path, args)) => {
+                    let mut new_argv = Vec::new();
+                    new_argv.push(path.to_string());
+                    // XXX: 目前仅支持单个参数
+                    if let Some(arg) = args {
+                        new_argv.push(arg.to_string());
+                    }
+                    new_argv.push(path_str.clone());
+                    new_argv.extend(argv_strings.iter().skip(1).cloned());
+                    exec_path_str = path.to_string();
+                    (new_argv, envp_strings, exec_path_str)
                 }
-                new_argv.push(path_str.clone());
-                new_argv.extend(argv_strings.iter().skip(1).cloned());
-                exec_path_str = path.to_string();
-                (new_argv, envp_strings, exec_path_str)
-            } else {
-                return -EINVAL;
+                Err(e) => return e.to_errno(),
             }
         } else {
             (argv_strings, envp_strings, exec_path_str)
@@ -118,8 +123,22 @@ pub fn execve(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HashbangError {
+    MissingInterpreter,
+    InvalidUtf8,
+}
+
+impl HashbangError {
+    fn to_errno(self) -> c_int {
+        match self {
+            HashbangError::MissingInterpreter | HashbangError::InvalidUtf8 => -EINVAL,
+        }
+    }
+}
+
 /// 辅助函数：解析 Hashbang 行
-fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
+fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), HashbangError> {
     // 查找第一个换行符 ('\n')，只读取第一行
     let line_end = data.iter().position(|&b| b == b'\n').unwrap_or(data.len());
     // 跳过开头的空格和制表符
@@ -137,18 +156,19 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), ()> {
         .collect();
 
     if parts.is_empty() {
-        return Err(()); // 格式错误或只包含 #!
+        return Err(HashbangError::MissingInterpreter);
     }
 
     // 解释器路径
-    let interpreter_path = core::str::from_utf8(parts[0]).map_err(|_| ())?;
+    let interpreter_path =
+        core::str::from_utf8(parts[0]).map_err(|_| HashbangError::InvalidUtf8)?;
 
     // 可选参数
     let interpreter_arg = parts
         .get(1)
         .map(|p| core::str::from_utf8(p))
         .transpose()
-        .map_err(|_| ())?;
+        .map_err(|_| HashbangError::InvalidUtf8)?;
 
     Ok((interpreter_path, interpreter_arg))
 }

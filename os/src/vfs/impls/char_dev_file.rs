@@ -288,7 +288,7 @@ impl File for CharDeviceFile {
     fn lseek(&self, _offset: isize, _whence: SeekWhence) -> Result<usize, FsError> {
         // 大多数字符设备不支持 seek
         // 但某些设备（如 /dev/mem）可能需要
-        Err(FsError::NotSupported)
+        Err(FsError::NotSeekable)
     }
 
     fn offset(&self) -> usize {
@@ -320,7 +320,7 @@ impl File for CharDeviceFile {
                 // MISC 设备 ioctl (包括 RTC)
                 self.misc_ioctl(request, arg)
             }
-            _ => Err(FsError::NotSupported),
+            _ => Err(FsError::NotTty),
         }
     }
     fn as_any(&self) -> &dyn core::any::Any {
@@ -454,10 +454,10 @@ impl CharDeviceFile {
                     }
                     Err(FsError::NoDevice)
                 }
-                _ => Err(FsError::NotSupported),
+                _ => Err(FsError::NotTty),
             }
         } else {
-            Err(FsError::NotSupported)
+            Err(FsError::NotTty)
         }
     }
 }
