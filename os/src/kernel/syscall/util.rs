@@ -10,6 +10,7 @@ use alloc::{
 };
 
 use crate::{
+    config::MAX_ARGV,
     kernel::current_task,
     uapi::{errno::EINVAL, log::SyslogAction},
     vfs::{
@@ -88,6 +89,10 @@ pub fn get_args_safe(ptr_array: usize, _name: &str) -> Result<Vec<String>, FsErr
 
         if ptr_val == 0 {
             break; // NULL 终止
+        }
+
+        if args.len() >= MAX_ARGV {
+            return Err(FsError::InvalidArgument);
         }
 
         let s = copy_str_from_user(ptr_val)?;
