@@ -27,17 +27,13 @@ pub fn renameat2(
     // 解析旧路径
     let old_path_str = match get_path_safe(oldpath as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析新路径
     let new_path_str = match get_path_safe(newpath as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 分割路径为 (父目录, 文件名)

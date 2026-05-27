@@ -137,14 +137,12 @@ pub fn statfs(path: *const c_char, buf: *mut LinuxStatFs) -> isize {
     // 解析路径字符串
     let path_str = match get_path_safe(path as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 验证路径存在
-    if vfs_lookup(&path_str).is_err() {
-        return -(EINVAL as isize);
+    if let Err(e) = vfs_lookup(&path_str) {
+        return e.to_errno();
     }
 
     // 通过 MOUNT_TABLE 查找文件系统
@@ -191,9 +189,7 @@ pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> 
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析标志
@@ -272,9 +268,7 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 查找符号链接（不跟随最后一级的符号链接）
@@ -322,9 +316,7 @@ pub fn newfstatat(dirfd: i32, pathname: *const c_char, statbuf: *mut Stat, flags
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析标志
@@ -378,9 +370,7 @@ pub fn statx(
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     let at_flags = AtFlags::from_bits_truncate(flags);
@@ -430,9 +420,7 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析标志

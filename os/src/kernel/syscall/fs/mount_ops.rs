@@ -27,18 +27,14 @@ pub fn mount(
     // 解析目标路径
     let target_str = match get_path_safe(target as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析 source (可能为空)
     let source_str = if !source.is_null() {
         match get_path_safe(source as usize) {
             Ok(s) => s,
-            Err(_) => {
-                return FsError::InvalidArgument.to_errno();
-            }
+            Err(e) => return e.to_errno(),
         }
     } else {
         String::new()
@@ -48,9 +44,7 @@ pub fn mount(
     let fstype_str = if !filesystemtype.is_null() {
         match get_path_safe(filesystemtype as usize) {
             Ok(s) => s,
-            Err(_) => {
-                return FsError::InvalidArgument.to_errno();
-            }
+            Err(e) => return e.to_errno(),
         }
     } else {
         String::new()
@@ -206,9 +200,7 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
     // 解析目标路径
     let target_str = match get_path_safe(target as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     crate::pr_debug!("[SYSCALL] umount2: unmounting '{}'", target_str);

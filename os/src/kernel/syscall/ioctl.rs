@@ -81,7 +81,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         TIOCGWINSZ | TIOCSWINSZ | TCGETS | TCSETS | TCSETSW | TCSETSF => {
             match file.ioctl(request, arg) {
                 Ok(ret) => ret,
-                Err(FsError::NotSupported) => {
+                Err(FsError::NotSupported | FsError::NotTty) => {
                     pr_warn!(
                         "ioctl: fd={}, terminal request {:#x} ({}) not supported by file type",
                         fd,
@@ -90,7 +90,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
                     );
                     -ENOTTY as isize
                 }
-                Err(e) => fs_error_to_errno(e),
+                Err(e) => e.to_errno(),
             }
         }
 
@@ -116,7 +116,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
             pr_debug!("ioctl: delegating request {:#x} to file object", request);
             match file.ioctl(request, arg) {
                 Ok(ret) => ret,
-                Err(FsError::NotSupported) => {
+                Err(FsError::NotSupported | FsError::NotTty) => {
                     pr_warn!(
                         "ioctl: unsupported request {:#x} (type={:#x}, nr={}, size={})",
                         request,
@@ -128,7 +128,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
                 }
                 Err(e) => {
                     pr_err!("ioctl: file ioctl failed: {:?}", e);
-                    fs_error_to_errno(e)
+                    e.to_errno()
                 }
             }
         }
@@ -316,20 +316,5 @@ fn handle_ifreq(_file: &alloc::sync::Arc<dyn crate::vfs::File>, request: u32, ar
             -EOPNOTSUPP as isize
         }
         _ => -EINVAL as isize,
-    }
-}
-
-//  辅助函数
-
-/// 将 VFS 错误转换为 errno
-fn fs_error_to_errno(err: FsError) -> isize {
-    match err {
-        FsError::NotSupported => -EOPNOTSUPP as isize,
-        FsError::InvalidArgument => -EINVAL as isize,
-        FsError::NotFound => -crate::uapi::errno::ENOENT as isize,
-        FsError::PermissionDenied => -crate::uapi::errno::EACCES as isize,
-        FsError::AlreadyExists => -crate::uapi::errno::EEXIST as isize,
-        FsError::IoError => -crate::uapi::errno::EIO as isize,
-        _ => -crate::uapi::errno::EIO as isize,
     }
 }
