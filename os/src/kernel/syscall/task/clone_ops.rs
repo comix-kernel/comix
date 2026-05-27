@@ -146,9 +146,14 @@ pub fn clone(
 
     let tf = child_task.trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        (*tf).set_clone_trap_frame(&*ptf, child_task.kstack_base.as_usize(), stack as usize);
+        <TrapFrame as HwTrapFrame>::set_clone_trap_frame(
+            &mut *tf,
+            &*ptf,
+            child_task.kstack_base.as_usize(),
+            stack as usize,
+        );
         if requested_flags.contains(CloneFlags::SETTLS) {
-            (*tf).set_tls(tls as usize);
+            <TrapFrame as HwTrapFrame>::set_tls(&mut *tf, tls as usize);
         }
     }
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {

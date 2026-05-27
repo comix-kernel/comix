@@ -20,7 +20,7 @@ pub mod plat;
 pub mod task;
 pub mod virtual_memory;
 
-pub use arch::Arch;
+pub use arch::{Arch, HwTrapFrame};
 pub use cpu_ops::CpuOps;
 pub use plat::Platform;
 
@@ -38,10 +38,18 @@ mod loongarch;
 mod riscv;
 
 #[cfg(target_arch = "loongarch64")]
-pub use loongarch::*;
+#[allow(unused_imports)]
+pub use loongarch::{
+    boot, compiler_builtins, constant, cpu_ops as target_cpu_ops, intr, ipi, kernel, lib, memory,
+    mm, platform, timer, trap,
+};
 
 #[cfg(target_arch = "riscv64")]
-pub use riscv::*;
+#[allow(unused_imports)]
+pub use riscv::{
+    boot, constant, cpu_ops as target_cpu_ops, intr, ipi, kernel, lib, memory, mm, platform, timer,
+    trap,
+};
 
 // ---- 非目标架构（宿主测试）：Mock Stubs ----
 
@@ -49,8 +57,13 @@ pub use riscv::*;
 mod mock;
 
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-pub use mock::*;
+#[allow(unused_imports)]
+pub use mock::{
+    MockAddressSpace, MockArch, MockCpuOps, boot, constant, intr, ipi, kernel, lib, mm, platform,
+    timer, trap,
+};
 
+pub type TrapFrame = <ArchImpl as Arch>::TrapFrame;
 pub use constant::SUPERVISOR_EXTERNAL;
 
 // ---- ArchImpl 类型别名 ----
@@ -98,10 +111,35 @@ pub fn disable_interrupts() -> usize {
     ArchImpl::disable_interrupts()
 }
 
+#[inline]
+pub unsafe fn read_and_disable_interrupts() -> usize {
+    ArchImpl::disable_interrupts()
+}
+
 /// 恢复中断状态
 #[inline]
 pub fn restore_interrupt_state(flags: usize) {
     ArchImpl::restore_interrupt_state(flags)
+}
+
+#[inline]
+pub unsafe fn restore_interrupts(flags: usize) {
+    ArchImpl::restore_interrupt_state(flags)
+}
+
+#[inline]
+pub fn interrupt_was_enabled(flags: usize) -> bool {
+    ArchImpl::interrupt_was_enabled(flags)
+}
+
+#[inline]
+pub fn are_interrupts_enabled() -> bool {
+    intr::are_interrupts_enabled()
+}
+
+#[inline]
+pub fn enable_irq(irq: usize) {
+    intr::enable_irq(irq)
 }
 
 /// 获取当前 CPU ID
@@ -144,6 +182,63 @@ pub fn clock_freq() -> usize {
 #[inline]
 pub fn send_reschedule_ipi(target: usize) {
     ArchImpl::send_reschedule_ipi(target)
+}
+
+#[inline]
+pub unsafe fn restore_trap_frame(trap_frame: &TrapFrame) {
+    unsafe { trap::restore(trap_frame) }
+}
+
+#[inline]
+pub unsafe fn set_trap_frame_cpu_ptr(trap_frame_ptr: *mut TrapFrame, cpu_ptr: usize) {
+    unsafe { trap::set_trap_frame_cpu_ptr(trap_frame_ptr, cpu_ptr) }
+}
+
+#[inline]
+pub unsafe fn init_kernel_trap_frame(
+    trap_frame_ptr: *mut TrapFrame,
+    entry: usize,
+    terminal: usize,
+    kernel_sp: usize,
+) {
+    unsafe {
+        core::ptr::write(trap_frame_ptr, <TrapFrame as HwTrapFrame>::zero_init());
+        <TrapFrame as HwTrapFrame>::set_kernel_trap_frame(
+            &mut *trap_frame_ptr,
+            entry,
+            terminal,
+            kernel_sp,
+        );
+        let cpu_ptr = {
+            let _guard = crate::sync::PreemptGuard::new();
+            crate::kernel::current_cpu() as *const _ as usize
+        };
+        set_trap_frame_cpu_ptr(trap_frame_ptr, cpu_ptr);
+    }
+}
+
+#[inline]
+pub fn sigreturn_trampoline_address() -> usize {
+    trap::sigreturn_trampoline_address()
+}
+
+#[inline]
+pub fn kernel_sigreturn_trampoline_bytes() -> &'static [u8] {
+    trap::kernel_sigreturn_trampoline_bytes()
+}
+
+#[inline]
+pub unsafe fn forkret_restore(tf_ptr: *mut TrapFrame, is_kernel_thread: bool) {
+    unsafe { kernel::task::forkret_restore(tf_ptr, is_kernel_thread) }
+}
+
+#[inline]
+pub unsafe fn prepare_user_restore(
+    tfp: *mut TrapFrame,
+    user_pc: address::VA,
+    user_sp: address::VA,
+) {
+    unsafe { kernel::task::prepare_user_restore(tfp, user_pc, user_sp) }
 }
 
 /// 物理地址 → 虚拟地址（直接映射）

@@ -156,7 +156,7 @@ unsafe impl<CPU: CpuOps> Sync for RawSpinLock<CPU> {}
 mod tests {
     use super::*;
     use crate::{
-        arch::intr::{are_interrupts_enabled, read_and_disable_interrupts, restore_interrupts},
+        arch::{are_interrupts_enabled, read_and_disable_interrupts, restore_interrupts},
         kassert, test_case,
     };
 

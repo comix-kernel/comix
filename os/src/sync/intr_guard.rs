@@ -97,7 +97,13 @@ impl<CPU: CpuOps> Drop for IntrGuard<CPU> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{arch::intr::*, kassert, println, test_case};
+    use crate::{
+        arch::{
+            are_interrupts_enabled, enable_interrupts, read_and_disable_interrupts,
+            restore_interrupts,
+        },
+        kassert, println, test_case,
+    };
 
     test_case!(test_guard_disables_interrupts, {
         println!("Testing: test_guard_disables_interrupts");

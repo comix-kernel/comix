@@ -181,7 +181,7 @@ pub fn rest_init() {
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             task_frame,
             init as usize,
             0,
@@ -268,7 +268,7 @@ fn create_kthreadd() {
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             task_frame,
             kthreadd as usize,
             0,
@@ -310,7 +310,7 @@ pub fn create_idle_task(cpu_id: usize, idle_fn: fn() -> !) -> crate::kernel::Sha
         .trap_frame_ptr
         .load(core::sync::atomic::Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             task_frame,
             idle_fn as usize,
             0,

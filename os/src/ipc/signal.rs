@@ -12,10 +12,7 @@
 use bitflags::bitflags;
 
 use crate::{
-    arch::{
-        kernel::cpu,
-        trap::{TrapFrame, sigreturn_trampoline_address},
-    },
+    arch::{HwTrapFrame, TrapFrame},
     kernel::{
         SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
         exit_process, exit_task, sleep_task, wake_up_task, yield_task,
@@ -188,7 +185,7 @@ fn install_user_signal_trap_frame(
         );
         // Linux ABI: build rt_sigframe { siginfo, ucontext } on the user stack.
         let frame_size = core::mem::size_of::<RtSigFrame>();
-        let mut sp = align_down(tf.get_sp(), 16);
+        let mut sp = align_down(<TrapFrame as HwTrapFrame>::get_sp(tf), 16);
         sp = align_down(sp - frame_size, 16);
 
         let sig_info_addr = sp + core::mem::offset_of!(RtSigFrame, info);
@@ -211,16 +208,16 @@ fn install_user_signal_trap_frame(
         let restorer = if sa_flags.contains(SaFlags::RESTORER) && !action.sa_restorer.is_null() {
             action.sa_restorer as usize
         } else {
-            sigreturn_trampoline_address()
+            crate::arch::sigreturn_trampoline_address()
         };
-        tf.set_ra(restorer);
+        <TrapFrame as HwTrapFrame>::set_ra(tf, restorer);
 
         // 设置用户处理器入口
-        tf.set_sepc(entry as usize);
-        tf.set_a0(sig_num);
-        tf.set_a1(sig_info_addr);
-        tf.set_a2(ucontext_addr);
-        tf.set_sp(sp);
+        <TrapFrame as HwTrapFrame>::set_sepc(tf, entry as usize);
+        <TrapFrame as HwTrapFrame>::set_a0(tf, sig_num);
+        <TrapFrame as HwTrapFrame>::set_a1(tf, sig_info_addr);
+        <TrapFrame as HwTrapFrame>::set_a2(tf, ucontext_addr);
+        <TrapFrame as HwTrapFrame>::set_sp(tf, sp);
     }
 }
 

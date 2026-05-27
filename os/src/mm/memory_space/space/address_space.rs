@@ -108,7 +108,7 @@ impl MemorySpace {
             return Ok(());
         }
 
-        let code = crate::arch::trap::kernel_sigreturn_trampoline_bytes();
+        let code = crate::arch::kernel_sigreturn_trampoline_bytes();
         self.insert_framed_area(
             vpn_range,
             AreaType::UserMmap,
