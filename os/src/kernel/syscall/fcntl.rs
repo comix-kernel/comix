@@ -137,7 +137,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             let file_size = metadata.size;
             let (start, len) = match flock.to_absolute_range(file_offset, file_size) {
                 Ok(range) => range,
-                Err(_) => return -(EINVAL as isize),
+                Err(e) => return e.to_errno(),
             };
 
             // 测试锁
@@ -201,7 +201,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             let file_size = metadata.size;
             let (start, len) = match flock.to_absolute_range(file_offset, file_size) {
                 Ok(range) => range,
-                Err(_) => return -(EINVAL as isize),
+                Err(e) => return e.to_errno(),
             };
 
             // 获取当前进程 PID
