@@ -8,7 +8,6 @@ global_asm!(include_str!("entry.S"));
 use crate::mm::address::UsizeConvert;
 use crate::{
     arch::{timer, trap},
-    earlyprintln,
     kernel::{self, NUM_CPU, current_cpu},
     pr_debug, pr_err, pr_info, pr_warn,
     sync::PreemptGuard,
@@ -25,7 +24,7 @@ unsafe extern "C" {
 /// 从核调试入口
 #[unsafe(no_mangle)]
 pub extern "C" fn secondary_debug_entry(hartid: usize) {
-    crate::earlyprintln!("[DEBUG] Hart {} reached secondary_wait_high", hartid);
+    crate::println!("[DEBUG] Hart {} reached secondary_wait_high", hartid);
 }
 
 /// RISC-V 主核启动入口
@@ -53,7 +52,7 @@ fn setup_boot_cpu(_hartid: usize) {
         unsafe {
             core::arch::asm!("mv tp, {}", in(reg) cpu_ptr);
         }
-        earlyprintln!("[Boot] Initialized CPUS, tp = 0x{:x}", cpu_ptr);
+        crate::println!("[Boot] Initialized CPUS, tp = 0x{:x}", cpu_ptr);
     }
 }
 

@@ -73,8 +73,6 @@ mod memory_space_tests {
 
     // 6. 测试 MMIO 地址翻译 - 使用独立的 MemorySpace 实例
     test_case!(test_mmio_translation, {
-        use crate::arch::ArchImpl;
-
         // 使用独立的 MemorySpace 实例，避免与其他测试或全局状态冲突
         let mut ms = MemorySpace::new();
 
@@ -172,8 +170,6 @@ mod memory_space_tests {
 
     // 8. 测试动态添加 MMIO 映射
     test_case!(test_dynamic_mmio_mapping, {
-        use crate::arch::ArchImpl;
-
         let mut ms = MemorySpace::new();
 
         // 尝试映射一个自定义的 MMIO 区域（使用未占用的地址）
@@ -269,8 +265,6 @@ mod memory_space_tests {
 
     // 11. 测试 map_mmio 函数 - 冲突检测
     test_case!(test_map_mmio_conflict, {
-        use crate::arch::ArchImpl;
-
         let mut ms = MemorySpace::new();
 
         // 使用一个合理的物理地址
@@ -445,9 +439,8 @@ mod memory_space_tests {
     // 16. 测试 mmap 文件映射基本功能
     test_case!(test_mmap_file_basic, {
         use crate::fs::tmpfs::TmpFs;
-        use crate::uapi::mm::{MapFlags, ProtFlags};
+
         use crate::vfs::{File, FileMode, FileSystem};
-        use alloc::sync::Arc;
 
         println!("Testing mmap file mapping basic functionality");
 

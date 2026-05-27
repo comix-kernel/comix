@@ -410,10 +410,10 @@ fn apply_static_pie_relocs(
                     return Err(ExecImageError::InvalidElf);
                 }
                 let sym_addr = load_bias + dt_symtab + r_sym * dt_syment;
-                let st_value = space
+
+                space
                     .read_u64_at(sym_addr + 8)
-                    .map_err(ExecImageError::Paging)? as usize;
-                st_value
+                    .map_err(ExecImageError::Paging)? as usize
             }
         };
         let value = resolve_relocation_value(kind, load_bias, symbol_value, r_addend);

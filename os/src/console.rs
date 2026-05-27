@@ -4,8 +4,9 @@
 //! - 早期阶段：使用 arch::sbi 直接输出
 //! - 运行时阶段：使用 device::console::MAIN_CONSOLE
 
+use core::cell::UnsafeCell;
 use core::fmt::{self, Write};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::arch::Platform;
 use crate::sync::SpinLock;
@@ -16,9 +17,59 @@ static CONSOLE_RUNTIME: AtomicBool = AtomicBool::new(false);
 /// 控制台锁（保护输出的原子性）
 static CONSOLE_LOCK: SpinLock<()> = SpinLock::new(());
 
+const BOOT_CONSOLE_BUFFER_SIZE: usize = 16 * 1024;
+
+struct BootConsoleBuffer {
+    write_seq: AtomicUsize,
+    replayed_seq: AtomicUsize,
+    bytes: [UnsafeCell<u8>; BOOT_CONSOLE_BUFFER_SIZE],
+}
+
+unsafe impl Sync for BootConsoleBuffer {}
+
+impl BootConsoleBuffer {
+    const fn new() -> Self {
+        Self {
+            write_seq: AtomicUsize::new(0),
+            replayed_seq: AtomicUsize::new(0),
+            bytes: [const { UnsafeCell::new(0) }; BOOT_CONSOLE_BUFFER_SIZE],
+        }
+    }
+
+    fn push(&self, byte: u8) {
+        let seq = self.write_seq.fetch_add(1, Ordering::Relaxed);
+        unsafe {
+            *self.bytes[seq % BOOT_CONSOLE_BUFFER_SIZE].get() = byte;
+        }
+    }
+
+    fn replay_to_runtime_console(&self) {
+        #[cfg(feature = "device")]
+        if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
+            let write_seq = self.write_seq.load(Ordering::Acquire);
+            let oldest = write_seq.saturating_sub(BOOT_CONSOLE_BUFFER_SIZE);
+            let start = self.replayed_seq.load(Ordering::Acquire).max(oldest);
+
+            for seq in start..write_seq {
+                let byte = unsafe { *self.bytes[seq % BOOT_CONSOLE_BUFFER_SIZE].get() };
+                console.write_bytes(&[byte]);
+            }
+
+            self.replayed_seq.store(write_seq, Ordering::Release);
+        }
+    }
+}
+
+static BOOT_CONSOLE_BUFFER: BootConsoleBuffer = BootConsoleBuffer::new();
+
 /// 切换到运行时控制台（设备初始化完成后调用）
 pub fn init() {
     CONSOLE_RUNTIME.store(true, Ordering::Release);
+    BOOT_CONSOLE_BUFFER.replay_to_runtime_console();
+}
+
+pub fn is_runtime() -> bool {
+    CONSOLE_RUNTIME.load(Ordering::Acquire)
 }
 
 #[inline]
@@ -32,6 +83,7 @@ fn write_str_unlocked(s: &str) {
     }
 
     for b in s.bytes() {
+        BOOT_CONSOLE_BUFFER.push(b);
         crate::arch::ArchImpl::console_putchar(b);
     }
 }
@@ -43,15 +95,7 @@ fn putchar_unlocked(c: u8) {
     if CONSOLE_RUNTIME.load(Ordering::Acquire) {
         // 运行时：使用 device console
         if let Some(console) = crate::device::console::MAIN_CONSOLE.read().as_ref() {
-            // `Console::write_str` 只接受 UTF-8 字符串，因此这里只对 ASCII 走 runtime console；
-            // 对于非 ASCII 字节，直接降级到 SBI，避免破坏 UTF-8 多字节序列。
-            if c.is_ascii() {
-                let buf = [c];
-                let s = core::str::from_utf8(&buf).unwrap();
-                console.write_str(s);
-            } else {
-                crate::arch::ArchImpl::console_putchar(c);
-            }
+            console.write_bytes(&[c]);
         } else {
             // 降级到 SBI
             crate::arch::ArchImpl::console_putchar(c);
@@ -59,6 +103,7 @@ fn putchar_unlocked(c: u8) {
         return;
     }
     // 早期或无 device 功能：使用 arch console
+    BOOT_CONSOLE_BUFFER.push(c);
     crate::arch::ArchImpl::console_putchar(c);
 }
 
@@ -80,22 +125,36 @@ fn getchar_unlocked() -> Option<u8> {
     crate::arch::ArchImpl::console_getchar()
 }
 
+fn with_console_lock_or_fallback(f: impl FnOnce()) {
+    if let Some(_guard) = CONSOLE_LOCK.try_lock() {
+        f();
+    } else {
+        f();
+    }
+}
+
 /// 带锁的字符串输出（公开接口）
 pub fn write_str(s: &str) {
-    let _guard = CONSOLE_LOCK.lock();
-    write_str_unlocked(s);
+    with_console_lock_or_fallback(|| write_str_unlocked(s));
 }
 
 /// 带锁的单字符输出（公开接口，用于兼容性）
 pub fn putchar(c: u8) {
-    let _guard = CONSOLE_LOCK.lock();
-    putchar_unlocked(c);
+    with_console_lock_or_fallback(|| putchar_unlocked(c));
 }
 
 /// 带锁的单字符输入（公开接口）
 pub fn getchar() -> Option<u8> {
-    let _guard = CONSOLE_LOCK.lock();
-    getchar_unlocked()
+    if let Some(_guard) = CONSOLE_LOCK.try_lock() {
+        getchar_unlocked()
+    } else {
+        None
+    }
+}
+
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments) {
+    Stdout.write_fmt(args).unwrap();
 }
 
 /// 控制台输出结构体（实现 Write trait，供日志系统使用）
@@ -110,50 +169,48 @@ impl Write for Stdout {
     fn write_fmt(&mut self, args: fmt::Arguments) -> fmt::Result {
         // 重写 write_fmt 以确保整个格式化输出在一个锁内完成
         // 这样可以防止多个 CPU 的日志输出交错
-        let _guard = CONSOLE_LOCK.lock();
-
-        // 创建一个临时的 writer，它使用 putchar_unlocked（不加锁）
-        struct UnlockedWriter;
-        impl Write for UnlockedWriter {
-            fn write_str(&mut self, s: &str) -> fmt::Result {
-                write_str_unlocked(s);
-                Ok(())
-            }
+        if let Some(_guard) = CONSOLE_LOCK.try_lock() {
+            UnlockedWriter.write_fmt(args)
+        } else {
+            UnlockedWriter.write_fmt(args)
         }
-
-        // 在持有锁的情况下格式化并输出
-        UnlockedWriter.write_fmt(args)
     }
 }
 
-/// 早期打印：逐字节通过 arch 的 console_putchar 输出。
-/// 不使用锁，适用于内核初始化早期阶段。
+// 创建一个临时的 writer，它使用 write_str_unlocked（不加锁）
+struct UnlockedWriter;
+impl Write for UnlockedWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        write_str_unlocked(s);
+        Ok(())
+    }
+}
+
+/// Emergency print: no console lock; runtime uses MAIN_CONSOLE, otherwise boot buffer + arch mirror.
 #[doc(hidden)]
-pub fn _early_print(args: core::fmt::Arguments) {
+pub fn emergency_print(args: core::fmt::Arguments) {
     struct EarlyWriter;
     impl core::fmt::Write for EarlyWriter {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            for b in s.bytes() {
-                crate::arch::ArchImpl::console_putchar(b);
-            }
+            write_str_unlocked(s);
             Ok(())
         }
     }
     EarlyWriter.write_fmt(args).unwrap();
 }
 
-/// 早期打印宏 (不含换行)
+/// 打印格式化文本到控制台并写入日志缓冲区。
 #[macro_export]
-macro_rules! earlyprint {
+macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::_early_print(format_args!($fmt $(, $($arg)+)?))
+        $crate::log::print_impl(format_args!($fmt $(, $($arg)+)?))
     }
 }
 
-/// 早期打印宏 (含换行)
+/// 打印格式化文本到控制台并添加换行，同时写入日志缓冲区。
 #[macro_export]
-macro_rules! earlyprintln {
+macro_rules! println {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::_early_print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+        $crate::log::print_impl(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }
 }

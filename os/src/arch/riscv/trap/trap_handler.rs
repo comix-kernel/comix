@@ -4,7 +4,6 @@
 
 use core::sync::atomic::Ordering;
 
-use crate::earlyprintln;
 use crate::ipc::check_signal;
 use riscv::register::scause::{self, Trap};
 use riscv::register::sstatus::SPP;
@@ -16,6 +15,12 @@ use crate::arch::trap::restore;
 use crate::device::IRQ_MANAGER;
 use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_task};
+
+macro_rules! emergency_println {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        crate::console::emergency_print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+    };
+}
 
 /// 陷阱处理程序
 /// 从中断处理入口跳转到这里时，
@@ -103,138 +108,138 @@ pub fn user_trap(
             let sscratch_val = sscratch::read();
 
             // 打印详细的异常信息
-            crate::earlyprintln!("\n");
-            crate::earlyprintln!("===============================================");
-            crate::earlyprintln!("   UNEXPECTED TRAP IN USER MODE (U-Mode)");
-            crate::earlyprintln!("===============================================");
-            crate::earlyprintln!("");
-            crate::earlyprintln!("[!] Exception Type:");
-            crate::earlyprintln!("   Trap: {:?}", scause.cause());
-            crate::earlyprintln!("   Raw scause: {:#x}", scause_val);
-            crate::earlyprintln!("");
-            crate::earlyprintln!("[!] Exception Location:");
-            crate::earlyprintln!("   sepc (fault PC):  {:#x}", sepc_old);
-            crate::earlyprintln!("   stval (fault VA): {:#x}", stval_val);
-            crate::earlyprintln!("");
-            crate::earlyprintln!("[!] Register State:");
-            crate::earlyprintln!("   sstatus: {:#x}", sstatus_old.bits());
-            crate::earlyprintln!("   sscratch: {:#x}", sscratch_val);
-            crate::earlyprintln!("");
-            crate::earlyprintln!("[!] TrapFrame Details:");
-            crate::earlyprintln!("   Stack Pointers:");
-            crate::earlyprintln!("     x2_sp (user stack): {:#x} <===", trap_frame.x2_sp);
-            crate::earlyprintln!("     kernel_sp:          {:#x}", trap_frame.kernel_sp);
-            crate::earlyprintln!("");
-            crate::earlyprintln!("   General Registers:");
-            crate::earlyprintln!(
+            emergency_println!("\n");
+            emergency_println!("===============================================");
+            emergency_println!("   UNEXPECTED TRAP IN USER MODE (U-Mode)");
+            emergency_println!("===============================================");
+            emergency_println!("");
+            emergency_println!("[!] Exception Type:");
+            emergency_println!("   Trap: {:?}", scause.cause());
+            emergency_println!("   Raw scause: {:#x}", scause_val);
+            emergency_println!("");
+            emergency_println!("[!] Exception Location:");
+            emergency_println!("   sepc (fault PC):  {:#x}", sepc_old);
+            emergency_println!("   stval (fault VA): {:#x}", stval_val);
+            emergency_println!("");
+            emergency_println!("[!] Register State:");
+            emergency_println!("   sstatus: {:#x}", sstatus_old.bits());
+            emergency_println!("   sscratch: {:#x}", sscratch_val);
+            emergency_println!("");
+            emergency_println!("[!] TrapFrame Details:");
+            emergency_println!("   Stack Pointers:");
+            emergency_println!("     x2_sp (user stack): {:#x} <===", trap_frame.x2_sp);
+            emergency_println!("     kernel_sp:          {:#x}", trap_frame.kernel_sp);
+            emergency_println!("");
+            emergency_println!("   General Registers:");
+            emergency_println!(
                 "     x1_ra:  {:#x}  x3_gp:  {:#x}  x4_tp:  {:#x}",
                 trap_frame.x1_ra,
                 trap_frame.x3_gp,
                 trap_frame.x4_tp
             );
-            crate::earlyprintln!(
+            emergency_println!(
                 "     x5_t0:  {:#x}  x6_t1:  {:#x}  x7_t2:  {:#x}",
                 trap_frame.x5_t0,
                 trap_frame.x6_t1,
                 trap_frame.x7_t2
             );
-            crate::earlyprintln!("");
-            crate::earlyprintln!("   Argument Registers:");
-            crate::earlyprintln!(
+            emergency_println!("");
+            emergency_println!("   Argument Registers:");
+            emergency_println!(
                 "     x10_a0: {:#x}  x11_a1: {:#x}  x12_a2: {:#x}",
                 trap_frame.x10_a0,
                 trap_frame.x11_a1,
                 trap_frame.x12_a2
             );
-            crate::earlyprintln!(
+            emergency_println!(
                 "     x13_a3: {:#x}  x14_a4: {:#x}  x15_a5: {:#x}",
                 trap_frame.x13_a3,
                 trap_frame.x14_a4,
                 trap_frame.x15_a5
             );
-            crate::earlyprintln!(
+            emergency_println!(
                 "     x16_a6: {:#x}  x17_a7: {:#x}",
                 trap_frame.x16_a6,
                 trap_frame.x17_a7
             );
-            crate::earlyprintln!("");
-            crate::earlyprintln!("   Saved Registers:");
-            crate::earlyprintln!(
+            emergency_println!("");
+            emergency_println!("   Saved Registers:");
+            emergency_println!(
                 "     x8_s0:  {:#x}  x9_s1:  {:#x}",
                 trap_frame.x8_s0,
                 trap_frame.x9_s1
             );
-            crate::earlyprintln!(
+            emergency_println!(
                 "     x18_s2: {:#x}  x19_s3: {:#x}",
                 trap_frame.x18_s2,
                 trap_frame.x19_s3
             );
-            crate::earlyprintln!("");
+            emergency_println!("");
 
             // 解释常见的异常类型
-            crate::earlyprintln!("[!] Exception Explanation:");
+            emergency_println!("[!] Exception Explanation:");
             match scause.cause() {
                 Trap::Exception(0) => {
-                    crate::earlyprintln!("   Instruction Address Misaligned");
-                    crate::earlyprintln!("   -> PC address {:#x} is not 2-byte aligned", sepc_old);
+                    emergency_println!("   Instruction Address Misaligned");
+                    emergency_println!("   -> PC address {:#x} is not 2-byte aligned", sepc_old);
                 }
                 Trap::Exception(1) => {
-                    crate::earlyprintln!("   Instruction Access Fault");
-                    crate::earlyprintln!("   -> Cannot fetch instruction from {:#x}", sepc_old);
+                    emergency_println!("   Instruction Access Fault");
+                    emergency_println!("   -> Cannot fetch instruction from {:#x}", sepc_old);
                 }
                 Trap::Exception(2) => {
-                    crate::earlyprintln!("   Illegal Instruction");
-                    crate::earlyprintln!("   -> Illegal instruction at {:#x}", sepc_old);
+                    emergency_println!("   Illegal Instruction");
+                    emergency_println!("   -> Illegal instruction at {:#x}", sepc_old);
                 }
                 Trap::Exception(4) => {
-                    crate::earlyprintln!("   Load Address Misaligned");
-                    crate::earlyprintln!(
+                    emergency_println!("   Load Address Misaligned");
+                    emergency_println!(
                         "   -> Tried to load from misaligned address {:#x}",
                         stval_val
                     );
                 }
                 Trap::Exception(5) => {
-                    crate::earlyprintln!("   Load Access Fault");
-                    crate::earlyprintln!("   -> Cannot read from address {:#x}", stval_val);
+                    emergency_println!("   Load Access Fault");
+                    emergency_println!("   -> Cannot read from address {:#x}", stval_val);
                 }
                 Trap::Exception(6) => {
-                    crate::earlyprintln!("   Store/AMO Address Misaligned");
-                    crate::earlyprintln!(
+                    emergency_println!("   Store/AMO Address Misaligned");
+                    emergency_println!(
                         "   -> Tried to store to misaligned address {:#x}",
                         stval_val
                     );
                 }
                 Trap::Exception(7) => {
-                    crate::earlyprintln!("   Store/AMO Access Fault");
-                    crate::earlyprintln!("   -> Cannot write to address {:#x}", stval_val);
+                    emergency_println!("   Store/AMO Access Fault");
+                    emergency_println!("   -> Cannot write to address {:#x}", stval_val);
                 }
                 Trap::Exception(12) => {
-                    crate::earlyprintln!("   Instruction Page Fault");
-                    crate::earlyprintln!(
+                    emergency_println!("   Instruction Page Fault");
+                    emergency_println!(
                         "   -> Page table entry invalid or no permission at {:#x}",
                         sepc_old
                     );
                 }
                 Trap::Exception(13) => {
-                    crate::earlyprintln!("   Load Page Fault");
-                    crate::earlyprintln!(
+                    emergency_println!("   Load Page Fault");
+                    emergency_println!(
                         "   -> Page table entry invalid or no read permission at {:#x}",
                         stval_val
                     );
                 }
                 Trap::Exception(15) => {
-                    crate::earlyprintln!("   Store Page Fault");
-                    crate::earlyprintln!(
+                    emergency_println!("   Store Page Fault");
+                    emergency_println!(
                         "   -> Page table entry invalid or no write permission at {:#x}",
                         stval_val
                     );
                 }
                 _ => {
-                    crate::earlyprintln!("   Unknown exception type");
+                    emergency_println!("   Unknown exception type");
                 }
             }
-            crate::earlyprintln!("");
-            crate::earlyprintln!("===============================================");
+            emergency_println!("");
+            emergency_println!("===============================================");
             // 不要因为用户态异常让内核 panic；仿照 Linux 行为，终止当前任务即可。
             // TODO: 进一步完善为向进程投递对应信号（SIGILL/SIGSEGV/...），并支持 core dump 等。
             let sig = match scause.cause() {
@@ -304,16 +309,16 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
             let scause_val = scause.bits();
 
             // 先直接打印到控制台，避免panic格式化时再次触发异常
-            earlyprintln!("\n");
-            earlyprintln!("================ KERNEL PANIC ================");
-            earlyprintln!("Unexpected exception in S-Mode (Kernel)!");
-            earlyprintln!("----------------------------------------------");
-            earlyprintln!("  Exception: {:?} (Raw scause: {:#x})", e, scause_val);
-            earlyprintln!("  Faulting VA (stval): {:#x}", stval_val);
-            earlyprintln!("  Faulting PC (sepc):  {:#x}", sepc_old);
-            earlyprintln!("  sstatus:             {:#x}", sstatus_old.bits());
-            earlyprintln!("  sscratch:            {:#x}", sscratch_val);
-            earlyprintln!("==============================================");
+            emergency_println!("\n");
+            emergency_println!("================ KERNEL PANIC ================");
+            emergency_println!("Unexpected exception in S-Mode (Kernel)!");
+            emergency_println!("----------------------------------------------");
+            emergency_println!("  Exception: {:?} (Raw scause: {:#x})", e, scause_val);
+            emergency_println!("  Faulting VA (stval): {:#x}", stval_val);
+            emergency_println!("  Faulting PC (sepc):  {:#x}", sepc_old);
+            emergency_println!("  sstatus:             {:#x}", sstatus_old.bits());
+            emergency_println!("  sscratch:            {:#x}", sscratch_val);
+            emergency_println!("==============================================");
             // sbi::shutdown(true);
             panic!("Kernel exception in S-Mode");
         }

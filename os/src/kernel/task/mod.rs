@@ -59,7 +59,7 @@ pub(crate) fn forkret() {
             t.memory_space.is_none(),
         )
     };
-    unsafe { crate::arch::kernel::task::forkret_restore(tf_ptr, is_kernel_thread) };
+    unsafe { crate::arch::forkret_restore(tf_ptr, is_kernel_thread) };
 }
 
 /// 在任务结束时调用的函数

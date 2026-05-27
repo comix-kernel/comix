@@ -8,4 +8,4 @@ pub use blk_dev_file::BlockDeviceFile;
 pub use char_dev_file::CharDeviceFile;
 pub use pipe_file::PipeFile;
 pub use reg_file::RegFile;
-pub use stdio_file::{StderrFile, StdinFile, StdoutFile, create_stdio_files};
+pub use stdio_file::create_stdio_files;
