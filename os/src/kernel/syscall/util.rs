@@ -4,7 +4,6 @@ use core::ffi::CStr;
 
 use crate::arch::Arch;
 use alloc::{
-    format,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -23,7 +22,7 @@ use crate::{
 const PATH_MAX: usize = 4096;
 
 /// 从用户空间复制字符串到内核缓冲区
-fn copy_str_from_user(user_ptr: usize) -> Result<String, &'static str> {
+fn copy_str_from_user(user_ptr: usize) -> Result<String, FsError> {
     let mut buf = [0u8; PATH_MAX];
     let len = unsafe {
         crate::arch::ArchImpl::copy_strn_from_user(
@@ -31,18 +30,17 @@ fn copy_str_from_user(user_ptr: usize) -> Result<String, &'static str> {
             buf.as_mut_ptr(),
             PATH_MAX,
         )
-        .map_err(|_| "Failed to read string from user space")?
+        .map_err(|_| FsError::BadAddress)?
     };
     if len == PATH_MAX {
-        return Err("Path exceeds PATH_MAX");
+        return Err(FsError::NameTooLong);
     }
     // copy_strn_from_user 在遇到 '\0' 时返回其索引（含 '\0'）
-    let c_str =
-        CStr::from_bytes_until_nul(&buf[..=len]).map_err(|_| "String is not null-terminated")?;
+    let c_str = CStr::from_bytes_until_nul(&buf[..=len]).map_err(|_| FsError::InvalidArgument)?;
     c_str
         .to_str()
         .map(|s| s.to_string())
-        .map_err(|_| "String is not valid UTF-8")
+        .map_err(|_| FsError::InvalidArgument)
 }
 
 /// 从用户空间获取路径字符串
@@ -50,10 +48,10 @@ fn copy_str_from_user(user_ptr: usize) -> Result<String, &'static str> {
 /// - `path`: 指向用户空间路径字符串的指针
 /// # 返回值
 /// - 成功时返回路径字符串
-/// - 失败时返回错误字符串
-pub fn get_path_safe(path: usize) -> Result<String, &'static str> {
+/// - 失败时返回 [`FsError`]
+pub fn get_path_safe(path: usize) -> Result<String, FsError> {
     if path == 0 {
-        return Err("Path pointer is NULL");
+        return Err(FsError::BadAddress);
     }
     copy_str_from_user(path)
 }
@@ -65,7 +63,7 @@ pub fn get_path_safe(path: usize) -> Result<String, &'static str> {
 /// # 返回值
 /// - 成功时返回包含参数字符串的 `Vec<String>`
 /// - 失败时返回错误字符串
-pub fn get_args_safe(ptr_array: usize, name: &str) -> Result<Vec<String>, String> {
+pub fn get_args_safe(ptr_array: usize, _name: &str) -> Result<Vec<String>, FsError> {
     let mut args = Vec::new();
 
     if ptr_array == 0 {
@@ -83,7 +81,7 @@ pub fn get_args_safe(ptr_array: usize, name: &str) -> Result<Vec<String>, String
                     (&mut val) as *mut usize as *mut u8,
                     core::mem::size_of::<usize>(),
                 )
-                .map_err(|_| format!("Failed to read {} pointer array from user space", name))?;
+                .map_err(|_| FsError::BadAddress)?;
             }
             val
         };
@@ -92,8 +90,7 @@ pub fn get_args_safe(ptr_array: usize, name: &str) -> Result<Vec<String>, String
             break; // NULL 终止
         }
 
-        let s =
-            copy_str_from_user(ptr_val).map_err(|e| format!("{}[{}]: {}", name, args.len(), e))?;
+        let s = copy_str_from_user(ptr_val)?;
 
         args.push(s);
         offset += core::mem::size_of::<usize>();
@@ -115,7 +112,7 @@ pub fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, Fs
             .lock()
             .cwd
             .clone()
-            .ok_or(FsError::NotSupported)?
+            .ok_or(FsError::IoError)?
     } else {
         // 对于文件描述符，我们需要获取对应的 dentry
         let task = current_task();

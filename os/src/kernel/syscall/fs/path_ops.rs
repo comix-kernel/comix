@@ -5,9 +5,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析标志位
@@ -83,9 +81,7 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 分割路径为目录和文件名
@@ -113,9 +109,7 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     let is_rmdir = (flags & AT_REMOVEDIR) != 0;
@@ -172,9 +166,7 @@ pub fn chdir(path: *const c_char) -> isize {
     // 解析路径
     let path_str = match get_path_safe(path as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 查找目标目录
@@ -202,7 +194,7 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
     // 获取当前工作目录dentry
     let cwd_dentry = match current_task().lock().fs.lock().cwd.clone() {
         Some(d) => d,
-        None => return FsError::NotSupported.to_errno(),
+        None => return FsError::IoError.to_errno(),
     };
 
     // 获取完整路径
@@ -215,14 +207,28 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
     }
 
     // 复制到用户态缓冲区
-    unsafe {
+    if unsafe {
         crate::arch::ArchImpl::copy_to_user(
             path_bytes.as_ptr(),
             crate::arch::address::UA::from_usize(buf as usize),
             path_bytes.len(),
         )
-        .ok();
-        write_to_user(buf.add(path_bytes.len()), 0u8);
+    }
+    .is_err()
+    {
+        return FsError::BadAddress.to_errno();
+    }
+    let nul = [0u8];
+    if unsafe {
+        crate::arch::ArchImpl::copy_to_user(
+            nul.as_ptr(),
+            crate::arch::address::UA::from_usize(buf as usize + path_bytes.len()),
+            nul.len(),
+        )
+    }
+    .is_err()
+    {
+        return FsError::BadAddress.to_errno();
     }
 
     buf as isize

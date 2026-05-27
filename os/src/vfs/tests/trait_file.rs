@@ -42,7 +42,7 @@ test_case!(test_disk_file_vs_pipe_file_lseek, {
 
     let result = pipe_file.lseek(0, SeekWhence::Set);
     kassert!(result.is_err());
-    kassert!(matches!(result, Err(FsError::NotSupported)));
+    kassert!(matches!(result, Err(FsError::NotSeekable)));
 });
 
 test_case!(test_disk_file_vs_pipe_file_offset, {
