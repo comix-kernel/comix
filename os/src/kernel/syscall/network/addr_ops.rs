@@ -53,7 +53,7 @@ pub fn sendto(
 
     let endpoint = match parse_sockaddr_in(dest_addr, addrlen) {
         Ok(e) => e,
-        Err(_) => return -22, // EINVAL
+        Err(e) => return e.to_errno(),
     };
 
     let task = current_task();
@@ -270,8 +270,8 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         }
     };
 
-    if write_sockaddr_in(addr, addrlen, ep).is_err() {
-        return -22; // EINVAL
+    if let Err(e) = write_sockaddr_in(addr, addrlen, ep) {
+        return e.to_errno();
     }
     0
 }
@@ -300,8 +300,8 @@ pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     };
 
     if let Some(ep) = remote_endpoint {
-        if write_sockaddr_in(addr, addrlen, ep).is_err() {
-            return -22; // EINVAL
+        if let Err(e) = write_sockaddr_in(addr, addrlen, ep) {
+            return e.to_errno();
         }
         0
     } else {
