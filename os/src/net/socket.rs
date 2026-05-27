@@ -1,6 +1,7 @@
 //! Socket implementation using smoltcp
 
 use crate::arch::Arch;
+use crate::net::NetworkError;
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
 use alloc::collections::VecDeque;
@@ -222,13 +223,13 @@ pub fn update_socket_handle(tid: usize, fd: usize, handle: SocketHandle) {
 pub fn set_socket_local_endpoint(
     file: &Arc<dyn crate::vfs::File>,
     endpoint: IpEndpoint,
-) -> Result<(), ()> {
+) -> Result<(), NetworkError> {
     let any = file.as_any();
     if let Some(socket_file) = any.downcast_ref::<SocketFile>() {
         socket_file.set_local_endpoint(endpoint);
         Ok(())
     } else {
-        Err(())
+        Err(NetworkError::InvalidSocket)
     }
 }
 
@@ -243,13 +244,13 @@ pub fn get_socket_local_endpoint(file: &Arc<dyn crate::vfs::File>) -> Option<IpE
 pub fn set_socket_remote_endpoint(
     file: &Arc<dyn crate::vfs::File>,
     endpoint: IpEndpoint,
-) -> Result<(), ()> {
+) -> Result<(), NetworkError> {
     let any = file.as_any();
     if let Some(socket_file) = any.downcast_ref::<SocketFile>() {
         socket_file.set_remote_endpoint(endpoint);
         Ok(())
     } else {
-        Err(())
+        Err(NetworkError::InvalidSocket)
     }
 }
 
@@ -278,13 +279,13 @@ pub fn socket_shutdown_write(file: &Arc<dyn crate::vfs::File>) {
 pub fn update_socket_file_handle(
     file: &Arc<dyn crate::vfs::File>,
     new_handle: SocketHandle,
-) -> Result<(), ()> {
+) -> Result<(), NetworkError> {
     let any = file.as_any();
     if let Some(socket_file) = any.downcast_ref::<SocketFile>() {
         socket_file.set_handle(new_handle);
         Ok(())
     } else {
-        Err(())
+        Err(NetworkError::InvalidSocket)
     }
 }
 
@@ -339,9 +340,9 @@ const AF_INET: u16 = 2;
 const SOCKADDR_IN_SIZE: usize = 16;
 
 /// Parse sockaddr_in structure from user space
-pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()> {
+pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, NetworkError> {
     if (addrlen as usize) < SOCKADDR_IN_SIZE {
-        return Err(());
+        return Err(NetworkError::InvalidAddress);
     }
 
     let mut buf = [0u8; SOCKADDR_IN_SIZE];
@@ -352,11 +353,11 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
             SOCKADDR_IN_SIZE,
         )
     }
-    .map_err(|_| ())?;
+    .map_err(|_| NetworkError::BadAddress)?;
 
     let family = u16::from_ne_bytes([buf[0], buf[1]]);
     if family != AF_INET {
-        return Err(());
+        return Err(NetworkError::InvalidAddress);
     }
 
     let port = u16::from_be_bytes([buf[2], buf[3]]);
@@ -369,9 +370,12 @@ pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, ()
 }
 
 /// Write sockaddr_in to buffer
-pub(crate) fn write_sockaddr_in_to_buf(buf: &mut [u8], endpoint: IpEndpoint) -> Result<(), ()> {
+pub(crate) fn write_sockaddr_in_to_buf(
+    buf: &mut [u8],
+    endpoint: IpEndpoint,
+) -> Result<(), NetworkError> {
     if buf.len() < SOCKADDR_IN_SIZE {
-        return Err(());
+        return Err(NetworkError::BufferTooSmall);
     }
 
     // family
@@ -387,11 +391,11 @@ pub(crate) fn write_sockaddr_in_to_buf(buf: &mut [u8], endpoint: IpEndpoint) -> 
         }
         #[cfg(feature = "proto-ipv6")]
         IpAddress::Ipv6(_) => {
-            return Err(()); // IPv6 not supported in AF_INET
+            return Err(NetworkError::NotSupported); // IPv6 not supported in AF_INET
         }
         #[cfg(not(feature = "proto-ipv6"))]
         _ => {
-            return Err(()); // Unknown address type
+            return Err(NetworkError::NotSupported); // Unknown address type
         }
     }
 
@@ -402,7 +406,11 @@ pub(crate) fn write_sockaddr_in_to_buf(buf: &mut [u8], endpoint: IpEndpoint) -> 
 }
 
 /// Write sockaddr_in structure to user space
-pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint) -> Result<(), ()> {
+pub fn write_sockaddr_in(
+    addr: *mut u8,
+    addrlen: *mut u32,
+    endpoint: IpEndpoint,
+) -> Result<(), NetworkError> {
     if addr.is_null() || addrlen.is_null() {
         return Ok(());
     }
@@ -428,16 +436,16 @@ pub fn write_sockaddr_in(addr: *mut u8, addrlen: *mut u32, endpoint: IpEndpoint)
             n,
         )
     }
-    .map_err(|_| ())?;
+    .map_err(|_| NetworkError::BadAddress)?;
 
     Ok(())
 }
 
-pub fn create_tcp_socket() -> Result<SocketHandle, ()> {
+pub fn create_tcp_socket() -> Result<SocketHandle, NetworkError> {
     crate::net::stack::network_stack().create_tcp_socket()
 }
 
-pub fn create_udp_socket() -> Result<SocketHandle, ()> {
+pub fn create_udp_socket() -> Result<SocketHandle, NetworkError> {
     crate::net::stack::network_stack().create_udp_socket()
 }
 
@@ -446,7 +454,11 @@ pub fn init_network(smoltcp_iface: crate::net::interface::SmoltcpInterface) {
     crate::net::stack::network_stack().init_network(smoltcp_iface);
 }
 
-pub fn tcp_connect(handle: SmoltcpHandle, remote: IpEndpoint, local: IpEndpoint) -> Result<(), ()> {
+pub fn tcp_connect(
+    handle: SmoltcpHandle,
+    remote: IpEndpoint,
+    local: IpEndpoint,
+) -> Result<(), NetworkError> {
     crate::net::stack::network_stack().tcp_connect(handle, remote, local)
 }
 
@@ -472,7 +484,7 @@ pub fn udp_attach_fd_to_port(
     old_handle: SmoltcpHandle,
     port: u16,
     bind_addr: Option<IpAddress>,
-) -> Result<SmoltcpHandle, ()> {
+) -> Result<SmoltcpHandle, NetworkError> {
     crate::net::stack::network_stack()
         .udp_attach_fd_to_port(tid, fd, file, old_handle, port, bind_addr)
 }

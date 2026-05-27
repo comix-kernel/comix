@@ -63,7 +63,9 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     init_heap();
 
     // 3. 创建内核地址空间（不激活，由调用者在合适时机激活）
-    let space = Arc::new(SpinLock::new(memory_space::MemorySpace::new_kernel()));
+    let space = Arc::new(SpinLock::new(
+        memory_space::MemorySpace::new_kernel().expect("failed to create kernel memory space"),
+    ));
 
     // 记录全局内核空间句柄，供次核切换使用（确保所有 CPU 使用同一份内核页表）
     set_global_kernel_space(space.clone());

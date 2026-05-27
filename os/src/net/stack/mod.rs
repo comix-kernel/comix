@@ -12,6 +12,7 @@ use smoltcp::socket::{tcp, udp};
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address};
 
+use super::NetworkError;
 use super::socket::{self, SocketFile, SocketHandle, UdpDatagram};
 
 mod adapter;
@@ -150,13 +151,17 @@ impl NetworkStack {
     }
 
     /// Create a TCP socket in the stack runtime.
-    pub fn create_tcp_socket(&self) -> Result<SocketHandle, ()> {
+    pub fn create_tcp_socket(&self) -> Result<SocketHandle, NetworkError> {
         let mut rx_vec = alloc::vec::Vec::new();
-        rx_vec.try_reserve(4096).map_err(|_| ())?;
+        rx_vec
+            .try_reserve(4096)
+            .map_err(|_| NetworkError::NoMemory)?;
         rx_vec.resize(4096, 0);
 
         let mut tx_vec = alloc::vec::Vec::new();
-        tx_vec.try_reserve(4096).map_err(|_| ())?;
+        tx_vec
+            .try_reserve(4096)
+            .map_err(|_| NetworkError::NoMemory)?;
         tx_vec.resize(4096, 0);
 
         let rx_buffer = tcp::SocketBuffer::new(rx_vec);
@@ -168,7 +173,7 @@ impl NetworkStack {
     }
 
     /// Create a UDP socket in the stack runtime.
-    pub fn create_udp_socket(&self) -> Result<SocketHandle, ()> {
+    pub fn create_udp_socket(&self) -> Result<SocketHandle, NetworkError> {
         let mut sockets = self.socket_set.lock();
         let handle = self.create_udp_socket_in_set(&mut sockets)?;
         Ok(SocketHandle::Udp(handle))
@@ -180,12 +185,12 @@ impl NetworkStack {
         handle: SmoltcpHandle,
         remote: IpEndpoint,
         local: IpEndpoint,
-    ) -> Result<(), ()> {
+    ) -> Result<(), NetworkError> {
         crate::pr_debug!("tcp_connect: start, handle={:?}", handle);
 
         let iface_guard = self.net_iface.lock();
         crate::pr_debug!("tcp_connect: got net_iface lock");
-        let wrapper = iface_guard.as_ref().ok_or(())?;
+        let wrapper = iface_guard.as_ref().ok_or(NetworkError::NotInitialized)?;
 
         let result = wrapper.with_context(|context| {
             crate::pr_debug!("tcp_connect: in with_context");
@@ -195,6 +200,7 @@ impl NetworkStack {
             crate::pr_debug!("tcp_connect: calling socket.connect");
             let r = socket.connect(context, remote, local).map_err(|e| {
                 crate::pr_debug!("tcp_connect error: {:?}", e);
+                NetworkError::ConnectFailed
             });
             crate::pr_debug!("tcp_connect: socket.connect returned {:?}", r);
             r
@@ -222,12 +228,16 @@ impl NetworkStack {
     }
 
     /// Start listening on a TCP socket.
-    pub fn tcp_listen(&self, handle: SmoltcpHandle, endpoint: IpListenEndpoint) -> Result<(), ()> {
+    pub fn tcp_listen(
+        &self,
+        handle: SmoltcpHandle,
+        endpoint: IpListenEndpoint,
+    ) -> Result<(), NetworkError> {
         let mut sockets = self.socket_set.lock();
         sockets
             .get_mut::<tcp::Socket>(handle)
             .listen(endpoint)
-            .map_err(|_| ())
+            .map_err(|_| NetworkError::AddressInUse)
     }
 
     /// Query listener state and endpoint without exposing `SocketSet`.
@@ -344,7 +354,7 @@ impl NetworkStack {
         old_handle: SmoltcpHandle,
         port: u16,
         bind_addr: Option<smoltcp::wire::IpAddress>,
-    ) -> Result<SmoltcpHandle, ()> {
+    ) -> Result<SmoltcpHandle, NetworkError> {
         let shared_handle = {
             let mut sockets = self.socket_set.lock();
             let mut ports = self.udp_ports.lock();
@@ -358,7 +368,7 @@ impl NetworkStack {
                 };
                 if sockets.get_mut::<udp::Socket>(h).bind(listen).is_err() {
                     sockets.remove(h);
-                    return Err(());
+                    return Err(NetworkError::AddressInUse);
                 }
                 ports.insert(
                     port,
@@ -796,21 +806,29 @@ impl NetworkStack {
     fn create_udp_socket_in_set(
         &self,
         sockets: &mut SocketSet<'static>,
-    ) -> Result<SmoltcpHandle, ()> {
+    ) -> Result<SmoltcpHandle, NetworkError> {
         let mut rx_meta_vec = alloc::vec::Vec::new();
-        rx_meta_vec.try_reserve(4).map_err(|_| ())?;
+        rx_meta_vec
+            .try_reserve(4)
+            .map_err(|_| NetworkError::NoMemory)?;
         rx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
 
         let mut tx_meta_vec = alloc::vec::Vec::new();
-        tx_meta_vec.try_reserve(4).map_err(|_| ())?;
+        tx_meta_vec
+            .try_reserve(4)
+            .map_err(|_| NetworkError::NoMemory)?;
         tx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
 
         let mut rx_data_vec = alloc::vec::Vec::new();
-        rx_data_vec.try_reserve(4096).map_err(|_| ())?;
+        rx_data_vec
+            .try_reserve(4096)
+            .map_err(|_| NetworkError::NoMemory)?;
         rx_data_vec.resize(4096, 0);
 
         let mut tx_data_vec = alloc::vec::Vec::new();
-        tx_data_vec.try_reserve(4096).map_err(|_| ())?;
+        tx_data_vec
+            .try_reserve(4096)
+            .map_err(|_| NetworkError::NoMemory)?;
         tx_data_vec.resize(4096, 0);
 
         let rx_buffer = udp::PacketBuffer::new(rx_meta_vec, rx_data_vec);

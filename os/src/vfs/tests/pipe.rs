@@ -65,7 +65,7 @@ test_case!(test_pipe_not_seekable, {
     // 管道不支持 lseek
     let result = file.lseek(0, SeekWhence::Set);
     kassert!(result.is_err());
-    kassert!(matches!(result, Err(FsError::NotSupported)));
+    kassert!(matches!(result, Err(FsError::NotSeekable)));
 });
 
 test_case!(test_pipe_readable_writable, {

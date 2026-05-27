@@ -21,9 +21,7 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析标志位
@@ -89,9 +87,7 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     // 解析路径字符串
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return -(EINVAL as isize);
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析标志位
@@ -133,9 +129,7 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
     // 安全地读取路径字符串
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 分割路径为目录和文件名
@@ -184,17 +178,13 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
     // 解析 target 路径
     let target_str = match get_path_safe(target as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 解析 linkpath 路径
     let link_str = match get_path_safe(linkpath as usize) {
         Ok(s) => s,
-        Err(_) => {
-            return FsError::InvalidArgument.to_errno();
-        }
+        Err(e) => return e.to_errno(),
     };
 
     // 分割路径为目录和文件名

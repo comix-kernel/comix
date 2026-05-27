@@ -127,15 +127,13 @@ impl MemorySpace {
     ///
     /// 这将创建一个完整的内核地址空间，包括跳板页、内核段（.text、.rodata、.data、.bss、堆）以及直接映射的
     /// 物理内存。供内核线程和系统初始化时使用。
-    pub fn new_kernel() -> Self {
-        let mut space = MemorySpace::new();
+    pub fn new_kernel() -> Result<Self, PagingError> {
+        let mut space = MemorySpace::new()?;
 
         // 映射所有内核空间（包括带内核权限的跳板页）
-        space
-            .map_kernel_space()
-            .expect("Failed to map kernel space");
+        space.map_kernel_space()?;
 
-        space
+        Ok(space)
     }
 
     /// 辅助函数：映射一个内核段

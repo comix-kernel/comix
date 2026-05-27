@@ -6,16 +6,23 @@ mod memory_space_tests {
     use crate::mm::page_table::{PagingError, UniversalPTEFlag};
     use crate::{kassert, println, test_case};
 
+    fn new_memory_space() -> MemorySpace {
+        match MemorySpace::new() {
+            Ok(space) => space,
+            Err(err) => panic!("failed to create test memory space: {:?}", err),
+        }
+    }
+
     // 1. 创建内存空间
     test_case!(test_memspace_create, {
         #[allow(unused)]
-        let ms = MemorySpace::new();
+        let ms = new_memory_space();
         // 应该已初始化页表
     });
 
     // 2. 直接映射：VA 必须 >= PAGE_OFFSET，从已知 PA 经 pa_to_va 计算 Vpn
     test_case!(test_direct_mapping, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
         let va_base = crate::arch::pa_to_va(PA::from_usize(0x8000_0000));
         let vpn_start = Vpn::from_addr_ceil(va_base);
         let vpn_range = VpnRange::new(vpn_start, Vpn::from_usize(vpn_start.as_usize() + 0x10));
@@ -33,7 +40,7 @@ mod memory_space_tests {
 
     // 3. 帧映射
     test_case!(test_framed_mapping, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
         let vpn_range = VpnRange::new(Vpn::from_usize(0x1000), Vpn::from_usize(0x1010));
 
         let area = MappingArea::new(
@@ -74,7 +81,7 @@ mod memory_space_tests {
     // 6. 测试 MMIO 地址翻译 - 使用独立的 MemorySpace 实例
     test_case!(test_mmio_translation, {
         // 使用独立的 MemorySpace 实例，避免与其他测试或全局状态冲突
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 使用一个不太可能被占用的测试地址
         const TEST_MMIO_PADDR: usize = 0xE000_0000;
@@ -170,7 +177,7 @@ mod memory_space_tests {
 
     // 8. 测试动态添加 MMIO 映射
     test_case!(test_dynamic_mmio_mapping, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 尝试映射一个自定义的 MMIO 区域（使用未占用的地址）
         const CUSTOM_MMIO_PADDR: usize = 0x5000_0000;
@@ -201,7 +208,7 @@ mod memory_space_tests {
 
     // 9. 测试 map_mmio 函数 - 新映射
     test_case!(test_map_mmio_new_mapping, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 使用一个未占用的物理地址
         const TEST_PADDR: usize = 0x6000_0000;
@@ -233,7 +240,7 @@ mod memory_space_tests {
 
     // 10. 测试 map_mmio 函数 - 已存在的映射
     test_case!(test_map_mmio_existing_mapping, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         const TEST_PADDR: usize = 0x7000_0000;
         const TEST_SIZE: usize = 0x1000;
@@ -265,7 +272,7 @@ mod memory_space_tests {
 
     // 11. 测试 map_mmio 函数 - 冲突检测
     test_case!(test_map_mmio_conflict, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 使用一个合理的物理地址
         const TEST_PADDR: usize = 0x8000_0000;
@@ -314,7 +321,7 @@ mod memory_space_tests {
 
     // 12. 测试 unmap_mmio 函数 - 正常取消映射
     test_case!(test_unmap_mmio_normal, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         const TEST_PADDR: usize = 0x9000_0000;
         const TEST_SIZE: usize = 0x1000;
@@ -348,7 +355,7 @@ mod memory_space_tests {
 
     // 13. 测试 unmap_mmio 函数 - 取消映射不存在的区域
     test_case!(test_unmap_mmio_not_mapped, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 尝试取消映射一个未映射的区域
         let vaddr = VA::from_usize(0xffff_ffc0_a000_0000);
@@ -365,7 +372,7 @@ mod memory_space_tests {
 
     // 14. 测试 unmap_mmio 函数 - 错误的区域类型
     test_case!(test_unmap_mmio_wrong_type, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 映射一个非MMIO区域：Direct 映射的 VA 必须 >= PAGE_OFFSET
         let va_base = crate::arch::pa_to_va(PA::from_usize(0xb000_0000));
@@ -396,7 +403,7 @@ mod memory_space_tests {
 
     // 15. 测试 map_mmio 和 unmap_mmio 组合 - 多个区域
     test_case!(test_mmio_multiple_regions, {
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         println!("Testing multiple MMIO mappings and unmappings");
 
@@ -501,7 +508,7 @@ mod memory_space_tests {
         // 完整测试需要更复杂的设置
 
         // 这里验证编译和结构正确性
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
         let vpn_range = VpnRange::new(Vpn::from_usize(0x2000), Vpn::from_usize(0x2002));
 
         // 创建一个没有文件映射的区域
@@ -534,7 +541,7 @@ mod memory_space_tests {
 
         // 创建一个内存空间并添加一些区域
         {
-            let mut ms = MemorySpace::new();
+            let mut ms = new_memory_space();
             let vpn_range = VpnRange::new(Vpn::from_usize(0x3000), Vpn::from_usize(0x3002));
 
             ms.insert_framed_area(
@@ -557,7 +564,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_basic, {
         println!("Testing mprotect basic functionality");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
         let vpn_range = VpnRange::new(Vpn::from_usize(0x4000), Vpn::from_usize(0x4002));
 
         // 创建一个可读写的区域
@@ -592,7 +599,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_errors, {
         println!("Testing mprotect error handling");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 测试未对齐的地址
         let result = ms.mprotect(
@@ -624,7 +631,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_multiple_areas, {
         println!("Testing mprotect across multiple areas");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 创建两个连续的区域
         let vpn_range1 = VpnRange::new(Vpn::from_usize(0x6000), Vpn::from_usize(0x6002));
@@ -665,7 +672,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_partial_front, {
         println!("Testing mprotect partial modification - front half");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 创建一个4页的区域
         let vpn_range = VpnRange::new(Vpn::from_usize(0x7000), Vpn::from_usize(0x7004));
@@ -715,7 +722,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_partial_back, {
         println!("Testing mprotect partial modification - back half");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 创建一个4页的区域
         let vpn_range = VpnRange::new(Vpn::from_usize(0x8000), Vpn::from_usize(0x8004));
@@ -765,7 +772,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_partial_middle, {
         println!("Testing mprotect partial modification - middle part (3-way split)");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 创建一个6页的区域
         let vpn_range = VpnRange::new(Vpn::from_usize(0x9000), Vpn::from_usize(0x9006));
@@ -823,7 +830,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_partial_pte_flags, {
         println!("Testing mprotect partial modification - verify PTE flags");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 创建一个4页的区域，并立即映射
         let vpn_range = VpnRange::new(Vpn::from_usize(0xa000), Vpn::from_usize(0xa004));
@@ -878,7 +885,7 @@ mod memory_space_tests {
     test_case!(test_mprotect_partial_single_page, {
         println!("Testing mprotect partial modification - single page");
 
-        let mut ms = MemorySpace::new();
+        let mut ms = new_memory_space();
 
         // 创建一个3页的区域
         let vpn_range = VpnRange::new(Vpn::from_usize(0xb000), Vpn::from_usize(0xb003));

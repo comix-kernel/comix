@@ -23,6 +23,7 @@ pub enum FsError {
 
     // 参数相关
     InvalidArgument, // -EINVAL(22): 无效参数
+    BadAddress,      // -EFAULT(14): 无效用户地址
     NameTooLong,     // -ENAMETOOLONG(36): 文件名过长
 
     // 文件系统相关
@@ -30,6 +31,8 @@ pub enum FsError {
     NoSpace,    // -ENOSPC(28): 设备空间不足
     IoError,    // -EIO(5): I/O 错误
     NoDevice,   // -ENODEV(19): 设备不存在
+    NoMemory,   // -ENOMEM(12): 内存不足
+    Busy,       // -EBUSY(16): 设备或资源忙
 
     // 管道相关 (新增)
     BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
@@ -40,34 +43,43 @@ pub enum FsError {
 
     // 其他
     NotSupported,    // -ENOTSUP(95): 操作不支持
+    NotTty,          // -ENOTTY(25): 非 TTY 设备或不支持该 ioctl
+    NotSeekable,     // -ESPIPE(29): 不支持 seek
     TooManyLinks,    // -EMLINK(31): 硬链接过多
     TooManySymlinks, // -ELOOP(40): 符号链接层级过多
 }
 
 impl FsError {
     /// 转换为系统调用错误码（负数）
-    pub fn to_errno(&self) -> isize {
+    pub fn to_errno(self) -> isize {
+        use crate::uapi::errno::*;
+
         match self {
-            FsError::NotFound => -2,
-            FsError::IoError => -5,
-            FsError::BadFileDescriptor => -9,
-            FsError::WouldBlock => -11,
-            FsError::PermissionDenied => -13,
-            FsError::AlreadyExists => -17,
-            FsError::NoDevice => -19,
-            FsError::NotDirectory => -20,
-            FsError::IsDirectory => -21,
-            FsError::InvalidArgument => -22,
-            FsError::TooManyOpenFiles => -24,
-            FsError::NoSpace => -28,
-            FsError::ReadOnlyFs => -30,
-            FsError::TooManyLinks => -31,
-            FsError::TooManySymlinks => -40,
-            FsError::BrokenPipe => -32,
-            FsError::NameTooLong => -36,
-            FsError::DirectoryNotEmpty => -39,
-            FsError::NotSupported => -95,
-            FsError::NotConnected => -107,
+            FsError::NotFound => -ENOENT as isize,
+            FsError::IoError => -EIO as isize,
+            FsError::BadFileDescriptor => -EBADF as isize,
+            FsError::WouldBlock => -EAGAIN as isize,
+            FsError::NoMemory => -ENOMEM as isize,
+            FsError::PermissionDenied => -EACCES as isize,
+            FsError::BadAddress => -EFAULT as isize,
+            FsError::Busy => -EBUSY as isize,
+            FsError::AlreadyExists => -EEXIST as isize,
+            FsError::NoDevice => -ENODEV as isize,
+            FsError::NotDirectory => -ENOTDIR as isize,
+            FsError::IsDirectory => -EISDIR as isize,
+            FsError::InvalidArgument => -EINVAL as isize,
+            FsError::TooManyOpenFiles => -EMFILE as isize,
+            FsError::NotTty => -ENOTTY as isize,
+            FsError::NoSpace => -ENOSPC as isize,
+            FsError::NotSeekable => -ESPIPE as isize,
+            FsError::ReadOnlyFs => -EROFS as isize,
+            FsError::TooManyLinks => -EMLINK as isize,
+            FsError::BrokenPipe => -EPIPE as isize,
+            FsError::NameTooLong => -ENAMETOOLONG as isize,
+            FsError::DirectoryNotEmpty => -ENOTEMPTY as isize,
+            FsError::TooManySymlinks => -ELOOP as isize,
+            FsError::NotSupported => -EOPNOTSUPP as isize,
+            FsError::NotConnected => -ENOTCONN as isize,
         }
     }
 }
@@ -79,8 +91,11 @@ mod tests {
     use super::*;
 
     test_case!(test_error_codes, {
-        kassert!(FsError::NotFound.to_errno() == -2);
-        kassert!(FsError::PermissionDenied.to_errno() == -13);
-        kassert!(FsError::AlreadyExists.to_errno() == -17);
+        kassert!(FsError::NotFound.to_errno() == -crate::uapi::errno::ENOENT as isize);
+        kassert!(FsError::PermissionDenied.to_errno() == -crate::uapi::errno::EACCES as isize);
+        kassert!(FsError::AlreadyExists.to_errno() == -crate::uapi::errno::EEXIST as isize);
+        kassert!(FsError::BadAddress.to_errno() == -crate::uapi::errno::EFAULT as isize);
+        kassert!(FsError::NotSeekable.to_errno() == -crate::uapi::errno::ESPIPE as isize);
+        kassert!(FsError::NotTty.to_errno() == -crate::uapi::errno::ENOTTY as isize);
     });
 }

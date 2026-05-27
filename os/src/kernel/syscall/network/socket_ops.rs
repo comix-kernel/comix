@@ -27,11 +27,11 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     let handle = match base_type {
         SOCK_STREAM => match create_tcp_socket() {
             Ok(h) => h,
-            Err(_) => return -12, // ENOMEM
+            Err(e) => return e.to_errno(),
         },
         SOCK_DGRAM => match create_udp_socket() {
             Ok(h) => h,
-            Err(_) => return -12, // ENOMEM
+            Err(e) => return e.to_errno(),
         },
         _ => return -94, // ESOCKTNOSUPPORT
     };
@@ -66,7 +66,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let endpoint = match parse_sockaddr_in(addr, addrlen) {
         Ok(e) => e,
-        Err(_) => return -22, // EINVAL
+        Err(e) => return e.to_errno(),
     };
 
     let task = current_task();
@@ -111,8 +111,8 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 return -22; // EINVAL
             }
 
-            if set_socket_local_endpoint(&file, endpoint).is_err() {
-                return -22; // EINVAL
+            if let Err(e) = set_socket_local_endpoint(&file, endpoint) {
+                return e.to_errno();
             }
         }
         SocketHandle::Udp(h) => {
@@ -151,17 +151,15 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 _ => None,
             };
 
-            if crate::net::socket::udp_attach_fd_to_port(
+            if let Err(e) = crate::net::socket::udp_attach_fd_to_port(
                 tid,
                 sockfd as usize,
                 &file,
                 h,
                 endpoint.port,
                 bind_addr,
-            )
-            .is_err()
-            {
-                return -98; // EADDRINUSE / bind error
+            ) {
+                return e.to_errno();
             }
         }
     }
@@ -247,10 +245,10 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                     listen_endpoint.port
                 );
 
-                if network_stack().tcp_listen(h, listen_endpoint).is_err() {
+                if let Err(e) = network_stack().tcp_listen(h, listen_endpoint) {
                     attempts_left = attempts_left.saturating_sub(1);
                     if attempts_left == 0 {
-                        return -98; // EADDRINUSE
+                        return e.to_errno();
                     }
                     endpoint.port = 0;
                     continue;
@@ -327,15 +325,13 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             // detach current listen socket immediately
             let new_listen_handle = match create_tcp_socket() {
                 Ok(SocketHandle::Tcp(h)) => h,
-                _ => return -12, // ENOMEM
+                Err(e) => return e.to_errno(),
+                Ok(SocketHandle::Udp(_)) => return -(crate::uapi::errno::EINVAL as isize),
             };
 
-            if network_stack()
-                .tcp_listen(new_listen_handle, listen_endpoint)
-                .is_err()
-            {
+            if let Err(e) = network_stack().tcp_listen(new_listen_handle, listen_endpoint) {
                 network_stack().remove_tcp_socket(new_listen_handle);
-                return -12; // ENOMEM or other error
+                return e.to_errno();
             }
 
             use crate::net::socket::{update_socket_file_handle, update_socket_handle};
@@ -344,7 +340,9 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
                 sockfd as usize,
                 SocketHandle::Tcp(new_listen_handle),
             );
-            update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)).unwrap();
+            if let Err(e) = update_socket_file_handle(&file, SocketHandle::Tcp(new_listen_handle)) {
+                return e.to_errno();
+            }
 
             // Established / CloseWait: this handle is ready to return right away.
             if matches!(

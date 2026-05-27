@@ -2,12 +2,12 @@ use super::*;
 
 impl MemorySpace {
     /// 创建一个新的空内存空间
-    pub fn new() -> Self {
-        MemorySpace {
-            page_table: ActivePageTableInner::new(),
+    pub fn new() -> Result<Self, PagingError> {
+        Ok(MemorySpace {
+            page_table: ActivePageTableInner::new()?,
             areas: Vec::new(),
             heap_start: None,
-        }
+        })
     }
 
     /// 返回页表的引用
@@ -56,7 +56,7 @@ impl MemorySpace {
         let current_space = crate::kernel::current_memory_space();
         let current_locked = current_space.lock();
 
-        let mut space = MemorySpace::new();
+        let mut space = MemorySpace::new()?;
         for area in current_locked.areas.iter() {
             let is_kernel = matches!(
                 area.area_type(),
@@ -317,7 +317,7 @@ impl MemorySpace {
     /// - 直接映射是共享的（不复制）
     /// - 帧映射是深层复制的
     pub fn clone_for_fork(&self) -> Result<Self, PagingError> {
-        let mut new_space = MemorySpace::new();
+        let mut new_space = MemorySpace::new()?;
         new_space.heap_start = self.heap_start;
 
         for area in self.areas.iter() {

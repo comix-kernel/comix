@@ -16,6 +16,18 @@ pub enum ExecImageError {
     Paging(PagingError),
 }
 
+impl From<FsError> for ExecImageError {
+    fn from(err: FsError) -> Self {
+        Self::Fs(err)
+    }
+}
+
+impl From<PagingError> for ExecImageError {
+    fn from(err: PagingError) -> Self {
+        Self::Paging(err)
+    }
+}
+
 pub struct PreparedExecImage {
     pub space: MemorySpace,
     /// 初始 PC：无动态链接器时为程序入口；有 PT_INTERP 时为动态链接器入口
@@ -86,7 +98,7 @@ fn read_exact_at(inode: &dyn Inode, offset: usize, buf: &mut [u8]) -> Result<(),
     while read_total < buf.len() {
         let n = inode
             .read_at(offset + read_total, &mut buf[read_total..])
-            .map_err(ExecImageError::Fs)?;
+            .map_err(ExecImageError::from)?;
         if n == 0 {
             return Err(ExecImageError::InvalidElf);
         }
@@ -223,7 +235,7 @@ fn load_segments_into_space(
         } else {
             let map_start = space
                 .find_free_region(total_size, crate::config::PAGE_SIZE)
-                .ok_or(ExecImageError::Paging(PagingError::OutOfMemory))?;
+                .ok_or(PagingError::OutOfMemory)?;
             map_start.as_usize().saturating_sub(seg_start)
         }
     } else {
@@ -249,7 +261,7 @@ fn load_segments_into_space(
 
         // Basic sanity: prevent mapping into user stack range
         if start_va >= crate::config::USER_STACK_TOP - crate::config::USER_STACK_SIZE {
-            return Err(ExecImageError::Paging(PagingError::InvalidAddress));
+            return Err(PagingError::InvalidAddress.into());
         }
 
         let vpn_range = crate::mm::address::VpnRange::new(
@@ -278,9 +290,7 @@ fn load_segments_into_space(
             AreaType::UserRodata
         };
 
-        space
-            .insert_framed_area(vpn_range, area_type, perm, None, None)
-            .map_err(ExecImageError::Paging)?;
+        space.insert_framed_area(vpn_range, area_type, perm, None, None)?;
 
         // Copy file bytes
         let mut remain = ph.p_filesz as usize;
@@ -290,13 +300,11 @@ fn load_segments_into_space(
             let take = core::cmp::min(remain, tmp.len());
             let n = inode
                 .read_at(src_off, &mut tmp[..take])
-                .map_err(ExecImageError::Fs)?;
+                .map_err(ExecImageError::from)?;
             if n == 0 {
                 return Err(ExecImageError::InvalidElf);
             }
-            space
-                .write_bytes_at(dst_va, &tmp[..n])
-                .map_err(ExecImageError::Paging)?;
+            space.write_bytes_at(dst_va, &tmp[..n])?;
             src_off += n;
             dst_va += n;
             remain -= n;
@@ -307,9 +315,7 @@ fn load_segments_into_space(
         let mut zero_va = start_va + ph.p_filesz as usize;
         while zero_remain > 0 {
             let take = core::cmp::min(zero_remain, zero_page.len());
-            space
-                .write_bytes_at(zero_va, &zero_page[..take])
-                .map_err(ExecImageError::Paging)?;
+            space.write_bytes_at(zero_va, &zero_page[..take])?;
             zero_va += take;
             zero_remain -= take;
         }
@@ -361,12 +367,8 @@ fn apply_static_pie_relocs(
     let dyn_end = dyn_addr + dyn_ph.p_memsz as usize;
 
     while dyn_addr + 16 <= dyn_end {
-        let tag = space
-            .read_i64_at(dyn_addr)
-            .map_err(ExecImageError::Paging)?;
-        let val = space
-            .read_u64_at(dyn_addr + 8)
-            .map_err(ExecImageError::Paging)? as usize;
+        let tag = space.read_i64_at(dyn_addr)?;
+        let val = space.read_u64_at(dyn_addr + 8)? as usize;
         dyn_addr += 16;
         match tag {
             DT_NULL => break,
@@ -394,9 +396,9 @@ fn apply_static_pie_relocs(
 
     for i in 0..count {
         let r = rel_base + i * dt_relaent;
-        let r_offset = space.read_u64_at(r).map_err(ExecImageError::Paging)? as usize;
-        let r_info = space.read_u64_at(r + 8).map_err(ExecImageError::Paging)?;
-        let r_addend = space.read_i64_at(r + 16).map_err(ExecImageError::Paging)? as isize;
+        let r_offset = space.read_u64_at(r)? as usize;
+        let r_info = space.read_u64_at(r + 8)?;
+        let r_addend = space.read_i64_at(r + 16)? as isize;
 
         let r_type = (r_info & 0xffff_ffff) as u32;
         let r_sym = (r_info >> 32) as usize;
@@ -410,26 +412,22 @@ fn apply_static_pie_relocs(
                     return Err(ExecImageError::InvalidElf);
                 }
                 let sym_addr = load_bias + dt_symtab + r_sym * dt_syment;
-
-                space
-                    .read_u64_at(sym_addr + 8)
-                    .map_err(ExecImageError::Paging)? as usize
+                let st_value = space.read_u64_at(sym_addr + 8)? as usize;
+                st_value
             }
         };
         let value = resolve_relocation_value(kind, load_bias, symbol_value, r_addend);
 
-        space
-            .write_usize_at(target_va, value)
-            .map_err(ExecImageError::Paging)?;
+        space.write_usize_at(target_va, value)?;
     }
 
     Ok(())
 }
 
 pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, ExecImageError> {
-    let dentry = crate::vfs::vfs_lookup(path).map_err(ExecImageError::Fs)?;
+    let dentry = crate::vfs::vfs_lookup(path).map_err(ExecImageError::from)?;
     let inode = dentry.inode.clone();
-    let meta = inode.metadata().map_err(ExecImageError::Fs)?;
+    let meta = inode.metadata().map_err(ExecImageError::from)?;
     if meta.inode_type != InodeType::File {
         return Err(ExecImageError::Fs(FsError::IsDirectory));
     }
@@ -438,7 +436,7 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
     let phdrs = parse_program_headers(inode.as_ref(), &eh)?;
     let interp = find_interp_path(inode.as_ref(), &phdrs)?;
 
-    let mut space = MemorySpace::new_user_with_kernel_mappings().map_err(ExecImageError::Paging)?;
+    let mut space = MemorySpace::new_user_with_kernel_mappings()?;
 
     // Main program: keep deterministic base for PIE/static-pie to avoid mapping at 0.
     let main_base_hint = if eh.e_type == ET_DYN {
@@ -464,24 +462,22 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
         crate::config::USER_STACK_TOP - crate::config::USER_STACK_SIZE,
     ));
     let user_stack_top = Vpn::from_addr_ceil(VA::from_usize(crate::config::USER_STACK_TOP));
-    space
-        .insert_framed_area(
-            crate::mm::address::VpnRange::new(user_stack_bottom, user_stack_top),
-            AreaType::UserStack,
-            UniversalPTEFlag::user_rw(),
-            None,
-            None,
-        )
-        .map_err(ExecImageError::Paging)?;
+    space.insert_framed_area(
+        crate::mm::address::VpnRange::new(user_stack_bottom, user_stack_top),
+        AreaType::UserStack,
+        UniversalPTEFlag::user_rw(),
+        None,
+        None,
+    )?;
 
     let mut initial_pc = main_entry;
     let at_entry = main_entry;
     let mut at_base = 0usize;
 
     if let Some(interp_path) = interp {
-        let interp_dentry = crate::vfs::vfs_lookup(&interp_path).map_err(ExecImageError::Fs)?;
+        let interp_dentry = crate::vfs::vfs_lookup(&interp_path).map_err(ExecImageError::from)?;
         let interp_inode = interp_dentry.inode.clone();
-        let interp_meta = interp_inode.metadata().map_err(ExecImageError::Fs)?;
+        let interp_meta = interp_inode.metadata().map_err(ExecImageError::from)?;
         if interp_meta.inode_type != InodeType::File {
             return Err(ExecImageError::InvalidElf);
         }

@@ -94,7 +94,7 @@ use alloc::sync::Arc;
 ///
 /// - 方法不携带 offset 参数，由实现者内部维护
 /// - 支持可 seek 文件（RegFile）和流式设备（PipeFile）
-/// - 可选方法提供默认实现（如 `lseek` 默认返回 `NotSupported`）
+/// - 可选方法提供默认实现（如 `lseek` 默认返回 `NotSeekable`）
 pub trait File: Send + Sync {
     /// 检查文件是否可读
     fn readable(&self) -> bool;
@@ -118,9 +118,9 @@ pub trait File: Send + Sync {
 
     /// 设置文件偏移量（可选方法）
     ///
-    /// 默认返回 `NotSupported`，适用于流式设备。
+    /// 默认返回 `NotSeekable`，适用于流式设备。
     fn lseek(&self, _offset: isize, _whence: SeekWhence) -> Result<usize, FsError> {
-        Err(FsError::NotSupported)
+        Err(FsError::NotSeekable)
     }
 
     /// 获取当前偏移量（可选方法）
