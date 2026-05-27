@@ -59,14 +59,14 @@ pub extern "C" fn rust_main(_hartid: usize) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     if let Some(location) = info.location() {
-        earlyprintln!(
-            "Panicked at {}:{} {}",
+        crate::console::emergency_print(format_args!(
+            "Panicked at {}:{} {}\n",
             location.file(),
             location.line(),
             info.message()
-        );
+        ));
     } else {
-        earlyprintln!("Panicked: {}", info.message());
+        crate::console::emergency_print(format_args!("Panicked: {}\n", info.message()));
     }
 
     crate::arch::ArchImpl::power_off()

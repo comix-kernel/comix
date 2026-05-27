@@ -17,6 +17,9 @@ pub const USER_BASE: usize = 0x0000_0000_0000_0000;
 pub const USER_TOP: usize = 0x0000_003f_ffff_ffff;
 pub const KERNEL_BASE: usize = 0x9000_0000_0000_0000;
 
+/// Direct mapped uncached window for MMIO.
+pub const DMW0_BASE: usize = 0x8000_0000_0000_0000;
+
 /// 兼容 RISC-V 的地址空间常量
 /// 用于与架构无关代码的兼容
 pub const SV39_TOP_HALF_TOP: usize = 0xffff_ffff_ffff_ffff;

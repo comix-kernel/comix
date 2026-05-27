@@ -189,7 +189,7 @@ macro_rules! impl_platform {
     ($arch:ty) => {
         impl $crate::arch::plat::Platform for $arch {
             fn console_putchar(c: u8) {
-                lib::console_putchar(c as usize);
+                lib::console_putchar(c);
             }
 
             fn console_getchar() -> Option<u8> {

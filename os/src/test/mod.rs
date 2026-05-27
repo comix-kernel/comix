@@ -1,18 +1,15 @@
 mod guard;
 pub mod macros;
 pub mod net_test;
-use crate::{
-    arch::{are_interrupts_enabled, disable_interrupts, enable_interrupts},
-    earlyprintln,
-};
+use crate::arch::{are_interrupts_enabled, disable_interrupts, enable_interrupts};
 
 /// 测试运行器。它由测试框架自动调用，并传入一个包含所有测试的切片。
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Fn()]) {
     use crate::arch::Platform;
-    use crate::{earlyprintln, test::macros::TEST_FAILED};
+    use crate::test::macros::TEST_FAILED;
     use core::sync::atomic::Ordering;
-    earlyprintln!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());
+    crate::println!("\n\x1b[33m--- Running {} tests ---\x1b[0m", tests.len());
 
     // 重置失败计数器
     TEST_FAILED.store(0, Ordering::SeqCst);
@@ -23,8 +20,8 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
     }
 
     let failed = TEST_FAILED.load(Ordering::SeqCst);
-    earlyprintln!("\x1b[33m\n--- Test Summary ---\x1b[0m");
-    earlyprintln!(
+    crate::println!("\x1b[33m\n--- Test Summary ---\x1b[0m");
+    crate::println!(
         "\x1b[33mTotal: {}\x1b[0m, \x1b[32mPassed: {}\x1b[0m, \x1b[91mFailed: {}\x1b[0m, \x1b[33mTests Finished\x1b[0m",
         tests.len(),
         tests.len() - failed,
@@ -32,9 +29,9 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
     );
 
     if failed > 0 {
-        earlyprintln!("\x1b[91mSome tests failed!\x1b[0m");
+        crate::println!("\x1b[91mSome tests failed!\x1b[0m");
     } else {
-        earlyprintln!("\x1b[32mAll tests passed!\x1b[0m");
+        crate::println!("\x1b[32mAll tests passed!\x1b[0m");
     }
     crate::arch::ArchImpl::power_off();
 }
@@ -55,11 +52,11 @@ pub fn run_early_tests() {
     // 计算测试数量
     let count = unsafe { end.offset_from(start) } as usize;
     if count == 0 {
-        earlyprintln!("\x1b[36m[early_test] No early tests to run.\x1b[0m");
+        crate::println!("\x1b[36m[early_test] No early tests to run.\x1b[0m");
         return;
     }
 
-    earlyprintln!(
+    crate::println!(
         "\n\x1b[36m--- Running {} early tests (pre-mm) ---\x1b[0m",
         count
     );
@@ -70,7 +67,7 @@ pub fn run_early_tests() {
         test_fn();
     }
 
-    earlyprintln!("\x1b[36m--- Early tests finished ---\x1b[0m\n");
+    crate::println!("\x1b[36m--- Early tests finished ---\x1b[0m\n");
 }
 
 /// 一个 RAII 守卫，用于在作用域内启用中断，并在离开作用域时恢复之前的状态。
@@ -135,19 +132,19 @@ mod tests {
     //     // 我们断言这一点来验证宏的行为。
     //     kassert!(crate::arch::are_interrupts_enabled());
 
-    //     println!("  -> Assertion passed: Interrupts are enabled.");
+    //     crate::println!("  -> Assertion passed: Interrupts are enabled.");
 
     //     // 为了让测试更有意义，我们可以手动禁用中断，
     //     // 然后验证 RAII 守卫是否会在测试结束时恢复它们。
-    //     println!("  -> Manually disabling interrupts for demonstration...");
+    //     crate::println!("  -> Manually disabling interrupts for demonstration...");
     //     unsafe {
     //         crate::arch::disable_interrupts();
     //     }
 
     //     kassert!(!crate::arch::are_interrupts_enabled());
 
-    //     println!("  -> Assertion passed: Interrupts are now disabled manually.");
-    //     println!("  -> Leaving test block, the guard should now restore the state...");
+    //     crate::println!("  -> Assertion passed: Interrupts are now disabled manually.");
+    //     crate::println!("  -> Leaving test block, the guard should now restore the state...");
     // });
 
     // 一个配套的测试，在 `(Interrupts)` 测试之后运行，
@@ -157,6 +154,6 @@ mod tests {
     //     // 如果前一个测试的 RAII 守卫工作正常，那么中断现在应该是禁用的。
     //     kassert!(!crate::arch::are_interrupts_enabled());
 
-    //     println!("  -> Assertion passed: Interrupts were correctly restored to disabled state.");
+    //     crate::println!("  -> Assertion passed: Interrupts were correctly restored to disabled state.");
     // });
 }

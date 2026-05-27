@@ -128,6 +128,32 @@ impl LogCore {
         }
     }
 
+    /// 记录裸 `print!`/`println!` 输出。
+    ///
+    /// 控制台保持原始文本输出，日志缓冲区以 Info 级别保存，避免普通
+    /// `println!` 信息绕过 syslog。
+    pub fn _print(&self, args: fmt::Arguments) {
+        let log_context = if crate::console::is_runtime() {
+            context::collect_context()
+        } else {
+            context::LogContext {
+                cpu_id: crate::arch::cpu_id(),
+                task_id: 0,
+                timestamp: crate::arch::get_time(),
+            }
+        };
+        let entry = LogEntry::from_args(
+            LogLevel::Info,
+            log_context.cpu_id,
+            log_context.task_id,
+            log_context.timestamp,
+            args,
+        );
+
+        self.buffer.write(&entry);
+        crate::console::_print(args);
+    }
+
     /// 从缓冲区读取下一个日志条目
     ///
     /// 如果没有可用条目，则返回 `None`。这是一个**无锁**的

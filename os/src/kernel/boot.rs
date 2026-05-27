@@ -7,7 +7,6 @@ use alloc::sync::Arc;
 
 use crate::{
     arch::{CpuOps, platform, timer, trap},
-    earlyprintln,
     ipc::{SignalHandlerTable, SignalPending},
     kernel::{
         FsStruct, Scheduler, TASK_MANAGER, TaskManagerTrait, TaskStruct, current_cpu,
@@ -64,8 +63,8 @@ pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
 
     run_early_tests();
 
-    earlyprintln!("[Boot] Hello, world!");
-    earlyprintln!(
+    crate::println!("[Boot] Hello, world!");
+    crate::println!(
         "[Boot] {} {} {} is up!",
         ops.arch_name,
         ops.cpu_label,
@@ -79,7 +78,7 @@ pub fn run_primary_boot(hartid: usize, ops: PrimaryBootOps) -> ! {
     {
         let _guard = PreemptGuard::new();
         current_cpu().switch_space(kernel_space);
-        earlyprintln!("[Boot] Activated kernel address space");
+        crate::println!("[Boot] Activated kernel address space");
     }
 
     #[cfg(test)]
