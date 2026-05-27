@@ -134,7 +134,7 @@ pub fn interrupt_was_enabled(flags: usize) -> bool {
 
 #[inline]
 pub fn are_interrupts_enabled() -> bool {
-    intr::are_interrupts_enabled()
+    ArchImpl::interrupts_enabled()
 }
 
 #[inline]
