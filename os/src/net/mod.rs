@@ -9,6 +9,37 @@ pub mod interface;
 pub mod socket;
 pub mod stack;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkError {
+    NoMemory,
+    NotInitialized,
+    InvalidSocket,
+    InvalidAddress,
+    BadAddress,
+    BufferTooSmall,
+    AddressInUse,
+    NotSupported,
+    ConnectFailed,
+}
+
+impl NetworkError {
+    pub fn to_errno(self) -> isize {
+        use crate::uapi::errno::*;
+
+        match self {
+            NetworkError::NoMemory => -ENOMEM as isize,
+            NetworkError::NotInitialized => -ENETDOWN as isize,
+            NetworkError::InvalidSocket => -ENOTSOCK as isize,
+            NetworkError::InvalidAddress => -EINVAL as isize,
+            NetworkError::BadAddress => -EFAULT as isize,
+            NetworkError::BufferTooSmall => -EINVAL as isize,
+            NetworkError::AddressInUse => -EADDRINUSE as isize,
+            NetworkError::NotSupported => -EOPNOTSUPP as isize,
+            NetworkError::ConnectFailed => -EINVAL as isize,
+        }
+    }
+}
+
 /// Register a net device and create its current compatibility interface.
 ///
 /// This is the migration boundary between device drivers and the network

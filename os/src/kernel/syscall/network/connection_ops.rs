@@ -7,7 +7,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             pr_debug!("connect: sockfd={}, endpoint={}", sockfd, e);
             e
         }
-        Err(_) => return -22, // EINVAL
+        Err(e) => return e.to_errno(),
     };
 
     let task = current_task();
@@ -26,7 +26,9 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     drop(task_lock);
 
     use crate::net::socket::set_socket_remote_endpoint;
-    set_socket_remote_endpoint(&file, endpoint).unwrap();
+    if let Err(e) = set_socket_remote_endpoint(&file, endpoint) {
+        return e.to_errno();
+    }
 
     let is_nonblock = file
         .flags()
@@ -96,7 +98,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             use crate::net::socket::tcp_connect;
             if let Err(e) = tcp_connect(h, endpoint, local_endpoint) {
                 pr_debug!("connect: tcp_connect failed: {:?}", e);
-                return -22; // EINVAL or connection error
+                return e.to_errno();
             }
 
             // For blocking sockets, wait until connection is established
@@ -184,17 +186,15 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
                 _ => None,
             };
 
-            if crate::net::socket::udp_attach_fd_to_port(
+            if let Err(e) = crate::net::socket::udp_attach_fd_to_port(
                 tid,
                 sockfd as usize,
                 &file,
                 h,
                 local_port,
                 bind_addr,
-            )
-            .is_err()
-            {
-                return -98;
+            ) {
+                return e.to_errno();
             }
             pr_debug!("connect: sockfd={} UDP -> success", sockfd);
         }
