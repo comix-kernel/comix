@@ -103,7 +103,7 @@ test_case!(test_tmpfs_metadata_timestamps_file, {
     let meta1 = file.metadata().unwrap();
     let ctime1 = meta1.ctime;
     let mtime1 = meta1.mtime;
-    let atime1 = meta1.atime;
+    let _atime1 = meta1.atime;
 
     // 时间戳应该非零
     kassert!(ctime1.tv_sec > 0 || ctime1.tv_nsec > 0);
@@ -155,7 +155,7 @@ test_case!(test_tmpfs_metadata_nlinks, {
     kassert!(meta.nlinks >= 2); // . 和父目录
 
     // 在目录中创建子目录
-    let subdir = dir
+    let _subdir = dir
         .mkdir("subdir", FileMode::from_bits_truncate(0o755))
         .unwrap();
     let meta = dir.metadata().unwrap();

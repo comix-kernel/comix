@@ -89,6 +89,15 @@ pub fn log_impl(level: LogLevel, args: core::fmt::Arguments) {
     GLOBAL_LOG._log(level, args);
 }
 
+/// Raw print implementation used by `print!`/`println!`.
+///
+/// Unlike `pr_*`, this keeps the console output unadorned while still storing
+/// the message in the log ring buffer so syslog can retrieve it.
+#[doc(hidden)]
+pub fn print_impl(args: core::fmt::Arguments) {
+    GLOBAL_LOG._print(args);
+}
+
 /// 检查日志级别是否启用（由宏调用）
 #[doc(hidden)]
 pub fn is_level_enabled(level: LogLevel) -> bool {

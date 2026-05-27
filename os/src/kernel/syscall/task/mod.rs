@@ -9,9 +9,9 @@ use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
+        HwTrapFrame, TrapFrame,
         address::UA,
         timer::{clock_freq, get_time},
-        trap::restore,
     },
     ipc::{SignalHandlerTable, SignalPending, signal_pending},
     kernel::{

@@ -6,7 +6,6 @@ use crate::vfs::dentry::{Dentry, DentryCache};
 use crate::vfs::error::FsError;
 use crate::vfs::file_system::FileSystem;
 use crate::vfs::inode::{FileMode, Inode};
-use alloc::string::String;
 use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
@@ -34,8 +33,6 @@ fn get_ext4_image() -> &'static [u8] {
 /// # Returns
 /// RamDisk instance with valid ext4 filesystem
 pub fn create_test_ramdisk() -> Arc<RamDisk> {
-    use crate::config::VIRTIO_BLK_SECTOR_SIZE;
-
     // 使用 512 字节扇区大小,与 VirtIO 块设备保持一致
     const SECTOR_SIZE: usize = 512; // Same as VIRTIO_BLK_SECTOR_SIZE
     const DEVICE_ID: usize = 0;

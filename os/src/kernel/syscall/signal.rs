@@ -8,7 +8,7 @@ use core::{
 use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
-    arch::{timer::clock_freq, trap::restore},
+    arch::{HwTrapFrame, TrapFrame, timer::clock_freq},
     ipc::{create_siginfo_for_signal, do_sigpending},
     kernel::{
         SharedTask, TASK_MANAGER, TIMER_QUEUE, TaskManagerTrait, current_task, sleep_task_prepare,
@@ -228,7 +228,7 @@ pub fn rt_sigreturn() -> ! {
     let tfp = current_task().lock().trap_frame_ptr.load(Ordering::SeqCst);
     let tf = unsafe { &mut *tfp };
     // Linux ABI: SP points to rt_sigframe { siginfo, ucontext }.
-    let frame_addr = tf.get_sp();
+    let frame_addr = <TrapFrame as HwTrapFrame>::get_sp(tf);
     let ucontext_addr = frame_addr + core::mem::offset_of!(RtSigFrame, uc);
     let ucontext: UContextT = unsafe { read_from_user(ucontext_addr as *const UContextT) };
 
@@ -239,8 +239,8 @@ pub fn rt_sigreturn() -> ! {
         t.blocked = SignalFlags::from_bits_truncate(ucontext.uc_sigmask as usize);
     }
 
-    tf.restore_from_mcontext(&ucontext.uc_mcontext);
-    unsafe { restore(tf) }
+    <TrapFrame as HwTrapFrame>::restore_from_mcontext(tf, &ucontext.uc_mcontext);
+    unsafe { crate::arch::restore_trap_frame(tf) }
     unreachable!("rt_sigreturn should not return");
 }
 

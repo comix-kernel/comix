@@ -23,7 +23,6 @@ pub use global_allocator::init_heap;
 
 use crate::arch::platform::MEMORY_END;
 use crate::config::PAGE_SIZE;
-use crate::earlyprintln;
 use crate::mm::address::PA;
 use crate::mm::address::{Ppn, UsizeConvert};
 use crate::sync::SpinLock;
@@ -72,7 +71,7 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     set_global_kernel_space(space.clone());
 
     let root_ppn = space.lock().root_ppn();
-    earlyprintln!(
+    crate::println!(
         "[MM] Created kernel space, root PPN: 0x{:x}",
         root_ppn.as_usize()
     );

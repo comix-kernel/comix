@@ -225,6 +225,82 @@ impl crate::kernel::syscall::syscall_frame::SyscallFrame for TrapFrame {
     }
 }
 
+impl crate::arch::HwTrapFrame for TrapFrame {
+    fn zero_init() -> Self {
+        TrapFrame::zero_init()
+    }
+
+    fn set_kernel_trap_frame(&mut self, entry: usize, terminal: usize, kernel_sp: usize) {
+        TrapFrame::set_kernel_trap_frame(self, entry, terminal, kernel_sp)
+    }
+
+    fn set_exec_trap_frame_from_layout(
+        &mut self,
+        entry: usize,
+        kernel_sp: usize,
+        layout: &crate::arch::task::ExecStackLayout,
+    ) {
+        TrapFrame::set_exec_trap_frame_from_layout(self, entry, kernel_sp, layout)
+    }
+
+    unsafe fn set_clone_trap_frame(
+        &mut self,
+        parent_frame: &Self,
+        kernel_sp: usize,
+        user_sp: usize,
+    ) {
+        unsafe { TrapFrame::set_clone_trap_frame(self, parent_frame, kernel_sp, user_sp) }
+    }
+
+    unsafe fn set_fork_trap_frame(&mut self, parent_frame: &Self) {
+        unsafe { TrapFrame::set_fork_trap_frame(self, parent_frame) }
+    }
+
+    fn get_sp(&self) -> usize {
+        TrapFrame::get_sp(self)
+    }
+
+    fn set_sp(&mut self, val: usize) {
+        TrapFrame::set_sp(self, val)
+    }
+
+    fn set_a0(&mut self, val: usize) {
+        TrapFrame::set_a0(self, val)
+    }
+
+    fn set_a1(&mut self, val: usize) {
+        TrapFrame::set_a1(self, val)
+    }
+
+    fn set_a2(&mut self, val: usize) {
+        TrapFrame::set_a2(self, val)
+    }
+
+    fn set_ra(&mut self, val: usize) {
+        TrapFrame::set_ra(self, val)
+    }
+
+    fn set_sepc(&mut self, pc: usize) {
+        TrapFrame::set_sepc(self, pc)
+    }
+
+    fn get_sepc(&self) -> usize {
+        TrapFrame::get_sepc(self)
+    }
+
+    fn set_tls(&mut self, tls: usize) {
+        TrapFrame::set_tls(self, tls)
+    }
+
+    fn to_mcontext(&self) -> MContextT {
+        TrapFrame::to_mcontext(self)
+    }
+
+    fn restore_from_mcontext(&mut self, mcontext: &MContextT) {
+        TrapFrame::restore_from_mcontext(self, mcontext)
+    }
+}
+
 pub struct SumGuard;
 impl SumGuard {
     pub fn new() -> Self {

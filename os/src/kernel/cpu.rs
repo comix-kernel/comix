@@ -131,7 +131,6 @@ mod tests {
 
     /// 测试 cpu_id() 函数
     test_case!(test_cpu_id, {
-        use crate::arch::ArchImpl;
         use crate::sync::PreemptGuard;
 
         let _guard = PreemptGuard::new();
