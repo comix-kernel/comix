@@ -9,6 +9,7 @@
 //! 确保架构层与内核其余部分的解耦。
 
 use crate::arch::{address::UA, cpu_ops::CpuOps, virtual_memory::VirtualMemory};
+use crate::mm::page_table::PagingError;
 
 /// 顶层架构抽象 trait。
 ///
@@ -48,13 +49,13 @@ pub trait Arch: CpuOps + VirtualMemory {
     /// - `src` 必须是有效的用户空间虚拟地址
     /// - `dst` 必须指向足够大的内核缓冲区
     /// - `len` 字节必须在合法范围内
-    unsafe fn copy_from_user(src: UA, dst: *mut u8, len: usize) -> Result<(), ()>;
+    unsafe fn copy_from_user(src: UA, dst: *mut u8, len: usize) -> Result<(), PagingError>;
 
     /// 尝试从用户空间复制数据（非阻塞版本，不处理缺页）
     ///
     /// # Safety
     /// 同上
-    unsafe fn try_copy_from_user(src: UA, dst: *mut u8, len: usize) -> Result<(), ()>;
+    unsafe fn try_copy_from_user(src: UA, dst: *mut u8, len: usize) -> Result<(), PagingError>;
 
     /// 从内核空间复制数据到用户空间
     ///
@@ -63,13 +64,17 @@ pub trait Arch: CpuOps + VirtualMemory {
     /// - `dst` 必须是有效的用户空间虚拟地址
     /// - `src` 必须指向有效内核数据
     /// - `len` 字节必须在合法范围内
-    unsafe fn copy_to_user(src: *const u8, dst: UA, len: usize) -> Result<(), ()>;
+    unsafe fn copy_to_user(src: *const u8, dst: UA, len: usize) -> Result<(), PagingError>;
 
     /// 从用户空间复制以 '\0' 结尾的字符串
     ///
     /// # Safety
     /// 同上
-    unsafe fn copy_strn_from_user(src: UA, dst: *mut u8, max_len: usize) -> Result<usize, ()>;
+    unsafe fn copy_strn_from_user(
+        src: UA,
+        dst: *mut u8,
+        max_len: usize,
+    ) -> Result<usize, PagingError>;
 
     // ---- 系统信息 ----
 

@@ -9,6 +9,7 @@ macro_rules! impl_arch {
     ($arch:ty, $process_space:ty, $kernel_space:ty) => {
         use $crate::arch::virtual_memory::VirtualMemory;
         use $crate::mm::address::Ppn;
+        use $crate::mm::page_table::PagingError;
         use $crate::sync::SpinLock;
 
         lazy_static::lazy_static! {
@@ -46,11 +47,11 @@ macro_rules! impl_arch {
                 src: $crate::arch::address::UA,
                 dst: *mut u8,
                 len: usize,
-            ) -> Result<(), ()> {
+            ) -> Result<(), PagingError> {
                 let src = src.as_usize();
                 validate_user_copy_range(src, len, false)?;
                 if len != 0 && dst.is_null() {
-                    return Err(());
+                    return Err(PagingError::InvalidAddress);
                 }
                 let _guard = trap::SumGuard::new();
                 unsafe { core::ptr::copy_nonoverlapping(src as *const u8, dst, len) };
@@ -61,7 +62,7 @@ macro_rules! impl_arch {
                 src: $crate::arch::address::UA,
                 dst: *mut u8,
                 len: usize,
-            ) -> Result<(), ()> {
+            ) -> Result<(), PagingError> {
                 unsafe { Self::copy_from_user(src, dst, len) }
             }
 
@@ -69,11 +70,11 @@ macro_rules! impl_arch {
                 src: *const u8,
                 dst: $crate::arch::address::UA,
                 len: usize,
-            ) -> Result<(), ()> {
+            ) -> Result<(), PagingError> {
                 let dst = dst.as_usize();
                 validate_user_copy_range(dst, len, true)?;
                 if len != 0 && src.is_null() {
-                    return Err(());
+                    return Err(PagingError::InvalidAddress);
                 }
                 let _guard = trap::SumGuard::new();
                 unsafe { core::ptr::copy_nonoverlapping(src, dst as *mut u8, len) };
@@ -84,18 +85,18 @@ macro_rules! impl_arch {
                 src: $crate::arch::address::UA,
                 dst: *mut u8,
                 max_len: usize,
-            ) -> Result<usize, ()> {
+            ) -> Result<usize, PagingError> {
                 let src = src.as_usize();
                 if !(constant::USER_BASE..=<$arch as VirtualMemory>::USER_TOP).contains(&src) {
-                    return Err(());
+                    return Err(PagingError::InvalidAddress);
                 }
                 if max_len != 0 && dst.is_null() {
-                    return Err(());
+                    return Err(PagingError::InvalidAddress);
                 }
                 let _guard = trap::SumGuard::new();
                 let mut i = 0;
                 while i < max_len {
-                    let cur = src.checked_add(i).ok_or(())?;
+                    let cur = src.checked_add(i).ok_or(PagingError::InvalidAddress)?;
                     validate_user_copy_range(cur, 1, false)?;
                     let byte = unsafe { core::ptr::read_volatile(cur as *const u8) };
                     unsafe { *dst.add(i) = byte };
@@ -137,7 +138,11 @@ macro_rules! impl_arch {
             }
         }
 
-        fn validate_user_copy_range(start: usize, len: usize, write: bool) -> Result<(), ()> {
+        fn validate_user_copy_range(
+            start: usize,
+            len: usize,
+            write: bool,
+        ) -> Result<(), PagingError> {
             use $crate::mm::address::{PageNum, VA, Vpn};
             use $crate::mm::page_table::{PageTableInner, UniversalPTEFlag};
 
@@ -145,12 +150,12 @@ macro_rules! impl_arch {
                 return Ok(());
             }
             if !(constant::USER_BASE..=<$arch as VirtualMemory>::USER_TOP).contains(&start) {
-                return Err(());
+                return Err(PagingError::InvalidAddress);
             }
-            let end = start.checked_add(len).ok_or(())?;
-            let last = end.checked_sub(1).ok_or(())?;
+            let end = start.checked_add(len).ok_or(PagingError::InvalidAddress)?;
+            let last = end.checked_sub(1).ok_or(PagingError::InvalidAddress)?;
             if last > <$arch as VirtualMemory>::USER_TOP {
-                return Err(());
+                return Err(PagingError::InvalidAddress);
             }
 
             let space = $crate::kernel::current_memory_space();
@@ -158,21 +163,21 @@ macro_rules! impl_arch {
             let mut cur = start;
             while cur < end {
                 let vpn = Vpn::from_addr_floor(VA::from_usize(cur));
-                let (_, _, flags) = guard.page_table().walk(vpn).map_err(|_| ())?;
+                let (_, _, flags) = guard.page_table().walk(vpn)?;
                 let required = UniversalPTEFlag::VALID | UniversalPTEFlag::USER_ACCESSIBLE;
                 if !flags.contains(required) {
-                    return Err(());
+                    return Err(PagingError::PermissionDenied);
                 }
                 if write {
                     if !flags.contains(UniversalPTEFlag::WRITEABLE) {
-                        return Err(());
+                        return Err(PagingError::PermissionDenied);
                     }
                 } else if !flags.contains(UniversalPTEFlag::READABLE) {
-                    return Err(());
+                    return Err(PagingError::PermissionDenied);
                 }
                 let next_page = (cur & !($crate::config::PAGE_SIZE - 1))
                     .checked_add($crate::config::PAGE_SIZE)
-                    .ok_or(())?;
+                    .ok_or(PagingError::InvalidAddress)?;
                 cur = core::cmp::min(next_page, end);
             }
             Ok(())

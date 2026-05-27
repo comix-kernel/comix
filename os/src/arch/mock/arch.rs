@@ -12,6 +12,7 @@ use crate::arch::virtual_memory::{
     KernAddressSpace, PageFrame, PageInfo, PhysMemoryRegion, PtePermissions, UserAddressSpace,
     VirtMemoryRegion, VirtualMemory,
 };
+use crate::mm::page_table::PagingError;
 use crate::sync::SpinLock;
 
 // 在非目标架构上，MockArch 的 UserContext 应等于 arch::kernel::context::Context，
@@ -68,7 +69,7 @@ impl MockAddressSpace {
 }
 
 impl UserAddressSpace for MockAddressSpace {
-    fn new() -> Result<Self, ()> {
+    fn new() -> Result<Self, PagingError> {
         Ok(Self::new())
     }
 
@@ -76,17 +77,22 @@ impl UserAddressSpace for MockAddressSpace {
 
     fn deactivate(&self) {}
 
-    fn map_page(&mut self, page: PageFrame, va: usize, perms: PtePermissions) -> Result<(), ()> {
+    fn map_page(
+        &mut self,
+        page: PageFrame,
+        va: usize,
+        perms: PtePermissions,
+    ) -> Result<(), PagingError> {
         self.mappings.push((va, page, perms));
         Ok(())
     }
 
-    fn unmap(&mut self, va: usize) -> Result<PageFrame, ()> {
+    fn unmap(&mut self, va: usize) -> Result<PageFrame, PagingError> {
         if let Some(pos) = self.mappings.iter().position(|(v, _, _)| *v == va) {
             let (_, frame, _) = self.mappings.remove(pos);
             Ok(frame)
         } else {
-            Err(())
+            Err(PagingError::NotMapped)
         }
     }
 
@@ -95,7 +101,7 @@ impl UserAddressSpace for MockAddressSpace {
         va: usize,
         new_page: PageFrame,
         perms: PtePermissions,
-    ) -> Result<PageFrame, ()> {
+    ) -> Result<PageFrame, PagingError> {
         let old = self.unmap(va)?;
         self.map_page(new_page, va, perms)?;
         Ok(old)
@@ -105,11 +111,11 @@ impl UserAddressSpace for MockAddressSpace {
         &mut self,
         _region: VirtMemoryRegion,
         _perms: PtePermissions,
-    ) -> Result<(), ()> {
+    ) -> Result<(), PagingError> {
         Ok(())
     }
 
-    fn unmap_range(&mut self, region: VirtMemoryRegion) -> Result<Vec<PageFrame>, ()> {
+    fn unmap_range(&mut self, region: VirtMemoryRegion) -> Result<Vec<PageFrame>, PagingError> {
         let start = region.start_va;
         let end = start + region.len;
         let frames: Vec<_> = self
@@ -137,13 +143,13 @@ impl UserAddressSpace for MockAddressSpace {
         region: VirtMemoryRegion,
         _other: &mut Self,
         _perms: PtePermissions,
-    ) -> Result<(), ()> {
+    ) -> Result<(), PagingError> {
         self.protect_range(region, _perms)
     }
 }
 
 impl KernAddressSpace for MockAddressSpace {
-    fn map_mmio(&mut self, _region: PhysMemoryRegion) -> Result<usize, ()> {
+    fn map_mmio(&mut self, _region: PhysMemoryRegion) -> Result<usize, PagingError> {
         Ok(0)
     }
 
@@ -152,7 +158,7 @@ impl KernAddressSpace for MockAddressSpace {
         _phys_range: PhysMemoryRegion,
         _virt_range: VirtMemoryRegion,
         _perms: PtePermissions,
-    ) -> Result<(), ()> {
+    ) -> Result<(), PagingError> {
         Ok(())
     }
 }
@@ -217,10 +223,10 @@ mod mock_arch_impl {
             src: crate::arch::address::UA,
             dst: *mut u8,
             len: usize,
-        ) -> Result<(), ()> {
+        ) -> Result<(), PagingError> {
             let src = src.as_usize();
             if len != 0 && (src == 0 || dst.is_null()) {
-                return Err(());
+                return Err(PagingError::InvalidAddress);
             }
             unsafe { core::ptr::copy_nonoverlapping(src as *const u8, dst, len) };
             Ok(())
@@ -230,7 +236,7 @@ mod mock_arch_impl {
             src: crate::arch::address::UA,
             dst: *mut u8,
             len: usize,
-        ) -> Result<(), ()> {
+        ) -> Result<(), PagingError> {
             unsafe { Self::copy_from_user(src, dst, len) }
         }
 
@@ -238,10 +244,10 @@ mod mock_arch_impl {
             src: *const u8,
             dst: crate::arch::address::UA,
             len: usize,
-        ) -> Result<(), ()> {
+        ) -> Result<(), PagingError> {
             let dst = dst.as_usize();
             if len != 0 && (src.is_null() || dst == 0) {
-                return Err(());
+                return Err(PagingError::InvalidAddress);
             }
             unsafe { core::ptr::copy_nonoverlapping(src, dst as *mut u8, len) };
             Ok(())
@@ -251,10 +257,10 @@ mod mock_arch_impl {
             src: crate::arch::address::UA,
             dst: *mut u8,
             max_len: usize,
-        ) -> Result<usize, ()> {
+        ) -> Result<usize, PagingError> {
             let src = src.as_usize();
             if max_len != 0 && (src == 0 || dst.is_null()) {
-                return Err(());
+                return Err(PagingError::InvalidAddress);
             }
             let mut i = 0;
             while i < max_len {
