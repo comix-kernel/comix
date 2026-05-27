@@ -7,7 +7,10 @@ use alloc::{
 
 use crate::{
     sync::Mutex,
-    util::{ring_buffer::RingBuffer, user_buffer::UserBuffer},
+    util::{
+        ring_buffer::{RingBuffer, RingBufferError},
+        user_buffer::UserBuffer,
+    },
 };
 
 /// 创建一个管道，返回读端和写端
@@ -117,7 +120,7 @@ impl PipeRingBuffer {
     }
 
     /// 写入一个字节
-    pub fn write_byte(&mut self, byte: u8) -> Result<(), ()> {
+    pub fn write_byte(&mut self, byte: u8) -> Result<(), RingBufferError> {
         self.buffer.write_byte(byte)
     }
 
