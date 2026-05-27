@@ -240,7 +240,7 @@ fn do_execve_switch(
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态
     unsafe {
-        restore(&*tfp);
+        crate::arch::restore_trap_frame(&*tfp);
     }
     -1
 }

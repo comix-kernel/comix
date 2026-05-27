@@ -2,7 +2,7 @@ mod guard;
 pub mod macros;
 pub mod net_test;
 use crate::{
-    arch::intr::{are_interrupts_enabled, disable_interrupts, enable_interrupts},
+    arch::{are_interrupts_enabled, disable_interrupts, enable_interrupts},
     earlyprintln,
 };
 
@@ -133,7 +133,7 @@ mod tests {
     // test_case!(verify_interrupt_environment, (Interrupt), {
     //     // 在这个代码块内部，中断应该已经被宏自动启用了。
     //     // 我们断言这一点来验证宏的行为。
-    //     kassert!(crate::arch::intr::are_interrupts_enabled());
+    //     kassert!(crate::arch::are_interrupts_enabled());
 
     //     println!("  -> Assertion passed: Interrupts are enabled.");
 
@@ -141,10 +141,10 @@ mod tests {
     //     // 然后验证 RAII 守卫是否会在测试结束时恢复它们。
     //     println!("  -> Manually disabling interrupts for demonstration...");
     //     unsafe {
-    //         crate::arch::intr::disable_interrupts();
+    //         crate::arch::disable_interrupts();
     //     }
 
-    //     kassert!(!crate::arch::intr::are_interrupts_enabled());
+    //     kassert!(!crate::arch::are_interrupts_enabled());
 
     //     println!("  -> Assertion passed: Interrupts are now disabled manually.");
     //     println!("  -> Leaving test block, the guard should now restore the state...");
@@ -155,7 +155,7 @@ mod tests {
     // test_case!(verify_interrupts_restored_after_test, {
     //     // 默认情况下，我们的测试运行器是在中断禁用的环境下运行的。
     //     // 如果前一个测试的 RAII 守卫工作正常，那么中断现在应该是禁用的。
-    //     kassert!(!crate::arch::intr::are_interrupts_enabled());
+    //     kassert!(!crate::arch::are_interrupts_enabled());
 
     //     println!("  -> Assertion passed: Interrupts were correctly restored to disabled state.");
     // });

@@ -190,7 +190,7 @@ unsafe impl<T: Send + Sync, CPU: CpuOps> Sync for RwLock<T, CPU> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{arch::intr::are_interrupts_enabled, kassert, test_case};
+    use crate::{arch::are_interrupts_enabled, kassert, test_case};
 
     test_case!(test_rwlock_read_basic, {
         let lock: RwLock<i32> = RwLock::new(42);

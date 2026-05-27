@@ -31,6 +31,7 @@ macro_rules! impl_arch {
 
         impl $crate::arch::arch::Arch for $arch {
             type UserContext = kernel::context::Context;
+            type TrapFrame = trap::TrapFrame;
 
             fn new_user_context(entry_point: usize, stack_top: usize) -> Self::UserContext {
                 let mut ctx = kernel::context::Context::zero_init();

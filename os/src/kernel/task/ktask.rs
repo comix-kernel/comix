@@ -9,7 +9,6 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use crate::{
-    arch::{disable_interrupts, trap::restore},
     kernel::{
         TaskState,
         cpu::current_cpu,
@@ -78,7 +77,7 @@ pub fn kthread_spawn(entry_point: fn()) -> u32 {
     let tf = task.trap_frame_ptr.load(Ordering::SeqCst);
     // SAFETY: 此时 trap_frame_tracker 已经分配完毕且不可变更，所有权在 task 中，指针有效
     unsafe {
-        crate::arch::kernel::task::init_kernel_trap_frame(
+        crate::arch::init_kernel_trap_frame(
             tf,
             entry_point as usize,
             super::terminate_task as usize,
@@ -185,7 +184,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // execve伪造进程上下文用的trapframe和当前进程的是同一个
     // 这时候发生中断会破坏创建到一半/创建好的的上下文
     // 不必显式恢复中断，它会在restore中由sret指令自动恢复
-    disable_interrupts();
+    crate::arch::disable_interrupts();
     {
         let mut t = task.lock();
         t.exe_path = Some(path.to_string());
@@ -207,7 +206,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        crate::arch::kernel::task::prepare_user_restore(
+        crate::arch::prepare_user_restore(
             tfp,
             prepared.initial_pc,
             prepared.user_sp_high,
@@ -216,7 +215,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态
     unsafe {
-        restore(&*tfp);
+        crate::arch::restore_trap_frame(&*tfp);
     }
     unreachable!("kernel_execve: should not return");
 }

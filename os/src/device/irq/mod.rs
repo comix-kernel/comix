@@ -10,7 +10,7 @@ use alloc::{
 
 pub mod plic;
 
-use crate::{arch::intr::enable_irq, device::Driver};
+use crate::{arch::enable_irq, device::Driver};
 
 /// 中断管理器结构体
 pub struct IrqManager {
