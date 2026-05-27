@@ -9,12 +9,17 @@ use crate::arch::timer::{
     TIMER_TICKS, ack_timer_interrupt, clock_freq, get_time, set_next_trigger,
 };
 use crate::arch::trap::restore;
-use crate::earlyprintln;
 use crate::ipc::check_signal;
 use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_task};
 
 use super::TrapFrame;
+
+macro_rules! emergency_println {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        crate::console::emergency_print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+    };
+}
 
 /// 仅在单核环境下使用的默认 TrapFrame；后续可由调度器替换为 per-CPU/任务帧
 #[unsafe(no_mangle)]
@@ -237,14 +242,14 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
         core::arch::asm!("csrrd {0}, {csr}", out(reg) badv, csr = const CSR_BADV, options(nostack, preserves_flags));
         core::arch::asm!("csrrd {0}, {csr}", out(reg) badi, csr = const CSR_BADI, options(nostack, preserves_flags));
     }
-    earlyprintln!("\n===============================================");
-    earlyprintln!("   UNEXPECTED TRAP IN USER MODE (PLV>0)");
-    earlyprintln!("===============================================");
-    earlyprintln!("estat: {:#x}", estat);
-    earlyprintln!("era  : {:#x}", era);
-    earlyprintln!("badv : {:#x}", badv);
-    earlyprintln!("badi : {:#x}", badi);
-    earlyprintln!("regs : {:#x?}", trap_frame.regs);
+    emergency_println!("\n===============================================");
+    emergency_println!("   UNEXPECTED TRAP IN USER MODE (PLV>0)");
+    emergency_println!("===============================================");
+    emergency_println!("estat: {:#x}", estat);
+    emergency_println!("era  : {:#x}", era);
+    emergency_println!("badv : {:#x}", badv);
+    emergency_println!("badi : {:#x}", badi);
+    emergency_println!("regs : {:#x?}", trap_frame.regs);
     panic!(
         "Unexpected trap in user mode: estat={:#x}, era={:#x}, badv={:#x}, badi={:#x}",
         estat, era, badv, badi

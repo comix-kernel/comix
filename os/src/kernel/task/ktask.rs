@@ -206,11 +206,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
 
     let tfp = task.lock().trap_frame_ptr.load(Ordering::SeqCst);
     unsafe {
-        crate::arch::prepare_user_restore(
-            tfp,
-            prepared.initial_pc,
-            prepared.user_sp_high,
-        );
+        crate::arch::prepare_user_restore(tfp, prepared.initial_pc, prepared.user_sp_high);
     }
     // SAFETY: tfp 指向的内存已经被分配且由当前任务拥有
     // 直接按 trapframe 状态恢复并 sret 到用户态

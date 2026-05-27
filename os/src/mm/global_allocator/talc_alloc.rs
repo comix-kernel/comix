@@ -8,7 +8,7 @@
 //! - 由链接器符号定义的堆内存区域。
 //! - 用于设置堆的初始化函数。
 
-use crate::{earlyprintln, sync::RawSpinLock};
+use crate::sync::RawSpinLock;
 use talc::{Span, Talc, Talck};
 
 /// 全局堆分配器实例
@@ -42,7 +42,7 @@ pub fn init_heap() {
     let heap_end = eheap as usize;
     let heap_size = heap_end - heap_start;
 
-    earlyprintln!(
+    crate::println!(
         "Initializing heap: start={:#x}, end={:#x}, size={:#x} ({} MB)",
         heap_start,
         heap_end,
@@ -57,5 +57,5 @@ pub fn init_heap() {
             .expect("Failed to initialize heap allocator");
     }
 
-    earlyprintln!("Heap allocator initialized successfully");
+    crate::println!("Heap allocator initialized successfully");
 }

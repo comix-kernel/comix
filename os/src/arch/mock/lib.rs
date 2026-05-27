@@ -10,7 +10,7 @@ pub fn restart() -> ! {
     }
 }
 
-pub fn console_putchar(_c: usize) {}
+pub fn console_putchar(_c: u8) {}
 
 pub fn console_getchar() -> usize {
     usize::MAX
