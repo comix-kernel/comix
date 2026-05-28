@@ -1,10 +1,7 @@
 //! IO 相关的系统调用实现
 
-// set_len 后立即通过 copy_from_user / copy_from_user_mut 从用户空间填充数据，
-// 在第一次读取前已完全初始化，符合安全语义。
-#![allow(clippy::uninit_vec)]
-
 use crate::arch::Arch;
+use crate::arch::address::UA;
 use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
@@ -21,6 +18,35 @@ fn empty_iovec() -> IoVec {
     }
 }
 
+fn copy_user_bytes(src: *const u8, len: usize) -> Result<alloc::vec::Vec<u8>, isize> {
+    let mut buf = alloc::vec![0u8; len];
+    unsafe {
+        crate::arch::ArchImpl::copy_from_user(UA::from_usize(src as usize), buf.as_mut_ptr(), len)
+            .map_err(|_| -(EFAULT as isize))?;
+    }
+    Ok(buf)
+}
+
+fn copy_user_array<T: Copy>(
+    src: *const T,
+    len: usize,
+    empty: T,
+) -> Result<alloc::vec::Vec<T>, isize> {
+    let mut buf = alloc::vec![empty; len];
+    let size = len
+        .checked_mul(core::mem::size_of::<T>())
+        .ok_or(-(EFAULT as isize))?;
+    unsafe {
+        crate::arch::ArchImpl::copy_from_user(
+            UA::from_usize(src as usize),
+            buf.as_mut_ptr() as *mut u8,
+            size,
+        )
+        .map_err(|_| -(EFAULT as isize))?;
+    }
+    Ok(buf)
+}
+
 /// 向文件描述符写入数据
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     loop {
@@ -30,15 +56,10 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
             Err(e) => return e.to_errno(),
         };
 
-        let mut kernel_buf = alloc::vec![0u8; count];
-        unsafe {
-            crate::arch::ArchImpl::copy_from_user(
-                crate::arch::address::UA::from_usize(buf as usize),
-                kernel_buf.as_mut_ptr(),
-                count,
-            )
-            .ok();
-        }
+        let kernel_buf = match copy_user_bytes(buf, count) {
+            Ok(buf) => buf,
+            Err(e) => return e,
+        };
 
         let result = match file.write(&kernel_buf) {
             Ok(n) => n as isize,
@@ -118,16 +139,10 @@ pub fn readv(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EFAULT as isize);
     }
 
-    // 读取 iovec 数组
-    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
-    unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            crate::arch::address::UA::from_usize(iov as usize),
-            iovec_array.as_mut_ptr() as *mut u8,
-            iovcnt * core::mem::size_of::<IoVec>(),
-        )
-        .ok();
-    }
+    let iovec_array = match copy_user_array(iov, iovcnt, empty_iovec()) {
+        Ok(iovecs) => iovecs,
+        Err(e) => return e,
+    };
 
     let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
@@ -188,15 +203,10 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
         return -(EFAULT as isize);
     }
 
-    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
-    unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            crate::arch::address::UA::from_usize(iov as usize),
-            iovec_array.as_mut_ptr() as *mut u8,
-            iovcnt * core::mem::size_of::<IoVec>(),
-        )
-        .ok();
-    }
+    let iovec_array = match copy_user_array(iov, iovcnt, empty_iovec()) {
+        Ok(iovecs) => iovecs,
+        Err(e) => return e,
+    };
 
     let task = current_task();
     let file = match task.lock().fd_table.get(fd) {
@@ -218,15 +228,16 @@ pub fn writev(fd: usize, iov: *const IoVec, iovcnt: usize) -> isize {
             };
         }
 
-        let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
-        unsafe {
-            crate::arch::ArchImpl::copy_from_user(
-                crate::arch::address::UA::from_usize(vec.iov_base as usize),
-                kernel_buf.as_mut_ptr(),
-                vec.iov_len,
-            )
-            .ok();
-        }
+        let kernel_buf = match copy_user_bytes(vec.iov_base, vec.iov_len) {
+            Ok(buf) => buf,
+            Err(e) => {
+                return if total_written > 0 {
+                    total_written as isize
+                } else {
+                    e
+                };
+            }
+        };
         match file.write(&kernel_buf) {
             Ok(n) => {
                 total_written += n;
@@ -298,15 +309,10 @@ pub fn pwrite64(fd: usize, buf: *const u8, count: usize, offset: i64) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    let mut kernel_buf = alloc::vec![0u8; count];
-    unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            crate::arch::address::UA::from_usize(buf as usize),
-            kernel_buf.as_mut_ptr(),
-            count,
-        )
-        .ok();
-    }
+    let kernel_buf = match copy_user_bytes(buf, count) {
+        Ok(buf) => buf,
+        Err(e) => return e,
+    };
     match file.write_at(offset as usize, &kernel_buf) {
         Ok(n) => n as isize,
         Err(e) => e.to_errno(),
@@ -335,15 +341,10 @@ pub fn preadv(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isize
         Err(e) => return e.to_errno(),
     };
 
-    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
-    unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            crate::arch::address::UA::from_usize(iov as usize),
-            iovec_array.as_mut_ptr() as *mut u8,
-            iovcnt * core::mem::size_of::<IoVec>(),
-        )
-        .ok();
-    }
+    let iovec_array = match copy_user_array(iov, iovcnt, empty_iovec()) {
+        Ok(iovecs) => iovecs,
+        Err(e) => return e,
+    };
 
     let mut total_read = 0usize;
     let mut current_offset = offset as usize;
@@ -412,15 +413,10 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
         Err(e) => return e.to_errno(),
     };
 
-    let mut iovec_array = alloc::vec![empty_iovec(); iovcnt];
-    unsafe {
-        crate::arch::ArchImpl::copy_from_user(
-            crate::arch::address::UA::from_usize(iov as usize),
-            iovec_array.as_mut_ptr() as *mut u8,
-            iovcnt * core::mem::size_of::<IoVec>(),
-        )
-        .ok();
-    }
+    let iovec_array = match copy_user_array(iov, iovcnt, empty_iovec()) {
+        Ok(iovecs) => iovecs,
+        Err(e) => return e,
+    };
 
     let mut total_written = 0usize;
     let mut current_offset = offset as usize;
@@ -437,15 +433,16 @@ pub fn pwritev(fd: usize, iov: *const IoVec, iovcnt: usize, offset: i64) -> isiz
             };
         }
 
-        let mut kernel_buf = alloc::vec![0u8; vec.iov_len];
-        unsafe {
-            crate::arch::ArchImpl::copy_from_user(
-                crate::arch::address::UA::from_usize(vec.iov_base as usize),
-                kernel_buf.as_mut_ptr(),
-                vec.iov_len,
-            )
-            .ok();
-        }
+        let kernel_buf = match copy_user_bytes(vec.iov_base, vec.iov_len) {
+            Ok(buf) => buf,
+            Err(e) => {
+                return if total_written > 0 {
+                    total_written as isize
+                } else {
+                    e
+                };
+            }
+        };
         match file.write_at(current_offset, &kernel_buf) {
             Ok(n) => {
                 total_written += n;
@@ -627,15 +624,11 @@ fn poll_with_timeout(
 
         {
             let size = nfds * core::mem::size_of::<PollFd>();
-            let mut pollfds_buf = alloc::vec![empty_pollfd(); nfds];
-            unsafe {
-                crate::arch::ArchImpl::copy_from_user(
-                    crate::arch::address::UA::from_usize(fds),
-                    pollfds_buf.as_mut_ptr() as *mut u8,
-                    size,
-                )
-                .ok();
-            }
+            let mut pollfds_buf = match copy_user_array(fds as *const PollFd, nfds, empty_pollfd())
+            {
+                Ok(pollfds) => pollfds,
+                Err(e) => return e,
+            };
 
             for pollfd in pollfds_buf.iter_mut() {
                 pollfd.revents = 0;

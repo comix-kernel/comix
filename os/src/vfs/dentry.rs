@@ -195,22 +195,24 @@ impl Dentry {
     /// 获取完整路径（通过向上遍历父节点直到根目录）
     pub fn full_path(&self) -> String {
         let mut components = alloc::vec::Vec::new();
-        let mut current: *const Dentry = self;
+        let mut current_name = self.name.clone();
+        let mut current_parent = self.parent();
 
         // 向上遍历到根目录
         loop {
-            let dentry = unsafe { &*current };
-
             // 根目录的名字是 "/"
-            if dentry.name == "/" {
+            if current_name == "/" {
                 break;
             }
 
-            components.push(dentry.name.clone());
+            components.push(current_name);
 
             // 获取父节点
-            match dentry.parent() {
-                Some(parent) => current = Arc::as_ptr(&parent),
+            match current_parent {
+                Some(parent) => {
+                    current_name = parent.name.clone();
+                    current_parent = parent.parent();
+                }
                 None => break, // 到达根或孤立节点
             }
         }

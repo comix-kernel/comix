@@ -135,7 +135,7 @@ macro_rules! impl_arch {
             }
 
             fn cpu_count() -> usize {
-                unsafe { $crate::kernel::NUM_CPU }
+                $crate::kernel::num_cpu()
             }
         }
 

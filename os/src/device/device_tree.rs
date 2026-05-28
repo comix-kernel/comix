@@ -2,16 +2,17 @@
 
 use crate::{
     device::{CMDLINE, irq::IntcDriver},
-    kernel::{CLOCK_FREQ, NUM_CPU},
+    kernel::{clock_freq, num_cpu, set_clock_freq, set_num_cpu},
     mm::address::{ConvertablePA, PA},
     pr_info, pr_warn,
     sync::SpinLock,
 };
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use fdt::{Fdt, node::FdtNode};
 /// 指向设备树的指针，在启动时由引导程序设置
 #[unsafe(no_mangle)]
-pub static mut DTP: usize = 0x114514; // 占位地址，实际由引导程序设置
+pub static DTP: AtomicUsize = AtomicUsize::new(0x114514); // 占位地址，实际由引导程序设置
 
 lazy_static::lazy_static! {
     /// 设备树
@@ -19,7 +20,7 @@ lazy_static::lazy_static! {
     /// XXX: 是否需要这个?
     pub static ref FDT: Fdt<'static> = {
         unsafe {
-            let addr = PA::to_va(&PA::from_usize(DTP));
+            let addr = PA::to_va(&PA::from_usize(DTP.load(Ordering::Acquire)));
             fdt::Fdt::from_ptr(addr.as_usize() as *mut u8).expect("Failed to parse device tree")
         }
     };
@@ -42,8 +43,7 @@ lazy_static::lazy_static! {
 /// 此函数在堆分配器初始化之前调用,因此不能使用任何需要堆分配的操作。
 pub fn early_init() {
     let cpus = FDT.cpus().count();
-    // SAFETY: 这里是在单核初始化阶段设置 CPU 数量
-    unsafe { NUM_CPU = cpus };
+    set_num_cpu(cpus);
 
     if let Some(cpu) = FDT.cpus().next() {
         let timebase = cpu
@@ -55,9 +55,7 @@ pub fn early_init() {
                 _ => None,
             });
         if let Some(freq) = timebase {
-            unsafe {
-                CLOCK_FREQ = freq;
-            }
+            set_clock_freq(freq);
         } else {
             pr_warn!("[Device] No timebase-frequency in DTB, keeping default");
         }
@@ -78,8 +76,8 @@ pub fn init() {
 
     // 设置 NUM_CPU 和 CLOCK_FREQ
     early_init();
-    pr_info!("[Device] now has {} CPU(s)", unsafe { NUM_CPU });
-    pr_info!("[Device] CLOCK_FREQ set to {} Hz", unsafe { CLOCK_FREQ });
+    pr_info!("[Device] now has {} CPU(s)", num_cpu());
+    pr_info!("[Device] CLOCK_FREQ set to {} Hz", clock_freq());
 
     FDT.memory().regions().for_each(|region| {
         pr_info!(

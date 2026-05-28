@@ -2,6 +2,7 @@
 //!
 //! 包含 CPU 结构体及其相关操作
 use alloc::sync::Arc;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::mm::activate;
 use crate::{
@@ -11,8 +12,28 @@ use crate::{
 };
 use lazy_static::lazy_static;
 
-pub static mut NUM_CPU: usize = 1;
-pub static mut CLOCK_FREQ: usize = 12_500_000;
+pub static NUM_CPU: AtomicUsize = AtomicUsize::new(1);
+pub static CLOCK_FREQ: AtomicUsize = AtomicUsize::new(12_500_000);
+
+#[inline]
+pub fn num_cpu() -> usize {
+    NUM_CPU.load(Ordering::Acquire)
+}
+
+#[inline]
+pub fn set_num_cpu(num_cpu: usize) {
+    NUM_CPU.store(num_cpu, Ordering::Release);
+}
+
+#[inline]
+pub fn clock_freq() -> usize {
+    CLOCK_FREQ.load(Ordering::Acquire)
+}
+
+#[inline]
+pub fn set_clock_freq(clock_freq: usize) {
+    CLOCK_FREQ.store(clock_freq, Ordering::Release);
+}
 
 lazy_static! {
     /// Per-CPU 数据: 每个 CPU 的状态
@@ -103,7 +124,9 @@ impl Cpu {
 ///
 /// 调用者必须确保在访问期间禁用抢占 (防止任务迁移到其他 CPU)。
 #[inline]
-pub fn current_cpu() -> &'static mut Cpu {
+#[rustfmt::skip]
+pub fn current_cpu() -> &'static
+mut Cpu {
     CPUS.get_mut()
 }
 
@@ -122,7 +145,7 @@ mod tests {
 
     /// 测试 CPUS 初始化
     test_case!(test_cpus_initialization, {
-        let num_cpu = unsafe { NUM_CPU };
+        let num_cpu = num_cpu();
         for cpu_id in 0..num_cpu {
             let cpu = CPUS.get_of(cpu_id);
             kassert!(cpu.cpu_id == cpu_id);
@@ -135,7 +158,7 @@ mod tests {
 
         let _guard = PreemptGuard::new();
         let id = crate::arch::cpu_id();
-        kassert!(id < unsafe { NUM_CPU });
+        kassert!(id < num_cpu());
     });
 
     /// 测试 current_cpu() 函数
@@ -144,7 +167,7 @@ mod tests {
 
         let _guard = PreemptGuard::new();
         let cpu = current_cpu();
-        kassert!(cpu.cpu_id < unsafe { NUM_CPU });
+        kassert!(cpu.cpu_id < num_cpu());
     });
 
     /// 测试 cpu_of() 函数
@@ -152,7 +175,7 @@ mod tests {
         let cpu0 = cpu_of(0);
         kassert!(cpu0.cpu_id == 0);
 
-        let num_cpu = unsafe { NUM_CPU };
+        let num_cpu = num_cpu();
         if num_cpu > 1 {
             let cpu1 = cpu_of(1);
             kassert!(cpu1.cpu_id == 1);
@@ -181,7 +204,7 @@ mod tests {
         }
 
         // 验证其他 CPU 的值仍然是初始值
-        let num_cpu = unsafe { NUM_CPU };
+        let num_cpu = num_cpu();
         let current_id = {
             let _guard = PreemptGuard::new();
             crate::arch::cpu_id()
@@ -201,7 +224,7 @@ mod tests {
 
         let per_cpu: PerCpu<usize> = PerCpu::new_with_id(|cpu_id| cpu_id * 10);
 
-        let num_cpu = unsafe { NUM_CPU };
+        let num_cpu = num_cpu();
         for cpu_id in 0..num_cpu {
             let value = per_cpu.get_of(cpu_id);
             kassert!(*value == cpu_id * 10);
