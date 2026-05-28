@@ -94,7 +94,7 @@ pub fn scheduler_of(cpu_id: usize) -> &'static SpinLock<RRScheduler> {
 
 /// 通过轮询方式为新任务选择一个目标 CPU。
 pub fn pick_cpu() -> usize {
-    let num_cpu = unsafe { crate::kernel::NUM_CPU };
+    let num_cpu = crate::kernel::num_cpu();
     NEXT_CPU.fetch_add(1, Ordering::Relaxed) % num_cpu
 }
 

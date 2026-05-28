@@ -222,8 +222,10 @@ impl FileLockManager {
     }
 }
 
-/// 全局文件锁管理器实例
-static FILE_LOCK_MANAGER: FileLockManager = FileLockManager::new();
+lazy_static::lazy_static! {
+    /// 全局文件锁管理器实例
+    static ref FILE_LOCK_MANAGER: FileLockManager = FileLockManager::new();
+}
 
 /// 获取全局文件锁管理器
 pub fn file_lock_manager() -> &'static FileLockManager {
