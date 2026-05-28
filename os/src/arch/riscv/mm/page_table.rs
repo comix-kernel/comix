@@ -393,7 +393,7 @@ impl PageTableInner {
         // 2. 通知所有其他 CPU 刷新 TLB
         // send_tlb_flush_ipi_all 内部会检查是否为多核环境
         // 单核环境下不会发送 IPI
-        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        let num_cpu = crate::kernel::num_cpu();
         if num_cpu > 1 {
             send_tlb_flush_ipi_all();
         }
@@ -413,7 +413,7 @@ impl PageTableInner {
         <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
         // 只有在非批处理模式下才发送 IPI
         if batch.is_none() {
-            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            let num_cpu = crate::kernel::num_cpu();
             if num_cpu > 1 {
                 send_tlb_flush_ipi_all();
             }
@@ -432,7 +432,7 @@ impl PageTableInner {
         <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
         // 只有在非批处理模式下才发送 IPI
         if batch.is_none() {
-            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            let num_cpu = crate::kernel::num_cpu();
             if num_cpu > 1 {
                 send_tlb_flush_ipi_all();
             }
@@ -452,7 +452,7 @@ impl PageTableInner {
         <Self as PageTableInnerTrait<PageTableEntry>>::tlb_flush(vpn);
         // 只有在非批处理模式下才发送 IPI
         if batch.is_none() {
-            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            let num_cpu = crate::kernel::num_cpu();
             if num_cpu > 1 {
                 send_tlb_flush_ipi_all();
             }
@@ -493,7 +493,7 @@ impl TlbBatchContext {
                 core::arch::asm!("sfence.vma");
             }
             // 发送一次 IPI 到所有其他 CPU
-            let num_cpu = unsafe { crate::kernel::NUM_CPU };
+            let num_cpu = crate::kernel::num_cpu();
             if num_cpu > 1 {
                 send_tlb_flush_ipi_all();
             }

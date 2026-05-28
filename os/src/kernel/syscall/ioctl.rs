@@ -283,10 +283,6 @@ fn handle_siocgifconf(arg: usize) -> isize {
 
     let ifconf = unsafe { read_from_user(ifconf_ptr as *const Ifconf) };
 
-    // 先清零原结构体，避免泄露内核栈数据
-    let zeroed = unsafe { core::mem::MaybeUninit::<Ifconf>::zeroed().assume_init() };
-    unsafe { write_to_user(ifconf_ptr, zeroed) };
-
     // TODO: 填充实际的网络接口列表
     let mut new_ifconf = ifconf;
     new_ifconf.ifc_len = 0;

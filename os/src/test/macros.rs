@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::println;
-use core::sync::atomic::AtomicUsize;
+use crate::sync::SpinLock;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Copy, Clone, Debug)]
 pub struct FailedAssertion {
@@ -16,9 +17,10 @@ impl FailedAssertion {
     }
 }
 
-pub static mut FAILED_LIST: [Option<FailedAssertion>; 32] = [None; 32];
 pub const FAILED_LIST_CAPACITY: usize = 32;
-pub static mut FAILED_INDEX: usize = 0;
+pub static FAILED_LIST: SpinLock<[Option<FailedAssertion>; FAILED_LIST_CAPACITY]> =
+    SpinLock::new([None; FAILED_LIST_CAPACITY]);
+pub static FAILED_INDEX: AtomicUsize = AtomicUsize::new(0);
 pub static TEST_FAILED: AtomicUsize = AtomicUsize::new(0);
 /// 安全地记录一个失败的断言。
 ///
@@ -29,18 +31,28 @@ pub static TEST_FAILED: AtomicUsize = AtomicUsize::new(0);
 ///
 /// * `assertion`: 要记录的 `FailedAssertion` 实例。
 pub fn record_failed_assertion(assertion: FailedAssertion) {
-    let index = TEST_FAILED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+    let index = TEST_FAILED.fetch_add(1, Ordering::SeqCst);
     if index < FAILED_LIST_CAPACITY {
-        unsafe {
-            FAILED_LIST[index] = Some(assertion);
-            if index + 1 > FAILED_INDEX {
-                FAILED_INDEX = index + 1;
-            }
-        }
+        FAILED_LIST.lock()[index] = Some(assertion);
+        FAILED_INDEX.fetch_max(index + 1, Ordering::SeqCst);
     } else {
         println!(
             "\x1b[91m[warn] Failed assertion list is full (capacity {}). Cannot record: {}\x1b[0m",
             FAILED_LIST_CAPACITY, assertion.cond
+        );
+    }
+}
+
+pub fn print_failed_assertions(start: usize, end: usize) {
+    let failed_list = FAILED_LIST.lock();
+    let failed_limit = core::cmp::min(end, FAILED_LIST_CAPACITY);
+    for i in start..failed_limit {
+        let Some(fail) = failed_list[i] else {
+            continue;
+        };
+        println!(
+            "\x1b[31mFailed assertion: {} at {}:{}\x1b[0m",
+            fail.cond, fail.file, fail.line
         );
     }
 }
@@ -139,16 +151,10 @@ macro_rules! test_case {
             let failed_after = $crate::test::macros::TEST_FAILED.load(core::sync::atomic::Ordering::SeqCst);
             let failed_count = failed_after - failed_before;
 
-            unsafe {
-                for i in failed_before..$crate::test::macros::FAILED_INDEX {
-                    if let Some(fail) = $crate::test::macros::FAILED_LIST[i] {
-                        $crate::println!(
-                            "\x1b[31mFailed assertion: {} at {}:{}\x1b[0m",
-                            fail.cond, fail.file, fail.line
-                        );
-                    }
-                }
-            }
+            $crate::test::macros::print_failed_assertions(
+                failed_before,
+                $crate::test::macros::FAILED_INDEX.load(core::sync::atomic::Ordering::SeqCst),
+            );
 
             if failed_count == 0 {
                 $crate::println!("\x1b[32m[ok] Test passed\x1b[0m\n");
@@ -187,19 +193,7 @@ fn run_test(test_name: &str, env_name: Option<&str>, test_fn: impl FnOnce()) {
     let failed_after = TEST_FAILED.load(core::sync::atomic::Ordering::SeqCst);
     let failed_count = failed_after - failed_before;
 
-    unsafe {
-        let failed_limit = FAILED_INDEX;
-        let failed_list = core::ptr::addr_of!(FAILED_LIST).cast::<Option<FailedAssertion>>();
-        for i in failed_before..failed_limit {
-            let Some(fail) = failed_list.add(i).read() else {
-                continue;
-            };
-            println!(
-                "\x1b[31mFailed assertion: {} at {}:{}\x1b[0m",
-                fail.cond, fail.file, fail.line
-            );
-        }
-    }
+    print_failed_assertions(failed_before, FAILED_INDEX.load(Ordering::SeqCst));
 
     if failed_count == 0 {
         println!("\x1b[32m[ok] Test passed\x1b[0m\n");

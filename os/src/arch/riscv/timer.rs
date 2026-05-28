@@ -3,7 +3,7 @@
 //! 包含定时器初始化、时间获取和定时器中断设置等功能
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{arch::lib::set_timer, kernel::CLOCK_FREQ};
+use crate::{arch::lib::set_timer, kernel};
 use riscv::register::time;
 
 /// 每秒的时钟中断次数
@@ -50,8 +50,7 @@ pub fn init() {
 /// 获取时钟频率
 #[inline]
 pub fn clock_freq() -> usize {
-    // SAFETY: CLOCK_FREQ 在内核初始化阶段被正确设置且之后不会更改
-    unsafe { CLOCK_FREQ }
+    kernel::clock_freq()
 }
 
 #[cfg(test)]

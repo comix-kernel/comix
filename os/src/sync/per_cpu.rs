@@ -40,7 +40,7 @@ pub struct PerCpu<T, CPU: CpuOps = ArchImpl> {
 
 impl<T, CPU: CpuOps> PerCpu<T, CPU> {
     pub fn new<F: Fn() -> T>(init: F) -> Self {
-        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        let num_cpu = crate::kernel::num_cpu();
         assert!(num_cpu > 0, "NUM_CPU must be set before creating PerCpu");
 
         let mut data = Vec::with_capacity(num_cpu);
@@ -54,7 +54,7 @@ impl<T, CPU: CpuOps> PerCpu<T, CPU> {
     }
 
     pub fn new_with_id<F: Fn(usize) -> T>(init: F) -> Self {
-        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        let num_cpu = crate::kernel::num_cpu();
         assert!(num_cpu > 0, "NUM_CPU must be set before creating PerCpu");
 
         let mut data = Vec::with_capacity(num_cpu);

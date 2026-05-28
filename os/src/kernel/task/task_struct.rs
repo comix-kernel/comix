@@ -2,7 +2,10 @@
 //!
 //! 包含任务的核心信息，如上下文、状态、内存空间等
 #![allow(dead_code)]
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
@@ -307,7 +310,7 @@ impl Task {
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
         unsafe {
             // 清零整个 TrapFrame，避免旧值泄漏到用户态
-            core::ptr::write_bytes(tf_ptr, 0, 1);
+            core::ptr::write_bytes(tf_ptr, 0, size_of::<TrapFrame>());
             <TrapFrame as HwTrapFrame>::set_exec_trap_frame_from_layout(
                 &mut *tf_ptr,
                 initial_pc.as_usize(),
