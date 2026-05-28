@@ -8,7 +8,7 @@ global_asm!(include_str!("entry.S"));
 use crate::mm::address::UsizeConvert;
 use crate::{
     arch::{timer, trap},
-    kernel::{self, NUM_CPU, current_cpu},
+    kernel::{self, current_cpu, num_cpu, set_num_cpu},
     pr_debug, pr_err, pr_info, pr_warn,
     sync::PreemptGuard,
 };
@@ -18,7 +18,7 @@ static CPU_ONLINE_MASK: AtomicUsize = AtomicUsize::new(0);
 
 // 从核启动标志（在 entry.S 中定义）
 unsafe extern "C" {
-    static mut secondary_boot_flag: u64;
+    static mut secondary_boot_flag: u64; // extern symbol from entry.S
 }
 
 /// 从核调试入口
@@ -57,7 +57,7 @@ fn setup_boot_cpu(_hartid: usize) {
 }
 
 fn boot_secondaries(_hartid: usize) {
-    let num_cpus = unsafe { NUM_CPU };
+    let num_cpus = num_cpu();
     if num_cpus > 1 {
         boot_secondary_cpus(num_cpus);
     }
@@ -131,7 +131,7 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
     if num_cpus <= 1 {
         pr_info!("[SMP] Single CPU mode, skipping secondary boot");
         CPU_ONLINE_MASK.fetch_or(1, Ordering::Release);
-        unsafe { NUM_CPU = 1 };
+        set_num_cpu(1);
         return;
     }
 
@@ -167,7 +167,7 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
 
     if expected_mask == 1 {
         pr_warn!("[SMP] No secondary hart could be started; falling back to single-core");
-        unsafe { NUM_CPU = 1 };
+        set_num_cpu(1);
         return;
     }
 
@@ -187,14 +187,14 @@ pub fn boot_secondary_cpus(num_cpus: usize) {
 
     let online_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
     let online_cnt = online_mask.count_ones() as usize;
-    unsafe { NUM_CPU = core::cmp::max(online_cnt, 1) };
+    set_num_cpu(core::cmp::max(online_cnt, 1));
 
     if online_mask == expected_mask {
-        pr_info!("[SMP] All {} CPUs are online!", unsafe { NUM_CPU });
+        pr_info!("[SMP] All {} CPUs are online!", num_cpu());
     } else {
         pr_warn!(
             "[SMP] Proceeding with {} online CPU(s), mask={:#b}",
-            unsafe { NUM_CPU },
+            num_cpu(),
             online_mask
         );
     }
@@ -206,13 +206,13 @@ mod tests {
     use crate::{kassert, test_case};
 
     test_case!(test_num_cpu, {
-        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        let num_cpu = crate::kernel::num_cpu();
         kassert!(num_cpu >= 1);
         kassert!(num_cpu <= crate::config::MAX_CPU_COUNT);
     });
 
     test_case!(test_cpu_online_mask, {
-        let num_cpu = unsafe { crate::kernel::NUM_CPU };
+        let num_cpu = crate::kernel::num_cpu();
         let actual_mask = CPU_ONLINE_MASK.load(Ordering::Acquire);
 
         if actual_mask == 0 {

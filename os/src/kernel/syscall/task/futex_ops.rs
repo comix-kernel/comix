@@ -1,4 +1,5 @@
 use super::*;
+use crate::arch::Arch;
 
 /// Futex 系统调用实现
 /// # 参数
@@ -25,9 +26,9 @@ pub fn futex(
     let mut fm = FUTEX_MANAGER.lock();
     match op as u32 {
         FUTEX_WAIT => {
-            // 必须保证获 取锁 → 读取用户数据 → 比较 → 释放锁 整个序列是原子的
-            let user_val = unsafe { read_from_user(uaddr) };
-            let memory_space = current_task()
+            // 必须保证获取锁 → 定位等待队列 → 读取用户数据 → 比较 → 入队/释放锁 的序列是原子的
+            let task = current_task();
+            let memory_space = task
                 .lock()
                 .memory_space
                 .as_ref()
@@ -41,11 +42,24 @@ pub fn futex(
             } else {
                 return -EFAULT;
             };
+            let user_val = {
+                let mut val = core::mem::MaybeUninit::<u32>::uninit();
+                let copy_result = unsafe {
+                    crate::arch::ArchImpl::copy_from_user(
+                        UA::from_usize(uaddr as usize),
+                        val.as_mut_ptr() as *mut u8,
+                        core::mem::size_of::<u32>(),
+                    )
+                };
+                if copy_result.is_err() {
+                    return -EFAULT;
+                }
+                unsafe { val.assume_init() }
+            };
             if user_val != val {
                 return -EAGAIN;
             }
 
-            let task = current_task();
             let waitq = fm.get_wait_queue(paddr);
             waitq.sleep(task.clone());
             sleep_task(task.clone(), true);

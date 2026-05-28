@@ -47,7 +47,7 @@ static IPI_PENDING: [AtomicU32; MAX_CPU_COUNT] = [const { AtomicU32::new(0) }; M
 ///
 /// 如果 target_cpu >= NUM_CPU，会 panic
 pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
-    let num_cpu = unsafe { crate::kernel::NUM_CPU };
+    let num_cpu = crate::kernel::num_cpu();
     assert!(target_cpu < num_cpu, "Invalid target CPU: {}", target_cpu);
 
     // 1. 设置目标 CPU 的待处理标志
@@ -78,7 +78,7 @@ pub fn send_ipi(target_cpu: usize, ipi_type: IpiType) {
 /// - hart_mask: hart 位掩码，每位代表一个 CPU
 /// - ipi_type: IPI 类型
 pub fn send_ipi_many(hart_mask: usize, ipi_type: IpiType) {
-    let num_cpu = unsafe { crate::kernel::NUM_CPU };
+    let num_cpu = crate::kernel::num_cpu();
 
     // 设置所有目标 CPU 的待处理标志
     for (cpu, pending) in IPI_PENDING.iter().enumerate().take(num_cpu) {
@@ -106,7 +106,7 @@ pub fn send_reschedule_ipi(cpu: usize) {
 /// 通知所有其他 CPU 刷新 TLB
 pub fn send_tlb_flush_ipi_all() {
     let current_cpu_id = super::kernel::cpu::cpu_id();
-    let num_cpu = unsafe { crate::kernel::NUM_CPU };
+    let num_cpu = crate::kernel::num_cpu();
     let mask = ((1 << num_cpu) - 1) & !(1 << current_cpu_id);
 
     if mask != 0 {

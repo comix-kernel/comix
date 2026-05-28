@@ -259,8 +259,6 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             let termios = *STDIO_TERMIOS.lock();
-            let zeroed = unsafe { core::mem::MaybeUninit::<Termios>::zeroed().assume_init() };
-            unsafe { write_to_user(termios_ptr, zeroed) };
             unsafe { write_to_user(termios_ptr, termios) };
 
             crate::pr_debug!(
@@ -312,10 +310,6 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             }
 
             let winsize = *STDIO_WINSIZE.lock();
-            let zeroed = unsafe {
-                core::mem::MaybeUninit::<crate::uapi::ioctl::WinSize>::zeroed().assume_init()
-            };
-            unsafe { write_to_user(winsize_ptr, zeroed) };
             unsafe { write_to_user(winsize_ptr, winsize) };
 
             crate::pr_debug!(
