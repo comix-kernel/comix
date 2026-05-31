@@ -2,10 +2,7 @@
 //!
 //! 包含任务的核心信息，如上下文、状态、内存空间等
 #![allow(dead_code)]
-use core::{
-    mem::size_of,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
@@ -20,7 +17,7 @@ use crate::{
         task::{forkret, task_state::TaskState},
     },
     mm::{
-        address::{ConvertablePA, PageNum, UA, VA},
+        address::{ConvertablePA, PageNum, UA, UsizeConvert, VA},
         frame_allocator::{FrameRangeTracker, FrameTracker},
         memory_space::MemorySpace,
     },
@@ -309,8 +306,12 @@ impl Task {
         // 4. 配置 TrapFrame (新的上下文)
         // SAFETY: tfptr 指向的内存已经被分配且可写，并由 task 拥有
         unsafe {
-            // 清零整个 TrapFrame，避免旧值泄漏到用户态
-            core::ptr::write_bytes(tf_ptr, 0, size_of::<TrapFrame>());
+            // 原先：清零整个 TrapFrame，避免旧值泄漏到用户态。
+            // 注意：write_bytes 的 count 以 TrapFrame 为单位（非字节），
+            // 这里只清零 1 个 TrapFrame。若误传 size_of::<TrapFrame>()，
+            // 会写 280*280 字节、越界冲掉当前 satp 指向的页表，导致静默死循环。
+            // 由于 set_exec_trap_frame 内部已 *self = Self::zero_init() 全量清零，
+            // 这行 write_bytes 在功能上完全冗余，故直接删除
             <TrapFrame as HwTrapFrame>::set_exec_trap_frame_from_layout(
                 &mut *tf_ptr,
                 initial_pc.as_usize(),
