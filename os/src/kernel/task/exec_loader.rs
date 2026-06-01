@@ -13,6 +13,7 @@ use crate::vfs::{FsError, Inode, InodeType};
 pub enum ExecImageError {
     Fs(FsError),
     InvalidElf,
+    NotRegular(InodeType),
     Paging(PagingError),
 }
 
@@ -429,7 +430,7 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
     let inode = dentry.inode.clone();
     let meta = inode.metadata().map_err(ExecImageError::from)?;
     if meta.inode_type != InodeType::File {
-        return Err(ExecImageError::Fs(FsError::IsDirectory));
+        return Err(ExecImageError::NotRegular(meta.inode_type));
     }
 
     let eh = parse_elf_header(inode.as_ref())?;
@@ -479,7 +480,7 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
         let interp_inode = interp_dentry.inode.clone();
         let interp_meta = interp_inode.metadata().map_err(ExecImageError::from)?;
         if interp_meta.inode_type != InodeType::File {
-            return Err(ExecImageError::InvalidElf);
+            return Err(ExecImageError::NotRegular(interp_meta.inode_type));
         }
 
         let interp_eh = parse_elf_header(interp_inode.as_ref())?;

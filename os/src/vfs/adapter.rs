@@ -12,7 +12,7 @@ impl Stat {
         Self {
             st_dev: 0, // TODO: 需要从文件系统获取设备号
             st_ino: meta.inode_no as u64,
-            st_mode: meta.mode.bits(),
+            st_mode: mode_with_type(meta),
             st_nlink: meta.nlinks as u32,
             st_uid: meta.uid,
             st_gid: meta.gid,
@@ -50,7 +50,7 @@ impl Statx {
             stx_nlink: meta.nlinks as u32,
             stx_uid: meta.uid,
             stx_gid: meta.gid,
-            stx_mode: meta.mode.bits() as u16,
+            stx_mode: mode_with_type(meta) as u16,
             __spare0: [0; 1],
             stx_ino: meta.inode_no as u64,
             stx_size: meta.size as u64,
@@ -69,6 +69,23 @@ impl Statx {
             stx_dio_offset_align: 0,
             __spare3: [0; 12],
         }
+    }
+}
+
+fn mode_with_type(meta: &InodeMetadata) -> u32 {
+    let mode = meta.mode.bits();
+    if mode & crate::vfs::FileMode::S_IFMT.bits() != 0 {
+        return mode;
+    }
+
+    mode | match meta.inode_type {
+        InodeType::File => crate::vfs::FileMode::S_IFREG.bits(),
+        InodeType::Directory => crate::vfs::FileMode::S_IFDIR.bits(),
+        InodeType::Symlink => crate::vfs::FileMode::S_IFLNK.bits(),
+        InodeType::CharDevice => crate::vfs::FileMode::S_IFCHR.bits(),
+        InodeType::BlockDevice => crate::vfs::FileMode::S_IFBLK.bits(),
+        InodeType::Fifo => crate::vfs::FileMode::S_IFIFO.bits(),
+        InodeType::Socket => crate::vfs::FileMode::S_IFSOCK.bits(),
     }
 }
 

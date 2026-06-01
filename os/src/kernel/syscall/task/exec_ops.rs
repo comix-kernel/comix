@@ -41,7 +41,7 @@ pub fn execve(
             Err(_) => return -EIO,
         };
         if meta.inode_type != crate::vfs::InodeType::File {
-            return -EISDIR;
+            return exec_non_file_errno(meta.inode_type);
         }
 
         let prefix_len = core::cmp::min(meta.size, 256);
@@ -173,6 +173,13 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), HashbangError> {
     Ok((interpreter_path, interpreter_arg))
 }
 
+// 按 POSIX/Linux 语义：对非普通文件（含目录）调用 execve 一律返回 EACCES。
+// 真实内核 may_open() 对 S_IFDIR + MAY_EXEC 返回 -EACCES；EISDIR 仅用于写目录等场景。
+// busybox/bash 拿到 EACCES 后会自行处理（bash 会 stat 后输出 "Is a directory"）。
+fn exec_non_file_errno(_inode_type: crate::vfs::InodeType) -> c_int {
+    -EACCES
+}
+
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
 fn do_execve_prepare(
     path: &str,
@@ -181,6 +188,9 @@ fn do_execve_prepare(
         Ok(p) => p,
         Err(crate::kernel::task::ExecImageError::Fs(FsError::NotFound)) => return Err(-ENOENT),
         Err(crate::kernel::task::ExecImageError::Fs(FsError::IsDirectory)) => return Err(-EISDIR),
+        Err(crate::kernel::task::ExecImageError::NotRegular(inode_type)) => {
+            return Err(exec_non_file_errno(inode_type));
+        }
         Err(crate::kernel::task::ExecImageError::Fs(_)) => return Err(-EIO),
         Err(crate::kernel::task::ExecImageError::Paging(
             crate::mm::page_table::PagingError::OutOfMemory,
