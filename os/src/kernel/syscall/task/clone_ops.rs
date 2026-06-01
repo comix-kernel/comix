@@ -46,6 +46,7 @@ pub fn clone(
         fs,
         uts,
         rlimit,
+        exe_path,
     ) = {
         let _guard = crate::sync::PreemptGuard::new();
         let cpu = current_cpu();
@@ -66,6 +67,7 @@ pub fn clone(
             task.fs.clone(),
             task.uts_namespace.clone(),
             task.rlimit.clone(),
+            task.exe_path.clone(),
         )
     };
     let exit_signal = requested_flags.get_exit_signal();
@@ -132,6 +134,7 @@ pub fn clone(
         fd_table,
         fs,
     );
+    child_task.exe_path = exe_path;
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
         unsafe {

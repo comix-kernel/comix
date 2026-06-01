@@ -176,7 +176,7 @@ impl ProcInode {
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::Symlink,
-                mode: FileMode::from_bits_truncate(0o777),
+                mode: FileMode::from_bits_truncate(0o777 | FileMode::S_IFLNK.bits()),
                 uid: 0,
                 gid: 0,
                 size: target.len(),
@@ -211,7 +211,7 @@ impl ProcInode {
             metadata: SpinLock::new(InodeMetadata {
                 inode_no,
                 inode_type: InodeType::Symlink,
-                mode: FileMode::from_bits_truncate(0o777),
+                mode: FileMode::from_bits_truncate(0o777 | FileMode::S_IFLNK.bits()),
                 uid: 0,
                 gid: 0,
                 size: 0, // 动态链接的大小未知
