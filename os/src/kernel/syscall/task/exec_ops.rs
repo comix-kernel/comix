@@ -173,11 +173,11 @@ fn parse_hashbang(data: &[u8]) -> Result<(&str, Option<&str>), HashbangError> {
     Ok((interpreter_path, interpreter_arg))
 }
 
-fn exec_non_file_errno(inode_type: crate::vfs::InodeType) -> c_int {
-    match inode_type {
-        crate::vfs::InodeType::Directory => -EISDIR,
-        _ => -EACCES,
-    }
+// 按 POSIX/Linux 语义：对非普通文件（含目录）调用 execve 一律返回 EACCES。
+// 真实内核 may_open() 对 S_IFDIR + MAY_EXEC 返回 -EACCES；EISDIR 仅用于写目录等场景。
+// busybox/bash 拿到 EACCES 后会自行处理（bash 会 stat 后输出 "Is a directory"）。
+fn exec_non_file_errno(_inode_type: crate::vfs::InodeType) -> c_int {
+    -EACCES
 }
 
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
