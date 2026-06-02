@@ -84,6 +84,8 @@ os-cargo-config:
 			printf '\n' >> $(OS_DIR)/.cargo/config.toml; \
 			cat "$(OS_DIR)/cargo-vendor-config.toml" >> $(OS_DIR)/.cargo/config.toml; \
 			echo "[OSCOMP] 已追加 vendored 源（离线构建）"; \
+			echo "[OSCOMP] 重建 vendor 校验和（评测机过滤删除了 .cargo-checksum.json）"; \
+			python3 scripts/restore_vendor_checksums.py $(OS_DIR); \
 		fi; \
 	else \
 		echo "[OSCOMP] 保留现有 $(OS_DIR)/.cargo/config.toml（本地开发）"; \
