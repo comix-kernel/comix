@@ -127,3 +127,8 @@ secondary_stacks_bottom:
     .space 65536 * 8        # 8 核 × 64KB
     .globl secondary_stacks_top
 secondary_stacks_top:
+
+    # 切回 .text：本文件经 global_asm! 与 switch.S 等纯代码 .S 拼接为同一汇编单元，
+    # 若停在 .bss.secondary_stack（NOBITS）结束，后续代码块会继承该段，触发
+    # "SHT_NOBITS section cannot have instructions"（旧版 LLVM 严格报错）。
+    .section .text

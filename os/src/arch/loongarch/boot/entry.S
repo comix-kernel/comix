@@ -102,3 +102,6 @@ boot_stack_lower_bound:
     .space 4096 * 48                # 48 页 = 192KB 启动栈
     .globl boot_stack_top
 boot_stack_top:
+
+    # 切回 .text：与 riscv entry.S 同理，避免 global_asm! 拼接时后续代码块继承本 .bss 段。
+    .section .text
