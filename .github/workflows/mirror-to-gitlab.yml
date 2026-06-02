@@ -1,0 +1,95 @@
+name: Mirror to GitLab (vendored)
+
+# 在 `Run tests & Code Quality Checks` 于 main 上成功后，将仓库镜像到 GitLab，
+# 并附带 vendored Rust 依赖（离线评测所需）。仅 push 到 main 且 CI 成功才镜像。
+on:
+  workflow_run:
+    workflows:
+      - Run tests & Code Quality Checks
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    # 手动触发；或 CI 在 main 的 push 上成功完成。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (exact SHA)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain (for cargo vendor)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-28
+
+      - name: Prepare mirror commit (vendor + README swap)
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b gitlab-mirror
+
+          # 1) GitLab 展示用 README
+          if [ -f README_gitlab.md ]; then
+            cp -f README_gitlab.md README.md
+          fi
+
+          # 2) Vendor Rust 依赖供评测机离线构建；
+          #    配置写入非隐藏文件，避免被评测机过滤。
+          pushd os >/dev/null
+          rm -rf vendor cargo-vendor-config.toml
+          cargo vendor vendor --locked > cargo-vendor-config.toml
+          printf '\n[net]\noffline = true\n' >> cargo-vendor-config.toml
+          test -d vendor
+          test -f cargo-vendor-config.toml
+          popd >/dev/null
+
+          git add -f README.md os/vendor os/cargo-vendor-config.toml
+          git commit -m "Mirror to GitLab (vendored) for ${SHA}"
+
+      - name: Push to GitLab (HTTP, force)
+        env:
+          GITLAB_REMOTE_URL: ${{ secrets.GITLAB_REMOTE_URL }}
+          GITLAB_USERNAME: ${{ secrets.GITLAB_USERNAME }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_BRANCH: ${{ secrets.GITLAB_BRANCH }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GITLAB_REMOTE_URL:-}" ] || [ -z "${GITLAB_USERNAME:-}" ] || [ -z "${GITLAB_TOKEN:-}" ]; then
+            echo "Missing secrets: GITLAB_REMOTE_URL / GITLAB_USERNAME / GITLAB_TOKEN"
+            exit 1
+          fi
+
+          branch="${GITLAB_BRANCH:-main}"
+
+          if ! git remote get-url gitlab >/dev/null 2>&1; then
+            git remote add gitlab "${GITLAB_REMOTE_URL}"
+          else
+            git remote set-url gitlab "${GITLAB_REMOTE_URL}"
+          fi
+
+          # 每次镜像在 GitHub 历史上叠加一个一次性 vendor 提交，GitLab main 与之
+          # 非快进，故强制推送（GitLab 为纯下游，历史每次重建）。
+          auth="$(printf '%s:%s' "${GITLAB_USERNAME}" "${GITLAB_TOKEN}" | base64 -w0)"
+          git -c http.extraHeader="Authorization: Basic ${auth}" push --force gitlab HEAD:"${branch}"
