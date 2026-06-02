@@ -7,6 +7,12 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
+// 下列特性在 nightly-2025-10-28 已稳定，但本项目固定的 nightly-2025-01-18
+// (1.86-nightly，与评测机/参考项目 SanktaOS 对齐) 仍需显式开启。
+#![feature(let_chains)]
+#![feature(trait_upcasting)]
+#![feature(unsigned_is_multiple_of)]
+#![feature(ip_from)]
 #![test_runner(test_runner)]
 #![reexport_test_harness_main = "test_main"]
 

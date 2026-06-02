@@ -82,15 +82,12 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
 
         // 写入 dirent 头部
         unsafe {
-            write_to_user(
-                dirp.add(written) as *mut LinuxDirent64,
-                LinuxDirent64 {
-                    d_ino: entry.inode_no as u64,
-                    d_off: current_off,
-                    d_reclen: dirent_len as u16,
-                    d_type: inode_type_to_d_type(entry.inode_type),
-                },
-            );
+            write_to_user(dirp.add(written) as *mut LinuxDirent64, LinuxDirent64 {
+                d_ino: entry.inode_no as u64,
+                d_off: current_off,
+                d_reclen: dirent_len as u16,
+                d_type: inode_type_to_d_type(entry.inode_type),
+            });
         }
 
         // 写入文件名到 d_name 字段（从 LinuxDirent64 offset 19 开始）
