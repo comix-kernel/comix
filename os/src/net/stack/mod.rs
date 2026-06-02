@@ -370,13 +370,10 @@ impl NetworkStack {
                     sockets.remove(h);
                     return Err(NetworkError::AddressInUse);
                 }
-                ports.insert(
-                    port,
-                    UdpPortEntry {
-                        handle: h,
-                        sockets: alloc::vec::Vec::new(),
-                    },
-                );
+                ports.insert(port, UdpPortEntry {
+                    handle: h,
+                    sockets: alloc::vec::Vec::new(),
+                });
                 h
             }
         };

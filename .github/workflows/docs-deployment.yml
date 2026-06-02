@@ -30,7 +30,7 @@ jobs:
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2025-10-28
+          toolchain: nightly-2025-01-18
           targets: riscv64gc-unknown-none-elf
           components: rust-src, rustfmt, clippy
 

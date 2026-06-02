@@ -12,7 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: nightly-2025-10-28
+  RUST_TOOLCHAIN: nightly-2025-01-18
   
   QEMU_VERSION: qemu-9.2.1
   QEMU_BUILD_PATH: ${{ github.workspace }}/qemu-build-cache
