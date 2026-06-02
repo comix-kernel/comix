@@ -16,7 +16,28 @@ else
     GDB_SCRIPT := cargo run -- --gdb
 endif
 
+# ============================================================
+# OSCOMP 评测提交目标（根 Makefile）
+# ============================================================
+# 评测机在仓库根执行 `make all`，要求产出 ELF 内核：kernel-rv、kernel-la。
+# 评测机 clone 时会过滤隐藏目录（含 os/.cargo），故构建前重建 os/.cargo/config.toml。
+RV_TARGET := riscv64gc-unknown-none-elf
+LA_TARGET := loongarch64-unknown-none
+OS_DIR := os
+OS_BIN := os
+
+# 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
+PROFILE ?= release
+ifeq ($(PROFILE),debug)
+    CARGO_PROFILE_FLAG :=
+    PROFILE_DIR := debug
+else
+    CARGO_PROFILE_FLAG := --release
+    PROFILE_DIR := release
+endif
+
 .PHONY: docker build_docker fmt run build clean clean-all gdb
+.PHONY: all kernel-rv kernel-la os-cargo-config
 
 docker:
 	docker run --rm -it -v ${PWD}:/mnt -w /mnt --name comix ${DOCKER_TAG} bash
@@ -38,6 +59,59 @@ run:
 # GDB 调试模式
 gdb:
 	cd os && $(GDB_SCRIPT)
+
+# ------------------------------------------------------------
+# OSCOMP 评测入口：make all → kernel-rv kernel-la (+ disk 镜像)
+# ------------------------------------------------------------
+
+# 重建 os/.cargo/config.toml（评测机 clone 时过滤隐藏目录，构建前恢复链接脚本 rustflags）。
+# - 有 os/cargo-vendor-config.toml（评测/镜像离线场景）：生成最小 config 并追加 vendored 源；
+# - 或 .cargo/config.toml 缺失：生成最小 config；
+# - 否则（本地开发，config 已存在）：保留现有 config，不破坏 runner/测试设置。
+# 注意：不写 build-std——两架构预编译 std 已自带 weak mem*，写了反而拖慢构建并破坏 cargo test。
+os-cargo-config:
+	@if [ -f "$(OS_DIR)/cargo-vendor-config.toml" ] || [ ! -f "$(OS_DIR)/.cargo/config.toml" ]; then \
+		echo "[OSCOMP] 重建 $(OS_DIR)/.cargo/config.toml"; \
+		mkdir -p $(OS_DIR)/.cargo; \
+		printf '%s\n' \
+			'[target.riscv64gc-unknown-none-elf]' \
+			'rustflags = ["-Clink-arg=-Tsrc/linker.ld", "-Cforce-frame-pointers=yes"]' \
+			'' \
+			'[target.loongarch64-unknown-none]' \
+			'rustflags = ["-Clink-arg=-Tsrc/loongarch_linker.ld", "-Cforce-frame-pointers=yes"]' \
+			> $(OS_DIR)/.cargo/config.toml; \
+		if [ -f "$(OS_DIR)/cargo-vendor-config.toml" ]; then \
+			printf '\n' >> $(OS_DIR)/.cargo/config.toml; \
+			cat "$(OS_DIR)/cargo-vendor-config.toml" >> $(OS_DIR)/.cargo/config.toml; \
+			echo "[OSCOMP] 已追加 vendored 源（离线构建）"; \
+		fi; \
+	else \
+		echo "[OSCOMP] 保留现有 $(OS_DIR)/.cargo/config.toml（本地开发）"; \
+	fi
+
+all: os-cargo-config kernel-rv kernel-la disk.img disk-la.img
+	@echo "[OSCOMP] 完成：kernel-rv kernel-la disk.img disk-la.img"
+
+kernel-rv: os-cargo-config
+	@echo "[OSCOMP] 构建 RISC-V 内核 (ELF, $(PROFILE_DIR)): kernel-rv"
+	cd $(OS_DIR) && ARCH=riscv cargo build $(CARGO_PROFILE_FLAG) --target $(RV_TARGET)
+	cp -f $(OS_DIR)/target/$(RV_TARGET)/$(PROFILE_DIR)/$(OS_BIN) kernel-rv
+
+kernel-la: os-cargo-config
+	@echo "[OSCOMP] 构建 LoongArch 内核 (ELF, $(PROFILE_DIR)): kernel-la"
+	cd $(OS_DIR) && ARCH=loongarch cargo build $(CARGO_PROFILE_FLAG) --target $(LA_TARGET)
+	cp -f $(OS_DIR)/target/$(LA_TARGET)/$(PROFILE_DIR)/$(OS_BIN) kernel-la
+
+# rootfs 镜像由 os/build.rs 在对应内核构建时生成（os/fs-{arch}.img），此处拷到根目录。
+disk.img: kernel-rv
+	@echo "[OSCOMP] 产出 rootfs 镜像: disk.img"
+	@test -f $(OS_DIR)/fs-riscv.img
+	cp -f $(OS_DIR)/fs-riscv.img disk.img
+
+disk-la.img: kernel-la
+	@echo "[OSCOMP] 产出 rootfs 镜像: disk-la.img"
+	@test -f $(OS_DIR)/fs-loongarch.img
+	cp -f $(OS_DIR)/fs-loongarch.img disk-la.img
 
 # 清理 OS 构建产物
 clean:

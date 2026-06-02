@@ -28,6 +28,14 @@ user/bin/**
 # 磁盘镜像文件
 *.img
 
+# OSCOMP 评测产物（由 `make all` 生成，不入库）
+/kernel-rv
+/kernel-la
+
+# Rust vendored 依赖（仅由镜像 CI 强制加入并推送到 GitLab，不入 GitHub 主仓库）
+os/vendor/
+os/cargo-vendor-config.toml
+
 .ignore/**
 !.ignore/README.md
 
