@@ -384,6 +384,24 @@ impl MountTable {
         Ok(())
     }
 
+    #[cfg(feature = "oscomp")]
+    pub(crate) fn umount_root_probe(&self) -> Result<(), FsError> {
+        let mut mounts = self.mounts.lock();
+        let stack = mounts.get_mut("/").ok_or(FsError::NotFound)?;
+        let mount_point = stack.pop().ok_or(FsError::NotFound)?;
+
+        if stack.is_empty() {
+            mounts.remove("/");
+        }
+
+        drop(mounts);
+
+        mount_point.fs.sync()?;
+        mount_point.fs.umount()?;
+
+        Ok(())
+    }
+
     /// 查找给定路径的挂载点
     ///
     /// 返回最长匹配的挂载点（栈顶）

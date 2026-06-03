@@ -209,6 +209,174 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
     Ok(())
 }
 
+// ============================================================
+// OSCOMP 评测模式文件系统初始化（仅 `oscomp` feature 下编译）
+// ============================================================
+// 评测机用 QEMU 同时挂两块盘：
+//   - 评测测试镜像（含 *_testcode.sh）
+//   - 我们的 rootfs（disk.img / disk-la.img，含 /bin/sh）
+// virtio-blk 探测顺序在不同 QEMU 配置下不稳定，故按内容判别：
+//   - rootfs 认 `/bin/sh`（或 `/bin/ash`）
+//   - testfs 认（根或下一层）`*_testcode.sh`，挂到 /tests
+// 测试发现/执行/关机由 rootfs 的 rcS 负责（见 data/*/etc/init.d/rcS）。
+
+/// 确保 rootfs 上存在某个顶层挂载点目录（如 /dev、/tests）。
+#[cfg(feature = "oscomp")]
+fn ensure_top_level_dir(path: &str, mode: FileMode) -> Result<(), FsError> {
+    if vfs_lookup(path).is_ok() {
+        return Ok(());
+    }
+    let name = path.strip_prefix('/').ok_or(FsError::InvalidArgument)?;
+    if name.is_empty() || name.contains('/') {
+        return Err(FsError::InvalidArgument);
+    }
+    let root = crate::vfs::get_root_dentry()?;
+    root.inode.mkdir(name, mode)?;
+    Ok(())
+}
+
+/// 挂载新的根文件系统后，把当前任务的 root/cwd 同步到新的 VFS 根。
+#[cfg(feature = "oscomp")]
+fn set_current_task_root_cwd_to_vfs_root() -> Result<(), FsError> {
+    let root = crate::vfs::get_root_dentry()?;
+    let task = crate::kernel::current_task();
+    let task_guard = task.lock();
+    let mut fs = task_guard.fs.lock();
+    fs.root = Some(root.clone());
+    fs.cwd = Some(root);
+    Ok(())
+}
+
+#[cfg(feature = "oscomp")]
+fn clear_current_task_root_cwd() {
+    let task = crate::kernel::current_task();
+    let task_guard = task.lock();
+    let mut fs = task_guard.fs.lock();
+    fs.root = None;
+    fs.cwd = None;
+}
+
+/// OSCOMP 评测模式：探测并挂载 rootfs（/）与评测测试镜像（/tests）。
+#[cfg(feature = "oscomp")]
+pub fn init_oscomp_filesystems() -> Result<(), FsError> {
+    use crate::config::EXT4_BLOCK_SIZE;
+
+    pr_info!("[OSCOMP][Ext4] Initializing filesystems (rootfs + testfs)");
+
+    let blk_list = BLK_DRIVERS.read();
+    if blk_list.is_empty() {
+        pr_info!("[OSCOMP][Ext4] No block device found");
+        return Err(FsError::NoDevice);
+    }
+    let devices: alloc::vec::Vec<_> = blk_list.iter().cloned().collect();
+    drop(blk_list);
+
+    // 1) 探测并挂载 rootfs 到 "/"（认 /bin/sh 或 /bin/ash）。
+    let mut root_idx: Option<usize> = None;
+    for (idx, dev) in devices.iter().enumerate() {
+        let bytes = dev.total_blocks().saturating_mul(dev.block_size());
+        let total_blocks = bytes / EXT4_BLOCK_SIZE;
+        let Ok(fs) = Ext4FileSystem::open(dev.clone(), EXT4_BLOCK_SIZE, total_blocks, idx) else {
+            continue;
+        };
+        MOUNT_TABLE.mount(
+            fs,
+            "/",
+            MountFlags::empty(),
+            Some(alloc::format!("virtio-blk{}", idx)),
+        )?;
+        set_current_task_root_cwd_to_vfs_root()?;
+        if vfs_lookup("/bin/sh").is_ok() || vfs_lookup("/bin/ash").is_ok() {
+            pr_info!(
+                "[OSCOMP][Ext4] Selected rootfs: virtio-blk{} (device_bytes={} MB)",
+                idx,
+                bytes / 1024 / 1024
+            );
+            root_idx = Some(idx);
+            break;
+        } else {
+            let _ = MOUNT_TABLE.umount_root_probe();
+            clear_current_task_root_cwd();
+        }
+    }
+    let root_idx = root_idx.ok_or(FsError::NoDevice)?;
+
+    // 确保 rootfs 上存在常用挂载点。
+    let dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o755);
+    let _ = ensure_top_level_dir("/dev", dir_mode);
+    let _ = ensure_top_level_dir("/proc", dir_mode);
+    let _ = ensure_top_level_dir("/sys", dir_mode);
+    let _ = ensure_top_level_dir("/tmp", dir_mode);
+    let _ = ensure_top_level_dir("/tests", dir_mode);
+
+    // 检测某挂载点（根或下一层）是否含 *_testcode.sh。
+    fn testsuite_has_scripts(mount_root: &str) -> bool {
+        let Ok(root) = vfs_lookup(mount_root) else {
+            return false;
+        };
+        let Ok(ents) = root.inode.readdir() else {
+            return false;
+        };
+        if ents.iter().any(|e| e.name.ends_with("_testcode.sh")) {
+            return true;
+        }
+        for e in ents {
+            if e.inode_type != crate::vfs::InodeType::Directory {
+                continue;
+            }
+            if e.name == "." || e.name == ".." {
+                continue;
+            }
+            let sub = alloc::format!("{}/{}", mount_root.trim_end_matches('/'), e.name);
+            let Ok(d) = vfs_lookup(&sub) else {
+                continue;
+            };
+            let Ok(sub_ents) = d.inode.readdir() else {
+                continue;
+            };
+            if sub_ents.iter().any(|se| se.name.ends_with("_testcode.sh")) {
+                return true;
+            }
+        }
+        false
+    }
+
+    // 2) 探测并挂载 testfs 到 "/tests"（认 *_testcode.sh）。
+    let mut test_found = false;
+    for (idx, dev) in devices.iter().enumerate() {
+        if idx == root_idx {
+            continue;
+        }
+        let bytes = dev.total_blocks().saturating_mul(dev.block_size());
+        let total_blocks = bytes / EXT4_BLOCK_SIZE;
+        let Ok(fs) = Ext4FileSystem::open(dev.clone(), EXT4_BLOCK_SIZE, total_blocks, idx) else {
+            continue;
+        };
+        MOUNT_TABLE.mount(
+            fs,
+            "/tests",
+            MountFlags::empty(),
+            Some(alloc::format!("virtio-blk{}", idx)),
+        )?;
+        if testsuite_has_scripts("/tests") {
+            pr_info!(
+                "[OSCOMP][Ext4] Selected testfs: virtio-blk{} (device_bytes={} MB)",
+                idx,
+                bytes / 1024 / 1024
+            );
+            test_found = true;
+            break;
+        } else {
+            let _ = MOUNT_TABLE.umount("/tests");
+        }
+    }
+    if !test_found {
+        pr_info!("[OSCOMP][Ext4] Testfs not found; rcS will scan / for test scripts");
+    }
+
+    Ok(())
+}
+
 /// 挂载 tmpfs 到指定路径
 ///
 /// # 参数
