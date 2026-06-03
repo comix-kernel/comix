@@ -53,3 +53,12 @@ os/可能的改进.md
 
 # Local planning/refactor notes
 docs/
+
+# AI workflow package is intended to be reusable and committed.
+!.ai-workflow/docs/
+!.ai-workflow/docs/**
+!.ai-workflow/AGENTS.md
+
+# Runtime workflow task instances are local by default.
+.ai-workflow/tasks/*
+!.ai-workflow/tasks/.gitkeep

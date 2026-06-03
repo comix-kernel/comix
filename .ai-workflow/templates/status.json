@@ -1,0 +1,14 @@
+{
+  "task": "{{TASK}}",
+  "created_at": "{{CREATED_AT}}",
+  "current_stage": "requirement",
+  "stages": {
+    "requirement": "pending",
+    "spec": "pending",
+    "implementation_plan": "pending",
+    "impl_loop": "pending",
+    "qa": "pending",
+    "ai_review": "pending",
+    "final_approval": "pending"
+  }
+}

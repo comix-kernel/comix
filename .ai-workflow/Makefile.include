@@ -1,0 +1,71 @@
+# Tool-agnostic AI workflow targets.
+# Include from a repository Makefile with:
+#   include .ai-workflow/Makefile.include
+
+WORKFLOW_NEW_FLAGS ?=
+WORKFLOW_VERIFY_FLAGS ?=
+STAGE ?=
+BY ?= human
+NOTE ?=
+REJECT_TYPE ?= 其他
+REASON ?=
+MUST_FIX ?=
+SUGGESTION ?=
+ALLOW_AI ?= 允许
+ROLLBACK ?=
+
+.PHONY: workflow-new workflow-list workflow-next workflow-check workflow-approve workflow-reject workflow-verify workflow-submit-check workflow-template-check workflow-install-ai-tools workflow-help
+
+workflow-help:
+	@echo "AI workflow targets:"
+	@echo "  workflow-new TASK=<name>    - Create an AI workflow task"
+	@echo "    optional: WORKFLOW_NEW_FLAGS=--dry-run"
+	@echo "  workflow-list               - List AI workflow tasks"
+	@echo "  workflow-next TASK=<name>   - Show the next workflow stage"
+	@echo "  workflow-check TASK=<name>  - Check workflow approval status"
+	@echo "  workflow-approve TASK=<name> STAGE=<stage> BY=<name>"
+	@echo "  workflow-reject TASK=<name> STAGE=<stage> REASON=<reason>"
+	@echo "  workflow-verify [TASK=<name>] - Run fmt/build/test checks"
+	@echo "    optional: WORKFLOW_VERIFY_FLAGS=--dry-run"
+	@echo "  workflow-submit-check TASK=<name> - Check submission readiness"
+	@echo "  workflow-template-check      - Validate workflow templates"
+	@echo "  workflow-install-ai-tools    - Install local Claude/Codex command or skill files"
+
+workflow-new:
+	@test -n "$(TASK)" || (echo "Usage: make workflow-new TASK=<task-name>" >&2; exit 1)
+	python3 .ai-workflow/scripts/workflow_new.py $(WORKFLOW_NEW_FLAGS) "$(TASK)"
+
+workflow-list:
+	python3 .ai-workflow/scripts/workflow_list.py --sync
+
+workflow-next:
+	@test -n "$(TASK)" || (echo "Usage: make workflow-next TASK=<task-name>" >&2; exit 1)
+	python3 .ai-workflow/scripts/workflow_next.py "$(TASK)"
+
+workflow-check:
+	@test -n "$(TASK)" || (echo "Usage: make workflow-check TASK=<task-name>" >&2; exit 1)
+	python3 .ai-workflow/scripts/workflow_check.py "$(TASK)"
+
+workflow-approve:
+	@test -n "$(TASK)" || (echo "Usage: make workflow-approve TASK=<task-name> STAGE=<stage>" >&2; exit 1)
+	@test -n "$(STAGE)" || (echo "Usage: make workflow-approve TASK=<task-name> STAGE=<stage>" >&2; exit 1)
+	python3 .ai-workflow/scripts/workflow_approve.py "$(TASK)" "$(STAGE)" --by "$(BY)" --note "$(NOTE)"
+
+workflow-reject:
+	@test -n "$(TASK)" || (echo "Usage: make workflow-reject TASK=<task-name> STAGE=<stage> REASON=<reason>" >&2; exit 1)
+	@test -n "$(STAGE)" || (echo "Usage: make workflow-reject TASK=<task-name> STAGE=<stage> REASON=<reason>" >&2; exit 1)
+	@test -n "$(REASON)" || (echo "Usage: make workflow-reject TASK=<task-name> STAGE=<stage> REASON=<reason>" >&2; exit 1)
+	python3 .ai-workflow/scripts/workflow_reject.py "$(TASK)" "$(STAGE)" --type "$(REJECT_TYPE)" --reason "$(REASON)" --must-fix "$(MUST_FIX)" --suggestion "$(SUGGESTION)" --allow-ai "$(ALLOW_AI)" $(if $(ROLLBACK),--rollback "$(ROLLBACK)",) --by "$(BY)"
+
+workflow-verify:
+	python3 .ai-workflow/scripts/workflow_verify.py $(WORKFLOW_VERIFY_FLAGS) $(if $(TASK),--task "$(TASK)",)
+
+workflow-submit-check:
+	@test -n "$(TASK)" || (echo "Usage: make workflow-submit-check TASK=<task-name>" >&2; exit 1)
+	python3 .ai-workflow/scripts/workflow_submit_check.py "$(TASK)"
+
+workflow-template-check:
+	python3 .ai-workflow/scripts/workflow_template_check.py
+
+workflow-install-ai-tools:
+	python3 .ai-workflow/scripts/workflow_install_ai_tools.py --all

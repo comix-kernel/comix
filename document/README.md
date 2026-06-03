@@ -5,6 +5,7 @@
 ## 快速浏览与预览
 
 - 直接阅读：按下述“目录导航”中的链接浏览各子模块文档。
+- AI 工作流：[AI 工作流设计](ai-workflow.md)、[AI 工作流示例](ai-workflow-example.md)。
 - 使用 mdBook 预览（若需书籍化浏览）：
   1. 安装 mdBook（一次性）
      - 使用 Rust 工具链：`cargo install mdbook`

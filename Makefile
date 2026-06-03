@@ -39,6 +39,8 @@ endif
 .PHONY: docker build_docker fmt run build clean clean-all gdb
 .PHONY: all kernel-rv kernel-la os-cargo-config
 
+include .ai-workflow/Makefile.include
+
 docker:
 	docker run --rm -it -v ${PWD}:/mnt -w /mnt --name comix ${DOCKER_TAG} bash
 
