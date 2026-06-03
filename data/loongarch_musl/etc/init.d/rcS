@@ -56,18 +56,21 @@ run_oscomp_tests_if_present() {
     # 检测到官方测试脚本就非交互地依次执行，跑完主动关机。
     [ -d /tests ] || return 1
 
-    # 官方测试二进制硬编码了 ELF 解释器路径（如 /lib/ld-linux-*.so.*）。
-    # 我们是 musl rootfs，把测试镜像里的 glibc loader/库软链到 /lib 以便加载。
+    # 官方测试二进制硬编码了 ELF 解释器路径（如 /lib64/ld-linux-*.so.*）。
+    # 我们是 musl rootfs，把测试镜像里的 glibc loader/库软链到常见 ABI libdir 以便加载。
     if [ -d /tests/glibc/lib ]; then
         [ -d /lib ] || /bin/mkdir -p /lib
+        [ -d /lib64 ] || /bin/mkdir -p /lib64
         for f in /tests/glibc/lib/ld-linux-*.so.*; do
             [ -f "$f" ] || continue
             base="${f##*/}"
-            [ -e "/lib/$base" ] || /bin/ln -s "$f" "/lib/$base"
+            /bin/ln -sf "$f" "/lib/$base"
+            /bin/ln -sf "$f" "/lib64/$base"
         done
         for base in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2; do
-            if [ -f "/tests/glibc/lib/$base" ] && [ ! -e "/lib/$base" ]; then
-                /bin/ln -s "/tests/glibc/lib/$base" "/lib/$base"
+            if [ -f "/tests/glibc/lib/$base" ]; then
+                /bin/ln -sf "/tests/glibc/lib/$base" "/lib/$base"
+                /bin/ln -sf "/tests/glibc/lib/$base" "/lib64/$base"
             fi
         done
     fi

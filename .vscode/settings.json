@@ -1,0 +1,12 @@
+{
+    "rust-analyzer.server.path": "rust-analyzer",
+    "rust-analyzer.linkedProjects": [
+        "os/Cargo.toml",
+        "user/init/Cargo.toml",
+        "user/hello/Cargo.toml"
+    ],
+    "rust-analyzer.cargo.allTargets": false,
+    "rust-analyzer.check.allTargets": false,
+    "rust-analyzer.cargo.targetDir": "target/rust-analyzer",
+    "rust-analyzer.diagnostics.enable": false
+}

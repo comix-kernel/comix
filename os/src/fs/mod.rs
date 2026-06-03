@@ -247,6 +247,15 @@ fn set_current_task_root_cwd_to_vfs_root() -> Result<(), FsError> {
     Ok(())
 }
 
+#[cfg(feature = "oscomp")]
+fn clear_current_task_root_cwd() {
+    let task = crate::kernel::current_task();
+    let task_guard = task.lock();
+    let mut fs = task_guard.fs.lock();
+    fs.root = None;
+    fs.cwd = None;
+}
+
 /// OSCOMP 评测模式：探测并挂载 rootfs（/）与评测测试镜像（/tests）。
 #[cfg(feature = "oscomp")]
 pub fn init_oscomp_filesystems() -> Result<(), FsError> {
@@ -285,6 +294,9 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
             );
             root_idx = Some(idx);
             break;
+        } else {
+            let _ = MOUNT_TABLE.umount_root_probe();
+            clear_current_task_root_cwd();
         }
     }
     let root_idx = root_idx.ok_or(FsError::NoDevice)?;
@@ -310,6 +322,9 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
         }
         for e in ents {
             if e.inode_type != crate::vfs::InodeType::Directory {
+                continue;
+            }
+            if e.name == "." || e.name == ".." {
                 continue;
             }
             let sub = alloc::format!("{}/{}", mount_root.trim_end_matches('/'), e.name);
@@ -351,6 +366,8 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
             );
             test_found = true;
             break;
+        } else {
+            let _ = MOUNT_TABLE.umount("/tests");
         }
     }
     if !test_found {
