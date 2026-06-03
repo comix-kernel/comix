@@ -203,12 +203,28 @@ pub fn rest_init() {
 fn init() {
     create_kthreadd();
 
-    if let Err(e) = crate::fs::init_ext4_from_block_device() {
-        pr_err!(
-            "[Init] Warning: Failed to initialize Ext4 filesystem: {:?}",
-            e
-        );
-        pr_info!("[Init] Continuing without filesystem...");
+    // OSCOMP 评测模式：探测双盘（rootfs + 测试镜像），把测试镜像挂到 /tests。
+    // 测试发现/执行/关机交给 rootfs 的 rcS（见 data/*/etc/init.d/rcS）。
+    #[cfg(feature = "oscomp")]
+    {
+        if let Err(e) = crate::fs::init_oscomp_filesystems() {
+            pr_err!(
+                "[Init][OSCOMP] Warning: Failed to initialize filesystems: {:?}",
+                e
+            );
+            pr_info!("[Init][OSCOMP] Continuing without filesystem...");
+        }
+    }
+    // 非评测模式：保持原有单盘启动（本地交互式开发）。
+    #[cfg(not(feature = "oscomp"))]
+    {
+        if let Err(e) = crate::fs::init_ext4_from_block_device() {
+            pr_err!(
+                "[Init] Warning: Failed to initialize Ext4 filesystem: {:?}",
+                e
+            );
+            pr_info!("[Init] Continuing without filesystem...");
+        }
     }
 
     if let Err(e) = crate::net::config::NetworkConfigManager::init_default_interface() {
