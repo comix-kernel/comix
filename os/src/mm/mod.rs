@@ -53,7 +53,46 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     // 分配器将管理 [start, end) 范围内的内存。
     let start = PA::from_usize(ekernel_paddr.as_usize().div_ceil(PAGE_SIZE) * PAGE_SIZE); // 页对齐
 
-    let end = PA::from_usize(MEMORY_END);
+    // 物理内存末端：优先采用设备树报告的真实 DRAM 范围，否则回退到编译期 MEMORY_END。
+    //
+    // 评测机通常给 1–2GB（本地复现甚至 -m 4G），QEMU 把 DTB 放在 RAM 顶端。若帧分配器只
+    // 覆盖 128MB（MEMORY_END），既无法管理评测所需的大内存，DTB 也会落在可映射范围之外。
+    // 必须与 kernel_space 的物理内存直映射上限保持一致（见 map_kernel_space）。
+    let dram_end = match crate::device::device_tree::dram_info() {
+        Some((dram_start, dram_size)) => {
+            let e = dram_start.saturating_add(dram_size);
+            crate::println!(
+                "[MM] DRAM from device tree: {:#x} - {:#x} (size {:#x})",
+                dram_start,
+                e,
+                dram_size
+            );
+            e
+        }
+        None => {
+            crate::println!(
+                "[MM] DRAM info unavailable, using MEMORY_END {:#x}",
+                MEMORY_END
+            );
+            MEMORY_END
+        }
+    };
+
+    // LoongArch virt 在 DTB 中报告超大 RAM 窗口，且 LoongArch 通过 DMW 硬件直映射访问物理
+    // 内存（不经页表）；用 4K 页映射多 GB 既极慢又无意义。把帧分配器范围 cap 在 1GiB，
+    // 与 map_kernel_space 的直映射上限一致。RISC-V 不设上限，覆盖全部 DRAM。
+    let end_usize = {
+        #[cfg(target_arch = "loongarch64")]
+        {
+            const MAX_USABLE_PHYS_BYTES: usize = 1024 * 1024 * 1024; // 1GiB
+            dram_end.min(start.as_usize().saturating_add(MAX_USABLE_PHYS_BYTES))
+        }
+        #[cfg(not(target_arch = "loongarch64"))]
+        {
+            dram_end
+        }
+    };
+    let end = PA::from_usize(end_usize);
 
     // 初始化物理帧分配器
     init_frame_allocator(start, end);
