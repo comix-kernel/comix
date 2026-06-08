@@ -75,6 +75,31 @@ impl Ext4Inode {
             _ => InodeType::File,
         }
     }
+
+    fn read_fast_symlink_target(&self, size: usize) -> Result<Option<String>, FsError> {
+        const FAST_SYMLINK_MAX_LEN: usize = 15 * core::mem::size_of::<u32>();
+
+        if size > FAST_SYMLINK_MAX_LEN {
+            return Ok(None);
+        }
+
+        let fs = self.fs.lock();
+        let inode_ref = fs.get_inode_ref(self.ino);
+        let inode = &inode_ref.inode;
+        if inode.blocks_count() != 0 {
+            return Ok(None);
+        }
+
+        let mut buf = Vec::with_capacity(FAST_SYMLINK_MAX_LEN);
+        for block_word in inode.block {
+            buf.extend_from_slice(&block_word.to_le_bytes());
+        }
+        buf.truncate(size);
+
+        String::from_utf8(buf)
+            .map(Some)
+            .map_err(|_| FsError::InvalidArgument)
+    }
 }
 
 impl Inode for Ext4Inode {
@@ -749,8 +774,11 @@ impl Inode for Ext4Inode {
             return Ok(String::new());
         }
 
-        // 读取符号链接目标
-        // 符号链接的目标存储在inode的数据区（与普通文件相同的方式）
+        if let Some(target) = self.read_fast_symlink_target(size)? {
+            return Ok(target);
+        }
+
+        // 读取长符号链接目标。短符号链接已在上面从 inode 的 i_block 内联区读取。
         let fs = self.fs.lock();
         let mut buf = alloc::vec![0u8; size];
 

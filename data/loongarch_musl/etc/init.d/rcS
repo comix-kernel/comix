@@ -64,13 +64,13 @@ run_oscomp_tests_if_present() {
         for f in /tests/glibc/lib/ld-linux-*.so.*; do
             [ -f "$f" ] || continue
             base="${f##*/}"
-            /bin/ln -sf "$f" "/lib/$base"
-            /bin/ln -sf "$f" "/lib64/$base"
+            [ -e "/lib/$base" ] || /bin/ln -s "$f" "/lib/$base"
+            [ -e "/lib64/$base" ] || /bin/ln -s "$f" "/lib64/$base"
         done
         for base in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2; do
             if [ -f "/tests/glibc/lib/$base" ]; then
-                /bin/ln -sf "/tests/glibc/lib/$base" "/lib/$base"
-                /bin/ln -sf "/tests/glibc/lib/$base" "/lib64/$base"
+                [ -e "/lib/$base" ] || /bin/ln -s "/tests/glibc/lib/$base" "/lib/$base"
+                [ -e "/lib64/$base" ] || /bin/ln -s "/tests/glibc/lib/$base" "/lib64/$base"
             fi
         done
     fi

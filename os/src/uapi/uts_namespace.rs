@@ -5,6 +5,9 @@ use crate::arch::ArchImpl;
 
 /// UTS 名称最大长度
 pub const UTS_NAME_LEN: usize = 65;
+pub const UTS_SYSNAME: &str = "Linux";
+pub const UTS_RELEASE: &str = "5.10.0";
+pub const UTS_VERSION: &str = "#1 SMP Mon Jan 1 00:00:00 UTC 2025";
 
 /// UTS 命名空间结构体
 /// 用于隔离不同任务的主机名和域名设置
@@ -29,10 +32,10 @@ impl Default for UtsNamespace {
     /// 创建一个默认的 UTS 命名空间实例
     ///
     /// 默认值为：
-    /// - sysname: "ComixOS"
+    /// - sysname: "Linux"
     /// - nodename: "localhost"
-    /// - release: "0.1.0"
-    /// - version: "Version 0.1.0"
+    /// - release: "5.10.0"
+    /// - version: "#1 SMP Mon Jan 1 00:00:00 UTC 2025"
     /// - machine: ArchImpl::name() (架构名称，如 "riscv64")
     /// - domainname: "localdomain"
     fn default() -> Self {
@@ -51,19 +54,19 @@ impl Default for UtsNamespace {
             },
             sysname: {
                 let mut buf = [0u8; 65];
-                let bytes = "ComixOS".as_bytes();
+                let bytes = UTS_SYSNAME.as_bytes();
                 buf[..bytes.len()].copy_from_slice(bytes);
                 buf
             },
             release: {
                 let mut buf = [0u8; 65];
-                let bytes = "0.1.0".as_bytes();
+                let bytes = UTS_RELEASE.as_bytes();
                 buf[..bytes.len()].copy_from_slice(bytes);
                 buf
             },
             version: {
                 let mut buf = [0u8; 65];
-                let bytes = "Version 0.1.0".as_bytes();
+                let bytes = UTS_VERSION.as_bytes();
                 buf[..bytes.len()].copy_from_slice(bytes);
                 buf
             },
