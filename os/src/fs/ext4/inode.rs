@@ -61,20 +61,6 @@ impl Ext4Inode {
             _ => InodeType::File, // 默认为普通文件
         }
     }
-
-    /// 辅助方法：将ext4_rs的DirEntryType转换为VFS InodeType
-    fn convert_dir_entry_type(dentry_type: u8) -> InodeType {
-        match dentry_type {
-            1 => InodeType::File,        // EXT4_DE_REG_FILE
-            2 => InodeType::Directory,   // EXT4_DE_DIR
-            3 => InodeType::CharDevice,  // EXT4_DE_CHRDEV
-            4 => InodeType::BlockDevice, // EXT4_DE_BLKDEV
-            5 => InodeType::Fifo,        // EXT4_DE_FIFO
-            6 => InodeType::Socket,      // EXT4_DE_SOCK
-            7 => InodeType::Symlink,     // EXT4_DE_SYMLINK
-            _ => InodeType::File,
-        }
-    }
 }
 
 impl Inode for Ext4Inode {
@@ -286,6 +272,12 @@ impl Inode for Ext4Inode {
         fs.link(&mut self_ref, &mut target_ref, name)
             .map_err(|_| FsError::NoSpace)?;
 
+        // 修复上游 link 缺陷：ext4_rs::link 只在内存里递增 child 的 links_count，
+        // 且 parent 仅用 without_csum 写回、child 完全不写回。这里补齐写回，
+        // 保证硬链接的 nlink 与目录校验和正确落盘。
+        fs.write_back_inode(&mut target_ref);
+        fs.write_back_inode(&mut self_ref);
+
         Ok(())
     }
 
@@ -317,15 +309,30 @@ impl Inode for Ext4Inode {
             fs.dir_remove(self.ino, name)
                 .map_err(|_| FsError::IoError)?;
         } else {
-            // 对于普通文件，使用底层 API 手动删除
+            // 对于普通文件，手动组合底层 API，修复上游 unlink 的两处缺陷：
+            //   1. 无条件 ialloc_free_inode、不检查 links_count —— 破坏硬链接
+            //   2. 不调用 truncate_inode 释放数据块 —— 每删一个文件都漏块
             let mut parent_ref = fs.get_inode_ref(self.ino);
             let mut child_ref = fs.get_inode_ref(child_ext4.ino);
 
-            // 调用底层的 unlink，它会：
-            // 1. 删除目录项（dir_remove_entry）
-            // 2. 释放 inode（ialloc_free_inode）
-            fs.unlink(&mut parent_ref, &mut child_ref, name)
+            // 先从父目录移除目录项
+            fs.dir_remove_entry(&mut parent_ref, name)
                 .map_err(|_| FsError::IoError)?;
+
+            let links = child_ref.inode.links_count();
+            if links > 1 {
+                // 仍有其它硬链接：仅递减链接计数，保留 inode 与数据块
+                child_ref.inode.set_links_count(links - 1);
+                fs.write_back_inode(&mut child_ref);
+            } else {
+                // 最后一个链接：先释放数据块，再回收 inode
+                // truncate_inode 内部 assert old_size > new_size，size 为 0 时跳过
+                if child_ref.inode.size() > 0 {
+                    fs.truncate_inode(&mut child_ref, 0)
+                        .map_err(|_| FsError::IoError)?;
+                }
+                fs.ialloc_free_inode(child_ref.inode_num, false);
+            }
 
             // 写回 parent inode
             fs.write_back_inode(&mut parent_ref);
@@ -577,6 +584,11 @@ impl Inode for Ext4Inode {
         let entries = fs.dir_get_entries(self.ino);
 
         // 转换为 VFS 的 DirEntry 格式
+        //
+        // 注意：不能信任目录项里存储的 d_type 字段。ext4_rs 的 dir_add_entry/
+        // insert_to_new_block 写入新目录项时把类型恒置为 EXT4_DE_DIR（上游 bug，
+        // 1.3.2 与 refactor 分支均未修），会把运行时新建的文件/符号链接误报为目录。
+        // 这里改为读取目标 inode 的真实 mode 推断类型，保证 readdir/getdents 正确。
         let vfs_entries = entries
             .iter()
             .map(|e| {
@@ -584,8 +596,9 @@ impl Inode for Ext4Inode {
                 let name_len = e.name_len as usize;
                 let name = String::from_utf8_lossy(&e.name[..name_len]).into_owned();
 
-                // inner 是 union，需要 unsafe 访问 inode_type 字段
-                let inode_type = unsafe { Self::convert_dir_entry_type(e.inner.inode_type) };
+                // 读取真实 inode 类型，绕过上游 d_type 恒为 DIR 的 bug
+                let inode_ref = fs.get_inode_ref(e.inode);
+                let inode_type = Self::convert_inode_type(inode_ref.inode.file_type());
 
                 DirEntry {
                     name,

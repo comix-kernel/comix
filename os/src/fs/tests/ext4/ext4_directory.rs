@@ -66,6 +66,22 @@ test_case!(test_ext4_readdir, {
         kassert!(names.contains(&"file1.txt"));
         kassert!(names.contains(&"file2.txt"));
         kassert!(names.contains(&"dir1"));
+
+        // 校验条目类型正确:运行时新建的普通文件必须报告为 File,
+        // 目录报告为 Directory。ext4_rs 的 dir_add_entry 把新目录项的
+        // d_type 恒置为 EXT4_DE_DIR(上游 bug),若 readdir 信任该字段会把
+        // file1/file2 误报为目录。此处断言守护 wrapper 的兜底修复。
+        for e in &entries {
+            match e.name.as_str() {
+                "file1.txt" | "file2.txt" => {
+                    kassert!(e.inode_type == InodeType::File);
+                }
+                "dir1" => {
+                    kassert!(e.inode_type == InodeType::Directory);
+                }
+                _ => {}
+            }
+        }
     }
 });
 

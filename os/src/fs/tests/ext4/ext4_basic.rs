@@ -51,23 +51,57 @@ test_case!(test_ext4_truncate, {
     kassert!(&buf[..] == b"Hello");
 });
 
-// FIXME: unlink 导致 ext4_rs panic: assertion failed: parent.inode.is_dir()
-// 需要进一步调查 ext4_rs 的 dir_remove 实现
-// test_case!(test_ext4_unlink_file, {
-//     // 创建 Ext4 文件系统和文件
-//     let fs = create_test_ext4();
-//     let root = fs.root_inode();
-//     create_test_file_with_content(&fs, "test.txt", b"test").unwrap();
-//
-//     // 删除文件
-//     let result = root.unlink("test.txt");
-//     kassert!(result.is_ok());
-//
-//     // 验证文件不存在
-//     let lookup_result = root.lookup("test.txt");
-//     kassert!(lookup_result.is_err());
-//     kassert!(matches!(lookup_result, Err(FsError::NotFound)));
-// });
+test_case!(test_ext4_unlink_file, {
+    // 创建 Ext4 文件系统和文件
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+    create_test_file_with_content(&fs, "test.txt", b"test").unwrap();
+
+    // 删除文件
+    let result = root.unlink("test.txt");
+    kassert!(result.is_ok());
+
+    // 验证文件不存在
+    let lookup_result = root.lookup("test.txt");
+    kassert!(lookup_result.is_err());
+    kassert!(matches!(lookup_result, Err(FsError::NotFound)));
+});
+
+test_case!(test_ext4_hard_link, {
+    // 创建文件并写入内容
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+    let target = create_test_file_with_content(&fs, "orig.txt", b"hardlink-data").unwrap();
+
+    // 初始链接数应为 1
+    kassert!(target.metadata().unwrap().nlinks == 1);
+
+    // 创建硬链接
+    let link_result = root.link("link.txt", &target);
+    kassert!(link_result.is_ok());
+
+    // bug #3 修复校验:链接计数必须写回磁盘,重新查找读到的 nlink 为 2
+    let relooked = root.lookup("orig.txt").unwrap();
+    kassert!(relooked.metadata().unwrap().nlinks == 2);
+
+    // 两个名字应指向同一 inode
+    let via_link = root.lookup("link.txt").unwrap();
+    kassert!(via_link.metadata().unwrap().inode_no == target.metadata().unwrap().inode_no);
+
+    // 通过链接名能读到相同内容
+    let mut buf = vec![0u8; 13];
+    let n = via_link.read_at(0, &mut buf).unwrap();
+    kassert!(&buf[..n] == b"hardlink-data");
+
+    // bug #2 修复校验:删除其中一个名字,inode 与数据块必须保留
+    root.unlink("link.txt").unwrap();
+    let still = root.lookup("orig.txt").unwrap();
+    kassert!(still.metadata().unwrap().nlinks == 1);
+
+    let mut buf2 = vec![0u8; 13];
+    let n2 = still.read_at(0, &mut buf2).unwrap();
+    kassert!(&buf2[..n2] == b"hardlink-data");
+});
 
 // P1 重要功能测试
 
