@@ -50,7 +50,7 @@ pub extern "C" fn trap_handler(trap_frame: &mut super::TrapFrame) {
             // 仅在返回用户态时检查信号
             check_signal();
         }
-        SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old),
+        SPP::Supervisor => kernel_trap(scause, sepc_old, sstatus_old, trap_frame),
     }
     // 恢复“当前任务”的陷阱帧。
     // 注意：在陷阱处理中可能发生了调度（例如用户态定时器中断），
@@ -255,7 +255,7 @@ pub fn user_trap(
 }
 
 /// 处理来自内核态的陷阱（中断、异常）
-pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus::Sstatus) {
+pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus::Sstatus, trap_frame: &super::TrapFrame) {
     match scause.cause() {
         Trap::Interrupt(5) => {
             // 时钟中断（内核态）
@@ -318,6 +318,15 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
             emergency_println!("  Faulting PC (sepc):  {:#x}", sepc_old);
             emergency_println!("  sstatus:             {:#x}", sstatus_old.bits());
             emergency_println!("  sscratch:            {:#x}", sscratch_val);
+            emergency_println!("");
+            emergency_println!("[!] Kernel Trap Frame Registers:");
+            emergency_println!("  x1_ra  (return):     {:#x}", trap_frame.x1_ra);
+            emergency_println!("  x2_sp  (stack ptr):  {:#x}", trap_frame.x2_sp);
+            emergency_println!("  x8_s0  (saved):      {:#x}", trap_frame.x8_s0);
+            emergency_println!("  x9_s1  (saved):      {:#x}", trap_frame.x9_s1);
+            emergency_println!("  x18_s2 (saved):      {:#x}", trap_frame.x18_s2);
+            emergency_println!("  x19_s3 (saved):      {:#x}", trap_frame.x19_s3);
+            emergency_println!("  kernel_sp:           {:#x}", trap_frame.kernel_sp);
             emergency_println!("==============================================");
             // sbi::shutdown(true);
             panic!("Kernel exception in S-Mode");

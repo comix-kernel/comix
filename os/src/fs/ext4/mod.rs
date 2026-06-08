@@ -120,7 +120,12 @@ impl Ext4FileSystem {
         // 使用 ext4_rs 打开文件系统
         // 注意：ext4_rs::Ext4::open 直接返回 Ext4，不返回 Result
         pr_info!("[Ext4] Calling ext4_rs::Ext4::open...");
-        let ext4 = ext4_rs::Ext4::open(adapter);
+        // 显式转换为 Arc<dyn BlockDevice> 后再传入。直接传 Arc<具体类型> 在
+        // release 模式下曾观察到生成的 dyn 胖指针错误（写路径 self=pa_to_va(0)
+        // 触发 Load Page Fault），疑似编译器/工具链对 unsized coercion 处理 bug。
+        // 显式 clone 一次得到 dyn Arc 可绕过该问题。
+        let dyn_adapter: Arc<dyn ext4_rs::BlockDevice> = adapter;
+        let ext4 = ext4_rs::Ext4::open(dyn_adapter);
         pr_info!("[Ext4] ext4_rs returned successfully");
 
         let ext4 = Arc::new(Mutex::new(ext4));
