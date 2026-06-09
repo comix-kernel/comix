@@ -175,3 +175,4 @@ pub mod ext4_io;
 pub mod ext4_metadata;
 pub mod ext4_permissions;
 pub mod ext4_rename;
+pub mod ext4_symlink;
