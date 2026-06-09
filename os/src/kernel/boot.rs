@@ -203,7 +203,7 @@ pub fn rest_init() {
 fn init() {
     create_kthreadd();
 
-    // OSCOMP 评测模式：探测双盘（rootfs + 测试镜像），把测试镜像挂到 /tests。
+    // OSCOMP 评测模式：按内容探测并挂载单盘 rootfs（内含 /tests）。
     // 测试发现/执行/关机交给 rootfs 的 rcS（见 data/*/etc/init.d/rcS）。
     #[cfg(feature = "oscomp")]
     {

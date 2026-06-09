@@ -9,6 +9,8 @@
 
 use std::env;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -159,10 +161,22 @@ fn main() {
         // user_bin_dir 已经在上面通过 user_dir 引用了, user/bin
         let user_bin_dir = user_dir.join("bin");
         let arch_stamp = PathBuf::from(&out_dir).join(format!("fs_img_arch_{}.txt", arch_key));
+        let test_suite_dir = project_root
+            .join("testsuits-for-oskernel")
+            .join("sdcard")
+            .join(arch_key);
 
         // 检查依赖
         println!("cargo:rerun-if-changed={}", data_dir.display());
-        let dependencies = vec![data_dir.clone(), user_bin_dir];
+        println!("cargo:rerun-if-changed={}", test_suite_dir.display());
+        let mut dependencies = vec![
+            data_dir.clone(),
+            user_bin_dir,
+            PathBuf::from(&manifest_dir).join("build.rs"),
+        ];
+        if test_suite_dir.exists() {
+            dependencies.push(test_suite_dir);
+        }
 
         let force_rebuild = match fs::read_to_string(&arch_stamp) {
             Ok(saved) => saved.trim() != arch_key,
@@ -179,7 +193,7 @@ fn main() {
             println!(
                 "cargo:warning=[build.rs] Creating full ext4 runtime image (4GB) at fs.img..."
             );
-            create_full_ext4_image(&fs_img_path, &data_dir, &project_root);
+            create_full_ext4_image(&fs_img_path, &data_dir, &project_root, arch_key);
             let _ = fs::write(&arch_stamp, format!("{}\n", arch_key));
             println!(
                 "cargo:warning=[build.rs] Runtime image created: {}",
@@ -347,8 +361,8 @@ fn create_empty_ext4_image(path: &PathBuf, size_mb: usize) {
     }
 }
 
-/// 创建完整的 ext4 镜像 (包含 data/ 和 user/bin/)
-fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) {
+/// 创建完整的 ext4 镜像 (包含 data/、测试套件和 user/bin/)
+fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path, arch_key: &str) {
     const IMG_SIZE_MB: usize = 4096; // 4GB
     const BLOCK_SIZE: usize = 1024 * 1024;
 
@@ -375,7 +389,25 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) 
         );
     }
 
-    // 3. 创建 /home/user/bin 目录并复制 user/bin
+    // 3. 预创建启动和评测需要的顶层目录，避免内核启动阶段写 rootfs。
+    for (dir, mode) in [
+        ("dev", 0o755),
+        ("proc", 0o755),
+        ("sys", 0o755),
+        ("tmp", 0o1777),
+        ("tests", 0o755),
+        ("lib", 0o755),
+        ("lib64", 0o755),
+    ] {
+        let path = temp_root.join(dir);
+        fs::create_dir_all(&path).unwrap_or_else(|_| panic!("Failed to create /{}", dir));
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode))
+            .unwrap_or_else(|_| panic!("Failed to set permissions on /{}", dir));
+    }
+    copy_oscomp_test_suites(&temp_root, project_root, arch_key);
+    create_glibc_runtime_symlinks(&temp_root);
+
+    // 4. 创建 /home/user/bin 目录并复制 user/bin
     let home_user_bin = temp_root.join("home").join("user").join("bin");
     fs::create_dir_all(&home_user_bin).expect("Failed to create home/user/bin");
 
@@ -385,7 +417,7 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) 
         println!("cargo:warning=[build.rs] Copied user/bin to /home/user/bin");
     }
 
-    // 4. 创建空镜像
+    // 5. 创建空镜像
     let dd_status = Command::new("dd")
         .arg("if=/dev/zero")
         .arg(format!("of={}", path.display()))
@@ -400,13 +432,18 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) 
         panic!("Failed to create disk image");
     }
 
-    // 5. 使用 mkfs.ext4 -d 选项从临时目录创建文件系统
+    // 6. 使用 mkfs.ext4 -d 选项从临时目录创建文件系统。
+    // 保持 feature 集合保守，降低 ext4_rs 写路径和目录索引/校验特性的耦合。
     let mkfs_status = Command::new("mkfs.ext4")
         .arg("-F")
         .arg("-b")
         .arg("4096")
         .arg("-m")
         .arg("0")
+        .arg("-I")
+        .arg("256")
+        .arg("-O")
+        .arg("64bit,^has_journal,^resize_inode,^dir_index,^metadata_csum")
         .arg("-d")
         .arg(&temp_root) // 使用临时目录作为根
         .arg(path)
@@ -419,14 +456,79 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) 
         panic!("Failed to format ext4 image with data!");
     }
 
-    // 6. 清理临时目录
+    // 7. 清理临时目录
     fs::remove_dir_all(&temp_root).ok();
 
-    println!("cargo:warning=[build.rs] Full ext4 image created successfully (1GB).");
+    println!("cargo:warning=[build.rs] Full ext4 image created successfully (4GB).");
 }
 
-/// 递归复制目录
-fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+fn copy_oscomp_test_suites(temp_root: &Path, project_root: &Path, arch_key: &str) {
+    let suite_root = project_root
+        .join("testsuits-for-oskernel")
+        .join("sdcard")
+        .join(arch_key);
+    if !suite_root.exists() {
+        println!(
+            "cargo:warning=[build.rs] OSCOMP test suite not found at {}, skipping /tests population",
+            suite_root.display()
+        );
+        return;
+    }
+
+    let tests_root = temp_root.join("tests");
+    for libc in ["musl", "glibc"] {
+        let src = suite_root.join(libc);
+        if !src.exists() {
+            println!(
+                "cargo:warning=[build.rs] OSCOMP {} suite not found at {}, skipping",
+                libc,
+                src.display()
+            );
+            continue;
+        }
+        let dst = tests_root.join(libc);
+        if dst.exists() {
+            fs::remove_dir_all(&dst).expect("Failed to remove stale test suite directory");
+        }
+        copy_dir_recursive(&src, &dst).expect("Failed to copy OSCOMP test suite");
+        println!(
+            "cargo:warning=[build.rs] Copied OSCOMP {} tests to /tests/{}",
+            libc, libc
+        );
+    }
+}
+
+fn create_glibc_runtime_symlinks(temp_root: &Path) {
+    for name in [
+        "ld-linux-riscv64-lp64d.so.1",
+        "ld-linux-loongarch-lp64d.so.1",
+        "libc.so.6",
+        "libm.so.6",
+        "libpthread.so.0",
+        "libdl.so.2",
+        "librt.so.1",
+        "libresolv.so.2",
+    ] {
+        for libdir in ["lib", "lib64"] {
+            let link_path = temp_root.join(libdir).join(name);
+            if link_path.exists() || link_path.is_symlink() {
+                continue;
+            }
+            let target = format!("/tests/glibc/lib/{}", name);
+            if let Err(e) = symlink(&target, &link_path) {
+                println!(
+                    "cargo:warning=[build.rs] Failed to create symlink {} -> {}: {}",
+                    link_path.display(),
+                    target,
+                    e
+                );
+            }
+        }
+    }
+}
+
+/// 递归复制目录，保留符号链接。
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
     }
@@ -435,8 +537,12 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+        let file_type = fs::symlink_metadata(&src_path)?.file_type();
 
-        if src_path.is_dir() {
+        if file_type.is_symlink() {
+            let target = fs::read_link(&src_path)?;
+            symlink(target, &dst_path)?;
+        } else if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             fs::copy(&src_path, &dst_path)?;

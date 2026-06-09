@@ -40,6 +40,14 @@ impl Ext4Inode {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_blocks_count_for_test(&self, blocks: u64) {
+        let fs = self.fs.lock();
+        let mut inode_ref = fs.get_inode_ref(self.ino);
+        inode_ref.inode.set_blocks_count(blocks);
+        fs.write_back_inode(&mut inode_ref);
+    }
+
     /// 辅助方法：获取完整路径（从 Dentry 动态获取）
     fn get_full_path(&self) -> Result<String, FsError> {
         let dentry = self.dentry.lock().upgrade().ok_or(FsError::IoError)?;
@@ -74,6 +82,28 @@ impl Ext4Inode {
             7 => InodeType::Symlink,     // EXT4_DE_SYMLINK
             _ => InodeType::File,
         }
+    }
+
+    fn read_fast_symlink_target(&self, size: usize) -> Result<Option<String>, FsError> {
+        const FAST_SYMLINK_MAX_LEN: usize = 15 * core::mem::size_of::<u32>();
+
+        if size >= FAST_SYMLINK_MAX_LEN {
+            return Ok(None);
+        }
+
+        let fs = self.fs.lock();
+        let inode_ref = fs.get_inode_ref(self.ino);
+        let inode = &inode_ref.inode;
+
+        let mut buf = Vec::with_capacity(FAST_SYMLINK_MAX_LEN);
+        for block_word in inode.block {
+            buf.extend_from_slice(&block_word.to_le_bytes());
+        }
+        buf.truncate(size);
+
+        String::from_utf8(buf)
+            .map(Some)
+            .map_err(|_| FsError::InvalidArgument)
     }
 }
 
@@ -255,8 +285,25 @@ impl Inode for Ext4Inode {
             .create(parent, name, inode_mod)
             .map_err(|_| FsError::NoSpace)?;
 
-        fs.write_at(new_inode.inode_num, 0, target.as_bytes())
-            .map_err(|_| FsError::IoError)?;
+        const FAST_SYMLINK_MAX_LEN: usize = 15 * core::mem::size_of::<u32>();
+        let target_bytes = target.as_bytes();
+        if target_bytes.len() < FAST_SYMLINK_MAX_LEN {
+            const EXT4_INODE_FLAG_EXTENTS: u32 = 0x0008_0000;
+
+            let mut inode_ref = fs.get_inode_ref(new_inode.inode_num);
+            inode_ref.inode.block = [0; 15];
+            for (word, chunk) in inode_ref.inode.block.iter_mut().zip(target_bytes.chunks(4)) {
+                let mut bytes = [0u8; 4];
+                bytes[..chunk.len()].copy_from_slice(chunk);
+                *word = u32::from_le_bytes(bytes);
+            }
+            inode_ref.inode.flags &= !EXT4_INODE_FLAG_EXTENTS;
+            inode_ref.inode.set_size(target_bytes.len() as u64);
+            fs.write_back_inode(&mut inode_ref);
+        } else {
+            fs.write_at(new_inode.inode_num, 0, target_bytes)
+                .map_err(|_| FsError::IoError)?;
+        }
 
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
@@ -749,8 +796,11 @@ impl Inode for Ext4Inode {
             return Ok(String::new());
         }
 
-        // 读取符号链接目标
-        // 符号链接的目标存储在inode的数据区（与普通文件相同的方式）
+        if let Some(target) = self.read_fast_symlink_target(size)? {
+            return Ok(target);
+        }
+
+        // 读取长符号链接目标。短符号链接已在上面从 inode 的 i_block 内联区读取。
         let fs = self.fs.lock();
         let mut buf = alloc::vec![0u8; size];
 

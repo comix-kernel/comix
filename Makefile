@@ -36,15 +36,13 @@ else
     PROFILE_DIR := release
 endif
 
-# 评测内核默认启用 oscomp 特性：启动时探测双盘、把测试镜像挂到 /tests，
-# 由 rootfs 的 rcS 自动跑测试并主动关机（赛题要求“自动运行 + 自动关闭”）。
+# 评测内核默认启用 oscomp 特性：使用单盘 rootfs（内含 /tests），
+# 由 rootfs 的 rcS 自动跑 musl 测试并主动关机（赛题要求“自动运行 + 自动关闭”）。
 # 本地交互式开发请用 `make run`（os/Makefile，不带 oscomp）。
 OSCOMP_FEATURE ?= --features oscomp
 
 # 本地复现评测用 QEMU 参数（可在命令行覆盖，如 `make run-oscomp-rv OSCOMP_RV_MEM=2G`）。
-# 测试镜像默认取仓库根的 sdcard-{rv,la}.img；rootfs 用 make all 产出的 disk{,-la}.img。
-TESTIMG_RV ?= sdcard-rv.img
-TESTIMG_LA ?= sdcard-la.img
+# rootfs 用 make all 产出的 disk{,-la}.img，里面已经包含 /tests/{musl,glibc}。
 OSCOMP_RV_MEM ?= 4G
 OSCOMP_RV_SMP ?= 1
 OSCOMP_LA_MEM ?= 4G
@@ -52,7 +50,7 @@ OSCOMP_LA_SMP ?= 1
 
 .PHONY: docker build_docker fmt run build clean clean-all gdb
 .PHONY: all kernel-rv kernel-la os-cargo-config
-.PHONY: run-oscomp-rv run-oscomp-la prepare-testimg-rv prepare-testimg-la
+.PHONY: run-oscomp-rv run-oscomp-la
 
 docker:
 	docker run --rm -it -v ${PWD}:/mnt -w /mnt --name comix ${DOCKER_TAG} bash
@@ -131,42 +129,24 @@ disk-la.img: kernel-la
 	cp -f $(OS_DIR)/fs-loongarch.img disk-la.img
 
 # ------------------------------------------------------------
-# 本地复现评测：启动 QEMU，挂测试镜像(x0) + 我们的 rootfs(x1)，
-# 内核自动跑测试并主动关机；-no-reboot 让关机时 QEMU 退出。
+# 本地复现评测：启动 QEMU，只挂单盘 rootfs（内含 /tests），
+# 内核自动跑 musl 测试并主动关机；-no-reboot 让关机时 QEMU 退出。
 # 设备型号对齐 os/qemu-run.sh（riscv: virtio-mmio）与 os/qemu-loongarch-run.sh（loongarch: pci）。
 # ------------------------------------------------------------
-prepare-testimg-rv:
-	@test -f "$(TESTIMG_RV)" || ( \
-		echo "[OSCOMP] 缺少 RISC-V 测试镜像: $(TESTIMG_RV)"; \
-		echo "[OSCOMP] 请把官方测试镜像放到该路径，或用 TESTIMG_RV=... 覆盖。"; \
-		exit 1; )
-	@echo "[OSCOMP] 使用 RISC-V 测试镜像: $(TESTIMG_RV)"
-
-prepare-testimg-la:
-	@test -f "$(TESTIMG_LA)" || ( \
-		echo "[OSCOMP] 缺少 LoongArch 测试镜像: $(TESTIMG_LA)"; \
-		echo "[OSCOMP] 请把官方测试镜像放到该路径，或用 TESTIMG_LA=... 覆盖。"; \
-		exit 1; )
-	@echo "[OSCOMP] 使用 LoongArch 测试镜像: $(TESTIMG_LA)"
-
-run-oscomp-rv: kernel-rv disk.img prepare-testimg-rv
-	@echo "[OSCOMP] 运行 RISC-V QEMU（测试镜像 + rootfs，自动跑测试并关机）"
+run-oscomp-rv: kernel-rv disk.img
+	@echo "[OSCOMP] 运行 RISC-V QEMU（单盘 rootfs + tests，自动跑测试并关机）"
 	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(OSCOMP_RV_MEM) -nographic \
 		-smp $(OSCOMP_RV_SMP) -bios default -no-reboot -rtc base=utc \
-		-drive file=$(TESTIMG_RV),if=none,format=raw,id=x0 \
+		-drive file=disk.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
-		-drive file=disk.img,if=none,format=raw,id=x1 \
-		-device virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1 \
 		-device virtio-net-device,netdev=net -netdev user,id=net
 
-run-oscomp-la: kernel-la disk-la.img prepare-testimg-la
-	@echo "[OSCOMP] 运行 LoongArch QEMU（测试镜像 + rootfs，自动跑测试并关机）"
+run-oscomp-la: kernel-la disk-la.img
+	@echo "[OSCOMP] 运行 LoongArch QEMU（单盘 rootfs + tests，自动跑测试并关机）"
 	qemu-system-loongarch64 -machine virt -kernel kernel-la -m $(OSCOMP_LA_MEM) -nographic \
 		-smp $(OSCOMP_LA_SMP) -no-reboot -rtc base=utc \
-		-drive file=$(TESTIMG_LA),if=none,format=raw,id=x0 \
+		-drive file=disk-la.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-pci,drive=x0 \
-		-drive file=disk-la.img,if=none,format=raw,id=x1 \
-		-device virtio-blk-pci,drive=x1 \
 		-device virtio-net-pci,netdev=net0 \
 		-netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
 
