@@ -52,26 +52,9 @@ echo "Mounting file systems via fstab..."
 echo "System initialization finished."
 
 run_oscomp_tests_if_present() {
-    # 评测测试镜像由内核挂到 /tests（init_oscomp_filesystems()）。
-    # 检测到官方测试脚本就非交互地依次执行，跑完主动关机。
+    # rootfs 内置 /tests。当前自动入口只跑 musl 分组；
+    # glibc 分组保留在镜像中，后续需要时直接调整本脚本。
     [ -d /tests ] || return 1
-
-    prepare_glibc_libs() {
-        # 官方 glibc 测试二进制硬编码了 ELF 解释器路径（如 /lib/ld-linux-*.so.*）。
-        # 默认先跑 musl 分组；后续支持 glibc 时再启用这段准备逻辑。
-        [ -d /tests/glibc/lib ] || return 0
-        [ -d /lib ] || /bin/mkdir -p /lib
-        for f in /tests/glibc/lib/ld-linux-*.so.*; do
-            [ -f "$f" ] || continue
-            base="${f##*/}"
-            [ -e "/lib/$base" ] || /bin/ln -s "$f" "/lib/$base"
-        done
-        for base in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2; do
-            if [ -f "/tests/glibc/lib/$base" ]; then
-                [ -e "/lib/$base" ] || /bin/ln -s "/tests/glibc/lib/$base" "/lib/$base"
-            fi
-        done
-    }
 
     scripts=""
     add_script() {
@@ -91,47 +74,10 @@ run_oscomp_tests_if_present() {
         done
     }
 
-    add_other_suite_scripts() {
-        for d in /tests/*; do
-            [ -d "$d" ] || continue
-            [ "$d" = "/tests/tests" ] && continue
-            [ "$d" = "/tests/musl" ] && continue
-            [ "$d" = "/tests/glibc" ] && continue
-            add_scripts_in_dir "$d"
-        done
-    }
-
-    # 默认只跑 musl 分组，避免当前尚未完整支持的 glibc/Linux ABI 卡住启动链路。
-    # 后续支持 glibc 后，可在 rootfs 中设置 OSCOMP_TEST_LIBC=glibc 或 all 复用同一入口。
-    oscomp_test_libc="${OSCOMP_TEST_LIBC:-musl}"
-    [ "${OSCOMP_RUN_GLIBC:-0}" = "1" ] && oscomp_test_libc="all"
-
-    case "$oscomp_test_libc" in
-        musl|MUSL|"")
-            add_scripts_in_dir /tests/musl
-            if [ -d /tests/glibc ]; then
-                echo "[OSCOMP] glibc test scripts skipped; set OSCOMP_TEST_LIBC=glibc/all to enable"
-            fi
-            ;;
-        glibc|GLIBC)
-            prepare_glibc_libs
-            add_scripts_in_dir /tests/glibc
-            ;;
-        all|ALL|both|BOTH)
-            add_scripts_in_dir /tests
-            add_scripts_in_dir /tests/musl
-            prepare_glibc_libs
-            add_scripts_in_dir /tests/glibc
-            add_other_suite_scripts
-            ;;
-        *)
-            echo "[OSCOMP] unknown OSCOMP_TEST_LIBC=$oscomp_test_libc; defaulting to musl"
-            add_scripts_in_dir /tests/musl
-            ;;
-    esac
+    add_scripts_in_dir /tests/musl
     [ -n "$scripts" ] || return 1
 
-    echo "[OSCOMP] detected test scripts under /tests; running in rcS"
+    echo "[OSCOMP] detected musl test scripts under /tests; running in rcS"
     export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests"
     export HOME="/"
 

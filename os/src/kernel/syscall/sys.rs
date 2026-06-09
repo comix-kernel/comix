@@ -8,7 +8,7 @@ use core::{
 
 use crate::{
     arch::{
-        lib::shutdown,
+        lib::{restart, shutdown},
         timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
     },
     kernel::{
@@ -20,13 +20,13 @@ use crate::{
         DEFAULT_CONSOLE_LEVEL, LogLevel, format_log_entry, get_console_level, read_log,
         set_console_level,
     },
-    pr_alert,
     security::{BiogasPoll, EntropyPool},
     uapi::{
         errno::{EINVAL, ENOSYS},
         log::SyslogAction,
         reboot::{
-            REBOOT_CMD_POWER_OFF, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
+            REBOOT_CMD_CAD_OFF, REBOOT_CMD_CAD_ON, REBOOT_CMD_HALT, REBOOT_CMD_POWER_OFF,
+            REBOOT_CMD_RESTART, REBOOT_MAGIC1, REBOOT_MAGIC2, REBOOT_MAGIC2A, REBOOT_MAGIC2B,
             REBOOT_MAGIC2C,
         },
         sysinfo::SysInfo,
@@ -54,7 +54,6 @@ use crate::{
 /// 成功返回 0，失败返回负错误码
 /// 对于重启或关机操作，函数不会返回
 pub fn reboot(magic: c_int, magic2: c_int, op: c_int, _arg: *mut c_void) -> c_int {
-    // TODO: 支持更多重启操作码
     if magic as u32 != REBOOT_MAGIC1 {
         return -EINVAL;
     }
@@ -66,14 +65,11 @@ pub fn reboot(magic: c_int, magic2: c_int, op: c_int, _arg: *mut c_void) -> c_in
         return -EINVAL;
     }
     match op as u32 {
-        REBOOT_CMD_POWER_OFF => {
-            shutdown(true);
-        }
-        _ => {
-            pr_alert!("reboot: unsupported reboot operation code {}\n", op);
-        }
+        REBOOT_CMD_CAD_OFF | REBOOT_CMD_CAD_ON => 0,
+        REBOOT_CMD_RESTART => restart(),
+        REBOOT_CMD_HALT | REBOOT_CMD_POWER_OFF => shutdown(false),
+        _ => -EINVAL,
     }
-    0
 }
 
 /// 获取系统信息系统调用
