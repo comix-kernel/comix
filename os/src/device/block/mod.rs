@@ -4,6 +4,7 @@
 
 use super::Driver;
 
+pub mod partition;
 pub mod ram_disk;
 pub mod virtio_blk;
 
