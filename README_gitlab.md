@@ -30,7 +30,7 @@
 - `vda1`：ext4 rootfs。
 - `vda2`：64 MiB FAT32/VFAT 空分区，用于 `basic/mount`、`basic/umount` 挂载 `/dev/vda2`。
 
-内核启用 `oscomp` feature 后会从发现到的整盘与分区块设备中探测 ext4 rootfs，选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 `/`。
+内核默认会从发现到的整盘与分区块设备中探测 ext4 rootfs，优先尝试分区设备，选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 `/`。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 
 ## 离线依赖 / 隐藏目录过滤（重要）
 

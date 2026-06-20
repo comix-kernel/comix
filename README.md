@@ -32,10 +32,10 @@ Comix 是一个以 Rust 编写的教学/实验型内核项目，目前聚焦 RIS
 ## 构建与运行
 
 ```bash
-# 构建内核（自动编译 user 程序并生成 fs.img）
+# 构建内核（自动编译 user 程序并生成 rootfs 中间镜像）
 make build
 
-# 在 QEMU 运行（使用 VirtIO-Block 挂载 fs.img）
+# 在 QEMU 运行（使用 VirtIO-Block 挂载 MBR 分区盘）
 cd os && make run
 
 # 调试：前台等待 GDB
@@ -45,7 +45,7 @@ b) cd os && make gdb     # 另一个终端连接 GDB
 # 在 QEMU 中运行内核测试
 cd os && make test
 ```
-提示：`fs.img` 为 ext4 镜像，由 build.rs 从 data/ 与 user/bin 构建并通过 VirtIO-Block 挂载；`simple_fs.img` 当前构建为空占位，未来可切换为内存盘嵌入方案。
+提示：`os/fs-riscv.img` / `os/fs-loongarch.img` 是 build.rs 从 data/ 与 user/bin 构建出的裸 ext4 rootfs 中间产物。实际 QEMU 运行会把它组装进 MBR raw disk，并通过 VirtIO-Block 挂载该分区盘；`simple_fs.img` 当前构建为空占位，未来可切换为内存盘嵌入方案。
 
 ## OSComp 镜像布局
 
@@ -53,14 +53,14 @@ cd os && make test
 
 - `kernel-rv` / `kernel-la`：RISC-V 与 LoongArch ELF 内核。
 - `os/fs-riscv.img` / `os/fs-loongarch.img`：裸 ext4 rootfs 中间产物，包含 `/bin`、`/sbin`、`/tests` 等内容。
-- `disk.img` / `disk-la.img`：QEMU 实际挂载的 MBR raw disk。
+- `disk.img` / `disk-la.img`：QEMU 实际挂载的 MBR raw disk，也是默认启动要求的磁盘形态。
 
 `disk.img` 与 `disk-la.img` 的分区固定为：
 
 - `vda1`：ext4 rootfs，内容来自对应的 `os/fs-*.img`。
 - `vda2`：64 MiB FAT32/VFAT 空分区，用于 OSComp `basic/mount` 与 `basic/umount` 测试挂载 `/dev/vda2`。
 
-内核在 `oscomp` feature 下会从发现到的块设备（整盘和分区）中探测 ext4 rootfs，并选择含 `/bin/sh` 或 `/bin/ash` 的设备挂载为 `/`，因此分区盘会从 `vda1` 启动。
+内核默认会从发现到的块设备（整盘和分区）中探测 ext4 rootfs，优先尝试分区设备，并选择含 `/bin/sh` 或 `/bin/ash` 的设备挂载为 `/`，因此分区盘会从 `vda1` 启动。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 
 ## 用户态程序
 

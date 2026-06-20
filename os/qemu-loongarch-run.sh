@@ -10,11 +10,7 @@ smp="1"
 arch="${ARCH:-loongarch}"
 fs="fs-${arch}.img"
 disk="disk-la.img"
-
-# 创建空磁盘镜像（如果不存在）
-if [ ! -f "$disk" ]; then
-    dd if=/dev/zero of="$disk" bs=1M count=32 2>/dev/null
-fi
+vfat="vfat.img"
 
 QEMU_ARGS=(
     -machine virt
@@ -25,19 +21,29 @@ QEMU_ARGS=(
     -no-reboot
 )
 
-# Virtio Block 设备 (fs.img)
 if [ -f "$fs" ]; then
-    QEMU_ARGS+=(-drive file="$fs",if=none,format=raw,id=x0)
-    QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
+    :
 elif [ -f "fs.img" ]; then
     fs="fs.img"
-    QEMU_ARGS+=(-drive file="$fs",if=none,format=raw,id=x0)
-    QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
 else
     echo "Error: ${fs} not found!"
     echo "Please run 'cargo build' first to generate the filesystem image."
     exit 1
 fi
+
+if [ ! -f "$vfat" ]; then
+    echo "Creating ${vfat} (64MiB FAT32/VFAT partition image)"
+    rm -f "$vfat"
+    truncate -s 64M "$vfat"
+    mkfs.vfat -F 32 -n CCYOSVFAT "$vfat"
+fi
+
+echo "Assembling ${disk} from ${fs} and ${vfat}"
+../scripts/assemble_partitioned_disk.sh "$fs" "$vfat" "$disk"
+
+# Virtio Block 设备（MBR 分区盘：vda1 rootfs，vda2 VFAT）
+QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x0)
+QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
 
 # Virtio Network 设备
 QEMU_ARGS+=(-device virtio-net-pci,netdev=net0)
@@ -45,12 +51,6 @@ QEMU_ARGS+=(-netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
 
 # RTC 设备 (基于 UTC 时间)
 QEMU_ARGS+=(-rtc base=utc)
-
-# 附加磁盘 (disk-la.img)
-if [ -f "$disk" ]; then
-    QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x1)
-    QEMU_ARGS+=(-device virtio-blk-pci,drive=x1)
-fi
 
 case $MODE in
     run)

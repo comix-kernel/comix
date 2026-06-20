@@ -51,7 +51,7 @@ echo "Mounting file systems via fstab..."
 
 echo "System initialization finished."
 
-run_oscomp_tests_if_present() {
+run_musl_tests_if_present() {
     # rootfs 内置 /tests。当前自动入口只跑 musl 分组；
     # glibc 分组保留在镜像中，后续需要时直接调整本脚本。
     [ -d /tests ] || return 1
@@ -77,30 +77,30 @@ run_oscomp_tests_if_present() {
     add_scripts_in_dir /tests/musl
     [ -n "$scripts" ] || return 1
 
-    echo "[OSCOMP] detected musl test scripts under /tests; running in rcS"
+    echo "[Tests] detected musl test scripts under /tests; running in rcS"
     export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests"
     export HOME="/"
 
     for f in $scripts; do
         dir="${f%/*}"
         base="${f##*/}"
-        echo "[OSCOMP] running $f"
+        echo "[Tests] running $f"
         (
             cd "$dir" || exit 1
             # 用 "." 执行避免依赖内核 shebang/ENOEXEC 行为；重定向 stdin 避免阻塞。
             . "./$base" </dev/null
         )
         rc=$?
-        echo "[OSCOMP] finished $f (rc=$rc)"
+        echo "[Tests] finished $f (rc=$rc)"
     done
 
-    echo "[OSCOMP] all tests finished; powering off"
+    echo "[Tests] all tests finished; powering off"
     /sbin/poweroff -f || /sbin/reboot -f || true
-    echo "[OSCOMP] poweroff returned unexpectedly; sleeping"
+    echo "[Tests] poweroff returned unexpectedly; sleeping"
     while true; do sleep 3600; done
 }
 
-if run_oscomp_tests_if_present; then
+if run_musl_tests_if_present; then
     exit 0
 fi
 

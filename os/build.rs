@@ -191,7 +191,8 @@ fn main() {
 
         if force_rebuild || should_rebuild(&fs_img_path, &dependencies) {
             println!(
-                "cargo:warning=[build.rs] Creating full ext4 runtime image (4GB) at fs.img..."
+                "cargo:warning=[build.rs] Creating full ext4 rootfs intermediate image (4GB) at {}...",
+                fs_img_name
             );
             create_full_ext4_image(&fs_img_path, &data_dir, &project_root, arch_key);
             let _ = fs::write(&arch_stamp, format!("{}\n", arch_key));
@@ -404,7 +405,7 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path, 
         fs::set_permissions(&path, fs::Permissions::from_mode(mode))
             .unwrap_or_else(|_| panic!("Failed to set permissions on /{}", dir));
     }
-    copy_oscomp_test_suites(&temp_root, project_root, arch_key);
+    copy_test_suites(&temp_root, project_root, arch_key);
     create_glibc_runtime_symlinks(&temp_root);
 
     // 4. 创建 /home/user/bin 目录并复制 user/bin
@@ -462,14 +463,14 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path, 
     println!("cargo:warning=[build.rs] Full ext4 image created successfully (4GB).");
 }
 
-fn copy_oscomp_test_suites(temp_root: &Path, project_root: &Path, arch_key: &str) {
+fn copy_test_suites(temp_root: &Path, project_root: &Path, arch_key: &str) {
     let suite_root = project_root
         .join("testsuits-for-oskernel")
         .join("sdcard")
         .join(arch_key);
     if !suite_root.exists() {
         println!(
-            "cargo:warning=[build.rs] OSCOMP test suite not found at {}, skipping /tests population",
+            "cargo:warning=[build.rs] Test suite not found at {}, skipping /tests population",
             suite_root.display()
         );
         return;
@@ -480,7 +481,7 @@ fn copy_oscomp_test_suites(temp_root: &Path, project_root: &Path, arch_key: &str
         let src = suite_root.join(libc);
         if !src.exists() {
             println!(
-                "cargo:warning=[build.rs] OSCOMP {} suite not found at {}, skipping",
+                "cargo:warning=[build.rs] {} test suite not found at {}, skipping",
                 libc,
                 src.display()
             );
@@ -490,9 +491,9 @@ fn copy_oscomp_test_suites(temp_root: &Path, project_root: &Path, arch_key: &str
         if dst.exists() {
             fs::remove_dir_all(&dst).expect("Failed to remove stale test suite directory");
         }
-        copy_dir_recursive(&src, &dst).expect("Failed to copy OSCOMP test suite");
+        copy_dir_recursive(&src, &dst).expect("Failed to copy test suite");
         println!(
-            "cargo:warning=[build.rs] Copied OSCOMP {} tests to /tests/{}",
+            "cargo:warning=[build.rs] Copied {} tests to /tests/{}",
             libc, libc
         );
     }

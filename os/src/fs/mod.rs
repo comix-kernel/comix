@@ -34,8 +34,8 @@
 //! ```no_run
 //! # use crate::fs::*;
 //! # use crate::vfs::*;
-//! // 1. 挂载根文件系统(Ext4或SimpleFS)
-//! init_ext4_from_block_device()
+//! // 1. 从分区盘探测并挂载根文件系统
+//! init_rootfs_from_discovered_block_devices()
 //!     .or_else(|_| init_simple_fs())?;
 //!
 //! // 2. 创建必要的目录
@@ -145,9 +145,11 @@ pub fn init_simple_fs() -> Result<(), crate::vfs::FsError> {
     Ok(())
 }
 
-/// 从真实的块设备初始化 Ext4 文件系统
+/// 从第一个块设备初始化 Ext4 文件系统。
 ///
-/// 尝试从第一个可用的块设备创建 Ext4 文件系统，并挂载为根文件系统
+/// 该函数仅保留为内部/测试兼容入口。公开运行路径使用
+/// [`init_rootfs_from_discovered_block_devices`]，从分区盘探测 rootfs。
+#[allow(dead_code)]
 pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
     use crate::config::{EXT4_BLOCK_SIZE, FS_IMAGE_SIZE};
     use crate::vfs::FsError;
@@ -212,15 +214,13 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
 }
 
 // ============================================================
-// OSCOMP 评测模式文件系统初始化（仅 `oscomp` feature 下编译）
+// 分区盘 rootfs 探测初始化
 // ============================================================
-// oscomp rootfs 从发现到的块设备中探测：disk.img / disk-la.img 是 MBR
-// 分区盘，vda1 内含 ext4 rootfs，vda2 预留给 VFAT 挂载测试。virtio-blk
-// 探测顺序在不同 QEMU 配置下可能变化，故仍按内容判别 rootfs（认
-// `/bin/sh` 或 `/bin/ash`）。测试发现/执行/关机由 rootfs 的 rcS 负责。
+// 默认运行镜像是 MBR 分区盘：vda1 内含 ext4 rootfs，vda2 预留给 VFAT
+// 挂载测试。virtio-blk 探测顺序在不同 QEMU 配置下可能变化，故按内容
+// 判别 rootfs（认 `/bin/sh` 或 `/bin/ash`），并优先尝试分区设备。
 
 /// 确保 rootfs 上存在某个顶层挂载点目录（如 /dev、/tests）。
-#[cfg(feature = "oscomp")]
 fn ensure_top_level_dir(path: &str, mode: FileMode) -> Result<(), FsError> {
     if vfs_lookup(path).is_ok() {
         return Ok(());
@@ -235,7 +235,6 @@ fn ensure_top_level_dir(path: &str, mode: FileMode) -> Result<(), FsError> {
 }
 
 /// 挂载新的根文件系统后，把当前任务的 root/cwd 同步到新的 VFS 根。
-#[cfg(feature = "oscomp")]
 fn set_current_task_root_cwd_to_vfs_root() -> Result<(), FsError> {
     let root = crate::vfs::get_root_dentry()?;
     let task = crate::kernel::current_task();
@@ -246,7 +245,6 @@ fn set_current_task_root_cwd_to_vfs_root() -> Result<(), FsError> {
     Ok(())
 }
 
-#[cfg(feature = "oscomp")]
 fn clear_current_task_root_cwd() {
     let task = crate::kernel::current_task();
     let task_guard = task.lock();
@@ -255,26 +253,53 @@ fn clear_current_task_root_cwd() {
     fs.cwd = None;
 }
 
-/// OSCOMP 评测模式：探测并挂载 rootfs（内含 /tests）。
-#[cfg(feature = "oscomp")]
-pub fn init_oscomp_filesystems() -> Result<(), FsError> {
+fn is_partition_device_name(name: &str) -> bool {
+    name.as_bytes()
+        .last()
+        .map(|byte| byte.is_ascii_digit())
+        .unwrap_or(false)
+}
+
+/// 探测并挂载分区盘 rootfs。
+///
+/// QEMU 挂载一个 MBR raw disk，`vda1` 是 ext4 rootfs，`vda2` 是 FAT32/VFAT
+/// 测试分区。这里遍历已发现的整盘和分区块设备，优先尝试分区设备，
+/// 选择能打开 ext4 且含 `/bin/sh` 或 `/bin/ash` 的设备挂载为 `/`。
+pub fn init_rootfs_from_discovered_block_devices() -> Result<(), FsError> {
     use crate::config::EXT4_BLOCK_SIZE;
 
-    pr_info!("[OSCOMP][Ext4] Initializing rootfs from discovered block devices");
+    pr_info!("[RootFS][Ext4] Probing discovered block devices for rootfs");
 
-    let devices = list_block_devices();
+    let mut devices = list_block_devices();
+    devices.sort_by_key(|dev| {
+        (
+            !is_partition_device_name(&dev.name),
+            dev.minor,
+            dev.name.clone(),
+        )
+    });
     if devices.is_empty() {
-        pr_info!("[OSCOMP][Ext4] No block device found");
+        pr_info!("[RootFS][Ext4] No block device found");
         return Err(FsError::NoDevice);
     }
 
     // 探测并挂载 rootfs 到 "/"（认 /bin/sh 或 /bin/ash）。
     let mut root_device: Option<String> = None;
-    for (idx, dev_info) in devices.iter().enumerate() {
+    for dev_info in devices.iter() {
         let dev = &dev_info.device;
         let bytes = dev.total_blocks().saturating_mul(dev.block_size());
         let total_blocks = bytes / EXT4_BLOCK_SIZE;
-        let Ok(fs) = Ext4FileSystem::open(dev.clone(), EXT4_BLOCK_SIZE, total_blocks, idx) else {
+        pr_info!(
+            "[RootFS][Ext4] Trying /dev/{} (device_bytes={} MB)",
+            dev_info.name,
+            bytes / 1024 / 1024
+        );
+        let Ok(fs) = Ext4FileSystem::open(
+            dev.clone(),
+            EXT4_BLOCK_SIZE,
+            total_blocks,
+            dev_info.minor as usize,
+        ) else {
             continue;
         };
         MOUNT_TABLE.mount(
@@ -286,7 +311,7 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
         set_current_task_root_cwd_to_vfs_root()?;
         if vfs_lookup("/bin/sh").is_ok() || vfs_lookup("/bin/ash").is_ok() {
             pr_info!(
-                "[OSCOMP][Ext4] Selected rootfs: /dev/{} (device_bytes={} MB)",
+                "[RootFS][Ext4] Selected rootfs: /dev/{} (device_bytes={} MB)",
                 dev_info.name,
                 bytes / 1024 / 1024
             );
@@ -295,6 +320,7 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
         } else {
             let _ = MOUNT_TABLE.umount_root_probe();
             clear_current_task_root_cwd();
+            crate::vfs::DENTRY_CACHE.clear();
         }
     }
     let _root_device = root_device.ok_or(FsError::NoDevice)?;
@@ -305,8 +331,9 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
     let _ = ensure_top_level_dir("/proc", dir_mode);
     let _ = ensure_top_level_dir("/sys", dir_mode);
     let _ = ensure_top_level_dir("/tmp", dir_mode);
+    let _ = ensure_top_level_dir("/mnt", dir_mode);
     let _ = ensure_top_level_dir("/tests", dir_mode);
-    pr_info!("[OSCOMP][Ext4] Rootfs ready; rcS will scan /tests/musl");
+    pr_info!("[RootFS][Ext4] Rootfs ready");
 
     Ok(())
 }

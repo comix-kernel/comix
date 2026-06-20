@@ -9,7 +9,7 @@ use crate::{
         current_task,
         syscall::util::{
             create_file_at, create_file_from_dentry, get_path_safe, resolve_at_path,
-            resolve_at_path_with_flags,
+            resolve_at_path_string, resolve_at_path_with_flags,
         },
     },
     uapi::{

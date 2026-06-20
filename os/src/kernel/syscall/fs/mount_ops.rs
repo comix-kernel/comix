@@ -21,6 +21,7 @@ pub fn mount(
     use crate::fs::sysfs::find_block_device;
     use crate::fs::vfat::VfatFileSystem;
     use crate::fs::{init_dev, init_procfs, init_sysfs, mount_tmpfs};
+    use crate::kernel::syscall::fs::AT_FDCWD;
     use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
 
@@ -87,7 +88,7 @@ pub fn mount(
         if meta.inode_type != InodeType::Directory {
             return Err(FsError::NotDirectory);
         }
-        Ok(dentry.full_path())
+        resolve_at_path_string(AT_FDCWD, path)
     }
 
     fn block_device_basename(source: &str) -> &str {
@@ -273,11 +274,14 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
 
     crate::pr_debug!("[SYSCALL] umount2: unmounting '{}'", target_str);
 
-    let target_path = match resolve_at_path(AT_FDCWD, &target_str) {
-        Ok(Some(dentry)) => dentry.full_path(),
-        Ok(None) => return FsError::NotFound.to_errno(),
+    let target_path = match resolve_at_path_string(AT_FDCWD, &target_str) {
+        Ok(path) => path,
         Err(e) => return e.to_errno(),
     };
+
+    if let Ok(None) = resolve_at_path(AT_FDCWD, &target_str) {
+        return FsError::NotFound.to_errno();
+    }
 
     // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
     match MOUNT_TABLE.umount(&target_path) {

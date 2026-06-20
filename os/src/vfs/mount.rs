@@ -384,7 +384,6 @@ impl MountTable {
         Ok(())
     }
 
-    #[cfg(feature = "oscomp")]
     pub(crate) fn umount_root_probe(&self) -> Result<(), FsError> {
         let mut mounts = self.mounts.lock();
         let stack = mounts.get_mut("/").ok_or(FsError::NotFound)?;

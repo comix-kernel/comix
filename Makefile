@@ -17,7 +17,7 @@ else
 endif
 
 # ============================================================
-# OSCOMP 评测提交目标（根 Makefile）
+# 评测提交目标（根 Makefile）
 # ============================================================
 # 评测机在仓库根执行 `make all`，要求产出 ELF 内核：kernel-rv、kernel-la。
 # 评测机 clone 时会过滤隐藏目录（含 os/.cargo），故构建前重建 os/.cargo/config.toml。
@@ -25,11 +25,10 @@ RV_TARGET := riscv64gc-unknown-none-elf
 LA_TARGET := loongarch64-unknown-none
 OS_DIR := os
 OS_BIN := os
-OSCOMP_VFAT_MB ?= 64
-OSCOMP_VFAT_IMG := $(OS_DIR)/vfat.img
-OSCOMP_SECTOR_SIZE := 512
-OSCOMP_PART_ALIGN_SECTORS := 2048
+VFAT_MB ?= 64
+VFAT_IMG := $(OS_DIR)/vfat.img
 MKFS_VFAT ?= mkfs.vfat
+ASSEMBLE_DISK := scripts/assemble_partitioned_disk.sh
 
 # 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
 PROFILE ?= release
@@ -41,21 +40,15 @@ else
     PROFILE_DIR := release
 endif
 
-# 评测内核默认启用 oscomp 特性：使用单盘 rootfs（内含 /tests），
-# 由 rootfs 的 rcS 自动跑 musl 测试并主动关机（赛题要求“自动运行 + 自动关闭”）。
-# 本地交互式开发请用 `make run`（os/Makefile，不带 oscomp）。
-OSCOMP_FEATURE ?= --features oscomp
-
-# 本地复现评测用 QEMU 参数（可在命令行覆盖，如 `make run-oscomp-rv OSCOMP_RV_MEM=2G`）。
-# rootfs 用 make all 产出的 disk{,-la}.img，里面已经包含 /tests/{musl,glibc}。
-OSCOMP_RV_MEM ?= 4G
-OSCOMP_RV_SMP ?= 1
-OSCOMP_LA_MEM ?= 4G
-OSCOMP_LA_SMP ?= 1
+# 本地运行评测镜像用 QEMU 参数（可在命令行覆盖，如 `make run-rv RV_MEM=2G`）。
+RV_MEM ?= 4G
+RV_SMP ?= 1
+LA_MEM ?= 4G
+LA_SMP ?= 1
 
 .PHONY: docker build_docker fmt run build clean clean-all gdb
 .PHONY: all kernel-rv kernel-la os-cargo-config
-.PHONY: run-oscomp-rv run-oscomp-la
+.PHONY: run-rv run-la
 
 docker:
 	docker run --rm -it -v ${PWD}:/mnt -w /mnt --name comix ${DOCKER_TAG} bash
@@ -79,7 +72,7 @@ gdb:
 	cd os && $(GDB_SCRIPT)
 
 # ------------------------------------------------------------
-# OSCOMP 评测入口：make all → kernel-rv kernel-la (+ disk 镜像)
+# 评测入口：make all → kernel-rv kernel-la (+ disk 镜像)
 # ------------------------------------------------------------
 
 # 重建 os/.cargo/config.toml（评测机 clone 时过滤隐藏目录，构建前恢复链接脚本 rustflags）。
@@ -89,7 +82,7 @@ gdb:
 # 注意：不写 build-std——两架构预编译 std 已自带 weak mem*，写了反而拖慢构建并破坏 cargo test。
 os-cargo-config:
 	@if [ -f "$(OS_DIR)/cargo-vendor-config.toml" ] || [ ! -f "$(OS_DIR)/.cargo/config.toml" ]; then \
-		echo "[OSCOMP] 重建 $(OS_DIR)/.cargo/config.toml"; \
+		echo "[Build] 重建 $(OS_DIR)/.cargo/config.toml"; \
 		mkdir -p $(OS_DIR)/.cargo; \
 		printf '%s\n' \
 			'[target.riscv64gc-unknown-none-elf]' \
@@ -101,90 +94,59 @@ os-cargo-config:
 		if [ -f "$(OS_DIR)/cargo-vendor-config.toml" ]; then \
 			printf '\n' >> $(OS_DIR)/.cargo/config.toml; \
 			cat "$(OS_DIR)/cargo-vendor-config.toml" >> $(OS_DIR)/.cargo/config.toml; \
-			echo "[OSCOMP] 已追加 vendored 源（离线构建）"; \
-			echo "[OSCOMP] 重建 vendor 校验和（评测机过滤删除了 .cargo-checksum.json）"; \
+			echo "[Build] 已追加 vendored 源（离线构建）"; \
+			echo "[Build] 重建 vendor 校验和（评测机过滤删除了 .cargo-checksum.json）"; \
 			python3 scripts/restore_vendor_checksums.py $(OS_DIR); \
 		fi; \
 	else \
-		echo "[OSCOMP] 保留现有 $(OS_DIR)/.cargo/config.toml（本地开发）"; \
+		echo "[Build] 保留现有 $(OS_DIR)/.cargo/config.toml（本地开发）"; \
 	fi
 
 all: os-cargo-config kernel-rv kernel-la disk.img disk-la.img
-	@echo "[OSCOMP] 完成：kernel-rv kernel-la disk.img disk-la.img"
+	@echo "[Build] 完成：kernel-rv kernel-la disk.img disk-la.img"
 
 kernel-rv: os-cargo-config
-	@echo "[OSCOMP] 构建 RISC-V 内核 (ELF, $(PROFILE_DIR)): kernel-rv"
-	cd $(OS_DIR) && ARCH=riscv cargo build $(CARGO_PROFILE_FLAG) --target $(RV_TARGET) $(OSCOMP_FEATURE)
+	@echo "[Build] 构建 RISC-V 内核 (ELF, $(PROFILE_DIR)): kernel-rv"
+	cd $(OS_DIR) && ARCH=riscv cargo build $(CARGO_PROFILE_FLAG) --target $(RV_TARGET)
 	cp -f $(OS_DIR)/target/$(RV_TARGET)/$(PROFILE_DIR)/$(OS_BIN) kernel-rv
 
 kernel-la: os-cargo-config
-	@echo "[OSCOMP] 构建 LoongArch 内核 (ELF, $(PROFILE_DIR)): kernel-la"
-	cd $(OS_DIR) && ARCH=loongarch cargo build $(CARGO_PROFILE_FLAG) --target $(LA_TARGET) $(OSCOMP_FEATURE)
+	@echo "[Build] 构建 LoongArch 内核 (ELF, $(PROFILE_DIR)): kernel-la"
+	cd $(OS_DIR) && ARCH=loongarch cargo build $(CARGO_PROFILE_FLAG) --target $(LA_TARGET)
 	cp -f $(OS_DIR)/target/$(LA_TARGET)/$(PROFILE_DIR)/$(OS_BIN) kernel-la
 
-$(OSCOMP_VFAT_IMG):
-	@echo "[OSCOMP] 创建 $(OSCOMP_VFAT_MB)MiB FAT32/VFAT 镜像: $@"
+$(VFAT_IMG):
+	@echo "[Disk] 创建 $(VFAT_MB)MiB FAT32/VFAT 镜像: $@"
 	rm -f $@
-	truncate -s $(OSCOMP_VFAT_MB)M $@
+	truncate -s $(VFAT_MB)M $@
 	$(MKFS_VFAT) -F 32 -n CCYOSVFAT $@
-
-define assemble_oscomp_disk
-	@test -f $(1)
-	@set -eu; \
-	rootfs="$(1)"; \
-	vfat="$(OSCOMP_VFAT_IMG)"; \
-	out="$@"; \
-	sector_size=$(OSCOMP_SECTOR_SIZE); \
-	align_sectors=$(OSCOMP_PART_ALIGN_SECTORS); \
-	root_bytes=$$(stat -c%s "$$rootfs"); \
-	vfat_bytes=$$(stat -c%s "$$vfat"); \
-	root_sectors=$$(((root_bytes + sector_size - 1) / sector_size)); \
-	vfat_sectors=$$(((vfat_bytes + sector_size - 1) / sector_size)); \
-	root_start=$$align_sectors; \
-	root_end=$$((root_start + root_sectors)); \
-	vfat_start=$$((((root_end + align_sectors - 1) / align_sectors) * align_sectors)); \
-	vfat_end=$$((vfat_start + vfat_sectors)); \
-	disk_sectors=$$((vfat_end + align_sectors)); \
-	rm -f "$$out"; \
-	truncate -s $$((disk_sectors * sector_size)) "$$out"; \
-	{ \
-		echo "label: dos"; \
-		echo "unit: sectors"; \
-		echo "start=$$root_start, size=$$root_sectors, type=83"; \
-		echo "start=$$vfat_start, size=$$vfat_sectors, type=0c"; \
-	} | sfdisk "$$out"; \
-	dd if="$$rootfs" of="$$out" bs=$$sector_size seek=$$root_start conv=notrunc status=none; \
-	dd if="$$vfat" of="$$out" bs=$$sector_size seek=$$vfat_start conv=notrunc status=none; \
-	echo "[OSCOMP] $$out: vda1 ext4 start=$$root_start sectors=$$root_sectors, vda2 vfat start=$$vfat_start sectors=$$vfat_sectors"
-endef
 
 # rootfs 裸 ext4 镜像由 os/build.rs 在对应内核构建时生成（os/fs-{arch}.img）。
 # 根目录 disk 镜像是评测 QEMU 挂载的 MBR 分区盘：vda1=rootfs，vda2=VFAT。
-disk.img: kernel-rv $(OSCOMP_VFAT_IMG)
-	@echo "[OSCOMP] 产出 MBR 分区盘镜像: disk.img"
-	$(call assemble_oscomp_disk,$(OS_DIR)/fs-riscv.img)
+disk.img: kernel-rv $(VFAT_IMG) $(ASSEMBLE_DISK)
+	@echo "[Disk] 产出 MBR 分区盘镜像: disk.img"
+	@$(ASSEMBLE_DISK) $(OS_DIR)/fs-riscv.img $(VFAT_IMG) $@
 
-disk-la.img: kernel-la $(OSCOMP_VFAT_IMG)
-	@echo "[OSCOMP] 产出 MBR 分区盘镜像: disk-la.img"
-	$(call assemble_oscomp_disk,$(OS_DIR)/fs-loongarch.img)
+disk-la.img: kernel-la $(VFAT_IMG) $(ASSEMBLE_DISK)
+	@echo "[Disk] 产出 MBR 分区盘镜像: disk-la.img"
+	@$(ASSEMBLE_DISK) $(OS_DIR)/fs-loongarch.img $(VFAT_IMG) $@
 
 # ------------------------------------------------------------
-# 本地复现评测：启动 QEMU，只挂单盘 rootfs（内含 /tests），
-# 内核自动跑 musl 测试并主动关机；-no-reboot 让关机时 QEMU 退出。
+# 本地运行分区盘：启动 QEMU，只挂 MBR raw disk。
 # 设备型号对齐 os/qemu-run.sh（riscv: virtio-mmio）与 os/qemu-loongarch-run.sh（loongarch: pci）。
 # ------------------------------------------------------------
-run-oscomp-rv: kernel-rv disk.img
-	@echo "[OSCOMP] 运行 RISC-V QEMU（单盘 rootfs + tests，自动跑测试并关机）"
-	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(OSCOMP_RV_MEM) -nographic \
-		-smp $(OSCOMP_RV_SMP) -bios default -no-reboot -rtc base=utc \
+run-rv: kernel-rv disk.img
+	@echo "[Run] 运行 RISC-V QEMU（分区盘：vda1 rootfs，vda2 VFAT）"
+	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
+		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
 		-drive file=disk.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
 		-device virtio-net-device,netdev=net -netdev user,id=net
 
-run-oscomp-la: kernel-la disk-la.img
-	@echo "[OSCOMP] 运行 LoongArch QEMU（单盘 rootfs + tests，自动跑测试并关机）"
-	qemu-system-loongarch64 -machine virt -kernel kernel-la -m $(OSCOMP_LA_MEM) -nographic \
-		-smp $(OSCOMP_LA_SMP) -no-reboot -rtc base=utc \
+run-la: kernel-la disk-la.img
+	@echo "[Run] 运行 LoongArch QEMU（分区盘：vda1 rootfs，vda2 VFAT）"
+	qemu-system-loongarch64 -machine virt -kernel kernel-la -m $(LA_MEM) -nographic \
+		-smp $(LA_SMP) -no-reboot -rtc base=utc \
 		-drive file=disk-la.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-pci,drive=x0 \
 		-device virtio-net-pci,netdev=net0 \

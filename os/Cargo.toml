@@ -42,9 +42,8 @@ fs = ["proc", "device", "dep:ext4_rs", "dep:fatfs"]
 proc_vm = ["paging", "fs"]
 net = ["sync", "device", "dep:smoltcp"]
 proto-ipv6 = []
-# oscomp: 评测模式。启用后内核在启动时探测双盘（rootfs + 评测测试镜像），
-# 把测试镜像挂到 /tests，由 rootfs 的 rcS 自动跑测试并主动关机。
-# 不启用时保持原有单盘启动 + 交互式 shell 的本地开发行为。
+# Deprecated compatibility feature. Rootfs probing and partitioned-disk boot are
+# now the default behavior; enabling `oscomp` has no effect.
 oscomp = []
 
 # RISC-V 架构特定依赖

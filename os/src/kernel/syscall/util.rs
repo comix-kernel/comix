@@ -16,7 +16,7 @@ use crate::{
     vfs::{
         DENTRY_CACHE, Dentry, File, FileMode, FsError, InodeType, OpenFlags, get_root_dentry,
         impls::{BlockDeviceFile, CharDeviceFile, RegFile},
-        split_path, vfs_lookup_from,
+        normalize_path, split_path, vfs_lookup_from,
     },
 };
 
@@ -140,6 +140,46 @@ pub fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, Fs
         Ok(d) => Ok(Some(d)),
         Err(FsError::NotFound) => Ok(None),
         Err(e) => Err(e),
+    }
+}
+
+/// Resolve a syscall path to the mount-table key for the path itself.
+///
+/// Unlike `resolve_at_path`, this returns the path of the mount point dentry
+/// before crossing into a mounted filesystem. `umount("./mnt")` must unmount
+/// `/cwd/mnt`, not the mounted filesystem root whose `full_path()` is `/`.
+pub fn resolve_at_path_string(dirfd: i32, path: &str) -> Result<String, FsError> {
+    if path.is_empty() {
+        return Err(FsError::InvalidArgument);
+    }
+
+    if path.starts_with('/') {
+        return Ok(normalize_path(path));
+    }
+
+    let base_dentry = if dirfd == super::fs::AT_FDCWD {
+        current_task()
+            .lock()
+            .fs
+            .lock()
+            .cwd
+            .clone()
+            .ok_or(FsError::IoError)?
+    } else {
+        let task = current_task();
+        let file = task.lock().fd_table.get(dirfd as usize)?;
+        let meta = file.metadata()?;
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        file.dentry()?
+    };
+
+    let base_path = base_dentry.full_path();
+    if base_path == "/" {
+        Ok(normalize_path(&alloc::format!("/{}", path)))
+    } else {
+        Ok(normalize_path(&alloc::format!("{}/{}", base_path, path)))
     }
 }
 

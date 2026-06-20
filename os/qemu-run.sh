@@ -9,12 +9,12 @@ smp="${SMP:-1}"  # 从环境变量读取，默认为 1
 arch="${ARCH:-riscv}"
 fs="fs-${arch}.img"
 disk="disk.img"
+vfat="vfat.img"
 
 # 1. 转换为纯二进制
 rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
 
-# 2. 检查 fs.img (1GB Ext4 文件系统)
-# 镜像应该由 build.rs 在编译时创建
+# 2. 检查 rootfs 中间产物，并组装运行用 MBR 分区盘
 if [ ! -f "$fs" ]; then
     if [ -f "fs.img" ]; then
         fs="fs.img"
@@ -25,7 +25,15 @@ if [ ! -f "$fs" ]; then
     fi
 fi
 
-echo "Using existing ${fs} (1GB Ext4 filesystem)"
+if [ ! -f "$vfat" ]; then
+    echo "Creating ${vfat} (64MiB FAT32/VFAT partition image)"
+    rm -f "$vfat"
+    truncate -s 64M "$vfat"
+    mkfs.vfat -F 32 -n CCYOSVFAT "$vfat"
+fi
+
+echo "Assembling ${disk} from ${fs} and ${vfat}"
+../scripts/assemble_partitioned_disk.sh "$fs" "$vfat" "$disk"
 
 # 3. 运行 QEMU
 QEMU_ARGS="-machine virt \
@@ -42,7 +50,7 @@ QEMU_ARGS="$QEMU_ARGS -serial stdio"
 QEMU_ARGS="$QEMU_ARGS -rtc base=utc"
 
 # Virtio Block 设备
-QEMU_ARGS="$QEMU_ARGS -drive file=$fs,if=none,format=raw,id=x0"
+QEMU_ARGS="$QEMU_ARGS -drive file=$disk,if=none,format=raw,id=x0"
 QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0"
 
 # Virtio Network 设备
