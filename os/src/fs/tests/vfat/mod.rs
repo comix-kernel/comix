@@ -1,5 +1,5 @@
+use crate::device::RamDisk;
 use crate::device::block::BlockDriver;
-use crate::device::ram_disk::RamDisk;
 use crate::fs::vfat::VfatFileSystem;
 use crate::fs::vfat::adapter::{FatBlockDevice, VfatIoError};
 use crate::vfs::{FileMode, FileSystem, InodeType};
