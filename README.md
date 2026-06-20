@@ -52,13 +52,15 @@ cd os && make test
 仓库根执行 `make all` 会生成评测用内核与磁盘镜像：
 
 - `kernel-rv` / `kernel-la`：RISC-V 与 LoongArch ELF 内核。
-- `os/fs-riscv.img` / `os/fs-loongarch.img`：裸 ext4 rootfs 中间产物，包含 `/bin`、`/sbin`、`/tests` 等内容。
+- `os/fs-riscv.img` / `os/fs-loongarch.img`：裸 ext4 rootfs 中间产物，包含 `/bin`、`/sbin` 与 `/tests` 挂载点等内容。
 - `disk.img` / `disk-la.img`：QEMU 实际挂载的 MBR raw disk，也是默认启动要求的磁盘形态。
 
 `disk.img` 与 `disk-la.img` 的分区固定为：
 
 - `vda1`：ext4 rootfs，内容来自对应的 `os/fs-*.img`。
 - `vda2`：64 MiB FAT32/VFAT 空分区，用于 OSComp `basic/mount` 与 `basic/umount` 测试挂载 `/dev/vda2`。
+
+官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 不写入 rootfs；本地运行时若它们位于仓库根目录，`make run-rv` / `make run-la` 会将其作为额外 VirtIO 块设备挂载，`rcS` 会把该 ext4 测试镜像挂到 `/tests` 后执行白名单 musl 测试。
 
 内核默认会从发现到的块设备（整盘和分区）中探测 ext4 rootfs，优先尝试分区设备，并选择含 `/bin/sh` 或 `/bin/ash` 的设备挂载为 `/`，因此分区盘会从 `vda1` 启动。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 

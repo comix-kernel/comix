@@ -11,6 +11,7 @@ arch="${ARCH:-loongarch}"
 fs="fs-${arch}.img"
 disk="disk-la.img"
 vfat="vfat.img"
+test_img="../sdcard-la.img"
 
 QEMU_ARGS=(
     -machine virt
@@ -44,6 +45,11 @@ echo "Assembling ${disk} from ${fs} and ${vfat}"
 # Virtio Block 设备（MBR 分区盘：vda1 rootfs，vda2 VFAT）
 QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x0)
 QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
+if [ -f "$test_img" ]; then
+    echo "Attaching official test image ${test_img} as vdb"
+    QEMU_ARGS+=(-drive file="$test_img",if=none,format=raw,id=test0)
+    QEMU_ARGS+=(-device virtio-blk-pci,drive=test0)
+fi
 
 # Virtio Network 设备
 QEMU_ARGS+=(-device virtio-net-pci,netdev=net0)

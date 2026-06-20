@@ -30,6 +30,8 @@
 - `vda1`：ext4 rootfs。
 - `vda2`：64 MiB FAT32/VFAT 空分区，用于 `basic/mount`、`basic/umount` 挂载 `/dev/vda2`。
 
+官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 作为额外块设备提供测试内容，镜像根目录包含 `musl/` 与 `glibc/`。启动脚本会尝试把该 ext4 测试镜像挂载到 `/tests`，再自动运行白名单 musl 测试。
+
 内核默认会从发现到的整盘与分区块设备中探测 ext4 rootfs，优先尝试分区设备，选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 `/`。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 
 ## 离线依赖 / 隐藏目录过滤（重要）

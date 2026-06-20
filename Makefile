@@ -29,6 +29,11 @@ VFAT_MB ?= 64
 VFAT_IMG := $(OS_DIR)/vfat.img
 MKFS_VFAT ?= mkfs.vfat
 ASSEMBLE_DISK := scripts/assemble_partitioned_disk.sh
+COMMA := ,
+TESTIMG_RV ?= sdcard-rv.img
+TESTIMG_LA ?= sdcard-la.img
+RV_TEST_DRIVE := $(if $(wildcard $(TESTIMG_RV)),-drive file=$(TESTIMG_RV)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-device$(COMMA)drive=test0$(COMMA)bus=virtio-mmio-bus.1)
+LA_TEST_DRIVE := $(if $(wildcard $(TESTIMG_LA)),-drive file=$(TESTIMG_LA)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-pci$(COMMA)drive=test0)
 
 # 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
 PROFILE ?= release
@@ -132,7 +137,8 @@ disk-la.img: kernel-la $(VFAT_IMG) $(ASSEMBLE_DISK)
 	@$(ASSEMBLE_DISK) $(OS_DIR)/fs-loongarch.img $(VFAT_IMG) $@
 
 # ------------------------------------------------------------
-# 本地运行分区盘：启动 QEMU，只挂 MBR raw disk。
+# 本地运行分区盘：启动 QEMU，rootfs 分区盘保持为 vda；
+# 若根目录存在官方测试镜像，则额外挂为 vdb 并由 rcS 挂载到 /tests。
 # 设备型号对齐 os/qemu-run.sh（riscv: virtio-mmio）与 os/qemu-loongarch-run.sh（loongarch: pci）。
 # ------------------------------------------------------------
 run-rv: kernel-rv disk.img
@@ -141,6 +147,7 @@ run-rv: kernel-rv disk.img
 		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
 		-drive file=disk.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
+		$(RV_TEST_DRIVE) \
 		-device virtio-net-device,netdev=net -netdev user,id=net
 
 run-la: kernel-la disk-la.img
@@ -149,6 +156,7 @@ run-la: kernel-la disk-la.img
 		-smp $(LA_SMP) -no-reboot -rtc base=utc \
 		-drive file=disk-la.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-pci,drive=x0 \
+		$(LA_TEST_DRIVE) \
 		-device virtio-net-pci,netdev=net0 \
 		-netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
 

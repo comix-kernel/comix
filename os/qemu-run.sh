@@ -10,6 +10,7 @@ arch="${ARCH:-riscv}"
 fs="fs-${arch}.img"
 disk="disk.img"
 vfat="vfat.img"
+test_img="../sdcard-rv.img"
 
 # 1. 转换为纯二进制
 rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
@@ -52,6 +53,11 @@ QEMU_ARGS="$QEMU_ARGS -rtc base=utc"
 # Virtio Block 设备
 QEMU_ARGS="$QEMU_ARGS -drive file=$disk,if=none,format=raw,id=x0"
 QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0"
+if [ -f "$test_img" ]; then
+    echo "Attaching official test image ${test_img} as vdb"
+    QEMU_ARGS="$QEMU_ARGS -drive file=$test_img,if=none,format=raw,id=test0"
+    QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=test0,bus=virtio-mmio-bus.1"
+fi
 
 # Virtio Network 设备
 QEMU_ARGS="$QEMU_ARGS -device virtio-net-device,netdev=net"

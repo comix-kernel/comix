@@ -161,22 +161,14 @@ fn main() {
         // user_bin_dir 已经在上面通过 user_dir 引用了, user/bin
         let user_bin_dir = user_dir.join("bin");
         let arch_stamp = PathBuf::from(&out_dir).join(format!("fs_img_arch_{}.txt", arch_key));
-        let test_suite_dir = project_root
-            .join("testsuits-for-oskernel")
-            .join("sdcard")
-            .join(arch_key);
 
         // 检查依赖
         println!("cargo:rerun-if-changed={}", data_dir.display());
-        println!("cargo:rerun-if-changed={}", test_suite_dir.display());
-        let mut dependencies = vec![
+        let dependencies = vec![
             data_dir.clone(),
             user_bin_dir,
             PathBuf::from(&manifest_dir).join("build.rs"),
         ];
-        if test_suite_dir.exists() {
-            dependencies.push(test_suite_dir);
-        }
 
         let force_rebuild = match fs::read_to_string(&arch_stamp) {
             Ok(saved) => saved.trim() != arch_key,
@@ -194,7 +186,7 @@ fn main() {
                 "cargo:warning=[build.rs] Creating full ext4 rootfs intermediate image (4GB) at {}...",
                 fs_img_name
             );
-            create_full_ext4_image(&fs_img_path, &data_dir, &project_root, arch_key);
+            create_full_ext4_image(&fs_img_path, &data_dir, &project_root);
             let _ = fs::write(&arch_stamp, format!("{}\n", arch_key));
             println!(
                 "cargo:warning=[build.rs] Runtime image created: {}",
@@ -362,8 +354,8 @@ fn create_empty_ext4_image(path: &PathBuf, size_mb: usize) {
     }
 }
 
-/// 创建完整的 ext4 镜像 (包含 data/、测试套件和 user/bin/)
-fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path, arch_key: &str) {
+/// 创建完整的 ext4 rootfs 镜像（包含 data/ 和 user/bin/，/tests 作为测试镜像挂载点）。
+fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path) {
     const IMG_SIZE_MB: usize = 4096; // 4GB
     const BLOCK_SIZE: usize = 1024 * 1024;
 
@@ -405,7 +397,6 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path, 
         fs::set_permissions(&path, fs::Permissions::from_mode(mode))
             .unwrap_or_else(|_| panic!("Failed to set permissions on /{}", dir));
     }
-    copy_test_suites(&temp_root, project_root, arch_key);
     create_glibc_runtime_symlinks(&temp_root);
 
     // 4. 创建 /home/user/bin 目录并复制 user/bin
@@ -461,42 +452,6 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path, project_root: &Path, 
     fs::remove_dir_all(&temp_root).ok();
 
     println!("cargo:warning=[build.rs] Full ext4 image created successfully (4GB).");
-}
-
-fn copy_test_suites(temp_root: &Path, project_root: &Path, arch_key: &str) {
-    let suite_root = project_root
-        .join("testsuits-for-oskernel")
-        .join("sdcard")
-        .join(arch_key);
-    if !suite_root.exists() {
-        println!(
-            "cargo:warning=[build.rs] Test suite not found at {}, skipping /tests population",
-            suite_root.display()
-        );
-        return;
-    }
-
-    let tests_root = temp_root.join("tests");
-    for libc in ["musl", "glibc"] {
-        let src = suite_root.join(libc);
-        if !src.exists() {
-            println!(
-                "cargo:warning=[build.rs] {} test suite not found at {}, skipping",
-                libc,
-                src.display()
-            );
-            continue;
-        }
-        let dst = tests_root.join(libc);
-        if dst.exists() {
-            fs::remove_dir_all(&dst).expect("Failed to remove stale test suite directory");
-        }
-        copy_dir_recursive(&src, &dst).expect("Failed to copy test suite");
-        println!(
-            "cargo:warning=[build.rs] Copied {} tests to /tests/{}",
-            libc, libc
-        );
-    }
 }
 
 fn create_glibc_runtime_symlinks(temp_root: &Path) {
