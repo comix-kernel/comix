@@ -273,12 +273,19 @@ pub fn umount2(target: *const c_char, _flags: i32) -> isize {
 
     crate::pr_debug!("[SYSCALL] umount2: unmounting '{}'", target_str);
 
-    // 卸载文件系统
+    let target_path = match resolve_at_path(AT_FDCWD, &target_str) {
+        Ok(Some(dentry)) => dentry.full_path(),
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
 
     // 注意：MOUNT_TABLE.umount() 会自动调用 fs.sync()
-    match MOUNT_TABLE.umount(&target_str) {
+    match MOUNT_TABLE.umount(&target_path) {
         Ok(()) => {
-            crate::pr_debug!("[SYSCALL] umount2: successfully unmounted '{}'", target_str);
+            crate::pr_debug!(
+                "[SYSCALL] umount2: successfully unmounted '{}'",
+                target_path
+            );
             0
         }
         Err(e) => {
