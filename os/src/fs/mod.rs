@@ -214,10 +214,10 @@ pub fn init_ext4_from_block_device() -> Result<(), crate::vfs::FsError> {
 // ============================================================
 // OSCOMP 评测模式文件系统初始化（仅 `oscomp` feature 下编译）
 // ============================================================
-// oscomp rootfs 与开发环境一样走单盘启动：disk.img / disk-la.img 内含
-// `/bin/sh`、`/sbin/init` 和 `/tests/{musl,glibc}`。virtio-blk 探测顺序在
-// 不同 QEMU 配置下可能变化，故仍按内容判别 rootfs（认 `/bin/sh` 或
-// `/bin/ash`）。测试发现/执行/关机由 rootfs 的 rcS 负责。
+// oscomp rootfs 从发现到的块设备中探测：disk.img / disk-la.img 是 MBR
+// 分区盘，vda1 内含 ext4 rootfs，vda2 预留给 VFAT 挂载测试。virtio-blk
+// 探测顺序在不同 QEMU 配置下可能变化，故仍按内容判别 rootfs（认
+// `/bin/sh` 或 `/bin/ash`）。测试发现/执行/关机由 rootfs 的 rcS 负责。
 
 /// 确保 rootfs 上存在某个顶层挂载点目录（如 /dev、/tests）。
 #[cfg(feature = "oscomp")]
@@ -255,24 +255,23 @@ fn clear_current_task_root_cwd() {
     fs.cwd = None;
 }
 
-/// OSCOMP 评测模式：探测并挂载单盘 rootfs（内含 /tests）。
+/// OSCOMP 评测模式：探测并挂载 rootfs（内含 /tests）。
 #[cfg(feature = "oscomp")]
 pub fn init_oscomp_filesystems() -> Result<(), FsError> {
     use crate::config::EXT4_BLOCK_SIZE;
 
-    pr_info!("[OSCOMP][Ext4] Initializing single-disk rootfs");
+    pr_info!("[OSCOMP][Ext4] Initializing rootfs from discovered block devices");
 
-    let blk_list = BLK_DRIVERS.read();
-    if blk_list.is_empty() {
+    let devices = list_block_devices();
+    if devices.is_empty() {
         pr_info!("[OSCOMP][Ext4] No block device found");
         return Err(FsError::NoDevice);
     }
-    let devices: alloc::vec::Vec<_> = blk_list.iter().cloned().collect();
-    drop(blk_list);
 
     // 探测并挂载 rootfs 到 "/"（认 /bin/sh 或 /bin/ash）。
-    let mut root_idx: Option<usize> = None;
-    for (idx, dev) in devices.iter().enumerate() {
+    let mut root_device: Option<String> = None;
+    for (idx, dev_info) in devices.iter().enumerate() {
+        let dev = &dev_info.device;
         let bytes = dev.total_blocks().saturating_mul(dev.block_size());
         let total_blocks = bytes / EXT4_BLOCK_SIZE;
         let Ok(fs) = Ext4FileSystem::open(dev.clone(), EXT4_BLOCK_SIZE, total_blocks, idx) else {
@@ -282,23 +281,23 @@ pub fn init_oscomp_filesystems() -> Result<(), FsError> {
             fs,
             "/",
             MountFlags::empty(),
-            Some(alloc::format!("virtio-blk{}", idx)),
+            Some(alloc::format!("/dev/{}", dev_info.name)),
         )?;
         set_current_task_root_cwd_to_vfs_root()?;
         if vfs_lookup("/bin/sh").is_ok() || vfs_lookup("/bin/ash").is_ok() {
             pr_info!(
-                "[OSCOMP][Ext4] Selected rootfs: virtio-blk{} (device_bytes={} MB)",
-                idx,
+                "[OSCOMP][Ext4] Selected rootfs: /dev/{} (device_bytes={} MB)",
+                dev_info.name,
                 bytes / 1024 / 1024
             );
-            root_idx = Some(idx);
+            root_device = Some(dev_info.name.clone());
             break;
         } else {
             let _ = MOUNT_TABLE.umount_root_probe();
             clear_current_task_root_cwd();
         }
     }
-    let _root_idx = root_idx.ok_or(FsError::NoDevice)?;
+    let _root_device = root_device.ok_or(FsError::NoDevice)?;
 
     // 确保 rootfs 上存在常用挂载点。
     let dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o755);
