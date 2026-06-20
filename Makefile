@@ -25,6 +25,9 @@ RV_TARGET := riscv64gc-unknown-none-elf
 LA_TARGET := loongarch64-unknown-none
 OS_DIR := os
 OS_BIN := os
+OSCOMP_VFAT_MB ?= 64
+OSCOMP_VFAT_IMG := $(OS_DIR)/vfat.img
+MKFS_VFAT ?= mkfs.vfat
 
 # 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
 PROFILE ?= release
@@ -116,6 +119,12 @@ kernel-la: os-cargo-config
 	@echo "[OSCOMP] 构建 LoongArch 内核 (ELF, $(PROFILE_DIR)): kernel-la"
 	cd $(OS_DIR) && ARCH=loongarch cargo build $(CARGO_PROFILE_FLAG) --target $(LA_TARGET) $(OSCOMP_FEATURE)
 	cp -f $(OS_DIR)/target/$(LA_TARGET)/$(PROFILE_DIR)/$(OS_BIN) kernel-la
+
+$(OSCOMP_VFAT_IMG):
+	@echo "[OSCOMP] 创建 $(OSCOMP_VFAT_MB)MiB FAT32/VFAT 镜像: $@"
+	rm -f $@
+	truncate -s $(OSCOMP_VFAT_MB)M $@
+	$(MKFS_VFAT) -F 32 -n CCYOSVFAT $@
 
 # rootfs 镜像由 os/build.rs 在对应内核构建时生成（os/fs-{arch}.img），此处拷到根目录。
 disk.img: kernel-rv
