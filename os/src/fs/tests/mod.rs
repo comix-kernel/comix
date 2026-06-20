@@ -3,3 +3,4 @@ mod proc;
 mod simple_fs;
 mod sysfs;
 mod tmpfs;
+mod vfat;

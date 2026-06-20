@@ -80,6 +80,7 @@ pub mod simple_fs;
 pub mod smfs;
 pub mod sysfs;
 pub mod tmpfs;
+pub mod vfat;
 
 use alloc::string::String;
 use alloc::sync::Arc;
