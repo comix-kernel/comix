@@ -1,6 +1,8 @@
 use crate::device::block::BlockDriver;
 use crate::device::ram_disk::RamDisk;
+use crate::fs::vfat::VfatFileSystem;
 use crate::fs::vfat::adapter::{FatBlockDevice, VfatIoError};
+use crate::vfs::{FileMode, FileSystem, InodeType};
 use crate::{kassert, test_case};
 use alloc::sync::Arc;
 use alloc::vec;
@@ -88,4 +90,69 @@ test_case!(test_vfat_adapter_rejects_invalid_seek, {
     kassert!(device.seek(fatfs::SeekFrom::End(1)) == Err(VfatIoError::OutOfBounds));
     kassert!(device.seek(fatfs::SeekFrom::Current(-1)) == Err(VfatIoError::OutOfBounds));
     kassert!(device.position() == 0);
+});
+
+fn formatted_disk() -> Arc<RamDisk> {
+    let disk = RamDisk::new(4 * 1024 * 1024, 512, 0);
+    let mut device = FatBlockDevice::new(disk.clone()).unwrap();
+    fatfs::format_volume(
+        &mut device,
+        fatfs::FormatVolumeOptions::new().total_sectors(disk.total_blocks() as u32),
+    )
+    .unwrap();
+    disk
+}
+
+test_case!(test_vfat_vfs_create_write_read_file, {
+    let disk = formatted_disk();
+    let fs = VfatFileSystem::open(disk, 0).unwrap();
+    let root = fs.root_inode();
+
+    let file = root
+        .create(
+            "hello.txt",
+            FileMode::S_IFREG | FileMode::from_bits_truncate(0o666),
+        )
+        .unwrap();
+    let written = file.write_at(0, b"hello vfat").unwrap();
+    kassert!(written == 10);
+
+    let mut buf = [0u8; 10];
+    let read = file.read_at(0, &mut buf).unwrap();
+    kassert!(read == 10);
+    kassert!(&buf == b"hello vfat");
+
+    let metadata = file.metadata().unwrap();
+    kassert!(metadata.inode_type == InodeType::File);
+    kassert!(metadata.size == 10);
+});
+
+test_case!(test_vfat_vfs_mkdir_lookup_readdir, {
+    let disk = formatted_disk();
+    let fs = VfatFileSystem::open(disk, 0).unwrap();
+    let root = fs.root_inode();
+
+    let dir = root
+        .mkdir(
+            "docs",
+            FileMode::S_IFDIR | FileMode::from_bits_truncate(0o777),
+        )
+        .unwrap();
+    dir.create(
+        "readme.md",
+        FileMode::S_IFREG | FileMode::from_bits_truncate(0o666),
+    )
+    .unwrap();
+
+    let looked_up = root.lookup("docs").unwrap();
+    kassert!(looked_up.metadata().unwrap().inode_type == InodeType::Directory);
+
+    let entries = dir.readdir().unwrap();
+    kassert!(entries.iter().any(|entry| entry.name == "."));
+    kassert!(entries.iter().any(|entry| entry.name == ".."));
+    kassert!(
+        entries
+            .iter()
+            .any(|entry| entry.name == "readme.md" && entry.inode_type == InodeType::File)
+    );
 });
