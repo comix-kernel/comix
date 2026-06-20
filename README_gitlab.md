@@ -16,9 +16,21 @@
 - `make all` 生成以下 ELF 内核：
   - `kernel-rv`：RISC-V 内核（`riscv64gc-unknown-none-elf`，release）
   - `kernel-la`：LoongArch 内核（`loongarch64-unknown-none`，release）
-- 同时生成可选的 rootfs 镜像（评测启动 QEMU 时一并挂载）：
+- 同时生成可选的磁盘镜像（评测启动 QEMU 时一并挂载）：
   - `disk.img`
   - `disk-la.img`
+
+`os/build.rs` 会先生成裸 ext4 rootfs 中间产物：
+
+- `os/fs-riscv.img`
+- `os/fs-loongarch.img`
+
+顶层 `Makefile` 再把它们组装成 MBR raw disk。最终分区布局固定为：
+
+- `vda1`：ext4 rootfs。
+- `vda2`：64 MiB FAT32/VFAT 空分区，用于 `basic/mount`、`basic/umount` 挂载 `/dev/vda2`。
+
+内核启用 `oscomp` feature 后会从发现到的整盘与分区块设备中探测 ext4 rootfs，选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 `/`。
 
 ## 离线依赖 / 隐藏目录过滤（重要）
 
@@ -36,3 +48,4 @@
 ## 工具链
 
 - `os/rust-toolchain.toml` 固定为 `nightly-2025-10-28`。
+- 镜像构建依赖：`dd`、`truncate`、`sfdisk`、`mkfs.ext4`、`mkfs.vfat`。

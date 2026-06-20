@@ -26,7 +26,7 @@ Comix 是一个以 Rust 编写的教学/实验型内核项目，目前聚焦 RIS
 - Rust nightly（已在 rust-toolchain.toml 固定）
 - RISC-V 目标：`rustup target add riscv64gc-unknown-none-elf`
 - QEMU：`qemu-system-riscv64`
-- 构建工具：`make`、`python3`、`dd`、`mkfs.ext4`、`rust-objcopy`（首轮构建会创建 ext4 镜像，可能较耗时/磁盘）
+- 构建工具：`make`、`python3`、`dd`、`truncate`、`sfdisk`、`mkfs.ext4`、`mkfs.vfat`、`rust-objcopy`（首轮构建会创建 ext4 镜像，可能较耗时/磁盘）
 - 可选：Docker/DevContainer 直接复用仓库提供的镜像
 
 ## 构建与运行
@@ -46,6 +46,21 @@ b) cd os && make gdb     # 另一个终端连接 GDB
 cd os && make test
 ```
 提示：`fs.img` 为 ext4 镜像，由 build.rs 从 data/ 与 user/bin 构建并通过 VirtIO-Block 挂载；`simple_fs.img` 当前构建为空占位，未来可切换为内存盘嵌入方案。
+
+## OSComp 镜像布局
+
+仓库根执行 `make all` 会生成评测用内核与磁盘镜像：
+
+- `kernel-rv` / `kernel-la`：RISC-V 与 LoongArch ELF 内核。
+- `os/fs-riscv.img` / `os/fs-loongarch.img`：裸 ext4 rootfs 中间产物，包含 `/bin`、`/sbin`、`/tests` 等内容。
+- `disk.img` / `disk-la.img`：QEMU 实际挂载的 MBR raw disk。
+
+`disk.img` 与 `disk-la.img` 的分区固定为：
+
+- `vda1`：ext4 rootfs，内容来自对应的 `os/fs-*.img`。
+- `vda2`：64 MiB FAT32/VFAT 空分区，用于 OSComp `basic/mount` 与 `basic/umount` 测试挂载 `/dev/vda2`。
+
+内核在 `oscomp` feature 下会从发现到的块设备（整盘和分区）中探测 ext4 rootfs，并选择含 `/bin/sh` 或 `/bin/ash` 的设备挂载为 `/`，因此分区盘会从 `vda1` 启动。
 
 ## 用户态程序
 
