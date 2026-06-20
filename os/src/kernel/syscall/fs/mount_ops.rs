@@ -6,8 +6,7 @@ use super::*;
 /// 40 (SYS_MOUNT)
 ///
 /// # 简化实现说明
-/// - 只支持 ext4 文件系统（忽略 filesystemtype 参数）
-/// - 使用第一个可用的块设备（忽略 source 参数）
+/// - 支持 ext4 与 FAT/VFAT 块设备文件系统
 /// - 忽略所有 mountflags（但保留以保持 ABI 兼容）
 /// - 忽略 data 参数
 pub fn mount(
@@ -20,6 +19,7 @@ pub fn mount(
     use crate::config::EXT4_BLOCK_SIZE;
     use crate::fs::ext4::Ext4FileSystem;
     use crate::fs::sysfs::find_block_device;
+    use crate::fs::vfat::VfatFileSystem;
     use crate::fs::{init_dev, init_procfs, init_sysfs, mount_tmpfs};
     use crate::vfs::{MOUNT_TABLE, MountFlags as VfsMountFlags};
     use alloc::string::String;
@@ -79,39 +79,61 @@ pub fn mount(
         }
     }
 
-    // 特殊挂载点处理
-    match target_str.as_str() {
-        "/proc" => {
-            if let Err(e) = ensure_dir_exists("/proc") {
+    fn resolve_mount_target(path: &str) -> Result<String, FsError> {
+        use crate::vfs::vfs_lookup;
+
+        let dentry = vfs_lookup(path)?;
+        let meta = dentry.inode.metadata()?;
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        Ok(dentry.full_path())
+    }
+
+    fn block_device_basename(source: &str) -> &str {
+        source
+            .rsplit('/')
+            .find(|part| !part.is_empty())
+            .unwrap_or(source)
+    }
+
+    let target_path = match resolve_mount_target(&target_str) {
+        Ok(path) => path,
+        Err(FsError::NotFound)
+            if matches!(target_str.as_str(), "/proc" | "/sys" | "/tmp" | "/dev") =>
+        {
+            if let Err(e) = ensure_dir_exists(&target_str) {
                 return e.to_errno();
             }
+            match resolve_mount_target(&target_str) {
+                Ok(path) => path,
+                Err(e) => return e.to_errno(),
+            }
+        }
+        Err(e) => return e.to_errno(),
+    };
+
+    // 特殊挂载点处理
+    match target_path.as_str() {
+        "/proc" => {
             return match init_procfs() {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/sys" => {
-            if let Err(e) = ensure_dir_exists("/sys") {
-                return e.to_errno();
-            }
             return match init_sysfs() {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/tmp" => {
-            if let Err(e) = ensure_dir_exists("/tmp") {
-                return e.to_errno();
-            }
             return match mount_tmpfs("/tmp", 0) {
                 Ok(_) => 0,
                 Err(e) => e.to_errno(),
             };
         }
         "/dev" => {
-            if let Err(e) = ensure_dir_exists("/dev") {
-                return e.to_errno();
-            }
             // 先挂载 tmpfs 到 /dev
             if let Err(e) = mount_tmpfs("/dev", 0) {
                 return e.to_errno();
@@ -125,10 +147,15 @@ pub fn mount(
         _ => {}
     }
 
-    // 通用挂载逻辑 (目前只支持 ext4)
+    let find_source_block_device = || {
+        find_block_device(&source_str)
+            .or_else(|| find_block_device(block_device_basename(&source_str)))
+    };
+
+    // 通用块设备文件系统挂载逻辑
     if fstype_str == "ext4" {
         // 查找块设备
-        let dev_info = match find_block_device(&source_str) {
+        let dev_info = match find_source_block_device() {
             Some(info) => info,
             None => {
                 crate::pr_err!("[SYSCALL] mount: block device '{}' not found", source_str);
@@ -147,8 +174,12 @@ pub fn mount(
         // 为了兼容现有 API，我们尝试从设备获取大小。
         let total_blocks = block_device.total_blocks();
 
-        let ext4_fs = match Ext4FileSystem::open(block_device.clone(), block_size, total_blocks, 0)
-        {
+        let ext4_fs = match Ext4FileSystem::open(
+            block_device.clone(),
+            block_size,
+            total_blocks,
+            dev_info.minor as usize,
+        ) {
             Ok(fs) => fs,
             Err(e) => {
                 crate::pr_err!("[SYSCALL] mount: failed to open ext4: {:?}", e);
@@ -159,14 +190,51 @@ pub fn mount(
         // 挂载文件系统
         match MOUNT_TABLE.mount(
             ext4_fs,
-            &target_str,
+            &target_path,
             VfsMountFlags::empty(),
             Some(source_str),
         ) {
             Ok(()) => {
                 crate::pr_info!(
                     "[SYSCALL] mount: successfully mounted ext4 at '{}'",
-                    target_str
+                    target_path
+                );
+                return 0;
+            }
+            Err(e) => {
+                crate::pr_err!("[SYSCALL] mount: failed: {:?}", e);
+                return e.to_errno();
+            }
+        }
+    }
+
+    if matches!(fstype_str.as_str(), "vfat" | "fat" | "fat32") {
+        let dev_info = match find_source_block_device() {
+            Some(info) => info,
+            None => {
+                crate::pr_err!("[SYSCALL] mount: block device '{}' not found", source_str);
+                return -(ENOENT as isize);
+            }
+        };
+
+        let vfat_fs = match VfatFileSystem::open(dev_info.device.clone(), dev_info.minor as usize) {
+            Ok(fs) => fs,
+            Err(e) => {
+                crate::pr_err!("[SYSCALL] mount: failed to open vfat: {:?}", e);
+                return e.to_errno();
+            }
+        };
+
+        match MOUNT_TABLE.mount(
+            vfat_fs,
+            &target_path,
+            VfsMountFlags::empty(),
+            Some(source_str),
+        ) {
+            Ok(()) => {
+                crate::pr_info!(
+                    "[SYSCALL] mount: successfully mounted vfat at '{}'",
+                    target_path
                 );
                 return 0;
             }
@@ -180,7 +248,7 @@ pub fn mount(
     crate::pr_err!(
         "[SYSCALL] mount: unsupported filesystem type '{}' or target '{}'",
         fstype_str,
-        target_str
+        target_path
     );
     -(EINVAL as isize)
 }
