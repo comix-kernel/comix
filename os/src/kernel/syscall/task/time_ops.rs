@@ -52,6 +52,11 @@ pub fn gettid() -> c_int {
     current_task().lock().tid as c_int
 }
 
+pub fn sched_yield() -> c_int {
+    yield_task();
+    0
+}
+
 /// 基于时钟的高精度睡眠
 /// # 参数
 /// - `clk_id`: 时钟 ID

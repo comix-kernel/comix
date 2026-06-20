@@ -9,7 +9,7 @@ use core::{
 use crate::{
     arch::{
         lib::{restart, shutdown},
-        timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq},
+        timer::{TICKS_PER_SEC, TIMER_TICKS, clock_freq, get_time},
     },
     kernel::{
         current_task,
@@ -30,9 +30,13 @@ use crate::{
             REBOOT_MAGIC2C,
         },
         sysinfo::SysInfo,
-        time::clock_id::{
-            CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME,
-            CLOCK_REALTIME_COARSE, MAX_CLOCKS,
+        time::{
+            Tms,
+            clock_id::{
+                CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME,
+                CLOCK_REALTIME_COARSE, MAX_CLOCKS,
+            },
+            timeval, timezone,
         },
         types::SizeT,
         uts_namespace::{UTS_NAME_LEN, UtsNamespace},
@@ -211,6 +215,28 @@ pub fn clock_getres(clk_id: c_int, tp: *mut TimeSpec) -> c_int {
     }
 
     0
+}
+
+/// 获取当前墙上时间。
+pub fn gettimeofday(tv: *mut timeval, tz: *mut timezone) -> c_int {
+    if !tv.is_null() {
+        write_to_user(tv, TimeSpec::now().to_timeval());
+    }
+    if !tz.is_null() {
+        write_to_user(tz, timezone {
+            tz_minuteswest: 0,
+            tz_dsttime: 0,
+        });
+    }
+    0
+}
+
+/// 获取进程时间统计。
+pub fn times(buf: *mut Tms) -> c_long {
+    if !buf.is_null() {
+        write_to_user(buf, Tms::zero());
+    }
+    (get_time() as u128 * TICKS_PER_SEC as u128 / clock_freq() as u128) as c_long
 }
 
 /// 读取和控制内核日志缓冲区

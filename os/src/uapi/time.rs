@@ -250,6 +250,31 @@ impl timeval {
     }
 }
 
+/// CPU time accounting returned by `times`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tms {
+    /// User CPU time.
+    pub tms_utime: c_long,
+    /// System CPU time.
+    pub tms_stime: c_long,
+    /// User CPU time of waited-for children.
+    pub tms_cutime: c_long,
+    /// System CPU time of waited-for children.
+    pub tms_cstime: c_long,
+}
+
+impl Tms {
+    pub const fn zero() -> Self {
+        Self {
+            tms_utime: 0,
+            tms_stime: 0,
+            tms_cutime: 0,
+            tms_cstime: 0,
+        }
+    }
+}
+
 /// 用于设置 POSIX 间隔定时器 (timer_create) 的结构。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

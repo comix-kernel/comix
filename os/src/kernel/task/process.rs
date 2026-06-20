@@ -38,8 +38,12 @@ pub fn exit_process(task: SharedTask, code: i32) {
         }
     }
     {
+        let leader_tid = task.lock().tid;
         let mut t = TASK_MANAGER.lock();
         for thread in threads {
+            if thread.lock().tid == leader_tid {
+                continue;
+            }
             // Terminate remaining threads in the same process.
             // IMPORTANT: do not overwrite the process exit code.
             // Use 0 here; the process exit status is carried by the thread group leader.

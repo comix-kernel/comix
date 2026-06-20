@@ -99,6 +99,9 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_CLOCK_GETRES => sys_clock_getres(frame),
         crate::kernel::syscall::numbers::SYS_SYSLOG => sys_syslog(frame),
 
+        // 调度
+        crate::kernel::syscall::numbers::SYS_SCHED_YIELD => sys_sched_yield(frame),
+
         // 信号
         crate::kernel::syscall::numbers::SYS_KILL => sys_kill(frame),
         crate::kernel::syscall::numbers::SYS_TKILL => sys_tkill(frame),
@@ -119,6 +122,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_GETRESUID => sys_getresuid(frame),
         crate::kernel::syscall::numbers::SYS_SETRESGID => sys_setresgid(frame),
         crate::kernel::syscall::numbers::SYS_GETRESGID => sys_getresgid(frame),
+        crate::kernel::syscall::numbers::SYS_TIMES => sys_times(frame),
         crate::kernel::syscall::numbers::SYS_SETPGID => sys_setpgid(frame),
         crate::kernel::syscall::numbers::SYS_SETSID => sys_setsid(frame),
 
@@ -128,6 +132,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_GETRLIMIT => sys_getrlimit(frame),
         crate::kernel::syscall::numbers::SYS_SETRLIMIT => sys_setrlimit(frame),
         crate::kernel::syscall::numbers::SYS_UMASK => sys_umask(frame),
+        crate::kernel::syscall::numbers::SYS_GETTIMEOFDAY => sys_gettimeofday(frame),
         crate::kernel::syscall::numbers::SYS_GETPID => sys_getpid(frame),
         crate::kernel::syscall::numbers::SYS_GETPPID => sys_getppid(frame),
         crate::kernel::syscall::numbers::SYS_GETPGID => sys_getpgid(frame),

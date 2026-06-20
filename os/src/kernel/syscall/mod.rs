@@ -30,7 +30,7 @@ use crate::{
         resource::{Rlimit, Rusage},
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
-        time::{Itimerval, TimeSpec},
+        time::{Itimerval, TimeSpec, Tms, timeval, timezone},
         types::{SigSetT, SizeT, StackT},
         uts_namespace::UtsNamespace,
     },
@@ -162,6 +162,7 @@ impl_syscall!(
 impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSpec));
 impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSpec));
 impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSpec));
+impl_syscall!(sys_sched_yield, sched_yield, ());
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 
 // 信号 (Signals)
@@ -196,6 +197,7 @@ impl_syscall!(sys_setresuid, setresuid, (u32, u32, u32));
 impl_syscall!(sys_getresuid, getresuid, (*mut u32, *mut u32, *mut u32));
 impl_syscall!(sys_setresgid, setresgid, (u32, u32, u32));
 impl_syscall!(sys_getresgid, getresgid, (*mut u32, *mut u32, *mut u32));
+impl_syscall!(sys_times, times, (*mut Tms));
 impl_syscall!(sys_setsid, setsid, ());
 impl_syscall!(sys_setpgid, set_pgid, (c_int, c_int));
 
@@ -205,6 +207,11 @@ impl_syscall!(sys_sethostname, set_hostname, (*const c_char, usize));
 impl_syscall!(sys_getrlimit, getrlimit, (c_int, *mut Rlimit));
 impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
 impl_syscall!(sys_umask, umask, (u32));
+impl_syscall!(
+    sys_gettimeofday,
+    gettimeofday,
+    (*mut timeval, *mut timezone)
+);
 impl_syscall!(sys_getpid, get_pid, ());
 impl_syscall!(sys_getppid, get_ppid, ());
 impl_syscall!(sys_getpgid, get_pgid, (c_int));

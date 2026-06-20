@@ -74,6 +74,9 @@ pub const SYS_CLOCK_GETTIME: usize = 113;
 pub const SYS_CLOCK_GETRES: usize = 114;
 pub const SYS_SYSLOG: usize = 116;
 
+// ---- 调度 ----
+pub const SYS_SCHED_YIELD: usize = 124;
+
 // ---- 信号 ----
 pub const SYS_KILL: usize = 129;
 pub const SYS_TKILL: usize = 130;
@@ -94,6 +97,7 @@ pub const SYS_SETRESUID: usize = 147;
 pub const SYS_GETRESUID: usize = 148;
 pub const SYS_SETRESGID: usize = 149;
 pub const SYS_GETRESGID: usize = 150;
+pub const SYS_TIMES: usize = 153;
 pub const SYS_SETPGID: usize = 154;
 pub const SYS_GETPGID: usize = 155;
 pub const SYS_SETSID: usize = 157;
@@ -102,6 +106,7 @@ pub const SYS_SETHOSTNAME: usize = 161;
 pub const SYS_GETRLIMIT: usize = 163;
 pub const SYS_SETRLIMIT: usize = 164;
 pub const SYS_UMASK: usize = 166;
+pub const SYS_GETTIMEOFDAY: usize = 169;
 pub const SYS_GETPID: usize = 172;
 pub const SYS_GETPPID: usize = 173;
 pub const SYS_GETUID: usize = 174;
