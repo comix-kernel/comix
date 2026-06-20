@@ -49,9 +49,10 @@ test_case!(test_chrdev_major, {
 });
 
 test_case!(test_get_blkdev_index, {
-    // 测试获取块设备索引
-    let index = get_blkdev_index(0);
-    kassert!(index.is_some() || index.is_none()); // 取决于是否有注册的设备
+    // VirtIO block reserves 16 minor numbers per disk.
+    kassert!(get_blkdev_index(makedev(blkdev_major::VIRTIO_BLK, 0)) == Some(0));
+    kassert!(get_blkdev_index(makedev(blkdev_major::VIRTIO_BLK, 2)) == Some(0));
+    kassert!(get_blkdev_index(makedev(blkdev_major::VIRTIO_BLK, 16)) == Some(1));
 });
 
 test_case!(test_get_chrdev_driver, {

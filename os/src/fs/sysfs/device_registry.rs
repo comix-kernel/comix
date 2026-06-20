@@ -8,9 +8,11 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::device::block::BlockDriver;
+use crate::device::block::partition::{PartitionBlockDevice, discover_partitions};
 use crate::device::net::net_device::NetDevice;
 use crate::device::rtc::RtcDriver;
 use crate::device::{BLK_DRIVERS, DRIVERS, DeviceType};
+use crate::vfs::devno::{blkdev_major, virtio_blk_minor};
 
 /// 块设备信息 (用于 sysfs)
 #[derive(Clone)]
@@ -55,24 +57,42 @@ pub struct RtcDeviceInfo {
 /// 列出所有块设备
 pub fn list_block_devices() -> Vec<BlockDeviceInfo> {
     let drivers = BLK_DRIVERS.read();
-    drivers
-        .iter()
-        .enumerate()
-        .map(|(idx, driver)| {
-            // 生成设备名: vda, vdb, vdc...
-            let name = format!("vd{}", (b'a' + idx as u8) as char);
-            // VirtIO 块设备的主设备号通常是 254
-            let major = 254;
-            let minor = idx as u32;
+    let mut devices = Vec::new();
 
-            BlockDeviceInfo {
-                name,
-                major,
-                minor,
-                device: driver.clone(),
-            }
-        })
-        .collect()
+    for (idx, driver) in drivers.iter().enumerate() {
+        // 生成设备名: vda, vdb, vdc...
+        let disk_name = format!("vd{}", (b'a' + idx as u8) as char);
+        let disk_minor = virtio_blk_minor(idx as u32, 0);
+
+        devices.push(BlockDeviceInfo {
+            name: disk_name.clone(),
+            major: blkdev_major::VIRTIO_BLK,
+            minor: disk_minor,
+            device: driver.clone(),
+        });
+
+        for entry in discover_partitions(driver) {
+            let partition_minor = virtio_blk_minor(idx as u32, entry.number);
+            let partition_name = format!("{}{}", disk_name, entry.number);
+            let Some(device) = PartitionBlockDevice::new(
+                driver.clone(),
+                partition_name.clone(),
+                entry.start_lba,
+                entry.sector_count,
+            ) else {
+                continue;
+            };
+
+            devices.push(BlockDeviceInfo {
+                name: partition_name,
+                major: blkdev_major::VIRTIO_BLK,
+                minor: partition_minor,
+                device,
+            });
+        }
+    }
+
+    devices
 }
 
 /// 列出所有网络设备

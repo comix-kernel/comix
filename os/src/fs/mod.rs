@@ -89,11 +89,12 @@ use crate::device::BLK_DRIVERS;
 use crate::device::RamDisk;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::simple_fs::SimpleFs;
+use crate::fs::sysfs::list_block_devices;
 use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::pr_info;
 use crate::vfs::dev::makedev;
-use crate::vfs::devno::{blkdev_major, chrdev_major};
+use crate::vfs::devno::chrdev_major;
 use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
 // lazy_static! {
@@ -396,8 +397,13 @@ fn create_devices() -> Result<(), FsError> {
     // 块设备：0660 权限
     let block_mode = FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660);
 
-    // /dev/vda (254, 0)
-    dev_inode.mknod("vda", block_mode, makedev(blkdev_major::VIRTIO_BLK, 0))?;
+    for dev_info in list_block_devices() {
+        dev_inode.mknod(
+            &dev_info.name,
+            block_mode,
+            makedev(dev_info.major, dev_info.minor),
+        )?;
+    }
 
     Ok(())
 }

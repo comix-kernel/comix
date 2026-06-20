@@ -2,8 +2,11 @@
 //!
 //! 冷插拔系统的简化实现：所有设备号到驱动的映射都通过硬编码规则完成。
 
-use crate::device::{Driver, RTC_DRIVERS, SERIAL_DRIVERS};
+use crate::device::block::BlockDriver;
+use crate::device::block::partition::{PartitionBlockDevice, discover_partitions};
+use crate::device::{BLK_DRIVERS, Driver, RTC_DRIVERS, SERIAL_DRIVERS};
 use crate::vfs::dev::{major, minor};
+use alloc::format;
 use alloc::sync::Arc;
 
 /// 标准字符设备 major 号
@@ -25,6 +28,20 @@ pub mod blkdev_major {
     pub const LOOP: u32 = 7; // /dev/loop*
     pub const SCSI_DISK: u32 = 8; // /dev/sd*
     pub const VIRTIO_BLK: u32 = 254; // /dev/vd*
+}
+
+pub const VIRTIO_BLK_PARTITIONS_PER_DISK: u32 = 16;
+
+pub fn virtio_blk_minor(disk_index: u32, partition_number: u32) -> u32 {
+    disk_index * VIRTIO_BLK_PARTITIONS_PER_DISK + partition_number
+}
+
+fn virtio_blk_disk_index(minor: u32) -> usize {
+    (minor / VIRTIO_BLK_PARTITIONS_PER_DISK) as usize
+}
+
+fn virtio_blk_partition_number(minor: u32) -> u32 {
+    minor % VIRTIO_BLK_PARTITIONS_PER_DISK
 }
 
 /// 查找字符设备驱动（硬编码规则）
@@ -98,9 +115,9 @@ pub fn get_blkdev_index(dev: u64) -> Option<usize> {
 
     match maj {
         blkdev_major::VIRTIO_BLK => {
-            // VirtIO 块设备：minor 直接对应 BLK_DRIVERS 索引
-            // vda=0, vdb=1, vdc=2, ...
-            Some(min as usize)
+            // VirtIO 块设备：每个磁盘预留 16 个 minor。
+            // vda=0, vda1=1, ..., vdb=16, vdb1=17, ...
+            Some(virtio_blk_disk_index(min))
         }
         blkdev_major::SCSI_DISK => {
             // SCSI 磁盘：每个磁盘占用 16 个 minor（0-15 为分区）
@@ -112,6 +129,51 @@ pub fn get_blkdev_index(dev: u64) -> Option<usize> {
             // 回环设备：暂不支持
             None
         }
+        _ => None,
+    }
+}
+
+/// 根据设备号解析块设备。分区设备返回带偏移转换的 BlockDriver 包装器。
+pub fn get_blkdev_driver(dev: u64) -> Option<Arc<dyn BlockDriver>> {
+    let maj = major(dev);
+    let min = minor(dev);
+
+    match maj {
+        blkdev_major::VIRTIO_BLK => {
+            let disk_idx = virtio_blk_disk_index(min);
+            let partition_number = virtio_blk_partition_number(min);
+            let drivers = BLK_DRIVERS.read();
+            let disk = drivers.get(disk_idx)?.clone();
+
+            if partition_number == 0 {
+                return Some(disk);
+            }
+
+            let partition = discover_partitions(&disk)
+                .into_iter()
+                .find(|entry| entry.number == partition_number)?;
+            let name = format!("vd{}{}", (b'a' + disk_idx as u8) as char, partition.number);
+            PartitionBlockDevice::new(disk, name, partition.start_lba, partition.sector_count)
+                .map(|device| device as Arc<dyn BlockDriver>)
+        }
+        blkdev_major::SCSI_DISK => {
+            let disk_idx = (min / 16) as usize;
+            let partition_number = min % 16;
+            let drivers = BLK_DRIVERS.read();
+            let disk = drivers.get(disk_idx)?.clone();
+
+            if partition_number == 0 {
+                return Some(disk);
+            }
+
+            let partition = discover_partitions(&disk)
+                .into_iter()
+                .find(|entry| entry.number == partition_number)?;
+            let name = format!("sd{}{}", (b'a' + disk_idx as u8) as char, partition.number);
+            PartitionBlockDevice::new(disk, name, partition.start_lba, partition.sector_count)
+                .map(|device| device as Arc<dyn BlockDriver>)
+        }
+        blkdev_major::LOOP => None,
         _ => None,
     }
 }

@@ -1,8 +1,8 @@
 //! 块设备文件的 File trait 实现
 
-use crate::device::BLK_DRIVERS;
+use crate::device::block::BlockDriver;
 use crate::sync::SpinLock;
-use crate::vfs::devno::get_blkdev_index;
+use crate::vfs::devno::get_blkdev_driver;
 use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
 use alloc::sync::Arc;
 
@@ -17,8 +17,8 @@ pub struct BlockDeviceFile {
     /// 设备号
     dev: u64,
 
-    /// 块设备驱动索引（在 BLK_DRIVERS 中）
-    blk_index: Option<usize>,
+    /// 块设备驱动
+    device: Arc<dyn BlockDriver>,
 
     /// 打开标志位
     pub flags: OpenFlags,
@@ -35,17 +35,13 @@ impl BlockDeviceFile {
         let dev = metadata.rdev;
 
         // 查找块设备驱动
-        let blk_index = get_blkdev_index(dev);
-
-        if blk_index.is_none() {
-            return Err(FsError::NoDevice);
-        }
+        let device = get_blkdev_driver(dev).ok_or(FsError::NoDevice)?;
 
         Ok(Self {
             dentry,
             inode,
             dev,
-            blk_index,
+            device,
             flags,
             offset: SpinLock::new(0),
         })
@@ -69,9 +65,7 @@ impl File for BlockDeviceFile {
             return Err(FsError::PermissionDenied);
         }
 
-        let blk_idx = self.blk_index.ok_or(FsError::NoDevice)?;
-        let drivers = BLK_DRIVERS.read();
-        let driver = drivers.get(blk_idx).ok_or(FsError::NoDevice)?;
+        let driver = &self.device;
 
         let mut offset_guard = self.offset.lock();
         let current_offset = *offset_guard;
@@ -112,9 +106,7 @@ impl File for BlockDeviceFile {
             return Err(FsError::PermissionDenied);
         }
 
-        let blk_idx = self.blk_index.ok_or(FsError::NoDevice)?;
-        let drivers = BLK_DRIVERS.read();
-        let driver = drivers.get(blk_idx).ok_or(FsError::NoDevice)?;
+        let driver = &self.device;
 
         let mut offset_guard = self.offset.lock();
         let current_offset = *offset_guard;
@@ -161,9 +153,7 @@ impl File for BlockDeviceFile {
     }
 
     fn lseek(&self, offset: isize, whence: SeekWhence) -> Result<usize, FsError> {
-        let blk_idx = self.blk_index.ok_or(FsError::NoDevice)?;
-        let drivers = BLK_DRIVERS.read();
-        let driver = drivers.get(blk_idx).ok_or(FsError::NoDevice)?;
+        let driver = &self.device;
 
         let device_size = driver.total_blocks() * Self::BLOCK_SIZE;
 
