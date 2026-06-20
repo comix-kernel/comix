@@ -65,19 +65,19 @@ run_musl_tests_if_present() {
         scripts="$scripts $1"
     }
 
-    add_scripts_in_dir() {
-        dir="$1"
-        [ -d "$dir" ] || return 0
-        for f in "$dir"/*_testcode.sh; do
-            [ -f "$f" ] || continue
-            add_script "$f"
-        done
-    }
-
-    add_scripts_in_dir /tests/musl
+    for name in \
+        basic_testcode.sh \
+        busybox_testcode.sh \
+        lua_testcode.sh \
+        iperf_testcode.sh
+    do
+        f="/tests/musl/$name"
+        [ -f "$f" ] || continue
+        add_script "$f"
+    done
     [ -n "$scripts" ] || return 1
 
-    echo "[Tests] detected musl test scripts under /tests; running in rcS"
+    echo "[Tests] detected whitelisted musl test scripts under /tests; running in rcS"
     export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests"
     export HOME="/"
 
