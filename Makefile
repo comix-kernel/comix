@@ -27,6 +27,8 @@ OS_DIR := os
 OS_BIN := os
 OSCOMP_VFAT_MB ?= 64
 OSCOMP_VFAT_IMG := $(OS_DIR)/vfat.img
+OSCOMP_SECTOR_SIZE := 512
+OSCOMP_PART_ALIGN_SECTORS := 2048
 MKFS_VFAT ?= mkfs.vfat
 
 # 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
@@ -126,16 +128,45 @@ $(OSCOMP_VFAT_IMG):
 	truncate -s $(OSCOMP_VFAT_MB)M $@
 	$(MKFS_VFAT) -F 32 -n CCYOSVFAT $@
 
-# rootfs 镜像由 os/build.rs 在对应内核构建时生成（os/fs-{arch}.img），此处拷到根目录。
-disk.img: kernel-rv
-	@echo "[OSCOMP] 产出 rootfs 镜像: disk.img"
-	@test -f $(OS_DIR)/fs-riscv.img
-	cp -f $(OS_DIR)/fs-riscv.img disk.img
+define assemble_oscomp_disk
+	@test -f $(1)
+	@set -eu; \
+	rootfs="$(1)"; \
+	vfat="$(OSCOMP_VFAT_IMG)"; \
+	out="$@"; \
+	sector_size=$(OSCOMP_SECTOR_SIZE); \
+	align_sectors=$(OSCOMP_PART_ALIGN_SECTORS); \
+	root_bytes=$$(stat -c%s "$$rootfs"); \
+	vfat_bytes=$$(stat -c%s "$$vfat"); \
+	root_sectors=$$(((root_bytes + sector_size - 1) / sector_size)); \
+	vfat_sectors=$$(((vfat_bytes + sector_size - 1) / sector_size)); \
+	root_start=$$align_sectors; \
+	root_end=$$((root_start + root_sectors)); \
+	vfat_start=$$((((root_end + align_sectors - 1) / align_sectors) * align_sectors)); \
+	vfat_end=$$((vfat_start + vfat_sectors)); \
+	disk_sectors=$$((vfat_end + align_sectors)); \
+	rm -f "$$out"; \
+	truncate -s $$((disk_sectors * sector_size)) "$$out"; \
+	{ \
+		echo "label: dos"; \
+		echo "unit: sectors"; \
+		echo "start=$$root_start, size=$$root_sectors, type=83"; \
+		echo "start=$$vfat_start, size=$$vfat_sectors, type=0c"; \
+	} | sfdisk "$$out"; \
+	dd if="$$rootfs" of="$$out" bs=$$sector_size seek=$$root_start conv=notrunc status=none; \
+	dd if="$$vfat" of="$$out" bs=$$sector_size seek=$$vfat_start conv=notrunc status=none; \
+	echo "[OSCOMP] $$out: vda1 ext4 start=$$root_start sectors=$$root_sectors, vda2 vfat start=$$vfat_start sectors=$$vfat_sectors"
+endef
 
-disk-la.img: kernel-la
-	@echo "[OSCOMP] 产出 rootfs 镜像: disk-la.img"
-	@test -f $(OS_DIR)/fs-loongarch.img
-	cp -f $(OS_DIR)/fs-loongarch.img disk-la.img
+# rootfs 裸 ext4 镜像由 os/build.rs 在对应内核构建时生成（os/fs-{arch}.img）。
+# 根目录 disk 镜像是评测 QEMU 挂载的 MBR 分区盘：vda1=rootfs，vda2=VFAT。
+disk.img: kernel-rv $(OSCOMP_VFAT_IMG)
+	@echo "[OSCOMP] 产出 MBR 分区盘镜像: disk.img"
+	$(call assemble_oscomp_disk,$(OS_DIR)/fs-riscv.img)
+
+disk-la.img: kernel-la $(OSCOMP_VFAT_IMG)
+	@echo "[OSCOMP] 产出 MBR 分区盘镜像: disk-la.img"
+	$(call assemble_oscomp_disk,$(OS_DIR)/fs-loongarch.img)
 
 # ------------------------------------------------------------
 # 本地复现评测：启动 QEMU，只挂单盘 rootfs（内含 /tests），
