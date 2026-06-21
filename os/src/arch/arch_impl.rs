@@ -210,6 +210,14 @@ macro_rules! impl_platform {
                 Some($crate::device::CMDLINE.read().clone())
             }
 
+            fn pa_to_va(pa: $crate::arch::address::PA) -> $crate::arch::address::VA {
+                mm::pa_to_va(pa)
+            }
+
+            unsafe fn va_to_pa(va: $crate::arch::address::VA) -> $crate::arch::address::PA {
+                unsafe { mm::va_to_pa(va) }
+            }
+
             fn power_off() -> ! {
                 lib::shutdown(false)
             }

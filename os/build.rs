@@ -302,6 +302,7 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path) {
         ("proc", 0o755),
         ("sys", 0o755),
         ("tmp", 0o1777),
+        ("mnt", 0o755),
         ("tests", 0o755),
         ("lib", 0o755),
         ("lib64", 0o755),

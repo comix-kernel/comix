@@ -1,15 +1,24 @@
     .section .text.entry
     .globl _start
 _start:
-    # 将a1的值存储到DTP位置
-    # a1: 指向设备树的物理地址,由引导加载程序传递
+    # OpenSBI enters with a0 = hartid, a1 = DTB physical address.
+    # Save them in callee-saved registers until we have a valid stack.
+    mv s0, a0
+    mv s1, a1
+
+    # 将a1的值存储到DTP位置。分页打开前运行在物理地址，因此需要把
+    # 链接期高半区符号地址转换为物理地址再写入。
     la t0, DTP
-    sd a1, 0(t0)
+    li t1, 0x3fffffffff
+    and t0, t0, t1
+    sd s1, 0(t0)
 
     # ========== 主核路径（hartid == 0）==========
 .primary_hart:
     # 1. 设置早期页表（恒等映射 + 高地址映射）
     la t0, boot_pagetable
+    li t1, 0x3fffffffff
+    and t0, t0, t1
     srli t0, t0, 12          # 转换为 PPN
     li t1, 8 << 60           # SV39 模式
     or t0, t0, t1
@@ -36,6 +45,7 @@ _start_high:
     or sp, sp, t0            # 将栈地址转换为虚拟地址
 
     # 4. 跳转到 Rust 主入口
+    mv a0, s0
     call rust_main
 
     # 不应该返回
@@ -67,8 +77,15 @@ boot_pagetable:
     # PTE[259]: 0xffff_ffc0_c000_0000 -> 0xc0000000
     .8byte (0xc0000 << 10) | 0xcf
 
-    # PTE[260-511]: 填充剩余项
-    .zero 8 * (512 - 0x100 - 4)    # 填充从索引260到511
+    # PTE[260-263]: 继续映射 4GB..8GB。QEMU -m 4G 时 RAM 物理范围可到
+    # 0x17fffffff，DTB 常位于 0x17fe00000，早期解析 FDT 前必须可访问。
+    .8byte (0x100000 << 10) | 0xcf
+    .8byte (0x140000 << 10) | 0xcf
+    .8byte (0x180000 << 10) | 0xcf
+    .8byte (0x1c0000 << 10) | 0xcf
+
+    # PTE[264-511]: 填充剩余项
+    .zero 8 * (512 - 0x100 - 8)    # 填充从索引264到511
 
     .section .bss.stack
     .globl boot_stack_lower_bound
