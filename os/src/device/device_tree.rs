@@ -42,26 +42,14 @@ lazy_static::lazy_static! {
 ///
 /// 此函数在堆分配器初始化之前调用,因此不能使用任何需要堆分配的操作。
 pub fn early_init() {
-    let cpus = FDT.cpus().count();
-    set_num_cpu(cpus);
-
-    if let Some(cpu) = FDT.cpus().next() {
-        let timebase = cpu
-            .property("timebase-frequency")
-            .or_else(|| cpu.property("clock-frequency"))
-            .and_then(|p| match p.value.len() {
-                4 => Some(u32::from_be_bytes(p.value.try_into().ok()?) as usize),
-                8 => Some(u64::from_be_bytes(p.value.try_into().ok()?) as usize),
-                _ => None,
-            });
-        if let Some(freq) = timebase {
-            set_clock_freq(freq);
-        } else {
-            pr_warn!("[Device] No timebase-frequency in DTB, keeping default");
-        }
-    } else {
+    let mut cpus = FDT.cpus();
+    let Some(first_cpu) = cpus.next() else {
         pr_warn!("[Device] No CPU found in device tree");
-    }
+        return;
+    };
+
+    set_num_cpu(1 + cpus.count());
+    set_clock_freq(first_cpu.timebase_frequency());
 }
 
 /// 初始化设备树
