@@ -1,7 +1,8 @@
 # 设置目标架构
 TARGET := riscv64gc-unknown-none-elf
 BUILD_MODE := release
-BUILD_COMMAND := cargo build --$(BUILD_MODE) --target=$(TARGET)
+USER_CARGO_CONFIG := ../cargo-config.toml
+BUILD_COMMAND := cargo build --$(BUILD_MODE) --target=$(TARGET) --config $(USER_CARGO_CONFIG)
 FALLBACK_CARGO_CONFIG := /tmp/comix-user-cargo-ustc-sparse.toml
 
 # 获取当前目录下除lib/外的所有子目录

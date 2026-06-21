@@ -170,11 +170,11 @@ clean:
 clean-all: clean
 	cd user && make clean
 
-# 手动编译用户程序（通常不需要，build.rs 会自动处理）
+# 手动编译用户程序（调试用；评测构建不会自动编译 user/）
 build-user:
 	cd user && make
 
-# 手动打包镜像（通常不需要，build.rs 会自动处理）
+# 手动打包 simple_fs 镜像（调试用；评测 rootfs 不依赖 user/）
 pack-simple-fs: build-user
 	@echo "Packing simple_fs..."
 	python3 scripts/make_init_simple_fs.py user/bin os/simple_fs.img

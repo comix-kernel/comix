@@ -29,9 +29,8 @@ endif
 # 核心目标
 # ===============================================
 # 注意：cargo build 会自动通过 build.rs 完成以下步骤：
-#   1. 编译 ../user 目录中的用户程序
-#   2. 打包 user/bin/ 到 simple_fs.img
-#   3. 嵌入镜像到内核二进制中
+#   1. 生成 simple_fs.img 空占位（旧 ramdisk 路径保留）
+#   2. 生成测试和运行时 ext4 镜像
 # 因此只需运行 cargo build 即可完成所有构建步骤
 
 # 目标 1: run (默认启动 QEMU)
