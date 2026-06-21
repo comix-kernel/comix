@@ -3,6 +3,10 @@
 
 KERNEL=$1
 MODE=${2:-run}
+is_cargo_test=0
+case "$KERNEL" in
+    */deps/os-*) is_cargo_test=1 ;;
+esac
 
 # 参数定义（对齐评测指令）
 mem="4G"
@@ -22,38 +26,41 @@ QEMU_ARGS=(
     -no-reboot
 )
 
-if [ -f "$fs" ]; then
-    :
-elif [ -f "fs.img" ]; then
-    fs="fs.img"
+if [ "$is_cargo_test" = "1" ]; then
+    echo "Detected cargo test binary; skipping block device attachments"
 else
-    echo "Error: ${fs} not found!"
-    echo "Please run 'cargo build' first to generate the filesystem image."
-    exit 1
+    if [ -f "$fs" ]; then
+        :
+    elif [ -f "fs.img" ]; then
+        fs="fs.img"
+    else
+        echo "Error: ${fs} not found!"
+        echo "Please run 'cargo build' first to generate the filesystem image."
+        exit 1
+    fi
+
+    if [ ! -f "$vfat" ]; then
+        echo "Creating ${vfat} (64MiB FAT32/VFAT partition image)"
+        rm -f "$vfat"
+        truncate -s 64M "$vfat"
+        mkfs.vfat -F 32 -n CCYOSVFAT "$vfat"
+    fi
+
+    echo "Assembling ${disk} from ${fs} and ${vfat}"
+    ../scripts/assemble_partitioned_disk.sh "$fs" "$vfat" "$disk"
+
+    # Virtio Block 设备（MBR 分区盘：vda1 rootfs，vda2 VFAT）
+    QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x0)
+    QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
+
+    if [ -f "$test_img" ]; then
+        echo "Attaching official test image ${test_img} as vdb"
+        QEMU_ARGS+=(-drive file="$test_img",if=none,format=raw,id=test0)
+        QEMU_ARGS+=(-device virtio-blk-pci,drive=test0)
+    else
+        echo "Warning: official test image ${test_img} not found; skipping vdb attachment" >&2
+    fi
 fi
-
-if [ ! -f "$vfat" ]; then
-    echo "Creating ${vfat} (64MiB FAT32/VFAT partition image)"
-    rm -f "$vfat"
-    truncate -s 64M "$vfat"
-    mkfs.vfat -F 32 -n CCYOSVFAT "$vfat"
-fi
-
-echo "Assembling ${disk} from ${fs} and ${vfat}"
-../scripts/assemble_partitioned_disk.sh "$fs" "$vfat" "$disk"
-
-if [ ! -f "$test_img" ]; then
-    echo "Error: official test image ${test_img} not found!" >&2
-    exit 1
-fi
-
-# Virtio Block 设备（MBR 分区盘：vda1 rootfs，vda2 VFAT）
-QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x0)
-QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
-
-echo "Attaching official test image ${test_img} as vdb"
-QEMU_ARGS+=(-drive file="$test_img",if=none,format=raw,id=test0)
-QEMU_ARGS+=(-device virtio-blk-pci,drive=test0)
 
 # Virtio Network 设备
 QEMU_ARGS+=(-device virtio-net-pci,netdev=net0)
