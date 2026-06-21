@@ -3,7 +3,10 @@
 //! 提供对 Virtio MMIO 设备的探测和初始化功能
 //! 通过设备树节点信息创建 Virtio 传输对象，并根据设备类型调用相应的初始化函数
 //! 支持块设备、GPU、输入设备和网络设备的初始化
-use core::ptr::NonNull;
+use core::{
+    mem::{align_of, size_of},
+    ptr::{NonNull, read_volatile},
+};
 
 use fdt::node::FdtNode;
 use virtio_drivers::transport::{
@@ -20,6 +23,25 @@ use crate::{
     mm::address::PA,
     pr_warn,
 };
+
+const VIRTIO_MMIO_DEVICE_ID_OFFSET: usize = 0x08;
+
+fn read_mmio_u32(base: *const u8, size: usize, offset: usize) -> Option<u32> {
+    let end = offset.checked_add(size_of::<u32>())?;
+    if size < end {
+        return None;
+    }
+
+    let addr = base.wrapping_add(offset) as usize;
+    if !addr.is_multiple_of(align_of::<u32>()) {
+        return None;
+    }
+
+    // SAFETY: The caller supplies an MMIO mapping base. The range check above
+    // proves that the 32-bit register lies inside the mapped node, and the
+    // alignment check proves the pointer is valid for a volatile u32 read.
+    Some(unsafe { read_volatile(addr as *const u32) })
+}
 
 pub fn driver_init() {
     DEVICE_TREE_REGISTRY
@@ -49,7 +71,19 @@ fn virtio_probe(node: &FdtNode) {
             .map_mmio(PA::from_usize(paddr), size)
             .ok()
             .expect("Failed to map MMIO region");
-        let header = NonNull::new(vaddr.as_usize() as *mut VirtIOHeader).unwrap();
+        let header_ptr = vaddr.as_usize() as *mut u8;
+        let Some(device_id) = read_mmio_u32(header_ptr, size, VIRTIO_MMIO_DEVICE_ID_OFFSET) else {
+            pr_warn!(
+                "[Device] Virtio MMIO device tree node {} has invalid DeviceID register",
+                node.name
+            );
+            return;
+        };
+        if device_id == 0 {
+            return;
+        }
+
+        let header = NonNull::new(header_ptr as *mut VirtIOHeader).unwrap();
         match unsafe { MmioTransport::new(header, size) } {
             Err(e) => pr_warn!("Error creating VirtIO MMIO transport: {}", e),
             Ok(transport) => {
