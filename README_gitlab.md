@@ -25,12 +25,12 @@
 - `os/fs-riscv.img`
 - `os/fs-loongarch.img`
 
-顶层 `Makefile` 再把它们组装成 MBR raw disk。最终分区布局固定为：
+顶层 `Makefile` 再把它们组装成我们的 MBR raw disk。最终分区布局固定为：
 
-- `vda1`：ext4 rootfs。
-- `vda2`：64 MiB FAT32/VFAT 空分区，用于 `basic/mount`、`basic/umount` 挂载 `/dev/vda2`。
+- 第一分区：ext4 rootfs。
+- 第二分区：64 MiB FAT32/VFAT 空分区，用于 `basic/mount`、`basic/umount`。
 
-官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 作为额外块设备提供测试内容，镜像根目录包含 `musl/` 与 `glibc/`。启动脚本会尝试把该 ext4 测试镜像挂载到 `/tests`，再自动运行白名单 musl 测试。
+我们的 MBR 分区盘作为第一个块设备 `vda`，内核从 `vda1` 启动 rootfs。官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 作为第二个块设备 `vdb` 提供测试内容，镜像根目录包含 `musl/` 与 `glibc/`。启动脚本会把 `vdb` 这个裸 ext4 测试镜像挂载到 `/tests`，再自动运行白名单 musl 测试。
 
 内核默认会从发现到的整盘与分区块设备中探测 ext4 rootfs，优先尝试分区设备，选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 `/`。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 

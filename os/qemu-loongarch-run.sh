@@ -42,14 +42,18 @@ fi
 echo "Assembling ${disk} from ${fs} and ${vfat}"
 ../scripts/assemble_partitioned_disk.sh "$fs" "$vfat" "$disk"
 
+if [ ! -f "$test_img" ]; then
+    echo "Error: official test image ${test_img} not found!" >&2
+    exit 1
+fi
+
 # Virtio Block 设备（MBR 分区盘：vda1 rootfs，vda2 VFAT）
 QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x0)
 QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
-if [ -f "$test_img" ]; then
-    echo "Attaching official test image ${test_img} as vdb"
-    QEMU_ARGS+=(-drive file="$test_img",if=none,format=raw,id=test0)
-    QEMU_ARGS+=(-device virtio-blk-pci,drive=test0)
-fi
+
+echo "Attaching official test image ${test_img} as vdb"
+QEMU_ARGS+=(-drive file="$test_img",if=none,format=raw,id=test0)
+QEMU_ARGS+=(-device virtio-blk-pci,drive=test0)
 
 # Virtio Network 设备
 QEMU_ARGS+=(-device virtio-net-pci,netdev=net0)

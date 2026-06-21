@@ -50,14 +50,20 @@ QEMU_ARGS="$QEMU_ARGS -serial stdio"
 # RTC 设备 (基于 UTC 时间)
 QEMU_ARGS="$QEMU_ARGS -rtc base=utc"
 
-# Virtio Block 设备
-QEMU_ARGS="$QEMU_ARGS -drive file=$disk,if=none,format=raw,id=x0"
-QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0"
-if [ -f "$test_img" ]; then
-    echo "Attaching official test image ${test_img} as vdb"
-    QEMU_ARGS="$QEMU_ARGS -drive file=$test_img,if=none,format=raw,id=test0"
-    QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=test0,bus=virtio-mmio-bus.1"
+if [ ! -f "$test_img" ]; then
+    echo "Error: official test image ${test_img} not found!" >&2
+    exit 1
 fi
+
+# Virtio Block 设备（MBR 分区盘：vda1=rootfs，vda2=VFAT）
+# RISC-V virtio-mmio 设备树按高地址先探测；我们的分区盘放 bus.1 才会注册为 /dev/vda。
+QEMU_ARGS="$QEMU_ARGS -drive file=$disk,if=none,format=raw,id=x0"
+QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1"
+
+# 官方测试盘是额外裸 ext4 盘，固定注册为 /dev/vdb 后由 rcS 挂载到 /tests。
+echo "Attaching official test image ${test_img} as vdb"
+QEMU_ARGS="$QEMU_ARGS -drive file=$test_img,if=none,format=raw,id=test0"
+QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=test0,bus=virtio-mmio-bus.0"
 
 # Virtio Network 设备
 QEMU_ARGS="$QEMU_ARGS -device virtio-net-device,netdev=net"

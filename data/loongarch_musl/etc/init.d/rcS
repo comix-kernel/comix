@@ -57,25 +57,40 @@ mount_official_test_image_if_present() {
 
     # Official test images are raw ext4 filesystems whose root contains
     # /musl and /glibc. Mounting one at /tests exposes /tests/musl.
-    for dev in \
-        /dev/vdb \
-        /dev/vda \
-        /dev/vdc \
-        /dev/vdb1 \
-        /dev/vda1 \
-        /dev/vdc1
-    do
-        [ -e "$dev" ] || continue
-        echo "[Tests] probing official test image on $dev"
-        if /bin/mount -t ext4 "$dev" /tests 2>/dev/null; then
-            if [ -d /tests/musl ]; then
-                echo "[Tests] mounted official test image from $dev at /tests"
-                return 0
-            fi
-            echo "[Tests] $dev is not an official test image; unmounting /tests"
-            /bin/umount /tests 2>/dev/null || true
+    dev="/dev/vdb"
+    [ -e "$dev" ] || return 1
+
+    echo "[Tests] probing official test image on $dev"
+    if /bin/mount -t ext4 "$dev" /tests 2>/dev/null; then
+        if [ -d /tests/musl ]; then
+            echo "[Tests] mounted official test image from $dev at /tests"
+            return 0
         fi
-    done
+        echo "[Tests] $dev is not an official test image; unmounting /tests"
+        /bin/umount /tests 2>/dev/null || true
+    fi
+
+    # Old multi-device probe disabled. The run scripts attach the official
+    # input image at /dev/vdb; our own partitioned kernel disk is /dev/vda.
+    # for dev in \
+    #     /dev/vdb \
+    #     /dev/vda \
+    #     /dev/vdc \
+    #     /dev/vdb1 \
+    #     /dev/vda1 \
+    #     /dev/vdc1
+    # do
+    #     [ -e "$dev" ] || continue
+    #     echo "[Tests] probing official test image on $dev"
+    #     if /bin/mount -t ext4 "$dev" /tests 2>/dev/null; then
+    #         if [ -d /tests/musl ]; then
+    #             echo "[Tests] mounted official test image from $dev at /tests"
+    #             return 0
+    #         fi
+    #         echo "[Tests] $dev is not an official test image; unmounting /tests"
+    #         /bin/umount /tests 2>/dev/null || true
+    #     fi
+    # done
 
     return 1
 }

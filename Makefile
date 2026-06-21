@@ -32,8 +32,8 @@ ASSEMBLE_DISK := scripts/assemble_partitioned_disk.sh
 COMMA := ,
 TESTIMG_RV ?= sdcard-rv.img
 TESTIMG_LA ?= sdcard-la.img
-RV_TEST_DRIVE := $(if $(wildcard $(TESTIMG_RV)),-drive file=$(TESTIMG_RV)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-device$(COMMA)drive=test0$(COMMA)bus=virtio-mmio-bus.1)
-LA_TEST_DRIVE := $(if $(wildcard $(TESTIMG_LA)),-drive file=$(TESTIMG_LA)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-pci$(COMMA)drive=test0)
+RV_TEST_DRIVE := -drive file=$(TESTIMG_RV)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-device$(COMMA)drive=test0$(COMMA)bus=virtio-mmio-bus.0
+LA_TEST_DRIVE := -drive file=$(TESTIMG_LA)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-pci$(COMMA)drive=test0
 
 # 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
 PROFILE ?= release
@@ -127,7 +127,7 @@ $(VFAT_IMG):
 	$(MKFS_VFAT) -F 32 -n CCYOSVFAT $@
 
 # rootfs 裸 ext4 镜像由 os/build.rs 在对应内核构建时生成（os/fs-{arch}.img）。
-# 根目录 disk 镜像是评测 QEMU 挂载的 MBR 分区盘：vda1=rootfs，vda2=VFAT。
+# 根目录 disk 镜像是 MBR 分区盘：第一分区为我们的 rootfs，第二分区为 VFAT。
 disk.img: kernel-rv $(VFAT_IMG) $(ASSEMBLE_DISK)
 	@echo "[Disk] 产出 MBR 分区盘镜像: disk.img"
 	@$(ASSEMBLE_DISK) $(OS_DIR)/fs-riscv.img $(VFAT_IMG) $@
@@ -137,21 +137,23 @@ disk-la.img: kernel-la $(VFAT_IMG) $(ASSEMBLE_DISK)
 	@$(ASSEMBLE_DISK) $(OS_DIR)/fs-loongarch.img $(VFAT_IMG) $@
 
 # ------------------------------------------------------------
-# 本地运行分区盘：启动 QEMU，rootfs 分区盘保持为 vda；
-# 若根目录存在官方测试镜像，则额外挂为 vdb 并由 rcS 挂载到 /tests。
+# 本地运行评测形态：我们的 MBR 分区盘作为 /dev/vda（vda1=rootfs，vda2=VFAT）；
+# 官方测试盘作为额外裸 ext4 块设备 /dev/vdb，由 rcS 挂载到 /tests。
+# RISC-V virtio-mmio 设备树按高地址先探测，因此我们的分区盘放 bus.1，
+# 官方测试盘放 bus.0，注册出来才是 vda=disk、vdb=sdcard。
 # 设备型号对齐 os/qemu-run.sh（riscv: virtio-mmio）与 os/qemu-loongarch-run.sh（loongarch: pci）。
 # ------------------------------------------------------------
-run-rv: kernel-rv disk.img
-	@echo "[Run] 运行 RISC-V QEMU（分区盘：vda1 rootfs，vda2 VFAT）"
+run-rv: kernel-rv disk.img $(TESTIMG_RV)
+	@echo "[Run] 运行 RISC-V QEMU（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
 	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
 		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
 		-drive file=disk.img,if=none,format=raw,id=x0 \
-		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
+		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1 \
 		$(RV_TEST_DRIVE) \
 		-device virtio-net-device,netdev=net -netdev user,id=net
 
-run-la: kernel-la disk-la.img
-	@echo "[Run] 运行 LoongArch QEMU（分区盘：vda1 rootfs，vda2 VFAT）"
+run-la: kernel-la disk-la.img $(TESTIMG_LA)
+	@echo "[Run] 运行 LoongArch QEMU（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
 	qemu-system-loongarch64 -machine virt -kernel kernel-la -m $(LA_MEM) -nographic \
 		-smp $(LA_SMP) -no-reboot -rtc base=utc \
 		-drive file=disk-la.img,if=none,format=raw,id=x0 \
