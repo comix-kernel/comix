@@ -101,7 +101,8 @@ pub fn mount(
     let target_path = match resolve_mount_target(&target_str) {
         Ok(path) => path,
         Err(FsError::NotFound)
-            if matches!(target_str.as_str(), "/proc" | "/sys" | "/tmp" | "/dev") =>
+            if fstype_str == "tmpfs"
+                || matches!(target_str.as_str(), "/proc" | "/sys" | "/tmp" | "/dev") =>
         {
             if let Err(e) = ensure_dir_exists(&target_str) {
                 return e.to_errno();
@@ -146,6 +147,13 @@ pub fn mount(
             };
         }
         _ => {}
+    }
+
+    if fstype_str == "tmpfs" {
+        return match mount_tmpfs(&target_path, 0) {
+            Ok(_) => 0,
+            Err(e) => e.to_errno(),
+        };
     }
 
     let find_source_block_device = || {

@@ -99,6 +99,26 @@ impl BlockDriver for PartitionBlockDevice {
         self.inner.read_block(inner_block, buf)
     }
 
+    fn read_blocks(&self, start_block: usize, buf: &mut [u8]) -> bool {
+        let block_size = self.block_size();
+        if block_size == 0 || !buf.len().is_multiple_of(block_size) {
+            return false;
+        }
+
+        let block_count = buf.len() / block_size;
+        let Some(end_block) = start_block.checked_add(block_count) else {
+            return false;
+        };
+        if end_block > self.block_count {
+            return false;
+        }
+
+        let Some(inner_block) = self.start_block.checked_add(start_block) else {
+            return false;
+        };
+        self.inner.read_blocks(inner_block, buf)
+    }
+
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
         if block_id >= self.block_count {
             return false;
@@ -108,6 +128,26 @@ impl BlockDriver for PartitionBlockDevice {
             return false;
         };
         self.inner.write_block(inner_block, buf)
+    }
+
+    fn write_blocks(&self, start_block: usize, buf: &[u8]) -> bool {
+        let block_size = self.block_size();
+        if block_size == 0 || !buf.len().is_multiple_of(block_size) {
+            return false;
+        }
+
+        let block_count = buf.len() / block_size;
+        let Some(end_block) = start_block.checked_add(block_count) else {
+            return false;
+        };
+        if end_block > self.block_count {
+            return false;
+        }
+
+        let Some(inner_block) = self.start_block.checked_add(start_block) else {
+            return false;
+        };
+        self.inner.write_blocks(inner_block, buf)
     }
 
     fn flush(&self) -> bool {

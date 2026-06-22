@@ -95,20 +95,57 @@ mount_official_test_image_if_present() {
     return 1
 }
 
+stage_musl_group_to_tmpfs() {
+    src="/tests/musl"
+    dst="/tmp/musl"
+    script="$1"
+
+    [ -d "$src" ] || return 1
+    [ -n "$script" ] || return 1
+
+    [ -d "$dst" ] || mkdir "$dst" || return 1
+
+    echo "[Tests] staging $script into tmpfs at $dst"
+
+    case "$script" in
+        basic_testcode.sh)
+            items="basic basic_testcode.sh busybox"
+            ;;
+        busybox_testcode.sh)
+            items="busybox busybox_cmd.txt busybox_testcode.sh"
+            ;;
+        lua_testcode.sh)
+            items="lua lua_testcode.sh test.sh date.lua file_io.lua max_min.lua random.lua remove.lua round_num.lua sin30.lua sort.lua strings.lua"
+            ;;
+        iperf_testcode.sh)
+            items="iperf3 iperf_testcode.sh"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    for item in $items; do
+        [ -e "$src/$item" ] || continue
+        [ -e "$dst/$item" ] && continue
+        cp -R "$src/$item" "$dst/" || return 1
+    done
+
+    [ -f "$dst/$script" ] || return 1
+    echo "[Tests] staged $script into tmpfs"
+    return 0
+}
+
 run_musl_tests_if_present() {
     # 官方测试镜像挂载到 /tests 后，当前自动入口只跑 musl 分组；
     # glibc 分组保留在测试镜像中，后续需要时直接调整本脚本。
     mount_official_test_image_if_present || true
     [ -d /tests ] || return 1
 
-    scripts=""
-    add_script() {
-        # 简单去重，避免 VFS 把 /tests 暴露成 /tests/tests 之类的病态情况。
-        case " $scripts " in
-            *" $1 "*) return 0 ;;
-        esac
-        scripts="$scripts $1"
-    }
+    ran=0
+    echo "[Tests] detected whitelisted musl test scripts; running in rcS"
+    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tmp/musl:/tests/musl"
+    export HOME="/"
 
     for name in \
         basic_testcode.sh \
@@ -116,17 +153,14 @@ run_musl_tests_if_present() {
         lua_testcode.sh \
         iperf_testcode.sh
     do
-        f="/tests/musl/$name"
+        if stage_musl_group_to_tmpfs "$name"; then
+            f="/tmp/musl/$name"
+        else
+            echo "[Tests] tmpfs staging failed for $name; running directly from /tests"
+            f="/tests/musl/$name"
+        fi
         [ -f "$f" ] || continue
-        add_script "$f"
-    done
-    [ -n "$scripts" ] || return 1
 
-    echo "[Tests] detected whitelisted musl test scripts under /tests; running in rcS"
-    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests"
-    export HOME="/"
-
-    for f in $scripts; do
         dir="${f%/*}"
         base="${f##*/}"
         echo "[Tests] running $f"
@@ -137,7 +171,9 @@ run_musl_tests_if_present() {
         )
         rc=$?
         echo "[Tests] finished $f (rc=$rc)"
+        ran=1
     done
+    [ "$ran" -eq 1 ] || return 1
 
     echo "[Tests] all tests finished; powering off"
     /sbin/poweroff -f || /sbin/reboot -f || true

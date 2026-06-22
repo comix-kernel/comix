@@ -733,11 +733,24 @@ impl Inode for TmpfsInode {
         Ok(new_inode as Arc<dyn Inode>)
     }
 
-    fn chmod(&self, _mode: FileMode) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
+    fn chmod(&self, mode: FileMode) -> Result<(), FsError> {
+        let mut metadata = self.metadata.lock();
+        let file_type = metadata.mode & FileMode::S_IFMT;
+        let permissions = mode & !FileMode::S_IFMT;
+        metadata.mode = file_type | permissions;
+        metadata.ctime = TimeSpec::now();
+        Ok(())
     }
 
-    fn chown(&self, _uid: u32, _gid: u32) -> Result<(), FsError> {
-        Err(FsError::NotSupported)
+    fn chown(&self, uid: u32, gid: u32) -> Result<(), FsError> {
+        let mut metadata = self.metadata.lock();
+        if uid != u32::MAX {
+            metadata.uid = uid;
+        }
+        if gid != u32::MAX {
+            metadata.gid = gid;
+        }
+        metadata.ctime = TimeSpec::now();
+        Ok(())
     }
 }

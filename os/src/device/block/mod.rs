@@ -18,6 +18,23 @@ pub trait BlockDriver: Driver {
     /// 如果读取成功则返回 true，否则返回 false
     fn read_block(&self, block_id: usize, buf: &mut [u8]) -> bool;
 
+    /// 连续读取多个块。
+    ///
+    /// 默认实现按单块循环，具体驱动可以覆盖为一次设备请求以减少 I/O 往返。
+    fn read_blocks(&self, start_block: usize, buf: &mut [u8]) -> bool {
+        let block_size = self.block_size();
+        if block_size == 0 || !buf.len().is_multiple_of(block_size) {
+            return false;
+        }
+
+        for (idx, block) in buf.chunks_exact_mut(block_size).enumerate() {
+            if !self.read_block(start_block + idx, block) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// 写入块设备数据
     /// # 参数：
     /// * `block_id` - 块设备的块号
@@ -25,6 +42,23 @@ pub trait BlockDriver: Driver {
     /// # 返回值：
     /// 如果写入成功则返回 true，否则返回 false
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool;
+
+    /// 连续写入多个块。
+    ///
+    /// 默认实现按单块循环，具体驱动可以覆盖为一次设备请求以减少 I/O 往返。
+    fn write_blocks(&self, start_block: usize, buf: &[u8]) -> bool {
+        let block_size = self.block_size();
+        if block_size == 0 || !buf.len().is_multiple_of(block_size) {
+            return false;
+        }
+
+        for (idx, block) in buf.chunks_exact(block_size).enumerate() {
+            if !self.write_block(start_block + idx, block) {
+                return false;
+            }
+        }
+        true
+    }
 
     /// 刷新到磁盘
     /// # 返回值：

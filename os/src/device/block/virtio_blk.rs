@@ -57,8 +57,16 @@ impl BlockDriver for VirtIOBlkDriver {
         self.0.lock().read_blocks(block_id, buf).is_ok()
     }
 
+    fn read_blocks(&self, start_block: usize, buf: &mut [u8]) -> bool {
+        self.0.lock().read_blocks(start_block, buf).is_ok()
+    }
+
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
         self.0.lock().write_blocks(block_id, buf).is_ok()
+    }
+
+    fn write_blocks(&self, start_block: usize, buf: &[u8]) -> bool {
+        self.0.lock().write_blocks(start_block, buf).is_ok()
     }
 
     fn flush(&self) -> bool {
@@ -113,8 +121,16 @@ impl BlockDriver for VirtIOBlkPciDriver {
         self.0.lock().read_blocks(block_id, buf).is_ok()
     }
 
+    fn read_blocks(&self, start_block: usize, buf: &mut [u8]) -> bool {
+        self.0.lock().read_blocks(start_block, buf).is_ok()
+    }
+
     fn write_block(&self, block_id: usize, buf: &[u8]) -> bool {
         self.0.lock().write_blocks(block_id, buf).is_ok()
+    }
+
+    fn write_blocks(&self, start_block: usize, buf: &[u8]) -> bool {
+        self.0.lock().write_blocks(start_block, buf).is_ok()
     }
 
     fn flush(&self) -> bool {
