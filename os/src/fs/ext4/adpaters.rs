@@ -69,7 +69,11 @@ impl ext4_rs::BlockDevice for BlockDeviceAdapter {
         }
 
         // 从读取的数据中提取所需的 block_size 字节
-        buffer[sector_offset..sector_offset + self.block_size].to_vec()
+        if sector_offset == 0 {
+            buffer
+        } else {
+            buffer[sector_offset..sector_offset + self.block_size].to_vec()
+        }
     }
 
     fn write_offset(&self, offset: usize, data: &[u8]) {
@@ -82,18 +86,41 @@ impl ext4_rs::BlockDevice for BlockDeviceAdapter {
 
         // 计算需要写入多少个扇区
         let bytes_to_write = data.len();
+        if bytes_to_write == 0 {
+            return;
+        }
         let sectors_needed = (sector_offset + bytes_to_write).div_ceil(self.sector_size);
 
-        // 读取-修改-写入
-        let mut buffer = alloc::vec![0u8; sectors_needed * self.sector_size];
+        let Some(write_end) = offset.checked_add(bytes_to_write) else {
+            crate::pr_err!("[Ext4Adapter] Write offset overflow at offset {}", offset);
+            return;
+        };
 
-        // 1. 读取所有受影响的扇区
         for i in 0..sectors_needed {
             let sector_id = start_sector + i;
-            let buf_offset = i * self.sector_size;
-            let sector_buf = &mut buffer[buf_offset..buf_offset + self.sector_size];
+            let sector_start = sector_id * self.sector_size;
+            let sector_end = sector_start + self.sector_size;
+            let overlap_start = offset.max(sector_start);
+            let overlap_end = write_end.min(sector_end);
+            let data_start = overlap_start - offset;
+            let data_end = overlap_end - offset;
 
-            if !self.inner.read_block(sector_id, sector_buf) {
+            if overlap_start == sector_start && overlap_end == sector_end {
+                if !self
+                    .inner
+                    .write_block(sector_id, &data[data_start..data_end])
+                {
+                    crate::pr_err!(
+                        "[Ext4Adapter] Write error at sector {} (offset {})",
+                        sector_id,
+                        offset
+                    );
+                }
+                continue;
+            }
+
+            let mut sector_buf = alloc::vec![0u8; self.sector_size];
+            if !self.inner.read_block(sector_id, &mut sector_buf) {
                 crate::pr_err!(
                     "[Ext4Adapter] Read error at sector {} (for write, offset {})",
                     sector_id,
@@ -101,18 +128,12 @@ impl ext4_rs::BlockDevice for BlockDeviceAdapter {
                 );
                 return;
             }
-        }
+            let sector_buf_start = overlap_start - sector_start;
+            let sector_buf_end = sector_buf_start + (overlap_end - overlap_start);
+            sector_buf[sector_buf_start..sector_buf_end]
+                .copy_from_slice(&data[data_start..data_end]);
 
-        // 2. 修改缓冲区
-        buffer[sector_offset..sector_offset + bytes_to_write].copy_from_slice(data);
-
-        // 3. 写回所有扇区
-        for i in 0..sectors_needed {
-            let sector_id = start_sector + i;
-            let buf_offset = i * self.sector_size;
-            let sector_data = &buffer[buf_offset..buf_offset + self.sector_size];
-
-            if !self.inner.write_block(sector_id, sector_data) {
+            if !self.inner.write_block(sector_id, &sector_buf) {
                 crate::pr_err!(
                     "[Ext4Adapter] Write error at sector {} (offset {})",
                     sector_id,
