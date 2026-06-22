@@ -10,7 +10,7 @@ use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -97,7 +97,7 @@ fn main() {
 
         if force_rebuild || should_rebuild(&fs_img_path, &dependencies) {
             println!(
-                "cargo:warning=[build.rs] Creating full ext4 rootfs intermediate image (4GB) at {}...",
+                "cargo:warning=[build.rs] Creating full ext4 rootfs intermediate image at {}...",
                 fs_img_name
             );
             create_full_ext4_image(&fs_img_path, &data_dir);
@@ -270,11 +270,11 @@ fn create_empty_ext4_image(path: &PathBuf, size_mb: usize) {
 
 /// 创建完整的 ext4 rootfs 镜像（包含 data/，/tests 作为测试镜像挂载点）。
 fn create_full_ext4_image(path: &PathBuf, data_dir: &Path) {
-    const IMG_SIZE_MB: usize = 4096; // 4GB
+    const IMG_SIZE_MB: usize = 256;
     const BLOCK_SIZE: usize = 1024 * 1024;
 
     println!(
-        "cargo:warning=[build.rs] Creating {}MB (4GB) full ext4 image at {}",
+        "cargo:warning=[build.rs] Creating {}MB full ext4 image at {}",
         IMG_SIZE_MB,
         path.display()
     );
@@ -290,6 +290,8 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path) {
     if data_dir.exists() {
         copy_dir_recursive(&data_dir.to_path_buf(), &temp_root)
             .expect("Failed to copy data directory");
+        recreate_symlinks_from_manifest(data_dir, &temp_root)
+            .expect("Failed to recreate data symlinks");
         println!(
             "cargo:warning=[build.rs] Copied {} to temp root",
             data_dir.display()
@@ -356,7 +358,10 @@ fn create_full_ext4_image(path: &PathBuf, data_dir: &Path) {
     // 6. 清理临时目录
     fs::remove_dir_all(&temp_root).ok();
 
-    println!("cargo:warning=[build.rs] Full ext4 image created successfully (4GB).");
+    println!(
+        "cargo:warning=[build.rs] Full ext4 image created successfully ({}MB).",
+        IMG_SIZE_MB
+    );
 }
 
 fn create_glibc_runtime_symlinks(temp_root: &Path) {
@@ -388,7 +393,88 @@ fn create_glibc_runtime_symlinks(temp_root: &Path) {
     }
 }
 
-/// 递归复制目录，保留符号链接。
+fn recreate_symlinks_from_manifest(data_dir: &Path, temp_root: &Path) -> std::io::Result<()> {
+    let manifest_path = data_dir.join("symlinks.manifest");
+    if !manifest_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&manifest_path)?;
+    let mut created = 0usize;
+
+    for (idx, raw_line) in content.lines().enumerate() {
+        let line_no = idx + 1;
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let (link_rel, target) = line.split_once('\t').ok_or_else(|| {
+            invalid_manifest(
+                &manifest_path,
+                line_no,
+                "expected '<link path>\\t<link target>'",
+            )
+        })?;
+        if link_rel.is_empty() || target.is_empty() {
+            return Err(invalid_manifest(
+                &manifest_path,
+                line_no,
+                "link path and target must be non-empty",
+            ));
+        }
+
+        let link_rel_path = Path::new(link_rel);
+        validate_manifest_link_path(&manifest_path, line_no, link_rel_path)?;
+
+        let link_path = temp_root.join(link_rel_path);
+        if let Some(parent) = link_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if link_path.exists() || link_path.is_symlink() {
+            fs::remove_file(&link_path)?;
+        }
+        symlink(target, &link_path)?;
+        created += 1;
+    }
+
+    println!(
+        "cargo:warning=[build.rs] Recreated {} symlinks from {}",
+        created,
+        manifest_path.display()
+    );
+    Ok(())
+}
+
+fn validate_manifest_link_path(
+    manifest_path: &Path,
+    line_no: usize,
+    link_rel_path: &Path,
+) -> std::io::Result<()> {
+    for component in link_rel_path.components() {
+        match component {
+            Component::Normal(_) => {}
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(invalid_manifest(
+                    manifest_path,
+                    line_no,
+                    "link path must be relative and stay inside the rootfs",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn invalid_manifest(path: &Path, line_no: usize, message: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("{}:{}: {}", path.display(), line_no, message),
+    )
+}
+
+/// 递归复制目录，保留符号链接；构建清单不写入 rootfs。
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
@@ -396,6 +482,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 
     for entry in fs::read_dir(src)? {
         let entry = entry?;
+        if entry.file_name() == "symlinks.manifest" {
+            continue;
+        }
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         let file_type = fs::symlink_metadata(&src_path)?.file_type();
