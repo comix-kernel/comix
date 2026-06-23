@@ -169,7 +169,9 @@ impl SocketFile {
 
     pub(crate) fn udp_push(&self, d: UdpDatagram) -> bool {
         let mut q = self.udp_rx_queue.lock();
-        if q.len() == q.capacity() {
+        if q.len() >= UDP_RXQ_MAX_CAP {
+            let _ = q.pop_front();
+        } else if q.len() == q.capacity() {
             let old_capacity = q.capacity();
             if old_capacity < UDP_RXQ_MAX_CAP {
                 let new_capacity = old_capacity
