@@ -476,6 +476,76 @@ impl NetworkStack {
         None
     }
 
+    /// Pop one spare listening TCP socket from a listener pool.
+    pub fn take_spare_tcp_listener(
+        &self,
+        file: &super::socket::SocketFile,
+        listen_endpoint: IpListenEndpoint,
+    ) -> Option<SmoltcpHandle> {
+        let sockets = self.socket_set.lock();
+        let mut q = file.listen_sockets.lock();
+        let mut i = 0;
+        while i < q.len() {
+            match q[i] {
+                SocketHandle::Tcp(h) => {
+                    let s = sockets.get::<tcp::Socket>(h);
+                    match s.state() {
+                        tcp::State::Listen if s.listen_endpoint() == listen_endpoint => {
+                            q.remove(i);
+                            return Some(h);
+                        }
+                        tcp::State::Closed => {
+                            q.remove(i);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                SocketHandle::Udp(_) => {
+                    q.remove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Count spare listening sockets for an endpoint, pruning stale queue entries.
+    pub fn tcp_spare_listener_count(
+        &self,
+        file: &super::socket::SocketFile,
+        listen_endpoint: IpListenEndpoint,
+    ) -> usize {
+        let sockets = self.socket_set.lock();
+        let mut q = file.listen_sockets.lock();
+        let mut count = 0;
+        let mut i = 0;
+        while i < q.len() {
+            match q[i] {
+                SocketHandle::Tcp(h) => {
+                    let s = sockets.get::<tcp::Socket>(h);
+                    match s.state() {
+                        tcp::State::Listen if s.listen_endpoint() == listen_endpoint => {
+                            count += 1;
+                        }
+                        tcp::State::Closed => {
+                            q.remove(i);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                SocketHandle::Udp(_) => {
+                    q.remove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        count
+    }
+
     /// Query whether a socket has reached the closed TCP state.
     pub fn socket_is_closed(&self, file: &super::socket::SocketFile) -> bool {
         let sockets = self.socket_set.lock();

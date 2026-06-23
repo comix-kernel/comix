@@ -123,8 +123,15 @@ impl SocketFile {
         self.listen_sockets.lock().clear();
     }
 
-    pub fn listen_sockets_len(&self) -> usize {
-        self.listen_sockets.lock().len()
+    pub fn has_listen_socket(&self, handle: SocketHandle) -> bool {
+        self.listen_sockets
+            .lock()
+            .iter()
+            .any(|h| match (*h, handle) {
+                (SocketHandle::Tcp(a), SocketHandle::Tcp(b)) => a == b,
+                (SocketHandle::Udp(a), SocketHandle::Udp(b)) => a == b,
+                _ => false,
+            })
     }
 
     /// Pop one established connection from the listener queue.
