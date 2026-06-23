@@ -84,6 +84,20 @@ fn wait_for_would_block(file: Arc<dyn File>, task: crate::kernel::SharedTask) ->
     Ok(())
 }
 
+fn file_read_ready(file: &Arc<dyn File>) -> bool {
+    if let Some(pipe_file) = file.as_any().downcast_ref::<crate::vfs::PipeFile>() {
+        return pipe_file.read_ready();
+    }
+    file.readable()
+}
+
+fn file_write_ready(file: &Arc<dyn File>) -> bool {
+    if let Some(pipe_file) = file.as_any().downcast_ref::<crate::vfs::PipeFile>() {
+        return pipe_file.write_ready();
+    }
+    file.writable()
+}
+
 /// 向文件描述符写入数据
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     loop {
@@ -671,11 +685,11 @@ fn poll_with_timeout(
                     }
                 };
 
-                if (pollfd.events & POLLIN) != 0 && file.readable() {
+                if (pollfd.events & POLLIN) != 0 && file_read_ready(&file) {
                     pollfd.revents |= POLLIN;
                 }
 
-                if (pollfd.events & POLLOUT) != 0 && file.writable() {
+                if (pollfd.events & POLLOUT) != 0 && file_write_ready(&file) {
                     pollfd.revents |= POLLOUT;
                 }
 
@@ -889,14 +903,14 @@ fn select_common(
 
             let mut fd_ready = false;
             if check_read
-                && file.readable()
+                && file_read_ready(&file)
                 && let Some(ref mut set) = read_set
             {
                 set.set(fd);
                 fd_ready = true;
             }
             if check_write
-                && file.writable()
+                && file_write_ready(&file)
                 && let Some(ref mut set) = write_set
             {
                 set.set(fd);

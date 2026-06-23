@@ -276,18 +276,23 @@ impl PipeFile {
         buffer.set_capacity(new_size)?;
         Ok(buffer.get_capacity())
     }
+
+    pub fn read_ready(&self) -> bool {
+        self.end_type.readable() && self.buffer.lock().can_read_now()
+    }
+
+    pub fn write_ready(&self) -> bool {
+        self.end_type.writable() && self.buffer.lock().can_write_now()
+    }
 }
 
 impl File for PipeFile {
     fn readable(&self) -> bool {
-        self.end_type.readable() && self.buffer.lock().can_read_now()
+        self.end_type.readable()
     }
 
     fn writable(&self) -> bool {
-        if !self.end_type.writable() {
-            return false;
-        }
-        self.buffer.lock().can_write_now()
+        self.end_type.writable()
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
