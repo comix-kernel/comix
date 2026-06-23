@@ -698,16 +698,15 @@ impl Inode for TmpfsInode {
             return Err(FsError::AlreadyExists);
         }
 
-        // 从 mode 提取文件类型
-        let inode_type = if mode.contains(FileMode::S_IFCHR) {
-            InodeType::CharDevice
-        } else if mode.contains(FileMode::S_IFBLK) {
-            InodeType::BlockDevice
-        } else if mode.contains(FileMode::S_IFIFO) {
-            InodeType::Fifo
-        } else {
-            // mknod 只支持特殊文件
-            return Err(FsError::InvalidArgument);
+        // 从 mode 的类型掩码精确提取文件类型。文件类型位不是互斥 bitflags，
+        // 不能用 contains() 判断，否则 S_IFBLK 会被误判成 S_IFCHR。
+        let inode_type = match mode & FileMode::S_IFMT {
+            FileMode::S_IFCHR => InodeType::CharDevice,
+            FileMode::S_IFBLK => InodeType::BlockDevice,
+            FileMode::S_IFIFO => InodeType::Fifo,
+            FileMode::S_IFSOCK => InodeType::Socket,
+            FileMode::S_IFREG => InodeType::File,
+            _ => return Err(FsError::InvalidArgument),
         };
 
         // 分配新的 inode 号
