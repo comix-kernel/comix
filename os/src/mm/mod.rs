@@ -110,6 +110,9 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     set_global_kernel_space(space.clone());
 
     let root_ppn = space.lock().root_ppn();
+    #[cfg(target_arch = "loongarch64")]
+    crate::arch::mm::set_kernel_root_ppn(root_ppn);
+
     crate::println!(
         "[MM] Created kernel space, root PPN: 0x{:x}",
         root_ppn.as_usize()

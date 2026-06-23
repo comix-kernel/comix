@@ -26,6 +26,8 @@ mod page_table;
 mod page_table_entry;
 
 use crate::arch::address::{PA, VA};
+use crate::mm::address::{PageNum, Ppn, UsizeConvert};
+use core::sync::atomic::{AtomicUsize, Ordering};
 pub use page_table::{PageTableInner, TlbBatchContext};
 pub use page_table_entry::PageTableEntry;
 
@@ -38,6 +40,18 @@ pub const VADDR_START: usize = 0x9000_0000_0000_0000;
 ///
 /// 用于从虚拟地址提取物理地址，保留低 48 位。
 pub const PADDR_MASK: usize = 0x0000_FFFF_FFFF_FFFF;
+
+static KERNEL_ROOT_PPN: AtomicUsize = AtomicUsize::new(0);
+
+/// Register the final kernel page-table root used for the high-half address space.
+pub fn set_kernel_root_ppn(ppn: Ppn) {
+    KERNEL_ROOT_PPN.store(ppn.as_usize(), Ordering::Release);
+}
+
+pub(crate) fn kernel_root_paddr() -> Option<usize> {
+    let ppn = KERNEL_ROOT_PPN.load(Ordering::Acquire);
+    (ppn != 0).then(|| Ppn::from_usize(ppn).start_addr().as_usize())
+}
 
 /// 虚拟地址转物理地址
 ///
