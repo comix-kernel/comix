@@ -450,14 +450,21 @@ impl Inode for TmpfsInode {
         }
         drop(child_meta);
 
-        // 获取该 inode 的已分配页数
-        let child_data = child.data.lock();
-        let allocated = child_data.iter().filter(|f| f.is_some()).count();
-        drop(child_data);
+        let child = children.remove(name).ok_or(FsError::NotFound)?;
+        let should_free_data = {
+            let mut child_meta = child.metadata.lock();
+            child_meta.nlinks = child_meta.nlinks.saturating_sub(1);
+            child_meta.ctime = TimeSpec::now();
+            child_meta.nlinks == 0
+        };
 
-        // 删除
-        children.remove(name);
-        self.dec_allocated_pages(allocated);
+        if should_free_data {
+            let child_data = child.data.lock();
+            let allocated = child_data.iter().filter(|f| f.is_some()).count();
+            drop(child_data);
+            self.dec_allocated_pages(allocated);
+        }
+
         self.update_mtime();
 
         Ok(())
@@ -637,9 +644,42 @@ impl Inode for TmpfsInode {
         Ok(symlink_inode as Arc<dyn Inode>)
     }
 
-    fn link(&self, _name: &str, _target: &Arc<dyn Inode>) -> Result<(), FsError> {
-        // TODO: 实现硬链接支持
-        Err(FsError::NotSupported)
+    fn link(&self, name: &str, target: &Arc<dyn Inode>) -> Result<(), FsError> {
+        let meta = self.metadata.lock();
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        drop(meta);
+
+        let target_inode = target
+            .as_any()
+            .downcast_ref::<TmpfsInode>()
+            .ok_or(FsError::InvalidArgument)?;
+        let target_arc = target_inode
+            .self_ref
+            .lock()
+            .upgrade()
+            .ok_or(FsError::IoError)?;
+
+        let mut children = self.children.lock();
+        if children.contains_key(name) {
+            return Err(FsError::AlreadyExists);
+        }
+
+        {
+            let mut target_meta = target_arc.metadata.lock();
+            if target_meta.inode_type == InodeType::Directory {
+                return Err(FsError::PermissionDenied);
+            }
+            target_meta.nlinks += 1;
+            target_meta.ctime = TimeSpec::now();
+        }
+
+        children.insert(name.to_string(), target_arc);
+        drop(children);
+
+        self.update_mtime();
+        Ok(())
     }
 
     fn rename(
