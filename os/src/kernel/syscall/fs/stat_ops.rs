@@ -219,6 +219,9 @@ pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> 
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     if mode & !(R_OK | W_OK | X_OK) != 0 {
         return -(EINVAL as isize);
