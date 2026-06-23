@@ -14,7 +14,15 @@ arch="${ARCH:-riscv}"
 fs="fs-${arch}.img"
 disk="disk.img"
 vfat="vfat.img"
-test_img="../sdcard-rv.img"
+test_img="${TESTIMG_RV:-}"
+if [ -z "$test_img" ]; then
+    for candidate in "../../CCYOS/sdcard-rv.img" "../sdcard-rv.img"; do
+        if [ -f "$candidate" ]; then
+            test_img="$candidate"
+            break
+        fi
+    done
+fi
 
 # 1. 转换为纯二进制
 rust-objcopy --strip-all "$ELF_FILE" -O binary "$BIN_FILE"
@@ -63,12 +71,12 @@ else
     QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1"
 
     # 官方测试盘是额外裸 ext4 盘，固定注册为 /dev/vdb 后由 rcS 挂载到 /tests。
-    if [ -f "$test_img" ]; then
+    if [ -n "$test_img" ] && [ -f "$test_img" ]; then
         echo "Attaching official test image ${test_img} as vdb"
         QEMU_ARGS="$QEMU_ARGS -drive file=$test_img,if=none,format=raw,id=test0"
         QEMU_ARGS="$QEMU_ARGS -device virtio-blk-device,drive=test0,bus=virtio-mmio-bus.0"
     else
-        echo "Warning: official test image ${test_img} not found; skipping vdb attachment" >&2
+        echo "Warning: official test image not found; set TESTIMG_RV=/path/to/sdcard-rv.img to attach one" >&2
     fi
 fi
 

@@ -15,7 +15,15 @@ arch="${ARCH:-loongarch}"
 fs="fs-${arch}.img"
 disk="disk-la.img"
 vfat="vfat.img"
-test_img="../sdcard-la.img"
+test_img="${TESTIMG_LA:-}"
+if [ -z "$test_img" ]; then
+    for candidate in "../../CCYOS/sdcard-la.img" "../sdcard-la.img"; do
+        if [ -f "$candidate" ]; then
+            test_img="$candidate"
+            break
+        fi
+    done
+fi
 
 QEMU_ARGS=(
     -machine virt
@@ -53,12 +61,12 @@ else
     QEMU_ARGS+=(-drive file="$disk",if=none,format=raw,id=x0)
     QEMU_ARGS+=(-device virtio-blk-pci,drive=x0)
 
-    if [ -f "$test_img" ]; then
+    if [ -n "$test_img" ] && [ -f "$test_img" ]; then
         echo "Attaching official test image ${test_img} as vdb"
         QEMU_ARGS+=(-drive file="$test_img",if=none,format=raw,id=test0)
         QEMU_ARGS+=(-device virtio-blk-pci,drive=test0)
     else
-        echo "Warning: official test image ${test_img} not found; skipping vdb attachment" >&2
+        echo "Warning: official test image not found; set TESTIMG_LA=/path/to/sdcard-la.img to attach one" >&2
     fi
 fi
 
