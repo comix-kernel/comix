@@ -27,12 +27,13 @@ pub enum FsError {
     NameTooLong,     // -ENAMETOOLONG(36): 文件名过长
 
     // 文件系统相关
-    ReadOnlyFs, // -EROFS(30): 只读文件系统
-    NoSpace,    // -ENOSPC(28): 设备空间不足
-    IoError,    // -EIO(5): I/O 错误
-    NoDevice,   // -ENODEV(19): 设备不存在
-    NoMemory,   // -ENOMEM(12): 内存不足
-    Busy,       // -EBUSY(16): 设备或资源忙
+    ReadOnlyFs,            // -EROFS(30): 只读文件系统
+    NoSpace,               // -ENOSPC(28): 设备空间不足
+    IoError,               // -EIO(5): I/O 错误
+    NoSuchDeviceOrAddress, // -ENXIO(6): 设备或地址不存在
+    NoDevice,              // -ENODEV(19): 设备不存在
+    NoMemory,              // -ENOMEM(12): 内存不足
+    Busy,                  // -EBUSY(16): 设备或资源忙
 
     // 管道相关 (新增)
     BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
@@ -57,6 +58,7 @@ impl FsError {
         match self {
             FsError::NotFound => -ENOENT as isize,
             FsError::IoError => -EIO as isize,
+            FsError::NoSuchDeviceOrAddress => -ENXIO as isize,
             FsError::BadFileDescriptor => -EBADF as isize,
             FsError::WouldBlock => -EAGAIN as isize,
             FsError::NoMemory => -ENOMEM as isize,

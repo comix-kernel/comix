@@ -15,7 +15,7 @@ use crate::{
     uapi::{errno::EINVAL, log::SyslogAction},
     vfs::{
         DENTRY_CACHE, Dentry, File, FileMode, FsError, InodeType, OpenFlags, get_root_dentry,
-        impls::{BlockDeviceFile, CharDeviceFile, RegFile},
+        impls::{BlockDeviceFile, CharDeviceFile, PipeFile, RegFile},
         normalize_path, split_path, vfs_lookup_from,
     },
 };
@@ -494,8 +494,12 @@ pub fn create_file_from_dentry(
             // 块设备
             Arc::new(BlockDeviceFile::new(dentry, flags)?)
         }
-        InodeType::Socket | InodeType::Fifo => {
-            // FIFO（命名管道） 和 Unix 域套接字 暂不支持
+        InodeType::Fifo => {
+            // FIFO（命名管道）
+            Arc::new(PipeFile::open_fifo(dentry, flags)?)
+        }
+        InodeType::Socket => {
+            // Unix 域套接字节点的运行时语义由 socket 子系统处理。
             return Err(FsError::NotSupported);
         }
     };

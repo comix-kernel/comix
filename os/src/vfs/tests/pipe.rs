@@ -1,4 +1,5 @@
 use super::*;
+use crate::fs::tmpfs::TmpFs;
 use crate::vfs::PipeFile;
 use crate::{kassert, test_case};
 
@@ -159,4 +160,45 @@ test_case!(test_pipe_zero_length_operations, {
     let result = read_file.read(&mut buf);
     kassert!(result.is_ok());
     kassert!(result.unwrap() == 0);
+});
+
+test_case!(test_named_fifo_shared_buffer, {
+    let fs = TmpFs::new(0);
+    let root = fs.root_inode();
+    let inode = root
+        .mknod(
+            "fifo",
+            FileMode::S_IFIFO | FileMode::S_IRUSR | FileMode::S_IWUSR,
+            0,
+        )
+        .unwrap();
+    let dentry = Dentry::new(String::from("fifo"), inode);
+
+    let read_end = PipeFile::open_fifo(dentry.clone(), OpenFlags::O_RDONLY).unwrap();
+    let write_end = PipeFile::open_fifo(dentry, OpenFlags::O_WRONLY).unwrap();
+
+    let write_file: Arc<dyn File> = Arc::new(write_end);
+    let read_file: Arc<dyn File> = Arc::new(read_end);
+
+    kassert!(write_file.write(b"named fifo").unwrap() == 10);
+
+    let mut buf = [0u8; 10];
+    kassert!(read_file.read(&mut buf).unwrap() == 10);
+    kassert!(&buf == b"named fifo");
+});
+
+test_case!(test_named_fifo_nonblock_write_without_reader, {
+    let fs = TmpFs::new(0);
+    let root = fs.root_inode();
+    let inode = root
+        .mknod(
+            "fifo",
+            FileMode::S_IFIFO | FileMode::S_IRUSR | FileMode::S_IWUSR,
+            0,
+        )
+        .unwrap();
+    let dentry = Dentry::new(String::from("fifo"), inode);
+
+    let result = PipeFile::open_fifo(dentry, OpenFlags::O_WRONLY | OpenFlags::O_NONBLOCK);
+    kassert!(matches!(result, Err(FsError::NoSuchDeviceOrAddress)));
 });

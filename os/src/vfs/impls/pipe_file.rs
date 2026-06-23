@@ -3,9 +3,14 @@
 //! 管道是流式单向通信设备，读端和写端分别由两个 [`PipeFile`] 实例表示。
 
 use crate::sync::SpinLock;
-use crate::vfs::{File, FileMode, FsError, InodeMetadata, InodeType, OpenFlags, TimeSpec};
-use alloc::collections::VecDeque;
+use crate::vfs::{Dentry, File, FileMode, FsError, InodeMetadata, InodeType, OpenFlags, TimeSpec};
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
+
+lazy_static::lazy_static! {
+    static ref NAMED_FIFO_REGISTRY: SpinLock<BTreeMap<usize, Arc<SpinLock<PipeRingBuffer>>>> =
+        SpinLock::new(BTreeMap::new());
+}
 
 /// 管道环形缓冲区
 ///
@@ -19,6 +24,10 @@ struct PipeRingBuffer {
     write_end_count: usize,
     /// 读端引用计数 (用于检测读端关闭)
     read_end_count: usize,
+    /// 是否曾经打开过写端。命名 FIFO 需要区分“尚无写端”和“写端已关闭”。
+    ever_had_writer: bool,
+    /// 是否曾经打开过读端。命名 FIFO 需要区分“尚无读端”和“读端已关闭”。
+    ever_had_reader: bool,
 }
 
 impl PipeRingBuffer {
@@ -32,7 +41,17 @@ impl PipeRingBuffer {
             capacity: Self::DEFAULT_CAPACITY,
             write_end_count: 0,
             read_end_count: 0,
+            ever_had_writer: false,
+            ever_had_reader: false,
         }
+    }
+
+    fn can_read_now(&self) -> bool {
+        !self.buffer.is_empty() || (self.ever_had_writer && self.write_end_count == 0)
+    }
+
+    fn can_write_now(&self) -> bool {
+        self.read_end_count > 0 && self.buffer.len() < self.capacity
     }
 
     /// 获取管道容量
@@ -57,13 +76,16 @@ impl PipeRingBuffer {
 
     /// 读取数据 (非阻塞)
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         if self.buffer.is_empty() {
             // 写端已关闭且缓冲区为空 -> EOF
-            if self.write_end_count == 0 {
+            if self.ever_had_writer && self.write_end_count == 0 {
                 return Ok(0);
             }
-            // 写端未关闭但缓冲区为空 -> 暂时返回0 (TODO: 配合调度器实现阻塞)
-            return Ok(0);
+            return Err(FsError::WouldBlock);
         }
 
         let nread = buf.len().min(self.buffer.len());
@@ -71,20 +93,29 @@ impl PipeRingBuffer {
             *byte = self.buffer.pop_front().unwrap();
         }
 
+        crate::kernel::syscall::io::wake_poll_waiters();
         Ok(nread)
     }
 
     /// 写入数据 (非阻塞)
     fn write(&mut self, buf: &[u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         // 读端已关闭 -> EPIPE (应发送 SIGPIPE 信号)
-        if self.read_end_count == 0 {
+        if self.ever_had_reader && self.read_end_count == 0 {
             return Err(FsError::BrokenPipe);
+        }
+
+        if self.read_end_count == 0 {
+            return Err(FsError::WouldBlock);
         }
 
         // 缓冲区已满 -> 暂时只写入可用空间 (TODO: 阻塞等待)
         let available = self.capacity - self.buffer.len();
         if available == 0 {
-            return Ok(0);
+            return Err(FsError::WouldBlock);
         }
 
         let nwrite = buf.len().min(available);
@@ -92,6 +123,7 @@ impl PipeRingBuffer {
             self.buffer.push_back(byte);
         }
 
+        crate::kernel::syscall::io::wake_poll_waiters();
         Ok(nwrite)
     }
 }
@@ -117,6 +149,26 @@ pub struct PipeFile {
 enum PipeEnd {
     Read,
     Write,
+    ReadWrite,
+}
+
+impl PipeEnd {
+    fn from_flags(readable: bool, writable: bool) -> Self {
+        match (readable, writable) {
+            (true, true) => Self::ReadWrite,
+            (true, false) => Self::Read,
+            (false, true) => Self::Write,
+            (false, false) => unreachable!(),
+        }
+    }
+
+    fn readable(self) -> bool {
+        matches!(self, Self::Read | Self::ReadWrite)
+    }
+
+    fn writable(self) -> bool {
+        matches!(self, Self::Write | Self::ReadWrite)
+    }
 }
 
 impl PipeFile {
@@ -136,6 +188,8 @@ impl PipeFile {
             let mut buf = buffer.lock();
             buf.read_end_count = 1;
             buf.write_end_count = 1;
+            buf.ever_had_reader = true;
+            buf.ever_had_writer = true;
         }
 
         let read_end = Self {
@@ -153,6 +207,54 @@ impl PipeFile {
         };
 
         (read_end, write_end)
+    }
+
+    /// 以命名 FIFO 的语义打开一个目录项。
+    pub fn open_fifo(dentry: Arc<Dentry>, flags: OpenFlags) -> Result<Self, FsError> {
+        let readable = flags.readable();
+        let writable = flags.writable();
+
+        if !readable && !writable {
+            return Err(FsError::InvalidArgument);
+        }
+
+        let key = Arc::as_ptr(&dentry) as usize;
+        let buffer = {
+            let mut registry = NAMED_FIFO_REGISTRY.lock();
+            registry
+                .entry(key)
+                .or_insert_with(|| Arc::new(SpinLock::new(PipeRingBuffer::new())))
+                .clone()
+        };
+
+        if writable
+            && !readable
+            && flags.contains(OpenFlags::O_NONBLOCK)
+            && buffer.lock().read_end_count == 0
+        {
+            return Err(FsError::NoSuchDeviceOrAddress);
+        }
+
+        {
+            let mut buf = buffer.lock();
+            if readable {
+                buf.read_end_count += 1;
+                buf.ever_had_reader = true;
+            }
+            if writable {
+                buf.write_end_count += 1;
+                buf.ever_had_writer = true;
+            }
+        }
+
+        crate::kernel::syscall::io::wake_poll_waiters();
+
+        Ok(Self {
+            buffer,
+            end_type: PipeEnd::from_flags(readable, writable),
+            flags: SpinLock::new(flags),
+            owner: SpinLock::new(None),
+        })
     }
 
     /// 设置文件状态标志 (F_SETFL)
@@ -175,27 +277,25 @@ impl PipeFile {
 
 impl File for PipeFile {
     fn readable(&self) -> bool {
-        // 读端始终可读；buffer 为空且写端未关闭时 read() 返回 Ok(0) 或 WouldBlock
-        self.end_type == PipeEnd::Read
+        self.end_type.readable() && self.buffer.lock().can_read_now()
     }
 
     fn writable(&self) -> bool {
-        if self.end_type != PipeEnd::Write {
+        if !self.end_type.writable() {
             return false;
         }
-        // 写端可写当读端仍然打开（buffer 满时 write() 返回 Ok(0) 或 WouldBlock）
-        self.buffer.lock().read_end_count > 0
+        self.buffer.lock().can_write_now()
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
-        if self.end_type != PipeEnd::Read {
+        if !self.end_type.readable() {
             return Err(FsError::InvalidArgument);
         }
         self.buffer.lock().read(buf)
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        if self.end_type != PipeEnd::Write {
+        if !self.end_type.writable() {
             return Err(FsError::InvalidArgument);
         }
         self.buffer.lock().write(buf)
@@ -257,6 +357,12 @@ impl Drop for PipeFile {
         match self.end_type {
             PipeEnd::Read => buf.read_end_count -= 1,
             PipeEnd::Write => buf.write_end_count -= 1,
+            PipeEnd::ReadWrite => {
+                buf.read_end_count -= 1;
+                buf.write_end_count -= 1;
+            }
         }
+        drop(buf);
+        crate::kernel::syscall::io::wake_poll_waiters();
     }
 }
