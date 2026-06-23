@@ -142,7 +142,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
             }
 
             pr_debug!("connect: tcp_connect success, nonblock={}", is_nonblock);
-            crate::pr_info!(
+            crate::pr_debug!(
                 "[TCP] Connection established: {} -> {}",
                 local_endpoint,
                 endpoint

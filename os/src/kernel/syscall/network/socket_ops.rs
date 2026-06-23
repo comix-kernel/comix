@@ -63,7 +63,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
                 SocketHandle::Tcp(_) => "TCP",
                 SocketHandle::Udp(_) => "UDP",
             };
-            pr_info!(
+            pr_debug!(
                 "[SOCKET] Created {} socket: tid={}, fd={}, domain={}, type={}",
                 handle_type,
                 tid,
