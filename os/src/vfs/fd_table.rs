@@ -314,6 +314,10 @@ impl FDTable {
     /// 返回新的 fd，与 old_fd 指向同一个 `Arc<dyn File>` (共享 offset)。
     /// 新分配的 fd 是 >= min_fd 的最小未使用文件描述符。
     pub fn dup_from(&self, old_fd: usize, min_fd: usize, flags: FdFlags) -> Result<usize, FsError> {
+        if min_fd >= self.max_fds {
+            return Err(FsError::InvalidArgument);
+        }
+
         let file = self.get(old_fd)?;
         let mut files = self.files.lock();
         let mut fd_flags = self.fd_flags.lock();

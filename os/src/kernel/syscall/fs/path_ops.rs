@@ -7,6 +7,9 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 解析标志位
     let open_flags = match OpenFlags::from_bits(flags) {
@@ -18,9 +21,15 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 
     // crate::println!("[openat] path: {}, flags: {:?} (raw: 0x{:x})", path_str, open_flags, flags);
 
+    if open_flags.contains(OpenFlags::O_CREAT) && open_flags.contains(OpenFlags::O_DIRECTORY) {
+        return FsError::InvalidArgument.to_errno();
+    }
+
+    let follow_symlink = !open_flags.contains(OpenFlags::O_NOFOLLOW);
+
     // 解析路径（处理AT_FDCWD和相对路径）
-    let dentry = match resolve_at_path(dirfd, &path_str) {
-        Ok(Some(d)) => {
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => {
             // 文件已存在
             // 检查 O_EXCL (与 O_CREAT 一起使用时，文件必须不存在)
             if open_flags.contains(OpenFlags::O_CREAT) && open_flags.contains(OpenFlags::O_EXCL) {
@@ -28,7 +37,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
             }
             d
         }
-        Ok(None) => {
+        Err(FsError::NotFound) => {
             // 文件不存在，检查是否需要创建
             if !open_flags.contains(OpenFlags::O_CREAT) {
                 return FsError::NotFound.to_errno();
@@ -48,6 +57,13 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
         Ok(m) => m,
         Err(e) => return e.to_errno(),
     };
+
+    if open_flags.contains(OpenFlags::O_NOFOLLOW) && meta.inode_type == InodeType::Symlink {
+        if open_flags.contains(OpenFlags::O_DIRECTORY) {
+            return FsError::NotDirectory.to_errno();
+        }
+        return FsError::TooManySymlinks.to_errno();
+    }
 
     // 检查 O_DIRECTORY (必须是目录)
     if open_flags.contains(OpenFlags::O_DIRECTORY) && meta.inode_type != InodeType::Directory {
@@ -71,7 +87,8 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 
     // 分配文件描述符
     let task = current_task();
-    match task.lock().fd_table.alloc(file) {
+    let fd_flags = FdFlags::from_open_flags(open_flags);
+    match task.lock().fd_table.alloc_with_flags(file, fd_flags) {
         Ok(fd) => fd as isize,
         Err(e) => e.to_errno(),
     }
@@ -83,9 +100,14 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    let path_str = if path_str.bytes().all(|b| b == b'/') {
+        path_str
+    } else {
+        path_str.trim_end_matches('/').into()
+    };
 
     // 分割路径为目录和文件名
-    let (dir_path, dirname) = match split_path(&path_str) {
+    let (dir_path, dirname) = match split_parent_preserving_basename(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -96,6 +118,10 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
         Ok(None) => return FsError::NotFound.to_errno(),
         Err(e) => return e.to_errno(),
     };
+
+    if is_special_basename(&dirname) {
+        return FsError::AlreadyExists.to_errno();
+    }
 
     // 创建目录
     let dir_mode = FileMode::from_bits_truncate(mode) | FileMode::S_IFDIR;
@@ -106,6 +132,10 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
 }
 
 pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
+    if flags & !AT_REMOVEDIR != 0 {
+        return FsError::InvalidArgument.to_errno();
+    }
+
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
@@ -115,7 +145,7 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     let is_rmdir = (flags & AT_REMOVEDIR) != 0;
 
     // 分割路径
-    let (dir_path, filename) = match split_path(&path_str) {
+    let (dir_path, filename) = match split_parent_preserving_basename(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -126,6 +156,10 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
         Ok(None) => return FsError::NotFound.to_errno(),
         Err(e) => return e.to_errno(),
     };
+
+    if is_rmdir && filename == "." {
+        return FsError::InvalidArgument.to_errno();
+    }
 
     // 检查目标文件类型
     let target_inode = match parent_dentry.inode.lookup(&filename) {
@@ -152,10 +186,16 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     }
 
     // 删除目录项
-    match parent_dentry.inode.unlink(&filename) {
+    let result = if is_rmdir {
+        parent_dentry.inode.rmdir(&filename)
+    } else {
+        parent_dentry.inode.unlink(&filename)
+    };
+
+    match result {
         Ok(()) => {
             // 从缓存中移除
-            parent_dentry.remove_child(&filename);
+            drop_cached_child(&parent_dentry, &filename);
             0
         }
         Err(e) => e.to_errno(),
@@ -203,7 +243,7 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
 
     // 检查缓冲区大小
     if path_bytes.len() + 1 > size {
-        return FsError::InvalidArgument.to_errno();
+        return -(crate::uapi::errno::ERANGE as isize);
     }
 
     // 复制到用户态缓冲区

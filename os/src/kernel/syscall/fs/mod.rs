@@ -8,8 +8,9 @@ use crate::{
     kernel::{
         current_task,
         syscall::util::{
-            create_file_at, create_file_from_dentry, get_path_safe, resolve_at_path,
-            resolve_at_path_string, resolve_at_path_with_flags,
+            create_file_at, create_file_from_dentry, get_path_safe, is_special_basename,
+            resolve_at_path, resolve_at_path_string, resolve_at_path_with_flags,
+            split_parent_preserving_basename,
         },
     },
     uapi::{
@@ -19,8 +20,8 @@ use crate::{
     },
     util::user_buffer::write_to_user,
     vfs::{
-        DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, Statx,
-        split_path, vfs_lookup,
+        DENTRY_CACHE, Dentry, FdFlags, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat,
+        Statx, vfs_lookup,
     },
 };
 
@@ -28,6 +29,12 @@ pub const AT_FDCWD: i32 = -100;
 pub const AT_SYMLINK_NOFOLLOW: u32 = 0x100;
 pub const AT_REMOVEDIR: u32 = 0x200;
 pub const O_CLOEXEC: u32 = 0o2000000;
+
+fn drop_cached_child(parent: &Dentry, name: &str) {
+    if let Some(child) = parent.remove_child(name) {
+        DENTRY_CACHE.remove(&child.full_path());
+    }
+}
 
 mod fd_ops;
 mod metadata_ops;

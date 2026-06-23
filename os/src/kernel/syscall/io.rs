@@ -10,6 +10,7 @@ use crate::util::user_buffer::{
     read_from_user, validate_user_ptr, validate_user_ptr_mut, write_to_user,
 };
 use crate::vfs::File;
+use alloc::sync::Arc;
 
 fn empty_iovec() -> IoVec {
     IoVec {
@@ -47,6 +48,42 @@ fn copy_user_array<T: Copy>(
     Ok(buf)
 }
 
+fn should_retry_would_block(file: &Arc<dyn File>) -> bool {
+    use crate::net::socket::SocketFile;
+    use crate::net::unix_socket::UnixSocketFile;
+    use crate::uapi::fcntl::OpenFlags;
+    use crate::vfs::PipeFile;
+
+    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+        return !socket_file.flags().contains(OpenFlags::O_NONBLOCK);
+    }
+
+    if let Some(socket_file) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        return !socket_file.flags().contains(OpenFlags::O_NONBLOCK);
+    }
+
+    if let Some(pipe_file) = file.as_any().downcast_ref::<PipeFile>() {
+        return !pipe_file.flags().contains(OpenFlags::O_NONBLOCK);
+    }
+
+    false
+}
+
+fn wait_for_would_block(file: Arc<dyn File>, task: crate::kernel::SharedTask) -> Result<(), isize> {
+    if file.as_any().is::<crate::net::socket::SocketFile>() {
+        crate::net::socket::poll_network_and_dispatch();
+    }
+
+    drop(file);
+    crate::kernel::yield_task();
+
+    if crate::ipc::signal_interrupts_syscall(&task) {
+        return Err(-(crate::uapi::errno::EINTR as isize));
+    }
+
+    Ok(())
+}
+
 /// 向文件描述符写入数据
 pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
     loop {
@@ -67,16 +104,10 @@ pub fn write(fd: usize, buf: *const u8, count: usize) -> isize {
         };
 
         if result == -11 {
-            use crate::net::socket::SocketFile;
-            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
-                && !socket_file
-                    .flags()
-                    .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
-            {
-                drop(file);
-                drop(task);
-                crate::net::socket::poll_network_and_dispatch();
-                crate::kernel::yield_task();
+            if should_retry_would_block(&file) {
+                if let Err(e) = wait_for_would_block(file, task) {
+                    return e;
+                }
                 continue;
             }
         }
@@ -111,16 +142,10 @@ pub fn read(fd: usize, buf: *mut u8, count: usize) -> isize {
         };
 
         if result == -11 {
-            use crate::net::socket::SocketFile;
-            if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
-                && !socket_file
-                    .flags()
-                    .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
-            {
-                drop(file);
-                drop(task);
-                crate::net::socket::poll_network_and_dispatch();
-                crate::kernel::yield_task();
+            if should_retry_would_block(&file) {
+                if let Err(e) = wait_for_would_block(file, task) {
+                    return e;
+                }
                 continue;
             }
         }

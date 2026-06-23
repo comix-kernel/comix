@@ -281,6 +281,9 @@ bitflags! {
         /// 必须是目录 (O_DIRECTORY)
         const O_DIRECTORY = 0o200000;
 
+        /// 不跟随最终符号链接 (O_NOFOLLOW)
+        const O_NOFOLLOW  = 0o400000;
+
         /// exec 时关闭 (O_CLOEXEC)
         const O_CLOEXEC   = 0o2000000;
 

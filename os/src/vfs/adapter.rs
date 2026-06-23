@@ -4,6 +4,7 @@
 
 use super::{InodeMetadata, InodeType};
 use crate::uapi::fs::{STATX_BASIC_STATS, Stat, Statx, StatxTimestamp};
+use crate::vfs::dev::{encode_linux_dev, major, minor};
 
 /// Stat 结构适配方法
 impl Stat {
@@ -16,7 +17,7 @@ impl Stat {
             st_nlink: meta.nlinks as u32,
             st_uid: meta.uid,
             st_gid: meta.gid,
-            st_rdev: meta.rdev,
+            st_rdev: encode_linux_dev(meta.rdev),
             __pad1: 0,
             st_size: meta.size as i64,
             st_blksize: 512,
@@ -60,8 +61,8 @@ impl Statx {
             stx_btime: StatxTimestamp::zeroed(),
             stx_ctime: ts(meta.ctime),
             stx_mtime: ts(meta.mtime),
-            stx_rdev_major: 0,
-            stx_rdev_minor: 0,
+            stx_rdev_major: major(meta.rdev),
+            stx_rdev_minor: minor(meta.rdev),
             stx_dev_major: 0,
             stx_dev_minor: 0,
             stx_mnt_id: 0,

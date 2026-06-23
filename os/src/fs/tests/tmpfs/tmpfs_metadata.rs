@@ -204,3 +204,57 @@ test_case!(test_tmpfs_metadata_after_unlink, {
     let meta2 = file.metadata();
     kassert!(meta2.is_ok());
 });
+
+test_case!(test_tmpfs_mknod_exact_file_types, {
+    use crate::vfs::dev::makedev;
+
+    let fs = create_test_tmpfs();
+    let root = fs.root_inode();
+    let dev = makedev(254, 16);
+
+    let chr = root
+        .mknod(
+            "ttyS0",
+            FileMode::S_IFCHR | FileMode::from_bits_truncate(0o666),
+            dev,
+        )
+        .unwrap();
+    let blk = root
+        .mknod(
+            "vdb",
+            FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660),
+            dev,
+        )
+        .unwrap();
+    let fifo = root
+        .mknod(
+            "fifo",
+            FileMode::S_IFIFO | FileMode::from_bits_truncate(0o644),
+            0,
+        )
+        .unwrap();
+    let sock = root
+        .mknod(
+            "sock",
+            FileMode::S_IFSOCK | FileMode::from_bits_truncate(0o644),
+            0,
+        )
+        .unwrap();
+    let reg = root
+        .mknod(
+            "regular",
+            FileMode::S_IFREG | FileMode::from_bits_truncate(0o644),
+            0,
+        )
+        .unwrap();
+
+    let chr_meta = chr.metadata().unwrap();
+    let blk_meta = blk.metadata().unwrap();
+    kassert!(chr_meta.inode_type == InodeType::CharDevice);
+    kassert!(chr_meta.rdev == dev);
+    kassert!(blk_meta.inode_type == InodeType::BlockDevice);
+    kassert!(blk_meta.rdev == dev);
+    kassert!(fifo.metadata().unwrap().inode_type == InodeType::Fifo);
+    kassert!(sock.metadata().unwrap().inode_type == InodeType::Socket);
+    kassert!(reg.metadata().unwrap().inode_type == InodeType::File);
+});

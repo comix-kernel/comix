@@ -27,19 +27,22 @@ pub enum FsError {
     NameTooLong,     // -ENAMETOOLONG(36): 文件名过长
 
     // 文件系统相关
-    ReadOnlyFs, // -EROFS(30): 只读文件系统
-    NoSpace,    // -ENOSPC(28): 设备空间不足
-    IoError,    // -EIO(5): I/O 错误
-    NoDevice,   // -ENODEV(19): 设备不存在
-    NoMemory,   // -ENOMEM(12): 内存不足
-    Busy,       // -EBUSY(16): 设备或资源忙
+    ReadOnlyFs,            // -EROFS(30): 只读文件系统
+    NoSpace,               // -ENOSPC(28): 设备空间不足
+    IoError,               // -EIO(5): I/O 错误
+    NoSuchDeviceOrAddress, // -ENXIO(6): 设备或地址不存在
+    NoDevice,              // -ENODEV(19): 设备不存在
+    NoMemory,              // -ENOMEM(12): 内存不足
+    Busy,                  // -EBUSY(16): 设备或资源忙
+    CrossDeviceLink,       // -EXDEV(18): 跨设备链接/重命名
 
     // 管道相关 (新增)
     BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
     WouldBlock, // -EAGAIN(11): 非阻塞操作将阻塞
 
     // 网络相关
-    NotConnected, // -ENOTCONN(107): 套接字未连接
+    DestinationAddressRequired, // -EDESTADDRREQ(89): 需要目标地址
+    NotConnected,               // -ENOTCONN(107): 套接字未连接
 
     // 其他
     NotSupported,    // -ENOTSUP(95): 操作不支持
@@ -57,6 +60,7 @@ impl FsError {
         match self {
             FsError::NotFound => -ENOENT as isize,
             FsError::IoError => -EIO as isize,
+            FsError::NoSuchDeviceOrAddress => -ENXIO as isize,
             FsError::BadFileDescriptor => -EBADF as isize,
             FsError::WouldBlock => -EAGAIN as isize,
             FsError::NoMemory => -ENOMEM as isize,
@@ -64,6 +68,7 @@ impl FsError {
             FsError::BadAddress => -EFAULT as isize,
             FsError::Busy => -EBUSY as isize,
             FsError::AlreadyExists => -EEXIST as isize,
+            FsError::CrossDeviceLink => -EXDEV as isize,
             FsError::NoDevice => -ENODEV as isize,
             FsError::NotDirectory => -ENOTDIR as isize,
             FsError::IsDirectory => -EISDIR as isize,
@@ -79,6 +84,7 @@ impl FsError {
             FsError::DirectoryNotEmpty => -ENOTEMPTY as isize,
             FsError::TooManySymlinks => -ELOOP as isize,
             FsError::NotSupported => -EOPNOTSUPP as isize,
+            FsError::DestinationAddressRequired => -EDESTADDRREQ as isize,
             FsError::NotConnected => -ENOTCONN as isize,
         }
     }
@@ -94,6 +100,7 @@ mod tests {
         kassert!(FsError::NotFound.to_errno() == -crate::uapi::errno::ENOENT as isize);
         kassert!(FsError::PermissionDenied.to_errno() == -crate::uapi::errno::EACCES as isize);
         kassert!(FsError::AlreadyExists.to_errno() == -crate::uapi::errno::EEXIST as isize);
+        kassert!(FsError::CrossDeviceLink.to_errno() == -crate::uapi::errno::EXDEV as isize);
         kassert!(FsError::BadAddress.to_errno() == -crate::uapi::errno::EFAULT as isize);
         kassert!(FsError::NotSeekable.to_errno() == -crate::uapi::errno::ESPIPE as isize);
         kassert!(FsError::NotTty.to_errno() == -crate::uapi::errno::ENOTTY as isize);

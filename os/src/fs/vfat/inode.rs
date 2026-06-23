@@ -235,11 +235,11 @@ impl Inode for VfatInode {
         let new_parent = new_parent
             .as_any()
             .downcast_ref::<VfatInode>()
-            .ok_or(FsError::InvalidArgument)?;
+            .ok_or(FsError::CrossDeviceLink)?;
         new_parent.ensure_directory()?;
 
         if !Arc::ptr_eq(&self.state, &new_parent.state) {
-            return Err(FsError::InvalidArgument);
+            return Err(FsError::CrossDeviceLink);
         }
 
         if self.path == new_parent.path && old_name.eq_ignore_ascii_case(new_name) {

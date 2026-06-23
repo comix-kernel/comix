@@ -107,11 +107,15 @@ use crate::{
             parse_sockaddr_in, register_socket_fd, unregister_socket_fd, write_sockaddr_in,
         },
         stack::{TcpConnectionState, TcpListenState, network_stack},
+        unix_socket::{
+            UnixSocketFile, create_unix_socket, create_unix_socket_pair, parse_sockaddr_un,
+            wait_unix_would_block, write_sockaddr_un, write_socketpair_fds,
+        },
     },
     pr_debug, pr_info, println,
     uapi::{
         fcntl::{FdFlags, OpenFlags},
-        socket::{SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOCK_TYPE_MASK},
+        socket::{AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOCK_TYPE_MASK},
     },
 };
 use alloc::sync::Arc;

@@ -1,5 +1,10 @@
 //! Socket options and constants
 
+// Address families
+pub const AF_UNIX: i32 = 1;
+pub const AF_LOCAL: i32 = AF_UNIX;
+pub const AF_INET: i32 = 2;
+
 // Socket levels
 pub const SOL_SOCKET: i32 = 1;
 pub const IPPROTO_TCP: i32 = 6;

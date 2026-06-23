@@ -14,6 +14,12 @@ use fdt::{Fdt, node::FdtNode};
 #[unsafe(no_mangle)]
 pub static DTP: AtomicUsize = AtomicUsize::new(0x114514); // 占位地址，实际由引导程序设置
 
+#[cfg(target_arch = "loongarch64")]
+const DEFAULT_CLOCK_FREQ: usize = 100_000_000;
+
+#[cfg(not(target_arch = "loongarch64"))]
+const DEFAULT_CLOCK_FREQ: usize = 12_500_000;
+
 lazy_static::lazy_static! {
     /// 设备树
     /// 通过 DTP 指针解析得到
@@ -49,7 +55,22 @@ pub fn early_init() {
     };
 
     set_num_cpu(1 + cpus.count());
-    set_clock_freq(first_cpu.timebase_frequency());
+    let freq = cpu_clock_frequency(first_cpu).unwrap_or_else(|| {
+        pr_warn!(
+            "[Device] CPU timebase/clock frequency missing in device tree; using {} Hz",
+            DEFAULT_CLOCK_FREQ
+        );
+        DEFAULT_CLOCK_FREQ
+    });
+    set_clock_freq(freq);
+}
+
+fn cpu_clock_frequency(cpu: fdt::standard_nodes::Cpu<'_, '_>) -> Option<usize> {
+    cpu.property("timebase-frequency")
+        .or_else(|| FDT.find_node("/cpus")?.property("timebase-frequency"))
+        .or_else(|| cpu.property("clock-frequency"))
+        .or_else(|| FDT.find_node("/cpus")?.property("clock-frequency"))
+        .and_then(|prop| prop.as_usize())
 }
 
 /// 初始化设备树

@@ -15,6 +15,7 @@ pub const SYS_MKNODAT: usize = 33;
 pub const SYS_MKDIRAT: usize = 34;
 pub const SYS_UNLINKAT: usize = 35;
 pub const SYS_SYMLINKAT: usize = 36;
+pub const SYS_LINKAT: usize = 37;
 pub const SYS_MOUNT: usize = 40;
 pub const SYS_UMOUNT2: usize = 39;
 pub const SYS_STATFS: usize = 43;
@@ -118,6 +119,7 @@ pub const SYS_SYSINFO: usize = 179;
 
 // ---- 网络/Socket ----
 pub const SYS_SOCKET: usize = 198;
+pub const SYS_SOCKETPAIR: usize = 199;
 pub const SYS_BIND: usize = 200;
 pub const SYS_LISTEN: usize = 201;
 pub const SYS_ACCEPT: usize = 202;

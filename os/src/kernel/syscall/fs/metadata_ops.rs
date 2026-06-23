@@ -1,4 +1,32 @@
 use super::*;
+use alloc::string::String;
+
+fn split_creating_path(dirfd: i32, path: &str) -> Result<(String, String), FsError> {
+    if path.bytes().all(|b| b == b'/') {
+        return Err(FsError::AlreadyExists);
+    }
+    if path.ends_with('/') {
+        let path = path.trim_end_matches('/');
+        match resolve_at_path(dirfd, path) {
+            Ok(Some(_)) => return Err(FsError::AlreadyExists),
+            Ok(None) => {}
+            Err(e) => return Err(e),
+        }
+
+        let (parent, _) = split_parent_preserving_basename(path)?;
+        let parent = match resolve_at_path(dirfd, &parent)? {
+            Some(parent) => parent,
+            None => return Err(FsError::NotFound),
+        };
+        if parent.inode.metadata()?.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        return Err(FsError::NotFound);
+    }
+
+    split_parent_preserving_basename(path)
+}
 
 /// fchownat - 修改文件所有者和组
 ///
@@ -24,8 +52,14 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
         Err(e) => return e.to_errno(),
     };
 
+    const FCHOWNAT_ALLOWED_FLAGS: u32 =
+        AtFlags::SYMLINK_NOFOLLOW.bits() | AtFlags::EMPTY_PATH.bits();
+    if flags & !FCHOWNAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
     // 解析标志位
-    let at_flags = AtFlags::from_bits_truncate(flags);
+    let at_flags = AtFlags::from_bits_retain(flags);
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
     let empty_path = at_flags.contains(AtFlags::EMPTY_PATH);
 
@@ -53,6 +87,9 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
             Err(e) => e.to_errno(),
         };
     }
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 解析路径，获取 dentry（使用辅助函数）
     let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
@@ -73,7 +110,7 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
 /// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
 /// * `pathname` - 文件路径
 /// * `mode` - 新的权限模式（12 位权限位）
-/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW 等）
+/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW、AT_EMPTY_PATH 等）
 ///
 /// # 返回值
 /// * 0 - 成功
@@ -90,9 +127,16 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
         Err(e) => return e.to_errno(),
     };
 
+    const FCHMODAT_ALLOWED_FLAGS: u32 =
+        AtFlags::SYMLINK_NOFOLLOW.bits() | AtFlags::EMPTY_PATH.bits();
+    if flags & !FCHMODAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
     // 解析标志位
-    let at_flags = AtFlags::from_bits_truncate(flags);
+    let at_flags = AtFlags::from_bits_retain(flags);
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    let empty_path = at_flags.contains(AtFlags::EMPTY_PATH);
 
     // 验证 mode 参数（只保留权限位，去除文件类型位）
     let mode = mode & 0o7777; // 保留 12 位权限位（包括 setuid/setgid/sticky）
@@ -100,6 +144,34 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
         Some(m) => m,
         None => return -(EINVAL as isize),
     };
+
+    // 处理 AT_EMPTY_PATH 情况
+    if empty_path && path_str.is_empty() {
+        // pathname 为空，操作 dirfd 本身
+        if dirfd == AT_FDCWD {
+            // 不能对当前目录使用 AT_EMPTY_PATH
+            return -(EINVAL as isize);
+        }
+
+        let task = current_task();
+        let file = match task.lock().fd_table.get(dirfd as usize) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
+
+        let dentry = match file.dentry() {
+            Ok(d) => d,
+            Err(e) => return e.to_errno(),
+        };
+
+        return match dentry.inode.chmod(file_mode) {
+            Ok(()) => 0,
+            Err(e) => e.to_errno(),
+        };
+    }
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 解析路径，获取 dentry（使用辅助函数）
     let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
@@ -133,7 +205,7 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, filename) = match split_path(&path_str) {
+    let (dir_path, filename) = match split_creating_path(dirfd, &path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -145,11 +217,27 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
         Err(e) => return e.to_errno(),
     };
 
-    // 构造文件模式
-    let file_mode = FileMode::from_bits_truncate(mode);
+    if is_special_basename(&filename) {
+        return FsError::AlreadyExists.to_errno();
+    }
+
+    // mknod without an explicit file type creates a regular file.
+    let mut file_mode = FileMode::from_bits_truncate(mode);
+    if file_mode & FileMode::S_IFMT == FileMode::empty() {
+        file_mode |= FileMode::S_IFREG;
+    }
+    if file_mode & FileMode::S_IFMT == FileMode::S_IFDIR {
+        return -(crate::uapi::errno::EPERM as isize);
+    }
+
+    // 用户态传入的是 Linux ABI dev_t，VFS 内部使用自己的 major/minor 编码。
+    let internal_dev = crate::vfs::dev::decode_linux_dev(dev);
 
     // 调用 inode.mknod()
-    match parent_dentry.inode.mknod(&filename, file_mode, dev) {
+    match parent_dentry
+        .inode
+        .mknod(&filename, file_mode, internal_dev)
+    {
         Ok(child_inode) => {
             // 创建 dentry 并加入缓存
             let child_dentry = Dentry::new(filename.clone(), child_inode);
@@ -188,7 +276,7 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, link_name) = match split_path(&link_str) {
+    let (dir_path, link_name) = match split_creating_path(newdirfd, &link_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -200,6 +288,10 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
         Err(e) => return e.to_errno(),
     };
 
+    if is_special_basename(&link_name) {
+        return FsError::AlreadyExists.to_errno();
+    }
+
     // 创建符号链接
     match parent_dentry.inode.symlink(&link_name, &target_str) {
         Ok(symlink_inode) => {
@@ -207,6 +299,76 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
             let symlink_dentry = Dentry::new(link_name.clone(), symlink_inode);
             parent_dentry.add_child(symlink_dentry.clone());
             DENTRY_CACHE.insert(&symlink_dentry);
+            0
+        }
+        Err(e) => e.to_errno(),
+    }
+}
+
+/// linkat - 创建硬链接
+pub fn linkat(
+    olddirfd: i32,
+    oldpath: *const c_char,
+    newdirfd: i32,
+    newpath: *const c_char,
+    flags: u32,
+) -> isize {
+    let old_path = match get_path_safe(oldpath as usize) {
+        Ok(s) => s,
+        Err(e) => return e.to_errno(),
+    };
+    let new_path = match get_path_safe(newpath as usize) {
+        Ok(s) => s,
+        Err(e) => return e.to_errno(),
+    };
+    if old_path.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
+
+    const LINKAT_ALLOWED_FLAGS: u32 = crate::uapi::fs::AtFlags::SYMLINK_FOLLOW.bits();
+    if flags & !LINKAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
+    let follow_symlink = flags & crate::uapi::fs::AtFlags::SYMLINK_FOLLOW.bits() != 0;
+    let old_dentry = match resolve_at_path_with_flags(olddirfd, &old_path, follow_symlink) {
+        Ok(dentry) => dentry,
+        Err(e) => return e.to_errno(),
+    };
+    let old_meta = match old_dentry.inode.metadata() {
+        Ok(meta) => meta,
+        Err(e) => return e.to_errno(),
+    };
+    if old_meta.inode_type == InodeType::Directory {
+        return -(crate::uapi::errno::EPERM as isize);
+    }
+
+    let (new_dir_path, new_name) = match split_creating_path(newdirfd, &new_path) {
+        Ok(parts) => parts,
+        Err(e) => return e.to_errno(),
+    };
+    let new_parent = match resolve_at_path(newdirfd, &new_dir_path) {
+        Ok(Some(dentry)) => dentry,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+    let new_parent_meta = match new_parent.inode.metadata() {
+        Ok(meta) => meta,
+        Err(e) => return e.to_errno(),
+    };
+    if new_parent_meta.inode_type != InodeType::Directory {
+        return FsError::NotDirectory.to_errno();
+    }
+    if is_special_basename(&new_name) {
+        return FsError::AlreadyExists.to_errno();
+    }
+
+    match new_parent.inode.link(&new_name, &old_dentry.inode) {
+        Ok(()) => {
+            drop_cached_child(&new_parent, &new_name);
+            let link_dentry = Dentry::new(new_name, old_dentry.inode.clone());
+            new_parent.add_child(link_dentry.clone());
+            DENTRY_CACHE.insert(&link_dentry);
             0
         }
         Err(e) => e.to_errno(),

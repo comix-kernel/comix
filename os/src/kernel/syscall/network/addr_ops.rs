@@ -51,12 +51,36 @@ pub fn sendto(
         return send(sockfd, buf, len, 0);
     }
 
+    let task = current_task();
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        let unix_addr = match parse_sockaddr_un(dest_addr, addrlen) {
+            Ok(addr) => addr,
+            Err(e) => return e,
+        };
+        let mut kernel_buf = alloc::vec![0u8; len];
+        unsafe {
+            crate::arch::ArchImpl::copy_from_user(
+                crate::arch::address::UA::from_usize(buf as usize),
+                kernel_buf.as_mut_ptr(),
+                len,
+            )
+            .ok();
+        }
+        return match unix_socket.send_to(&kernel_buf, unix_addr) {
+            Ok(n) => n as isize,
+            Err(e) => e.to_errno(),
+        };
+    }
+
     let endpoint = match parse_sockaddr_in(dest_addr, addrlen) {
         Ok(e) => e,
         Err(e) => return e.to_errno(),
     };
 
-    let task = current_task();
     let tid = task.lock().tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
@@ -185,6 +209,16 @@ pub fn recvfrom(
                         }
                         continue;
                     }
+                    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>()
+                        && !unix_socket
+                            .flags()
+                            .contains(crate::uapi::fcntl::OpenFlags::O_NONBLOCK)
+                    {
+                        if let Err(e) = wait_unix_would_block(file, task) {
+                            return e;
+                        }
+                        continue;
+                    }
                 }
                 return e.to_errno();
             }
@@ -206,15 +240,19 @@ pub fn shutdown(sockfd: i32, how: i32) -> isize {
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        return unix_socket.shutdown(how);
+    }
+
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
 
-    let file = match task_lock.fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => return -9, // EBADF
-    };
     drop(task_lock);
 
     use crate::net::socket::{socket_shutdown_read, socket_shutdown_write};
@@ -247,13 +285,20 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
-    let handle = match get_socket_handle(tid, sockfd as usize) {
-        Some(h) => h,
-        None => return -88, // ENOTSOCK
-    };
     let file = match task_lock.fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        return match write_sockaddr_un(addr, addrlen, unix_socket.local_addr()) {
+            Ok(()) => 0,
+            Err(e) => e,
+        };
+    }
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
     };
     drop(task_lock);
 
@@ -280,6 +325,20 @@ pub fn getsockname(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
 pub fn getpeername(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
     let task = current_task();
     let tid = task.lock().tid as usize;
+
+    let file = match task.lock().fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        return match unix_socket.peer_addr() {
+            Some(peer) => match write_sockaddr_un(addr, addrlen, Some(peer)) {
+                Ok(()) => 0,
+                Err(e) => e,
+            },
+            None => -107, // ENOTCONN
+        };
+    }
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
         Some(h) => h,
