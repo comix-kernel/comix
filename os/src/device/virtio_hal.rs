@@ -78,7 +78,7 @@ unsafe impl Hal for VirtIOHal {
     unsafe fn mmio_phys_to_virt(paddr: PhysAddr, _size: usize) -> NonNull<u8> {
         // 提取物理地址值并使用架构特定的转换函数
         let phys_addr = PA::from_usize(paddr as usize);
-        let virt = crate::arch::pa_to_va(phys_addr);
+        let virt = crate::arch::mmio_pa_to_va(phys_addr);
 
         // 验证虚拟地址的合法性
 
