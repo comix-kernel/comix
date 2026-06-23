@@ -255,7 +255,12 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
                 return n as isize;
             }
             Err(e) => {
-                pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, chunk_len, e);
+                pr_debug!(
+                    "send: sockfd={}, len={} -> error={:?}",
+                    sockfd,
+                    chunk_len,
+                    e
+                );
                 if e == crate::vfs::FsError::WouldBlock {
                     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
                         && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
@@ -325,11 +330,21 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
 
         match result {
             Ok(n) => {
-                pr_debug!("recv: sockfd={}, len={} -> received={}", sockfd, chunk_len, n);
+                pr_debug!(
+                    "recv: sockfd={}, len={} -> received={}",
+                    sockfd,
+                    chunk_len,
+                    n
+                );
                 return n as isize;
             }
             Err(e) => {
-                pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, chunk_len, e);
+                pr_debug!(
+                    "recv: sockfd={}, len={} -> error={:?}",
+                    sockfd,
+                    chunk_len,
+                    e
+                );
                 if e == crate::vfs::FsError::WouldBlock {
                     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
                         && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
