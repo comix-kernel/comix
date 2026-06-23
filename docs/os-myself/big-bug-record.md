@@ -105,12 +105,13 @@ BusyBox applet 的链接森林只是在运行时需要，不应该作为 Git 仓
 - `eb9d8ce net: support parallel tcp listeners`：为监听 socket 维护一组 spare TCP listener，accept 时把已建立连接交给新 fd，并补充新的 listener，解决 `PARALLEL_TCP` 连接拒绝。
 - `491634c net: reduce iperf socket log noise`：把热路径 socket/TCP 连接日志从 info 降到 debug，避免串口日志本身拖慢性能。
 - `aae6897 net: size adapter rx buffer for mtu`：adapter RX buffer 改为按 `device.mtu() + Ethernet header` 分配，修复 64KiB loopback TCP frame 被 2048B buffer 丢弃的问题。
+- `474b6ea net: cap tcp buffers below unstable window`：验证 UDP 改动时复现 smoltcp `SeqNumber` subtraction underflow，最终把 TCP buffer 从 256KiB 收到 128KiB-1，避开不稳定的大窗口组合。
 
 ### 决策和取舍
 
 没有直接 patch smoltcp。这里的问题主要是我们给 smoltcp 的设备能力、buffer 和 listen 模型不一致，先修本内核适配层更稳，也更容易解释。
 
-TCP buffer 选 256KiB 是折中值。更大可能继续提高峰值，但每个 TCP socket 都会占内存，iperf parallel 场景会放大内存占用；更小则容易回到 WouldBlock 和窗口太小的问题。
+TCP buffer 起初选 256KiB，是为了减少 WouldBlock 并提高窗口；这一版峰值很好，`BASIC_TCP`/`REVERSE_TCP` 能到约 490Mbit/s，`PARALLEL_TCP` 能到约 709Mbit/s。但后续在完整 iperf-only 复测中，`PARALLEL_TCP` 五条连接建立后触发 smoltcp sequence number underflow panic。64KiB 以内能稳定，但单流 TCP 只剩约 70Mbit/s。最终选 `128KiB-1`：仍然明显高于原始 4KiB/0 receiver，且完整 iperf 组稳定通过。
 
 listener pool 做了上限，不直接相信 iperf 传入的巨大 backlog。当前逻辑把用户 backlog clamp 到 128，实际 spare listener pool clamp 到 16，足够覆盖 iperf `-P 5`，同时避免一次 listen 分配过多 TCP buffer。
 
@@ -118,12 +119,55 @@ listener pool 做了上限，不直接相信 iperf 传入的巨大 backlog。当
 
 ### 验证
 
-临时把 RISC-V `rcS` 改成只跑 `iperf_testcode.sh`，重建 `make kernel-rv PROFILE=release`，用临时分区盘 `/tmp/ccyos-disk-iperf-repro.img` 跑官方 RISC-V musl iperf 组。
+临时把 RISC-V `rcS` 改成只跑 `iperf_testcode.sh`，构建 release 内核，用临时分区盘 `/tmp/ccyos-disk-udpq-tcp128k.img` 跑官方 RISC-V musl iperf 组。
 
-最新一次验证中，TCP 三项都通过：
+最终采用 128KiB-1 TCP buffer 后，最新一次验证中 TCP 三项都通过：
 
-- `BASIC_TCP`：sender 118MiB / 492Mbit/s，receiver 117MiB / 490Mbit/s。
-- `PARALLEL_TCP`：5 stream 全部连接成功，SUM sender 170MiB / 713Mbit/s，receiver 170MiB / 709Mbit/s。
-- `REVERSE_TCP`：sender/receiver 都约 118MiB / 494Mbit/s。
+- `BASIC_TCP`：sender 71.7MiB / 300Mbit/s，receiver 71.4MiB / 299Mbit/s。
+- `PARALLEL_TCP`：5 stream 全部连接成功，SUM sender 102MiB / 424Mbit/s，receiver 102MiB / 418Mbit/s。
+- `REVERSE_TCP`：sender 72.2MiB / 302Mbit/s，receiver 72.0MiB / 302Mbit/s。
 
-这说明最初 “4KiB / receiver 0” 和 “parallel connection refused” 两个 TCP 主问题已经解决。当前 iperf 剩余明显短板转移到 UDP 单流和 reverse UDP：sender 很高，但 receiver 仍有大量丢包，需要下一步继续优化 UDP 接收路径。
+这说明最初 “4KiB / receiver 0” 和 “parallel connection refused” 两个 TCP 主问题已经解决。TCP 的峰值为了稳定性放弃了 256KiB buffer 下的最高数字，但所有 TCP 子项稳定通过，且吞吐仍是原始结果的数量级提升。
+
+## 2026-06-23 iperf UDP 单流和反向模式高丢包
+
+### 现象
+
+TCP 主问题解决后，UDP 仍然拖分：
+
+- `BASIC_UDP` receiver 约 46Mbit/s，丢包约 58%-61%。
+- `REVERSE_UDP` receiver 约 48Mbit/s，同样有大量丢包。
+- `PARALLEL_UDP` 反而能到约 137Mbit/s 且 0% loss。
+
+这个现象说明链路、loopback MTU 和基本 UDP socket 不是完全坏掉；单 fd 收包路径比多 stream 分摊路径更容易溢出。
+
+### 关键发现
+
+本内核对 UDP 做了 per-port smoltcp socket 加 per-fd 队列的分发。smoltcp 共享 socket 收到包以后，`udp_dispatch_drain_locked()` 会复制到目标 `SocketFile` 的 `udp_rx_queue`，用户态再从这个队列 `recvfrom()`。
+
+原来的 `UDP_RXQ_CAP = 64` 太小。iperf UDP 使用极高目标带宽发包，发送端在短时间内产生的 datagram 比接收线程 drain 得更快；队列满后 `udp_push()` 直接返回 false，后续 datagram 被丢掉。`PARALLEL_UDP` 因为 5 条 stream 分散到多个 fd 队列，每个队列压力小，所以表现比单流好。
+
+试过把 UDP 队列固定预分配到 512。这个版本把 `BASIC_UDP` 提到 77.8Mbit/s 且 0% loss，但 `PARALLEL_UDP` 随后触发 `memory allocation of 1064960 bytes failed`。原因是每个 UDP 队列项包含最大 2048 字节 payload 缓冲，512 项接近 1MiB；所有 UDP socket 一创建就预分配，会把 parallel 场景的内存压力放大。
+
+### 处理步骤
+
+- `f4905d9 net: grow udp receive queues lazily`：UDP per-fd 队列初始仍为 64，只有队列满时才尝试翻倍扩容，最大 512。
+- 如果扩容失败或已达上限，队列丢弃最旧 datagram 再放入新 datagram。这样在内存紧张时仍然有 UDP 丢包，但不会因为固定大队列把内核堆打爆，也更偏向保留较新的 iperf 数据。
+
+### 决策和取舍
+
+没有把所有 UDP socket 都预分配 512 项。固定大队列能改善单流 loss，但并行时内存占用不可控；lazy growth 只让真正承压的 socket 付出内存成本。
+
+没有把 UDP 队列做成无限增长。iperf `-u -b 1000G` 本质上会制造远超内核处理能力的 burst；无限增长只是把丢包变成内存耗尽。512 是这次本地验证中能消掉单流丢包、又不会让 parallel UDP 分配失败的上限。
+
+丢弃策略从“队列满就丢新包”变成“扩不动时丢旧包”。这对 UDP 是可接受取舍：UDP 本来不保证可靠性，保留较新的 datagram 对 iperf 的实时统计和反向模式更有价值。
+
+### 验证
+
+临时把 RISC-V `rcS` 改成只跑 `iperf_testcode.sh`，构建 release 内核并用临时分区盘 `/tmp/ccyos-disk-udpq-tcp128k.img` 跑官方 RISC-V musl iperf 组。最新一次完整 iperf-only 验证全部通过：
+
+- `BASIC_UDP`：sender 25.9MiB / 109Mbit/s，receiver 25.9MiB / 108Mbit/s，0% loss。
+- `PARALLEL_UDP`：SUM sender 36.6MiB / 154Mbit/s，receiver 36.5MiB / 153Mbit/s，0% loss。
+- `REVERSE_UDP`：sender 19.9MiB / 82.7Mbit/s，receiver 19.8MiB / 82.8Mbit/s，0% loss。
+
+这说明 UDP 的主要问题是 per-fd 接收队列容量和内存策略，而不是 UDP 校验、地址绑定或 loopback 设备本身。
