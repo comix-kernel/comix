@@ -35,6 +35,9 @@ pub fn renameat2(
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    if old_path_str.is_empty() || new_path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 分割路径为 (父目录, 文件名)
     let (old_dir_path, old_name) = match split_path(&old_path_str) {
