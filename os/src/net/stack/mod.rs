@@ -18,6 +18,12 @@ use super::socket::{self, SocketFile, SocketHandle, UdpDatagram};
 mod adapter;
 pub use adapter::{NetDeviceAdapter, SmoltcpInterface};
 
+const TCP_RX_BUFFER_SIZE: usize = 256 * 1024;
+const TCP_TX_BUFFER_SIZE: usize = 256 * 1024;
+const UDP_PACKET_METADATA_CAPACITY: usize = 256;
+const UDP_RX_BUFFER_SIZE: usize = 256 * 1024;
+const UDP_TX_BUFFER_SIZE: usize = 256 * 1024;
+
 pub(crate) fn enqueue_loopback_frame(frame: Vec<u8>) {
     network_stack().enqueue_loopback_frame(frame);
 }
@@ -154,15 +160,15 @@ impl NetworkStack {
     pub fn create_tcp_socket(&self) -> Result<SocketHandle, NetworkError> {
         let mut rx_vec = alloc::vec::Vec::new();
         rx_vec
-            .try_reserve(4096)
+            .try_reserve(TCP_RX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        rx_vec.resize(4096, 0);
+        rx_vec.resize(TCP_RX_BUFFER_SIZE, 0);
 
         let mut tx_vec = alloc::vec::Vec::new();
         tx_vec
-            .try_reserve(4096)
+            .try_reserve(TCP_TX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        tx_vec.resize(4096, 0);
+        tx_vec.resize(TCP_TX_BUFFER_SIZE, 0);
 
         let rx_buffer = tcp::SocketBuffer::new(rx_vec);
         let tx_buffer = tcp::SocketBuffer::new(tx_vec);
@@ -806,27 +812,27 @@ impl NetworkStack {
     ) -> Result<SmoltcpHandle, NetworkError> {
         let mut rx_meta_vec = alloc::vec::Vec::new();
         rx_meta_vec
-            .try_reserve(4)
+            .try_reserve(UDP_PACKET_METADATA_CAPACITY)
             .map_err(|_| NetworkError::NoMemory)?;
-        rx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
+        rx_meta_vec.resize(UDP_PACKET_METADATA_CAPACITY, udp::PacketMetadata::EMPTY);
 
         let mut tx_meta_vec = alloc::vec::Vec::new();
         tx_meta_vec
-            .try_reserve(4)
+            .try_reserve(UDP_PACKET_METADATA_CAPACITY)
             .map_err(|_| NetworkError::NoMemory)?;
-        tx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
+        tx_meta_vec.resize(UDP_PACKET_METADATA_CAPACITY, udp::PacketMetadata::EMPTY);
 
         let mut rx_data_vec = alloc::vec::Vec::new();
         rx_data_vec
-            .try_reserve(4096)
+            .try_reserve(UDP_RX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        rx_data_vec.resize(4096, 0);
+        rx_data_vec.resize(UDP_RX_BUFFER_SIZE, 0);
 
         let mut tx_data_vec = alloc::vec::Vec::new();
         tx_data_vec
-            .try_reserve(4096)
+            .try_reserve(UDP_TX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        tx_data_vec.resize(4096, 0);
+        tx_data_vec.resize(UDP_TX_BUFFER_SIZE, 0);
 
         let rx_buffer = udp::PacketBuffer::new(rx_meta_vec, rx_data_vec);
         let tx_buffer = udp::PacketBuffer::new(tx_meta_vec, tx_data_vec);
