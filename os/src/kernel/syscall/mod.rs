@@ -224,6 +224,7 @@ impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
 
 // 网络 (Networking/Sockets)
 impl_syscall!(sys_socket, socket, (i32, i32, i32));
+impl_syscall!(sys_socketpair, socketpair, (i32, i32, i32, *mut i32));
 impl_syscall!(sys_bind, bind, (i32, *const u8, u32));
 impl_syscall!(sys_listen, listen, (i32, i32));
 impl_syscall!(sys_accept, accept, (i32, *mut u8, *mut u32));

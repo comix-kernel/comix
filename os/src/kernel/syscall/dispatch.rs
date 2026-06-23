@@ -145,6 +145,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
 
         // 网络
         crate::kernel::syscall::numbers::SYS_SOCKET => sys_socket(frame),
+        crate::kernel::syscall::numbers::SYS_SOCKETPAIR => sys_socketpair(frame),
         crate::kernel::syscall::numbers::SYS_BIND => sys_bind(frame),
         crate::kernel::syscall::numbers::SYS_LISTEN => sys_listen(frame),
         crate::kernel::syscall::numbers::SYS_ACCEPT => sys_accept(frame),

@@ -50,10 +50,15 @@ fn copy_user_array<T: Copy>(
 
 fn should_retry_would_block(file: &Arc<dyn File>) -> bool {
     use crate::net::socket::SocketFile;
+    use crate::net::unix_socket::UnixSocketFile;
     use crate::uapi::fcntl::OpenFlags;
     use crate::vfs::PipeFile;
 
     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>() {
+        return !socket_file.flags().contains(OpenFlags::O_NONBLOCK);
+    }
+
+    if let Some(socket_file) = file.as_any().downcast_ref::<UnixSocketFile>() {
         return !socket_file.flags().contains(OpenFlags::O_NONBLOCK);
     }
 

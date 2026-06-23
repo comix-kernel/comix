@@ -2,6 +2,20 @@ use super::*;
 
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
+    let task = current_task();
+    let task_lock = task.lock();
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        let unix_addr = match parse_sockaddr_un(addr, addrlen) {
+            Ok(addr) => addr,
+            Err(e) => return e,
+        };
+        return unix_socket.connect(unix_addr);
+    }
+
     let endpoint = match parse_sockaddr_in(addr, addrlen) {
         Ok(e) => {
             pr_debug!("connect: sockfd={}, endpoint={}", sockfd, e);
@@ -10,8 +24,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    let task = current_task();
-    let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
     let handle = match get_socket_handle(tid, sockfd as usize) {
@@ -19,10 +31,6 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         None => return -88, // ENOTSOCK
     };
 
-    let file = match task_lock.fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => return -9, // EBADF
-    };
     drop(task_lock);
 
     use crate::net::socket::set_socket_remote_endpoint;
@@ -245,17 +253,26 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
             }
             Err(e) => {
                 pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, len, e);
-                if e == crate::vfs::FsError::WouldBlock
-                    && let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
-                    && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
-                {
-                    drop(file);
-                    crate::net::socket::poll_network_and_dispatch();
-                    crate::kernel::yield_task();
-                    if crate::ipc::signal_interrupts_syscall(&task) {
-                        return -(crate::uapi::errno::EINTR as isize);
+                if e == crate::vfs::FsError::WouldBlock {
+                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                        && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
+                    {
+                        drop(file);
+                        crate::net::socket::poll_network_and_dispatch();
+                        crate::kernel::yield_task();
+                        if crate::ipc::signal_interrupts_syscall(&task) {
+                            return -(crate::uapi::errno::EINTR as isize);
+                        }
+                        continue;
                     }
-                    continue;
+                    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>()
+                        && !unix_socket.flags().contains(OpenFlags::O_NONBLOCK)
+                    {
+                        if let Err(e) = wait_unix_would_block(file, task) {
+                            return e;
+                        }
+                        continue;
+                    }
                 }
                 return e.to_errno();
             }
@@ -309,17 +326,26 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
             }
             Err(e) => {
                 pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, len, e);
-                if e == crate::vfs::FsError::WouldBlock
-                    && let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
-                    && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
-                {
-                    drop(file);
-                    crate::net::socket::poll_network_and_dispatch();
-                    crate::kernel::yield_task();
-                    if crate::ipc::signal_interrupts_syscall(&task) {
-                        return -(crate::uapi::errno::EINTR as isize);
+                if e == crate::vfs::FsError::WouldBlock {
+                    if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
+                        && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
+                    {
+                        drop(file);
+                        crate::net::socket::poll_network_and_dispatch();
+                        crate::kernel::yield_task();
+                        if crate::ipc::signal_interrupts_syscall(&task) {
+                            return -(crate::uapi::errno::EINTR as isize);
+                        }
+                        continue;
                     }
-                    continue;
+                    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>()
+                        && !unix_socket.flags().contains(OpenFlags::O_NONBLOCK)
+                    {
+                        if let Err(e) = wait_unix_would_block(file, task) {
+                            return e;
+                        }
+                        continue;
+                    }
                 }
                 return e.to_errno();
             }

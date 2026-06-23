@@ -8,6 +8,7 @@ pub mod config;
 pub mod interface;
 pub mod socket;
 pub mod stack;
+pub mod unix_socket;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkError {

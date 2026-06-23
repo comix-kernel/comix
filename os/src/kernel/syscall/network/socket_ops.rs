@@ -2,10 +2,6 @@ use super::*;
 
 /// 创建套接字
 pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
-    if domain != 2 {
-        return -97;
-    } // EAFNOSUPPORT
-
     let base_type = socket_type & SOCK_TYPE_MASK;
     let extra_flags = socket_type & !SOCK_TYPE_MASK;
     let supported_flags = SOCK_NONBLOCK | SOCK_CLOEXEC;
@@ -23,6 +19,23 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     } else {
         FdFlags::empty()
     };
+
+    if domain == AF_UNIX {
+        let socket_file = match create_unix_socket(base_type, open_flags) {
+            Ok(file) => file,
+            Err(e) => return e,
+        };
+        let task = current_task();
+        let task_lock = task.lock();
+        return match task_lock.fd_table.alloc_with_flags(socket_file, fd_flags) {
+            Ok(fd) => fd as isize,
+            Err(e) => e.to_errno(),
+        };
+    }
+
+    if domain != 2 {
+        return -97;
+    } // EAFNOSUPPORT
 
     let handle = match base_type {
         SOCK_STREAM => match create_tcp_socket() {
@@ -62,15 +75,78 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     }
 }
 
+/// 创建一对已连接的套接字
+pub fn socketpair(domain: i32, socket_type: i32, _protocol: i32, sv: *mut i32) -> isize {
+    if domain != AF_UNIX {
+        return -97; // EAFNOSUPPORT
+    }
+
+    let base_type = socket_type & SOCK_TYPE_MASK;
+    let extra_flags = socket_type & !SOCK_TYPE_MASK;
+    let supported_flags = SOCK_NONBLOCK | SOCK_CLOEXEC;
+    if extra_flags & !supported_flags != 0 {
+        return -22; // EINVAL
+    }
+
+    let mut open_flags = OpenFlags::empty();
+    if extra_flags & SOCK_NONBLOCK != 0 {
+        open_flags |= OpenFlags::O_NONBLOCK;
+    }
+    let fd_flags = if extra_flags & SOCK_CLOEXEC != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+
+    let (left, right) = match create_unix_socket_pair(base_type, open_flags) {
+        Ok(pair) => pair,
+        Err(e) => return e,
+    };
+
+    let task = current_task();
+    let task_lock = task.lock();
+    let left_fd = match task_lock.fd_table.alloc_with_flags(left, fd_flags) {
+        Ok(fd) => fd,
+        Err(e) => return e.to_errno(),
+    };
+    let right_fd = match task_lock.fd_table.alloc_with_flags(right, fd_flags) {
+        Ok(fd) => fd,
+        Err(e) => {
+            let _ = task_lock.fd_table.close(left_fd);
+            return e.to_errno();
+        }
+    };
+
+    if let Err(e) = write_socketpair_fds(sv, left_fd, right_fd) {
+        let _ = task_lock.fd_table.close(left_fd);
+        let _ = task_lock.fd_table.close(right_fd);
+        return e;
+    }
+
+    0
+}
+
 /// 绑定套接字
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
+    let task = current_task();
+    let task_lock = task.lock();
+    let file = match task_lock.fd_table.get(sockfd as usize) {
+        Ok(f) => f,
+        Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        let unix_addr = match parse_sockaddr_un(addr, addrlen) {
+            Ok(addr) => addr,
+            Err(e) => return e,
+        };
+        return unix_socket.bind(unix_addr);
+    }
+
     let endpoint = match parse_sockaddr_in(addr, addrlen) {
         Ok(e) => e,
         Err(e) => return e.to_errno(),
     };
 
-    let task = current_task();
-    let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
     pr_debug!(
@@ -177,14 +253,17 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
     let task_lock = task.lock();
     let tid = task_lock.tid as usize;
 
-    let handle = match get_socket_handle(tid, sockfd as usize) {
-        Some(h) => h,
-        None => return -88, // ENOTSOCK
-    };
-
     let file = match task_lock.fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
+    };
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        return unix_socket.listen(backlog);
+    }
+
+    let handle = match get_socket_handle(tid, sockfd as usize) {
+        Some(h) => h,
+        None => return -88, // ENOTSOCK
     };
     drop(task_lock);
 
@@ -278,6 +357,32 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
+
+    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+        let is_nonblock = unix_socket.flags().contains(OpenFlags::O_NONBLOCK);
+        loop {
+            match unix_socket.accept() {
+                Ok(conn) => {
+                    let peer_addr = conn.peer_addr();
+                    if let Err(e) = write_sockaddr_un(addr, addrlen, peer_addr) {
+                        return e;
+                    }
+                    return match task.lock().fd_table.alloc(conn) {
+                        Ok(fd) => fd as isize,
+                        Err(e) => e.to_errno(),
+                    };
+                }
+                Err(e) if e == -(crate::uapi::errno::EAGAIN as isize) && !is_nonblock => {
+                    crate::kernel::yield_task();
+                    if crate::ipc::signal_interrupts_syscall(&task) {
+                        return -(crate::uapi::errno::EINTR as isize);
+                    }
+                    continue;
+                }
+                Err(e) => return e,
+            }
+        }
+    }
 
     use crate::net::socket::SocketFile;
     let socket_file = match file.as_any().downcast_ref::<SocketFile>() {

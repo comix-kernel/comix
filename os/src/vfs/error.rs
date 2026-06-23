@@ -40,7 +40,8 @@ pub enum FsError {
     WouldBlock, // -EAGAIN(11): 非阻塞操作将阻塞
 
     // 网络相关
-    NotConnected, // -ENOTCONN(107): 套接字未连接
+    DestinationAddressRequired, // -EDESTADDRREQ(89): 需要目标地址
+    NotConnected,               // -ENOTCONN(107): 套接字未连接
 
     // 其他
     NotSupported,    // -ENOTSUP(95): 操作不支持
@@ -81,6 +82,7 @@ impl FsError {
             FsError::DirectoryNotEmpty => -ENOTEMPTY as isize,
             FsError::TooManySymlinks => -ELOOP as isize,
             FsError::NotSupported => -EOPNOTSUPP as isize,
+            FsError::DestinationAddressRequired => -EDESTADDRREQ as isize,
             FsError::NotConnected => -ENOTCONN as isize,
         }
     }

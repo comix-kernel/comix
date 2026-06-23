@@ -15,15 +15,42 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
         Err(_) => return -(EBADF as isize),
     };
 
-    let socket_file = match file
+    enum SocketOptionTarget<'a> {
+        Inet(&'a crate::net::socket::SocketFile),
+        Unix(&'a crate::net::unix_socket::UnixSocketFile),
+    }
+
+    impl SocketOptionTarget<'_> {
+        fn get(&self) -> crate::uapi::socket::SocketOptions {
+            match self {
+                Self::Inet(socket) => socket.get_socket_options(),
+                Self::Unix(socket) => socket.get_socket_options(),
+            }
+        }
+
+        fn set(&self, options: crate::uapi::socket::SocketOptions) {
+            match self {
+                Self::Inet(socket) => socket.set_socket_options(options),
+                Self::Unix(socket) => socket.set_socket_options(options),
+            }
+        }
+    }
+
+    let target = if let Some(sf) = file
         .as_any()
         .downcast_ref::<crate::net::socket::SocketFile>()
     {
-        Some(sf) => sf,
-        None => return -(ENOTSOCK as isize),
+        SocketOptionTarget::Inet(sf)
+    } else if let Some(sf) = file
+        .as_any()
+        .downcast_ref::<crate::net::unix_socket::UnixSocketFile>()
+    {
+        SocketOptionTarget::Unix(sf)
+    } else {
+        return -(ENOTSOCK as isize);
     };
 
-    let mut opts = socket_file.get_socket_options();
+    let mut opts = target.get();
 
     match level {
         SOL_SOCKET => match optname {
@@ -37,6 +64,7 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
             SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD => { /* Ignore timeout options */ }
             _ => return -(ENOPROTOOPT as isize),
         },
+        _ if matches!(target, SocketOptionTarget::Unix(_)) => return -(ENOPROTOOPT as isize),
         IPPROTO_IP => match optname {
             IP_TOS | IP_TTL | IP_PKTINFO | IP_MTU_DISCOVER | IP_RECVERR => { /* ignore */ }
             _ => return -(ENOPROTOOPT as isize),
@@ -52,7 +80,7 @@ pub fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *const u8, optl
         _ => return -(ENOPROTOOPT as isize),
     }
 
-    socket_file.set_socket_options(opts);
+    target.set(opts);
     0
 }
 
@@ -77,15 +105,28 @@ pub fn getsockopt(
         Err(_) => return -(EBADF as isize),
     };
 
-    let socket_file = match file
+    let opts = if let Some(sf) = file
         .as_any()
         .downcast_ref::<crate::net::socket::SocketFile>()
     {
-        Some(sf) => sf,
-        None => return -(ENOTSOCK as isize),
+        sf.get_socket_options()
+    } else if let Some(sf) = file
+        .as_any()
+        .downcast_ref::<crate::net::unix_socket::UnixSocketFile>()
+    {
+        sf.get_socket_options()
+    } else {
+        return -(ENOTSOCK as isize);
     };
 
-    let opts = socket_file.get_socket_options();
+    if file
+        .as_any()
+        .downcast_ref::<crate::net::unix_socket::UnixSocketFile>()
+        .is_some()
+        && level != SOL_SOCKET
+    {
+        return -(ENOPROTOOPT as isize);
+    };
 
     let available_len = read_from_user(optlen as *const u32) as usize;
     let mut written_len = 0usize;
