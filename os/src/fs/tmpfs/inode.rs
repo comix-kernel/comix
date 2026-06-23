@@ -191,6 +191,73 @@ impl TmpfsInode {
     fn cancel_page_reservation(&self) {
         self.dec_allocated_pages(1);
     }
+
+    fn remove_link_from_child(&self, child: &Arc<TmpfsInode>) {
+        let (inode_type, should_free_data) = {
+            let mut child_meta = child.metadata.lock();
+            let inode_type = child_meta.inode_type;
+            if inode_type == InodeType::Directory {
+                child_meta.nlinks = 0;
+                child_meta.ctime = TimeSpec::now();
+                (inode_type, false)
+            } else {
+                child_meta.nlinks = child_meta.nlinks.saturating_sub(1);
+                child_meta.ctime = TimeSpec::now();
+                (inode_type, child_meta.nlinks == 0)
+            }
+        };
+
+        if inode_type == InodeType::Directory {
+            let mut meta = self.metadata.lock();
+            meta.nlinks = meta.nlinks.saturating_sub(1);
+        }
+
+        if should_free_data {
+            let child_data = child.data.lock();
+            let allocated = child_data.iter().filter(|f| f.is_some()).count();
+            drop(child_data);
+            self.dec_allocated_pages(allocated);
+        }
+    }
+
+    fn is_descendant_or_self(candidate: &Arc<TmpfsInode>, ancestor: &Arc<TmpfsInode>) -> bool {
+        let mut current = Some(candidate.clone());
+        for _ in 0..1024 {
+            let Some(node) = current else {
+                return false;
+            };
+            if Arc::ptr_eq(&node, ancestor) {
+                return true;
+            }
+            current = node.parent.lock().upgrade();
+        }
+        true
+    }
+
+    fn validate_rename_target(
+        old_child: &Arc<TmpfsInode>,
+        target: &Arc<TmpfsInode>,
+    ) -> Result<(), FsError> {
+        if Arc::ptr_eq(old_child, target) {
+            return Ok(());
+        }
+
+        let old_type = old_child.metadata.lock().inode_type;
+        let target_type = target.metadata.lock().inode_type;
+
+        match (old_type, target_type) {
+            (InodeType::Directory, InodeType::Directory) => {
+                if !target.children.lock().is_empty() {
+                    return Err(FsError::DirectoryNotEmpty);
+                }
+            }
+            (InodeType::Directory, _) => return Err(FsError::NotDirectory),
+            (_, InodeType::Directory) => return Err(FsError::IsDirectory),
+            _ => {}
+        }
+
+        Ok(())
+    }
 }
 
 impl Inode for TmpfsInode {
@@ -451,19 +518,7 @@ impl Inode for TmpfsInode {
         drop(child_meta);
 
         let child = children.remove(name).ok_or(FsError::NotFound)?;
-        let should_free_data = {
-            let mut child_meta = child.metadata.lock();
-            child_meta.nlinks = child_meta.nlinks.saturating_sub(1);
-            child_meta.ctime = TimeSpec::now();
-            child_meta.nlinks == 0
-        };
-
-        if should_free_data {
-            let child_data = child.data.lock();
-            let allocated = child_data.iter().filter(|f| f.is_some()).count();
-            drop(child_data);
-            self.dec_allocated_pages(allocated);
-        }
+        self.remove_link_from_child(&child);
 
         self.update_mtime();
 
@@ -684,12 +739,118 @@ impl Inode for TmpfsInode {
 
     fn rename(
         &self,
-        _old_name: &str,
-        _new_parent: Arc<dyn Inode>,
-        _new_name: &str,
+        old_name: &str,
+        new_parent: Arc<dyn Inode>,
+        new_name: &str,
     ) -> Result<(), FsError> {
-        // TODO: 实现重命名支持
-        Err(FsError::NotSupported)
+        if old_name.is_empty()
+            || new_name.is_empty()
+            || old_name == "."
+            || old_name == ".."
+            || new_name == "."
+            || new_name == ".."
+        {
+            return Err(FsError::InvalidArgument);
+        }
+
+        let meta = self.metadata.lock();
+        if meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        drop(meta);
+
+        let self_arc = self.self_ref.lock().upgrade().ok_or(FsError::IoError)?;
+        let new_parent_ref = new_parent
+            .as_any()
+            .downcast_ref::<TmpfsInode>()
+            .ok_or(FsError::InvalidArgument)?;
+        let new_parent_arc = new_parent_ref
+            .self_ref
+            .lock()
+            .upgrade()
+            .ok_or(FsError::IoError)?;
+
+        if !Arc::ptr_eq(&self.stats, &new_parent_arc.stats) {
+            return Err(FsError::InvalidArgument);
+        }
+
+        let new_parent_meta = new_parent_arc.metadata.lock();
+        if new_parent_meta.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+        drop(new_parent_meta);
+
+        if Arc::ptr_eq(&self_arc, &new_parent_arc) && old_name == new_name {
+            return Ok(());
+        }
+
+        let old_child = {
+            let children = self.children.lock();
+            children.get(old_name).cloned().ok_or(FsError::NotFound)?
+        };
+
+        if old_child.metadata.lock().inode_type == InodeType::Directory
+            && Self::is_descendant_or_self(&new_parent_arc, &old_child)
+        {
+            return Err(FsError::InvalidArgument);
+        }
+
+        if Arc::ptr_eq(&self_arc, &new_parent_arc) {
+            let mut children = self.children.lock();
+            let old_child = children.get(old_name).cloned().ok_or(FsError::NotFound)?;
+            if let Some(target) = children.get(new_name).cloned() {
+                Self::validate_rename_target(&old_child, &target)?;
+                if Arc::ptr_eq(&old_child, &target) {
+                    return Ok(());
+                }
+                children.remove(new_name);
+                self.remove_link_from_child(&target);
+            }
+            let child = children.remove(old_name).ok_or(FsError::NotFound)?;
+            children.insert(new_name.to_string(), child.clone());
+            child.metadata.lock().ctime = TimeSpec::now();
+            drop(children);
+            self.update_mtime();
+            return Ok(());
+        }
+
+        {
+            let new_children = new_parent_arc.children.lock();
+            if let Some(target) = new_children.get(new_name).cloned() {
+                Self::validate_rename_target(&old_child, &target)?;
+                if Arc::ptr_eq(&old_child, &target) {
+                    return Ok(());
+                }
+            }
+        }
+
+        let child = {
+            let mut old_children = self.children.lock();
+            old_children.remove(old_name).ok_or(FsError::NotFound)?
+        };
+
+        {
+            let mut new_children = new_parent_arc.children.lock();
+            if let Some(target) = new_children.remove(new_name) {
+                Self::validate_rename_target(&child, &target)?;
+                new_parent_arc.remove_link_from_child(&target);
+            }
+            new_children.insert(new_name.to_string(), child.clone());
+        }
+
+        if child.metadata.lock().inode_type == InodeType::Directory {
+            *child.parent.lock() = Arc::downgrade(&new_parent_arc);
+            {
+                let mut old_meta = self.metadata.lock();
+                old_meta.nlinks = old_meta.nlinks.saturating_sub(1);
+            }
+            new_parent_arc.metadata.lock().nlinks += 1;
+        }
+        child.metadata.lock().ctime = TimeSpec::now();
+
+        self.update_mtime();
+        new_parent_arc.update_mtime();
+        Ok(())
     }
 
     fn set_times(&self, atime: Option<TimeSpec>, mtime: Option<TimeSpec>) -> Result<(), FsError> {
