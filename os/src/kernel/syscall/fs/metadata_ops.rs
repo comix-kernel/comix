@@ -59,6 +59,9 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
             Err(e) => e.to_errno(),
         };
     }
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 解析路径，获取 dentry（使用辅助函数）
     let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
@@ -104,6 +107,9 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     // 解析标志位
     let at_flags = AtFlags::from_bits_retain(flags);
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 验证 mode 参数（只保留权限位，去除文件类型位）
     let mode = mode & 0o7777; // 保留 12 位权限位（包括 setuid/setgid/sticky）
