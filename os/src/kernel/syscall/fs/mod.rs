@@ -20,8 +20,8 @@ use crate::{
     },
     util::user_buffer::write_to_user,
     vfs::{
-        DENTRY_CACHE, Dentry, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat, Statx,
-        split_path, vfs_lookup,
+        DENTRY_CACHE, Dentry, FdFlags, FileMode, FsError, InodeType, OpenFlags, SeekWhence, Stat,
+        Statx, split_path, vfs_lookup,
     },
 };
 

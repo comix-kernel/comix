@@ -87,7 +87,8 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 
     // 分配文件描述符
     let task = current_task();
-    match task.lock().fd_table.alloc(file) {
+    let fd_flags = FdFlags::from_open_flags(open_flags);
+    match task.lock().fd_table.alloc_with_flags(file, fd_flags) {
         Ok(fd) => fd as isize,
         Err(e) => e.to_errno(),
     }
