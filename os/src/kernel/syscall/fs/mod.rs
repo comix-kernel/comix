@@ -8,8 +8,9 @@ use crate::{
     kernel::{
         current_task,
         syscall::util::{
-            create_file_at, create_file_from_dentry, get_path_safe, resolve_at_path,
-            resolve_at_path_string, resolve_at_path_with_flags,
+            create_file_at, create_file_from_dentry, get_path_safe, is_special_basename,
+            resolve_at_path, resolve_at_path_string, resolve_at_path_with_flags,
+            split_parent_preserving_basename,
         },
     },
     uapi::{

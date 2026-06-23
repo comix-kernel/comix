@@ -144,7 +144,7 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, filename) = match split_path(&path_str) {
+    let (dir_path, filename) = match split_parent_preserving_basename(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -155,6 +155,10 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
         Ok(None) => return FsError::NotFound.to_errno(),
         Err(e) => return e.to_errno(),
     };
+
+    if is_special_basename(&filename) {
+        return FsError::AlreadyExists.to_errno();
+    }
 
     // 构造文件模式
     let file_mode = FileMode::from_bits_truncate(mode);
@@ -205,7 +209,7 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, link_name) = match split_path(&link_str) {
+    let (dir_path, link_name) = match split_parent_preserving_basename(&link_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -216,6 +220,10 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
         Ok(None) => return FsError::NotFound.to_errno(),
         Err(e) => return e.to_errno(),
     };
+
+    if is_special_basename(&link_name) {
+        return FsError::AlreadyExists.to_errno();
+    }
 
     // 创建符号链接
     match parent_dentry.inode.symlink(&link_name, &target_str) {
@@ -265,7 +273,7 @@ pub fn linkat(
         return -(crate::uapi::errno::EPERM as isize);
     }
 
-    let (new_dir_path, new_name) = match split_path(&new_path) {
+    let (new_dir_path, new_name) = match split_parent_preserving_basename(&new_path) {
         Ok(parts) => parts,
         Err(e) => return e.to_errno(),
     };
@@ -280,6 +288,9 @@ pub fn linkat(
     };
     if new_parent_meta.inode_type != InodeType::Directory {
         return FsError::NotDirectory.to_errno();
+    }
+    if is_special_basename(&new_name) {
+        return FsError::AlreadyExists.to_errno();
     }
 
     match new_parent.inode.link(&new_name, &old_dentry.inode) {

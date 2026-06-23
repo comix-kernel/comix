@@ -89,7 +89,7 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, dirname) = match split_path(&path_str) {
+    let (dir_path, dirname) = match split_parent_preserving_basename(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -100,6 +100,10 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
         Ok(None) => return FsError::NotFound.to_errno(),
         Err(e) => return e.to_errno(),
     };
+
+    if is_special_basename(&dirname) {
+        return FsError::AlreadyExists.to_errno();
+    }
 
     // 创建目录
     let dir_mode = FileMode::from_bits_truncate(mode) | FileMode::S_IFDIR;
@@ -123,7 +127,7 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     let is_rmdir = (flags & AT_REMOVEDIR) != 0;
 
     // 分割路径
-    let (dir_path, filename) = match split_path(&path_str) {
+    let (dir_path, filename) = match split_parent_preserving_basename(&path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -134,6 +138,10 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
         Ok(None) => return FsError::NotFound.to_errno(),
         Err(e) => return e.to_errno(),
     };
+
+    if is_rmdir && filename == "." {
+        return FsError::InvalidArgument.to_errno();
+    }
 
     // 检查目标文件类型
     let target_inode = match parent_dentry.inode.lookup(&filename) {

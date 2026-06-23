@@ -16,11 +16,15 @@ use crate::{
     vfs::{
         DENTRY_CACHE, Dentry, File, FileMode, FsError, InodeType, OpenFlags, get_root_dentry,
         impls::{BlockDeviceFile, CharDeviceFile, PipeFile, RegFile},
-        normalize_path, split_path, vfs_lookup_from,
+        normalize_path, vfs_lookup_from,
     },
 };
 
 const PATH_MAX: usize = 4096;
+
+pub fn is_special_basename(name: &str) -> bool {
+    name == "." || name == ".."
+}
 
 /// 从用户空间复制字符串到内核缓冲区
 fn copy_str_from_user(user_ptr: usize) -> Result<String, FsError> {
@@ -183,6 +187,38 @@ pub fn resolve_at_path_string(dirfd: i32, path: &str) -> Result<String, FsError>
     }
 }
 
+/// Split a path for syscalls that operate on a parent directory and a final name.
+///
+/// Unlike VFS `split_path`, this preserves a final `.` or `..` component so
+/// create/unlink style syscalls cannot accidentally operate on the normalized
+/// target instead.
+pub fn split_parent_preserving_basename(path: &str) -> Result<(String, String), FsError> {
+    if path.is_empty() {
+        return Err(FsError::NotFound);
+    }
+    if path.ends_with('/') && path.len() > 1 {
+        return Err(FsError::InvalidArgument);
+    }
+
+    if let Some(pos) = path.rfind('/') {
+        let name = String::from(&path[pos + 1..]);
+        if name.is_empty() {
+            return Err(FsError::InvalidArgument);
+        }
+
+        let parent = &path[..pos];
+        let parent = if parent.is_empty() {
+            String::from("/")
+        } else {
+            normalize_path(parent)
+        };
+
+        Ok((parent, name))
+    } else {
+        Ok((String::from("."), String::from(path)))
+    }
+}
+
 /// 在指定目录下创建一个新文件
 ///// # 参数
 /// - `dirfd`: 目录文件描述符，或 AT_FDCWD
@@ -190,7 +226,7 @@ pub fn resolve_at_path_string(dirfd: i32, path: &str) -> Result<String, FsError>
 /// - `mode`: 文件权限模式
 /// 返回新创建的文件的 Dentry
 pub fn create_file_at(dirfd: i32, path: &str, mode: u32) -> Result<Arc<Dentry>, FsError> {
-    let (dir_path, filename) = split_path(path)?;
+    let (dir_path, filename) = split_parent_preserving_basename(path)?;
     let parent_dentry = match resolve_at_path(dirfd, &dir_path)? {
         Some(d) => d,
         None => return Err(FsError::NotFound),
@@ -199,6 +235,9 @@ pub fn create_file_at(dirfd: i32, path: &str, mode: u32) -> Result<Arc<Dentry>, 
     let meta = parent_dentry.inode.metadata()?;
     if meta.inode_type != InodeType::Directory {
         return Err(FsError::NotDirectory);
+    }
+    if is_special_basename(&filename) {
+        return Err(FsError::AlreadyExists);
     }
 
     let file_mode = FileMode::from_bits_truncate(mode) | FileMode::S_IFREG;
