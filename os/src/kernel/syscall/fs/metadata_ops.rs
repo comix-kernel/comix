@@ -171,6 +171,9 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
     if file_mode & FileMode::S_IFMT == FileMode::empty() {
         file_mode |= FileMode::S_IFREG;
     }
+    if file_mode & FileMode::S_IFMT == FileMode::S_IFDIR {
+        return -(crate::uapi::errno::EPERM as isize);
+    }
 
     // 用户态传入的是 Linux ABI dev_t，VFS 内部使用自己的 major/minor 编码。
     let internal_dev = crate::vfs::dev::decode_linux_dev(dev);
