@@ -7,6 +7,9 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 解析标志位
     let open_flags = match OpenFlags::from_bits(flags) {
