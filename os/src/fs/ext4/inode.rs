@@ -547,6 +547,14 @@ impl Inode for Ext4Inode {
             // 如果目标已存在，需要先删除它
             let existing_ref = fs.get_inode_ref(existing_ino);
             let replaced_is_dir = existing_ref.inode.is_dir();
+            let old_child_is_dir = old_child_metadata.inode_type == InodeType::Directory;
+
+            if old_child_is_dir && !replaced_is_dir {
+                return Err(FsError::NotDirectory);
+            }
+            if !old_child_is_dir && replaced_is_dir {
+                return Err(FsError::IsDirectory);
+            }
 
             if replaced_is_dir {
                 // 如果目标是目录，必须为空
