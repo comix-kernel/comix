@@ -18,6 +18,10 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
 
     // crate::println!("[openat] path: {}, flags: {:?} (raw: 0x{:x})", path_str, open_flags, flags);
 
+    if open_flags.contains(OpenFlags::O_CREAT) && open_flags.contains(OpenFlags::O_DIRECTORY) {
+        return FsError::InvalidArgument.to_errno();
+    }
+
     // 解析路径（处理AT_FDCWD和相对路径）
     let dentry = match resolve_at_path(dirfd, &path_str) {
         Ok(Some(d)) => {
