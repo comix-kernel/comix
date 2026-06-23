@@ -420,17 +420,42 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
         Err(e) => return e.to_errno(),
     };
 
-    // 解析标志
-    let at_flags = match AtFlags::from_bits(flags) {
-        Some(f) => f,
-        None => return -(EINVAL as isize),
-    };
+    const UTIMENSAT_ALLOWED_FLAGS: u32 =
+        AtFlags::SYMLINK_NOFOLLOW.bits() | AtFlags::EMPTY_PATH.bits();
+    if flags & !UTIMENSAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
+    let at_flags = AtFlags::from_bits_retain(flags);
 
     // 查找文件
-    let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
-    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
-        Ok(d) => d,
-        Err(e) => return e.to_errno(),
+    let dentry = if path_str.is_empty() {
+        if !at_flags.contains(AtFlags::EMPTY_PATH) {
+            return FsError::NotFound.to_errno();
+        }
+
+        if dirfd == AT_FDCWD {
+            match current_task().lock().fs.lock().cwd.clone() {
+                Some(dentry) => dentry,
+                None => return FsError::IoError.to_errno(),
+            }
+        } else {
+            let task = current_task();
+            let file = match task.lock().fd_table.get(dirfd as usize) {
+                Ok(file) => file,
+                Err(e) => return e.to_errno(),
+            };
+            match file.dentry() {
+                Ok(dentry) => dentry,
+                Err(e) => return e.to_errno(),
+            }
+        }
+    } else {
+        let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
+        match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+            Ok(d) => d,
+            Err(e) => return e.to_errno(),
+        }
     };
 
     // 解析时间参数
