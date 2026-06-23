@@ -106,6 +106,10 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
 }
 
 pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
+    if flags & !AT_REMOVEDIR != 0 {
+        return FsError::InvalidArgument.to_errno();
+    }
+
     // 解析路径
     let path_str = match get_path_safe(pathname as usize) {
         Ok(s) => s,
@@ -152,7 +156,13 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     }
 
     // 删除目录项
-    match parent_dentry.inode.unlink(&filename) {
+    let result = if is_rmdir {
+        parent_dentry.inode.rmdir(&filename)
+    } else {
+        parent_dentry.inode.unlink(&filename)
+    };
+
+    match result {
         Ok(()) => {
             // 从缓存中移除
             drop_cached_child(&parent_dentry, &filename);
