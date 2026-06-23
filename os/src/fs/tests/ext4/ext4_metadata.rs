@@ -62,3 +62,114 @@ test_case!(test_ext4_inode_number, {
     let file_metadata = inode.metadata().unwrap();
     kassert!(file_metadata.inode_no != root_metadata.inode_no);
 });
+
+test_case!(test_ext4_create_preserves_file_mode, {
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+
+    let inode = root
+        .create("private.txt", FileMode::from_bits_truncate(0o600))
+        .unwrap();
+    let metadata = inode.metadata().unwrap();
+
+    kassert!(metadata.inode_type == InodeType::File);
+    kassert!((metadata.mode.bits() & 0o777) == 0o600);
+});
+
+test_case!(test_ext4_mkdir_preserves_mode, {
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+
+    let inode = root
+        .mkdir("private-dir", FileMode::from_bits_truncate(0o700))
+        .unwrap();
+    let metadata = inode.metadata().unwrap();
+
+    kassert!(metadata.inode_type == InodeType::Directory);
+    kassert!((metadata.mode.bits() & 0o777) == 0o700);
+});
+
+test_case!(test_ext4_mknod_device_metadata, {
+    use crate::vfs::dev::makedev;
+
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+    let chr_dev = makedev(1, 3);
+    let blk_dev = makedev(254, 16);
+
+    let chr = root
+        .mknod(
+            "null",
+            FileMode::S_IFCHR | FileMode::from_bits_truncate(0o666),
+            chr_dev,
+        )
+        .unwrap();
+    let blk = root
+        .mknod(
+            "vdb",
+            FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660),
+            blk_dev,
+        )
+        .unwrap();
+
+    let chr_meta = chr.metadata().unwrap();
+    let blk_meta = blk.metadata().unwrap();
+    kassert!(chr_meta.inode_type == InodeType::CharDevice);
+    kassert!(chr_meta.rdev == chr_dev);
+    kassert!((chr_meta.mode.bits() & 0o777) == 0o666);
+    kassert!(blk_meta.inode_type == InodeType::BlockDevice);
+    kassert!(blk_meta.rdev == blk_dev);
+    kassert!((blk_meta.mode.bits() & 0o777) == 0o660);
+});
+
+test_case!(test_ext4_mknod_special_file_types, {
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+
+    let fifo = root
+        .mknod(
+            "fifo",
+            FileMode::S_IFIFO | FileMode::from_bits_truncate(0o644),
+            0,
+        )
+        .unwrap();
+    let sock = root
+        .mknod(
+            "sock",
+            FileMode::S_IFSOCK | FileMode::from_bits_truncate(0o644),
+            0,
+        )
+        .unwrap();
+    let reg = root
+        .mknod(
+            "regular",
+            FileMode::S_IFREG | FileMode::from_bits_truncate(0o600),
+            0,
+        )
+        .unwrap();
+
+    kassert!(fifo.metadata().unwrap().inode_type == InodeType::Fifo);
+    kassert!(sock.metadata().unwrap().inode_type == InodeType::Socket);
+    let reg_meta = reg.metadata().unwrap();
+    kassert!(reg_meta.inode_type == InodeType::File);
+    kassert!((reg_meta.mode.bits() & 0o777) == 0o600);
+});
+
+test_case!(test_ext4_mknod_duplicate, {
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+
+    root.mknod(
+        "fifo",
+        FileMode::S_IFIFO | FileMode::from_bits_truncate(0o644),
+        0,
+    )
+    .unwrap();
+
+    let result = root.mknod(
+        "fifo",
+        FileMode::S_IFIFO | FileMode::from_bits_truncate(0o644),
+        0,
+    );
+    kassert!(matches!(result, Err(FsError::AlreadyExists)));
+});

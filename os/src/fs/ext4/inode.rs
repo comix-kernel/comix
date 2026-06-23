@@ -13,6 +13,10 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use ext4_rs::InodeFileType;
 
+use crate::vfs::dev::{
+    decode_ext4_new_dev, decode_ext4_old_dev, encode_ext4_new_dev, encode_ext4_old_dev,
+    major as dev_major, minor as dev_minor,
+};
 use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
 
 /// Ext4 Inode 包装
@@ -82,6 +86,54 @@ impl Ext4Inode {
             7 => InodeType::Symlink,     // EXT4_DE_SYMLINK
             _ => InodeType::File,
         }
+    }
+
+    fn mode_file_type(mode: FileMode) -> Result<InodeFileType, FsError> {
+        match mode & FileMode::S_IFMT {
+            FileMode::S_IFREG => Ok(InodeFileType::S_IFREG),
+            FileMode::S_IFCHR => Ok(InodeFileType::S_IFCHR),
+            FileMode::S_IFBLK => Ok(InodeFileType::S_IFBLK),
+            FileMode::S_IFIFO => Ok(InodeFileType::S_IFIFO),
+            FileMode::S_IFSOCK => Ok(InodeFileType::S_IFSOCK),
+            _ => Err(FsError::InvalidArgument),
+        }
+    }
+
+    fn regular_file_mode(mode: FileMode) -> u16 {
+        let permissions = mode.bits() & !FileMode::S_IFMT.bits();
+        (InodeFileType::S_IFREG.bits() as u32 | permissions) as u16
+    }
+
+    fn directory_mode(mode: FileMode) -> u16 {
+        let permissions = mode.bits() & !FileMode::S_IFMT.bits();
+        (InodeFileType::S_IFDIR.bits() as u32 | permissions) as u16
+    }
+
+    fn special_file_mode(mode: FileMode, file_type: InodeFileType) -> u16 {
+        let permissions = mode.bits() & !FileMode::S_IFMT.bits();
+        (file_type.bits() as u32 | permissions) as u16
+    }
+
+    fn is_device_inode(inode_type: InodeType) -> bool {
+        matches!(inode_type, InodeType::CharDevice | InodeType::BlockDevice)
+    }
+
+    fn read_rdev_from_blocks(block: &[u32; 15]) -> u64 {
+        if block[0] != 0 {
+            decode_ext4_old_dev(block[0])
+        } else {
+            decode_ext4_new_dev(block[1])
+        }
+    }
+
+    fn encoded_rdev_blocks(dev: u64) -> [u32; 15] {
+        let mut blocks = [0; 15];
+        if dev_major(dev) <= 0xff && dev_minor(dev) <= 0xff {
+            blocks[0] = encode_ext4_old_dev(dev);
+        } else {
+            blocks[1] = encode_ext4_new_dev(dev);
+        }
+        blocks
     }
 
     fn read_fast_symlink_target(&self, size: usize) -> Result<Option<String>, FsError> {
@@ -159,7 +211,11 @@ impl Inode for Ext4Inode {
             nlinks: inode.links_count as usize,
             uid: inode.uid as u32,
             gid: inode.gid as u32,
-            rdev: 0,
+            rdev: if Self::is_device_inode(inode_type) {
+                Self::read_rdev_from_blocks(&inode.block)
+            } else {
+                0
+            },
         })
     }
 
@@ -213,7 +269,7 @@ impl Inode for Ext4Inode {
         Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
     }
 
-    fn create(&self, name: &str, _mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
+    fn create(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
         // Check if current inode is a directory
         let metadata = self.metadata()?;
         if metadata.inode_type != InodeType::Directory {
@@ -225,15 +281,14 @@ impl Inode for Ext4Inode {
             return Err(FsError::AlreadyExists);
         }
 
-        // create() only creates regular files (not directories)
         let fs = self.fs.lock();
-        // ext4_rs 的 create_inode 内部会强制设置 mode |= 0o777
-        // 所以这里直接使用 0o777
-        let ftype = ext4_rs::InodeFileType::S_IFREG.bits() | 0o777;
+        let file_mode = Self::regular_file_mode(mode);
 
-        let child_inode = fs
-            .create(self.ino, name, ftype)
+        let mut child_inode = fs
+            .create(self.ino, name, file_mode)
             .map_err(|_| FsError::IoError)?;
+        child_inode.inode.set_mode(file_mode);
+        fs.write_back_inode(&mut child_inode);
 
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
@@ -241,7 +296,7 @@ impl Inode for Ext4Inode {
         )))
     }
 
-    fn mkdir(&self, name: &str, _mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
+    fn mkdir(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
         // Check if current inode is a directory
         let metadata = self.metadata()?;
         if metadata.inode_type != InodeType::Directory {
@@ -253,19 +308,21 @@ impl Inode for Ext4Inode {
             return Err(FsError::AlreadyExists);
         }
 
-        // mkdir() creates directories using S_IFDIR | 0o755
         let fs = self.fs.lock();
-        let ftype = ext4_rs::InodeFileType::S_IFDIR.bits() | 0o755;
+        let dir_mode = Self::directory_mode(mode);
 
         let mut parent = self.ino;
         let mut name_off = 0;
 
         let inode_id = fs
-            .generic_open(name, &mut parent, true, ftype, &mut name_off)
+            .generic_open(name, &mut parent, true, dir_mode, &mut name_off)
             .map_err(|e| {
                 crate::pr_debug!("[Ext4Inode::mkdir] generic_open failed: {:?}", e);
                 FsError::NoSpace
             })?;
+        let mut inode_ref = fs.get_inode_ref(inode_id);
+        inode_ref.inode.set_mode(dir_mode);
+        fs.write_back_inode(&mut inode_ref);
 
         Ok(Arc::new(Ext4Inode::new(self.fs.clone(), inode_id)))
     }
@@ -815,8 +872,37 @@ impl Inode for Ext4Inode {
         String::from_utf8(buf).map_err(|_| FsError::InvalidArgument)
     }
 
-    fn mknod(&self, _name: &str, _mode: FileMode, _dev: u64) -> Result<Arc<dyn Inode>, FsError> {
-        // TODO: 实现 ext4 创建文件节点
-        Err(FsError::NotSupported)
+    fn mknod(&self, name: &str, mode: FileMode, dev: u64) -> Result<Arc<dyn Inode>, FsError> {
+        let metadata = self.metadata()?;
+        if metadata.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        if self.lookup(name).is_ok() {
+            return Err(FsError::AlreadyExists);
+        }
+
+        let file_type = Self::mode_file_type(mode)?;
+        let inode_mode = Self::special_file_mode(mode, file_type);
+        let fs = self.fs.lock();
+
+        let mut new_inode = fs
+            .create(self.ino, name, inode_mode)
+            .map_err(|_| FsError::IoError)?;
+
+        new_inode.inode.set_mode(inode_mode);
+        new_inode.inode.set_size(0);
+        new_inode.inode.set_blocks_count(0);
+
+        if matches!(file_type, InodeFileType::S_IFCHR | InodeFileType::S_IFBLK) {
+            new_inode.inode.block = Self::encoded_rdev_blocks(dev);
+        }
+
+        fs.write_back_inode(&mut new_inode);
+
+        Ok(Arc::new(Ext4Inode::new(
+            self.fs.clone(),
+            new_inode.inode_num,
+        )))
     }
 }
