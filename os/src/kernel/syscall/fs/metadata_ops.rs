@@ -1,4 +1,32 @@
 use super::*;
+use alloc::string::String;
+
+fn split_creating_path(dirfd: i32, path: &str) -> Result<(String, String), FsError> {
+    if path.bytes().all(|b| b == b'/') {
+        return Err(FsError::AlreadyExists);
+    }
+    if path.ends_with('/') {
+        let path = path.trim_end_matches('/');
+        match resolve_at_path(dirfd, path) {
+            Ok(Some(_)) => return Err(FsError::AlreadyExists),
+            Ok(None) => {}
+            Err(e) => return Err(e),
+        }
+
+        let (parent, _) = split_parent_preserving_basename(path)?;
+        let parent = match resolve_at_path(dirfd, &parent)? {
+            Some(parent) => parent,
+            None => return Err(FsError::NotFound),
+        };
+        if parent.inode.metadata()?.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        return Err(FsError::NotFound);
+    }
+
+    split_parent_preserving_basename(path)
+}
 
 /// fchownat - 修改文件所有者和组
 ///
@@ -150,7 +178,7 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, filename) = match split_parent_preserving_basename(&path_str) {
+    let (dir_path, filename) = match split_creating_path(dirfd, &path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -221,7 +249,7 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
     };
 
     // 分割路径为目录和文件名
-    let (dir_path, link_name) = match split_parent_preserving_basename(&link_str) {
+    let (dir_path, link_name) = match split_creating_path(newdirfd, &link_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -288,7 +316,7 @@ pub fn linkat(
         return -(crate::uapi::errno::EPERM as isize);
     }
 
-    let (new_dir_path, new_name) = match split_parent_preserving_basename(&new_path) {
+    let (new_dir_path, new_name) = match split_creating_path(newdirfd, &new_path) {
         Ok(parts) => parts,
         Err(e) => return e.to_errno(),
     };
