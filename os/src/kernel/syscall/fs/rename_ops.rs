@@ -1,4 +1,13 @@
 use super::*;
+use alloc::string::String;
+
+fn split_rename_path(path: &str) -> Result<(String, String), FsError> {
+    if path == "/" {
+        return Ok((String::from("/"), String::from(".")));
+    }
+
+    split_parent_preserving_basename(path)
+}
 
 /// 重命名或移动文件/目录
 pub fn renameat2(
@@ -39,13 +48,13 @@ pub fn renameat2(
         return FsError::NotFound.to_errno();
     }
 
-    // 分割路径为 (父目录, 文件名)
-    let (old_dir_path, old_name) = match split_path(&old_path_str) {
+    // 分割路径为 (父目录, 文件名)，保留最后一级 "."/".."。
+    let (old_dir_path, old_name) = match split_rename_path(&old_path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
 
-    let (new_dir_path, new_name) = match split_path(&new_path_str) {
+    let (new_dir_path, new_name) = match split_rename_path(&new_path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
@@ -78,6 +87,16 @@ pub fn renameat2(
     };
     if new_parent_meta.inode_type != InodeType::Directory {
         return -(ENOTDIR as isize);
+    }
+
+    if is_special_basename(&old_name) {
+        return -(crate::uapi::errno::EBUSY as isize);
+    }
+    if is_special_basename(&new_name) {
+        if rename_flags.contains(RenameFlags::NOREPLACE) {
+            return -(EEXIST as isize);
+        }
+        return -(crate::uapi::errno::EBUSY as isize);
     }
 
     // 查找源文件(验证存在)
