@@ -303,6 +303,9 @@ pub fn readlinkat(dirfd: i32, pathname: *const c_char, buf: *mut u8, bufsiz: usi
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 查找符号链接（不跟随最后一级的符号链接）
     let dentry = match resolve_at_path_with_flags(dirfd, &path_str, false) {
