@@ -63,15 +63,19 @@ impl SmoltcpInterface {
 #[derive(Clone)]
 pub struct NetDeviceAdapter {
     device: Arc<dyn crate::device::net::net_device::NetDevice>,
-    rx_buffer: [u8; 2048],
+    rx_buffer: Vec<u8>,
 }
 
 impl NetDeviceAdapter {
     /// Create a new adapter.
     pub fn new(device: Arc<dyn crate::device::net::net_device::NetDevice>) -> Self {
+        let rx_len = device
+            .mtu()
+            .saturating_add(smoltcp::wire::EthernetFrame::<&[u8]>::header_len())
+            .max(2048);
         Self {
             device,
-            rx_buffer: [0; 2048],
+            rx_buffer: alloc::vec![0; rx_len],
         }
     }
 

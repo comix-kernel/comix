@@ -1,5 +1,7 @@
 use super::*;
 
+const TCP_LISTENER_POOL_LIMIT: usize = 16;
+
 /// 创建套接字
 pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
     let base_type = socket_type & SOCK_TYPE_MASK;
@@ -61,7 +63,7 @@ pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
                 SocketHandle::Tcp(_) => "TCP",
                 SocketHandle::Udp(_) => "UDP",
             };
-            pr_info!(
+            pr_debug!(
                 "[SOCKET] Created {} socket: tid={}, fd={}, domain={}, type={}",
                 handle_type,
                 tid,
@@ -290,7 +292,7 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
             );
 
             let mut attempts_left: usize = if endpoint.port == 0 { 32 } else { 1 };
-            loop {
+            let listen_endpoint = loop {
                 if endpoint.port == 0 {
                     endpoint.port = alloc_ephemeral_port();
                 }
@@ -301,7 +303,7 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
 
                 // Convert endpoint to listen endpoint
                 // If bound to 0.0.0.0 or ::, listen on all addresses (addr = None)
-                use smoltcp::wire::{IpAddress, IpListenEndpoint};
+                use smoltcp::wire::IpListenEndpoint;
                 let listen_endpoint = match endpoint.addr {
                     IpAddress::Ipv4(addr) if addr.is_unspecified() => IpListenEndpoint {
                         addr: None,
@@ -332,14 +334,17 @@ pub fn listen(sockfd: i32, backlog: i32) -> isize {
                     endpoint.port = 0;
                     continue;
                 }
-                break;
-            }
+                break listen_endpoint;
+            };
 
             socket_file.set_listener(true);
             socket_file.clear_listen_sockets();
             // iperf 会传入非常大的 backlog（甚至 INT_MAX），这里做一个上限避免内存/逻辑风险
             let backlog = (backlog as usize).clamp(1, 128);
             socket_file.set_listen_backlog(backlog);
+            if let Err(e) = replenish_tcp_listeners(socket_file, listen_endpoint, backlog) {
+                return e;
+            }
             0
         }
         SocketHandle::Udp(_) => {
@@ -426,18 +431,16 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
                 None => return -88, // ENOTSOCK
             };
 
-        if state != TcpListenState::Listen && socket_file.listen_sockets_len() < backlog {
-            // detach current listen socket immediately
-            let new_listen_handle = match create_tcp_socket() {
-                Ok(SocketHandle::Tcp(h)) => h,
-                Err(e) => return e.to_errno(),
-                Ok(SocketHandle::Udp(_)) => return -(crate::uapi::errno::EINVAL as isize),
-            };
-
-            if let Err(e) = network_stack().tcp_listen(new_listen_handle, listen_endpoint) {
-                network_stack().remove_tcp_socket(new_listen_handle);
-                return e.to_errno();
+        if state != TcpListenState::Listen {
+            if let Err(e) = replenish_tcp_listeners(socket_file, listen_endpoint, backlog) {
+                return e;
             }
+
+            let Some(new_listen_handle) =
+                network_stack().take_spare_tcp_listener(socket_file, listen_endpoint)
+            else {
+                return -11; // EAGAIN
+            };
 
             use crate::net::socket::{update_socket_file_handle, update_socket_handle};
             update_socket_handle(
@@ -464,8 +467,17 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             }
 
             // Otherwise: keep it as pending (SynReceived, etc).
-            socket_file.add_listen_socket(SocketHandle::Tcp(listen_handle));
+            if !socket_file.has_listen_socket(SocketHandle::Tcp(listen_handle)) {
+                socket_file.add_listen_socket(SocketHandle::Tcp(listen_handle));
+            }
+            if let Err(e) = replenish_tcp_listeners(socket_file, listen_endpoint, backlog) {
+                return e;
+            }
             continue;
+        }
+
+        if let Err(e) = replenish_tcp_listeners(socket_file, listen_endpoint, backlog) {
+            return e;
         }
 
         if is_nonblock {
@@ -476,6 +488,29 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
             return -(crate::uapi::errno::EINTR as isize);
         }
     }
+}
+
+fn replenish_tcp_listeners(
+    socket_file: &SocketFile,
+    listen_endpoint: smoltcp::wire::IpListenEndpoint,
+    backlog: usize,
+) -> Result<(), isize> {
+    let target = backlog.clamp(1, TCP_LISTENER_POOL_LIMIT);
+    while network_stack().tcp_spare_listener_count(socket_file, listen_endpoint) < target {
+        let new_listen_handle = match create_tcp_socket() {
+            Ok(SocketHandle::Tcp(h)) => h,
+            Err(e) => return Err(e.to_errno()),
+            Ok(SocketHandle::Udp(_)) => return Err(-(crate::uapi::errno::EINVAL as isize)),
+        };
+
+        if let Err(e) = network_stack().tcp_listen(new_listen_handle, listen_endpoint) {
+            network_stack().remove_tcp_socket(new_listen_handle);
+            return Err(e.to_errno());
+        }
+
+        socket_file.add_listen_socket(SocketHandle::Tcp(new_listen_handle));
+    }
+    Ok(())
 }
 
 fn accept_return_conn(

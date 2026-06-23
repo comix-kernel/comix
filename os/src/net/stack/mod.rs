@@ -18,6 +18,16 @@ use super::socket::{self, SocketFile, SocketHandle, UdpDatagram};
 mod adapter;
 pub use adapter::{NetDeviceAdapter, SmoltcpInterface};
 
+// 256KiB buffers can drive smoltcp's large-window path into a sequence underflow
+// under parallel loopback iperf; 128KiB-1 keeps throughput high with a stable window scale.
+const TCP_RX_BUFFER_SIZE: usize = 128 * 1024 - 1;
+const TCP_TX_BUFFER_SIZE: usize = 128 * 1024 - 1;
+const UDP_PACKET_METADATA_CAPACITY: usize = 256;
+const UDP_RX_BUFFER_SIZE: usize = 256 * 1024;
+const UDP_TX_BUFFER_SIZE: usize = 256 * 1024;
+const LOOPBACK_WRITE_DRAIN_POLLS: usize = 64;
+const LOOPBACK_FULL_DRAIN_POLLS: usize = 256;
+
 pub(crate) fn enqueue_loopback_frame(frame: Vec<u8>) {
     network_stack().enqueue_loopback_frame(frame);
 }
@@ -154,15 +164,15 @@ impl NetworkStack {
     pub fn create_tcp_socket(&self) -> Result<SocketHandle, NetworkError> {
         let mut rx_vec = alloc::vec::Vec::new();
         rx_vec
-            .try_reserve(4096)
+            .try_reserve(TCP_RX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        rx_vec.resize(4096, 0);
+        rx_vec.resize(TCP_RX_BUFFER_SIZE, 0);
 
         let mut tx_vec = alloc::vec::Vec::new();
         tx_vec
-            .try_reserve(4096)
+            .try_reserve(TCP_TX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        tx_vec.resize(4096, 0);
+        tx_vec.resize(TCP_TX_BUFFER_SIZE, 0);
 
         let rx_buffer = tcp::SocketBuffer::new(rx_vec);
         let tx_buffer = tcp::SocketBuffer::new(tx_vec);
@@ -412,6 +422,10 @@ impl NetworkStack {
 
     /// Poll until loopback compatibility queues are boundedly drained.
     pub fn poll_until_empty(&self) {
+        self.poll_loopback_bounded(LOOPBACK_FULL_DRAIN_POLLS);
+    }
+
+    fn poll_loopback_bounded(&self, max_polls: usize) {
         if let Some(ref wrapper) = *self.net_iface.lock() {
             wrapper.poll_smoltcp(&self.socket_set);
             {
@@ -420,8 +434,7 @@ impl NetworkStack {
             }
             self.reap_pending_tcp_close();
 
-            const MAX_DRAIN_POLLS: usize = 256;
-            for _ in 0..MAX_DRAIN_POLLS {
+            for _ in 0..max_polls {
                 if wrapper.loopback_queue_len() == 0 {
                     break;
                 }
@@ -463,6 +476,76 @@ impl NetworkStack {
             i += 1;
         }
         None
+    }
+
+    /// Pop one spare listening TCP socket from a listener pool.
+    pub fn take_spare_tcp_listener(
+        &self,
+        file: &super::socket::SocketFile,
+        listen_endpoint: IpListenEndpoint,
+    ) -> Option<SmoltcpHandle> {
+        let sockets = self.socket_set.lock();
+        let mut q = file.listen_sockets.lock();
+        let mut i = 0;
+        while i < q.len() {
+            match q[i] {
+                SocketHandle::Tcp(h) => {
+                    let s = sockets.get::<tcp::Socket>(h);
+                    match s.state() {
+                        tcp::State::Listen if s.listen_endpoint() == listen_endpoint => {
+                            q.remove(i);
+                            return Some(h);
+                        }
+                        tcp::State::Closed => {
+                            q.remove(i);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                SocketHandle::Udp(_) => {
+                    q.remove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Count spare listening sockets for an endpoint, pruning stale queue entries.
+    pub fn tcp_spare_listener_count(
+        &self,
+        file: &super::socket::SocketFile,
+        listen_endpoint: IpListenEndpoint,
+    ) -> usize {
+        let sockets = self.socket_set.lock();
+        let mut q = file.listen_sockets.lock();
+        let mut count = 0;
+        let mut i = 0;
+        while i < q.len() {
+            match q[i] {
+                SocketHandle::Tcp(h) => {
+                    let s = sockets.get::<tcp::Socket>(h);
+                    match s.state() {
+                        tcp::State::Listen if s.listen_endpoint() == listen_endpoint => {
+                            count += 1;
+                        }
+                        tcp::State::Closed => {
+                            q.remove(i);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                SocketHandle::Udp(_) => {
+                    q.remove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        count
     }
 
     /// Query whether a socket has reached the closed TCP state.
@@ -540,7 +623,7 @@ impl NetworkStack {
             }
         };
         if result.is_ok() {
-            self.poll();
+            self.poll_loopback_bounded(LOOPBACK_WRITE_DRAIN_POLLS);
             crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
@@ -736,7 +819,7 @@ impl NetworkStack {
             }
         };
         if result.is_ok() {
-            self.poll();
+            self.poll_loopback_bounded(LOOPBACK_WRITE_DRAIN_POLLS);
             crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
@@ -806,27 +889,27 @@ impl NetworkStack {
     ) -> Result<SmoltcpHandle, NetworkError> {
         let mut rx_meta_vec = alloc::vec::Vec::new();
         rx_meta_vec
-            .try_reserve(4)
+            .try_reserve(UDP_PACKET_METADATA_CAPACITY)
             .map_err(|_| NetworkError::NoMemory)?;
-        rx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
+        rx_meta_vec.resize(UDP_PACKET_METADATA_CAPACITY, udp::PacketMetadata::EMPTY);
 
         let mut tx_meta_vec = alloc::vec::Vec::new();
         tx_meta_vec
-            .try_reserve(4)
+            .try_reserve(UDP_PACKET_METADATA_CAPACITY)
             .map_err(|_| NetworkError::NoMemory)?;
-        tx_meta_vec.resize(4, udp::PacketMetadata::EMPTY);
+        tx_meta_vec.resize(UDP_PACKET_METADATA_CAPACITY, udp::PacketMetadata::EMPTY);
 
         let mut rx_data_vec = alloc::vec::Vec::new();
         rx_data_vec
-            .try_reserve(4096)
+            .try_reserve(UDP_RX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        rx_data_vec.resize(4096, 0);
+        rx_data_vec.resize(UDP_RX_BUFFER_SIZE, 0);
 
         let mut tx_data_vec = alloc::vec::Vec::new();
         tx_data_vec
-            .try_reserve(4096)
+            .try_reserve(UDP_TX_BUFFER_SIZE)
             .map_err(|_| NetworkError::NoMemory)?;
-        tx_data_vec.resize(4096, 0);
+        tx_data_vec.resize(UDP_TX_BUFFER_SIZE, 0);
 
         let rx_buffer = udp::PacketBuffer::new(rx_meta_vec, rx_data_vec);
         let tx_buffer = udp::PacketBuffer::new(tx_meta_vec, tx_data_vec);

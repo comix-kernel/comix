@@ -112,7 +112,7 @@ use crate::{
             wait_unix_would_block, write_sockaddr_un, write_socketpair_fds,
         },
     },
-    pr_debug, pr_info, println,
+    pr_debug, println,
     uapi::{
         fcntl::{FdFlags, OpenFlags},
         socket::{AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOCK_TYPE_MASK},

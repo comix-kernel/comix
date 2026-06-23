@@ -118,7 +118,7 @@ stage_musl_group_to_tmpfs() {
             items="lua lua_testcode.sh test.sh date.lua file_io.lua max_min.lua random.lua remove.lua round_num.lua sin30.lua sort.lua strings.lua"
             ;;
         iperf_testcode.sh)
-            items="iperf3 iperf_testcode.sh"
+            items="busybox iperf3 iperf_testcode.sh"
             ;;
         *)
             return 1
