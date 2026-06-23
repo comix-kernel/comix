@@ -166,8 +166,11 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
         return FsError::AlreadyExists.to_errno();
     }
 
-    // 构造文件模式
-    let file_mode = FileMode::from_bits_truncate(mode);
+    // mknod without an explicit file type creates a regular file.
+    let mut file_mode = FileMode::from_bits_truncate(mode);
+    if file_mode & FileMode::S_IFMT == FileMode::empty() {
+        file_mode |= FileMode::S_IFREG;
+    }
 
     // 用户态传入的是 Linux ABI dev_t，VFS 内部使用自己的 major/minor 编码。
     let internal_dev = crate::vfs::dev::decode_linux_dev(dev);
