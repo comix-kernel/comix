@@ -238,7 +238,7 @@ pub fn getcwd(buf: *mut u8, size: usize) -> isize {
 
     // 检查缓冲区大小
     if path_bytes.len() + 1 > size {
-        return FsError::InvalidArgument.to_errno();
+        return -(crate::uapi::errno::ERANGE as isize);
     }
 
     // 复制到用户态缓冲区
