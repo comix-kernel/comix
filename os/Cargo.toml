@@ -65,6 +65,9 @@ todo = "warn"
 needless_borrow = "deny"
 redundant_clone = "deny"
 
+[patch.crates-io]
+ext4_rs = { path = "../vendor/ext4_rs" }
+
 [profile.dev]
 opt-level = 1  # 启用基本优化以减小代码体积
 panic = "abort"
