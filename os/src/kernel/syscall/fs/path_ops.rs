@@ -100,6 +100,11 @@ pub fn mkdirat(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    let path_str = if path_str.bytes().all(|b| b == b'/') {
+        path_str
+    } else {
+        path_str.trim_end_matches('/').into()
+    };
 
     // 分割路径为目录和文件名
     let (dir_path, dirname) = match split_parent_preserving_basename(&path_str) {
