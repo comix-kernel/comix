@@ -1,12 +1,33 @@
 use super::*;
 use alloc::string::String;
 
-fn split_rename_path(path: &str) -> Result<(String, String), FsError> {
-    if path == "/" {
-        return Ok((String::from("/"), String::from(".")));
+struct RenamePath {
+    parent: String,
+    name: String,
+    trailing_slash: bool,
+}
+
+fn split_rename_path(path: &str) -> Result<RenamePath, FsError> {
+    if path.bytes().all(|b| b == b'/') {
+        return Ok(RenamePath {
+            parent: String::from("/"),
+            name: String::from("."),
+            trailing_slash: false,
+        });
     }
 
-    split_parent_preserving_basename(path)
+    let trailing_slash = path.ends_with('/');
+    let path = if trailing_slash {
+        path.trim_end_matches('/')
+    } else {
+        path
+    };
+    let (parent, name) = split_parent_preserving_basename(path)?;
+    Ok(RenamePath {
+        parent,
+        name,
+        trailing_slash,
+    })
 }
 
 /// 重命名或移动文件/目录
@@ -49,24 +70,24 @@ pub fn renameat2(
     }
 
     // 分割路径为 (父目录, 文件名)，保留最后一级 "."/".."。
-    let (old_dir_path, old_name) = match split_rename_path(&old_path_str) {
+    let old_path = match split_rename_path(&old_path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
 
-    let (new_dir_path, new_name) = match split_rename_path(&new_path_str) {
+    let new_path = match split_rename_path(&new_path_str) {
         Ok(p) => p,
         Err(e) => return e.to_errno(),
     };
 
     // 查找父目录
-    let old_parent = match resolve_at_path(olddirfd, &old_dir_path) {
+    let old_parent = match resolve_at_path(olddirfd, &old_path.parent) {
         Ok(Some(d)) => d,
         Ok(None) => return -(ENOENT as isize),
         Err(e) => return e.to_errno(),
     };
 
-    let new_parent = match resolve_at_path(newdirfd, &new_dir_path) {
+    let new_parent = match resolve_at_path(newdirfd, &new_path.parent) {
         Ok(Some(d)) => d,
         Ok(None) => return -(ENOENT as isize),
         Err(e) => return e.to_errno(),
@@ -89,19 +110,28 @@ pub fn renameat2(
         return -(ENOTDIR as isize);
     }
 
-    if is_special_basename(&old_name) {
+    if is_special_basename(&old_path.name) {
         return -(crate::uapi::errno::EBUSY as isize);
     }
-    if is_special_basename(&new_name) {
+    if is_special_basename(&new_path.name) {
         if rename_flags.contains(RenameFlags::NOREPLACE) {
             return -(EEXIST as isize);
         }
         return -(crate::uapi::errno::EBUSY as isize);
     }
 
+    let old_requires_dir = old_path.trailing_slash;
+    let new_requires_dir = new_path.trailing_slash;
+    let old_name = old_path.name;
+    let new_name = new_path.name;
+
     // 查找源文件(验证存在)
-    let _old_inode = match old_parent.inode.lookup(&old_name) {
+    let old_inode = match old_parent.inode.lookup(&old_name) {
         Ok(inode) => inode,
+        Err(e) => return e.to_errno(),
+    };
+    let old_meta = match old_inode.metadata() {
+        Ok(meta) => meta,
         Err(e) => return e.to_errno(),
     };
 
@@ -130,7 +160,7 @@ pub fn renameat2(
         );
 
         // 验证目标文件存在
-        let _new_inode = match new_parent.inode.lookup(&new_name) {
+        let new_inode = match new_parent.inode.lookup(&new_name) {
             Ok(inode) => inode,
             Err(e) => {
                 crate::pr_err!(
@@ -141,6 +171,16 @@ pub fn renameat2(
                 return -(ENOENT as isize); // EXCHANGE 要求目标必须存在
             }
         };
+        let new_meta = match new_inode.metadata() {
+            Ok(meta) => meta,
+            Err(e) => return e.to_errno(),
+        };
+        if old_requires_dir && old_meta.inode_type != InodeType::Directory {
+            return -(ENOTDIR as isize);
+        }
+        if new_requires_dir && new_meta.inode_type != InodeType::Directory {
+            return -(ENOTDIR as isize);
+        }
 
         // 生成临时文件名(使用时间戳或特殊前缀避免冲突)
         let temp_name = alloc::format!(".rename_temp_{}_{}", old_name, new_name);
@@ -315,6 +355,9 @@ pub fn renameat2(
         if new_parent.inode.lookup(&new_name).is_ok() {
             return -(EEXIST as isize);
         }
+        if (old_requires_dir || new_requires_dir) && old_meta.inode_type != InodeType::Directory {
+            return -(ENOTDIR as isize);
+        }
 
         // 执行重命名
         if let Err(e) = old_parent
@@ -330,6 +373,24 @@ pub fn renameat2(
         // WHITEOUT 暂不支持(需要 Union FS 支持)
         return FsError::NotSupported.to_errno();
     } else {
+        if old_requires_dir && old_meta.inode_type != InodeType::Directory {
+            return -(ENOTDIR as isize);
+        }
+        if new_requires_dir {
+            if old_meta.inode_type != InodeType::Directory {
+                return -(ENOTDIR as isize);
+            }
+            if let Ok(new_inode) = new_parent.inode.lookup(&new_name) {
+                let new_meta = match new_inode.metadata() {
+                    Ok(meta) => meta,
+                    Err(e) => return e.to_errno(),
+                };
+                if new_meta.inode_type != InodeType::Directory {
+                    return -(ENOTDIR as isize);
+                }
+            }
+        }
+
         // 普通重命名/移动(允许覆盖目标)
         if let Err(e) = old_parent
             .inode
