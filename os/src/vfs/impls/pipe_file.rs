@@ -270,8 +270,10 @@ impl PipeFile {
     }
 
     /// 设置管道大小 (F_SETPIPE_SZ)
-    pub fn set_pipe_size(&self, new_size: usize) -> Result<(), FsError> {
-        self.buffer.lock().set_capacity(new_size)
+    pub fn set_pipe_size(&self, new_size: usize) -> Result<usize, FsError> {
+        let mut buffer = self.buffer.lock();
+        buffer.set_capacity(new_size)?;
+        Ok(buffer.get_capacity())
     }
 }
 
@@ -331,8 +333,8 @@ impl File for PipeFile {
         Ok(self.buffer.lock().get_capacity())
     }
 
-    fn set_pipe_size(&self, size: usize) -> Result<(), FsError> {
-        self.buffer.lock().set_capacity(size)
+    fn set_pipe_size(&self, size: usize) -> Result<usize, FsError> {
+        PipeFile::set_pipe_size(self, size)
     }
 
     fn get_owner(&self) -> Result<i32, FsError> {

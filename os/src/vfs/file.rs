@@ -167,8 +167,8 @@ pub trait File: Send + Sync {
 
     /// 设置管道大小（可选方法，用于 F_SETPIPE_SZ）
     ///
-    /// 默认返回 `NotSupported`，仅适用于 PipeFile
-    fn set_pipe_size(&self, _size: usize) -> Result<(), FsError> {
+    /// 成功返回实际设置后的管道大小。默认返回 `NotSupported`，仅适用于 PipeFile。
+    fn set_pipe_size(&self, _size: usize) -> Result<usize, FsError> {
         Err(FsError::NotSupported)
     }
 

@@ -274,7 +274,7 @@ pub fn fcntl(fd: usize, cmd_raw: i32, arg: usize) -> isize {
             };
 
             match file.set_pipe_size(new_size) {
-                Ok(()) => new_size as isize,
+                Ok(size) => size as isize,
                 Err(e) => e.to_errno(),
             }
         }
