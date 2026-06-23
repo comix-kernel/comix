@@ -94,3 +94,39 @@ test_case!(test_devno_consistency, {
     kassert!(major(dev1) == major(dev2));
     kassert!(minor(dev1) == minor(dev2));
 });
+
+test_case!(test_linux_dev_encoding_roundtrip, {
+    for maj in [0, 1, 8, 254, 4095] {
+        for min in [0, 1, 3, 255, 256, 4096] {
+            let dev = makedev(maj, min);
+            let encoded = encode_linux_dev(dev);
+            kassert!(decode_linux_dev(encoded) == dev);
+        }
+    }
+});
+
+test_case!(test_linux_dev_known_null_encoding, {
+    let dev = makedev(chrdev_major::MEM, 3);
+    kassert!(encode_linux_dev(dev) == 0x103);
+    kassert!(decode_linux_dev(0x103) == dev);
+});
+
+test_case!(test_ext4_old_dev_encoding_roundtrip, {
+    for maj in [0, 1, 8, 254, 255] {
+        for min in [0, 1, 3, 16, 255] {
+            let dev = makedev(maj, min);
+            let encoded = encode_ext4_old_dev(dev);
+            kassert!(decode_ext4_old_dev(encoded) == dev);
+        }
+    }
+});
+
+test_case!(test_ext4_new_dev_encoding_roundtrip, {
+    for maj in [0, 1, 8, 254, 4095] {
+        for min in [0, 1, 3, 255, 256, 4096] {
+            let dev = makedev(maj, min);
+            let encoded = encode_ext4_new_dev(dev);
+            kassert!(decode_ext4_new_dev(encoded) == dev);
+        }
+    }
+});
