@@ -95,20 +95,6 @@ mount_official_test_image_if_present() {
     return 1
 }
 
-stage_all_musl_to_tmpfs() {
-    src="/tests/musl"
-    dst="/tmp/musl"
-
-    [ -d "$src" ] || return 1
-
-    [ -d "$dst" ] || mkdir "$dst" || return 1
-
-    echo "[Tests] staging full musl test tree into tmpfs at $dst"
-    cp -R "$src"/. "$dst/" || return 1
-    echo "[Tests] staged full musl test tree into tmpfs"
-    return 0
-}
-
 run_musl_tests_if_present() {
     # 官方测试镜像挂载到 /tests 后，自动扫描并运行 musl 下的全部测试脚本；
     # glibc 分组保留在测试镜像中，后续需要时直接调整本脚本。
@@ -116,13 +102,12 @@ run_musl_tests_if_present() {
     [ -d /tests/musl ] || return 1
 
     ran=0
-    echo "[Tests] detected musl test scripts; running all in rcS"
-    stage_all_musl_to_tmpfs || return 1
+    echo "[Tests] detected musl test scripts; running directly from /tests in rcS"
 
-    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tmp/musl"
+    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl"
     export HOME="/"
 
-    for f in /tmp/musl/*_testcode.sh; do
+    for f in /tests/musl/*_testcode.sh; do
         [ -f "$f" ] || continue
 
         dir="${f%/*}"
