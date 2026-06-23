@@ -133,9 +133,11 @@ __restore:
 	tlb_refill_entry:
 	    csrwr   $t0, 0x8b          # TLBRSAVE <- t0
 	    csrrd   $t0, 0x1b          # CSR.PGD (auto-selects PGDL/PGDH)
+	    # PWCH enables Dir3 for the top-level directory, so the refill
+	    # walk must descend Dir3 -> Dir2 -> Dir1 before loading PTEs.
+	    lddir   $t0, $t0, 4
 	    lddir   $t0, $t0, 3
 	    lddir   $t0, $t0, 2
-	    lddir   $t0, $t0, 1
 	    ldpte   $t0, 0
 	    ldpte   $t0, 1
 	    tlbfill
