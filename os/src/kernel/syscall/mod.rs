@@ -69,6 +69,11 @@ impl_syscall!(
     symlinkat,
     (*const c_char, i32, *const c_char)
 );
+impl_syscall!(
+    sys_linkat,
+    linkat,
+    (i32, *const c_char, i32, *const c_char, u32)
+);
 
 // 挂载/文件系统信息 (Mount/Filesystem Info)
 impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));

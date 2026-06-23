@@ -218,3 +218,72 @@ pub fn symlinkat(target: *const c_char, newdirfd: i32, linkpath: *const c_char) 
         Err(e) => e.to_errno(),
     }
 }
+
+/// linkat - 创建硬链接
+pub fn linkat(
+    olddirfd: i32,
+    oldpath: *const c_char,
+    newdirfd: i32,
+    newpath: *const c_char,
+    flags: u32,
+) -> isize {
+    use crate::uapi::fs::AtFlags;
+
+    let old_path = match get_path_safe(oldpath as usize) {
+        Ok(s) => s,
+        Err(e) => return e.to_errno(),
+    };
+    let new_path = match get_path_safe(newpath as usize) {
+        Ok(s) => s,
+        Err(e) => return e.to_errno(),
+    };
+
+    let at_flags = match AtFlags::from_bits(flags) {
+        Some(flags) => flags,
+        None => return -(EINVAL as isize),
+    };
+    if at_flags.contains(AtFlags::EMPTY_PATH) {
+        return -(EINVAL as isize);
+    }
+
+    let follow_symlink = at_flags.contains(AtFlags::SYMLINK_FOLLOW);
+    let old_dentry = match resolve_at_path_with_flags(olddirfd, &old_path, follow_symlink) {
+        Ok(dentry) => dentry,
+        Err(e) => return e.to_errno(),
+    };
+    let old_meta = match old_dentry.inode.metadata() {
+        Ok(meta) => meta,
+        Err(e) => return e.to_errno(),
+    };
+    if old_meta.inode_type == InodeType::Directory {
+        return -(crate::uapi::errno::EPERM as isize);
+    }
+
+    let (new_dir_path, new_name) = match split_path(&new_path) {
+        Ok(parts) => parts,
+        Err(e) => return e.to_errno(),
+    };
+    let new_parent = match resolve_at_path(newdirfd, &new_dir_path) {
+        Ok(Some(dentry)) => dentry,
+        Ok(None) => return FsError::NotFound.to_errno(),
+        Err(e) => return e.to_errno(),
+    };
+    let new_parent_meta = match new_parent.inode.metadata() {
+        Ok(meta) => meta,
+        Err(e) => return e.to_errno(),
+    };
+    if new_parent_meta.inode_type != InodeType::Directory {
+        return FsError::NotDirectory.to_errno();
+    }
+
+    match new_parent.inode.link(&new_name, &old_dentry.inode) {
+        Ok(()) => {
+            drop_cached_child(&new_parent, &new_name);
+            let link_dentry = Dentry::new(new_name, old_dentry.inode.clone());
+            new_parent.add_child(link_dentry.clone());
+            DENTRY_CACHE.insert(&link_dentry);
+            0
+        }
+        Err(e) => e.to_errno(),
+    }
+}

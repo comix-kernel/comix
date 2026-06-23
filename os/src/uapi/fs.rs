@@ -191,6 +191,9 @@ bitflags! {
         /// 不跟随符号链接（AT_SYMLINK_NOFOLLOW）
         const SYMLINK_NOFOLLOW = 0x100;
 
+        /// 跟随符号链接（AT_SYMLINK_FOLLOW，用于 linkat 等）
+        const SYMLINK_FOLLOW = 0x400;
+
         /// 使用有效 UID/GID 而非实际 UID/GID（AT_EACCESS）
         const EACCESS = 0x200;
 

@@ -36,6 +36,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_MKDIRAT => sys_mkdirat(frame),
         crate::kernel::syscall::numbers::SYS_UNLINKAT => sys_unlinkat(frame),
         crate::kernel::syscall::numbers::SYS_SYMLINKAT => sys_symlinkat(frame),
+        crate::kernel::syscall::numbers::SYS_LINKAT => sys_linkat(frame),
 
         // 挂载/文件系统信息
         crate::kernel::syscall::numbers::SYS_MOUNT => sys_mount(frame),
