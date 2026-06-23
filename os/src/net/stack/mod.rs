@@ -23,6 +23,8 @@ const TCP_TX_BUFFER_SIZE: usize = 256 * 1024;
 const UDP_PACKET_METADATA_CAPACITY: usize = 256;
 const UDP_RX_BUFFER_SIZE: usize = 256 * 1024;
 const UDP_TX_BUFFER_SIZE: usize = 256 * 1024;
+const LOOPBACK_WRITE_DRAIN_POLLS: usize = 64;
+const LOOPBACK_FULL_DRAIN_POLLS: usize = 256;
 
 pub(crate) fn enqueue_loopback_frame(frame: Vec<u8>) {
     network_stack().enqueue_loopback_frame(frame);
@@ -418,6 +420,10 @@ impl NetworkStack {
 
     /// Poll until loopback compatibility queues are boundedly drained.
     pub fn poll_until_empty(&self) {
+        self.poll_loopback_bounded(LOOPBACK_FULL_DRAIN_POLLS);
+    }
+
+    fn poll_loopback_bounded(&self, max_polls: usize) {
         if let Some(ref wrapper) = *self.net_iface.lock() {
             wrapper.poll_smoltcp(&self.socket_set);
             {
@@ -426,8 +432,7 @@ impl NetworkStack {
             }
             self.reap_pending_tcp_close();
 
-            const MAX_DRAIN_POLLS: usize = 256;
-            for _ in 0..MAX_DRAIN_POLLS {
+            for _ in 0..max_polls {
                 if wrapper.loopback_queue_len() == 0 {
                     break;
                 }
@@ -546,7 +551,7 @@ impl NetworkStack {
             }
         };
         if result.is_ok() {
-            self.poll();
+            self.poll_loopback_bounded(LOOPBACK_WRITE_DRAIN_POLLS);
             crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
@@ -742,7 +747,7 @@ impl NetworkStack {
             }
         };
         if result.is_ok() {
-            self.poll();
+            self.poll_loopback_bounded(LOOPBACK_WRITE_DRAIN_POLLS);
             crate::kernel::syscall::io::wake_poll_waiters();
         }
         result
