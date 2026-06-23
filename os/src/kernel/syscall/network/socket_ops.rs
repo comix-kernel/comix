@@ -499,12 +499,20 @@ fn replenish_tcp_listeners(
     while network_stack().tcp_spare_listener_count(socket_file, listen_endpoint) < target {
         let new_listen_handle = match create_tcp_socket() {
             Ok(SocketHandle::Tcp(h)) => h,
-            Err(e) => return Err(e.to_errno()),
+            Err(e) => {
+                if network_stack().tcp_spare_listener_count(socket_file, listen_endpoint) > 0 {
+                    break;
+                }
+                return Err(e.to_errno());
+            }
             Ok(SocketHandle::Udp(_)) => return Err(-(crate::uapi::errno::EINVAL as isize)),
         };
 
         if let Err(e) = network_stack().tcp_listen(new_listen_handle, listen_endpoint) {
             network_stack().remove_tcp_socket(new_listen_handle);
+            if network_stack().tcp_spare_listener_count(socket_file, listen_endpoint) > 0 {
+                break;
+            }
             return Err(e.to_errno());
         }
 
