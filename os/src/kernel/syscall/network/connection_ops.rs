@@ -1,5 +1,7 @@
 use super::*;
 
+const SOCKET_IO_CHUNK_SIZE: usize = 64 * 1024;
+
 /// 连接到远程地址
 pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let task = current_task();
@@ -233,13 +235,14 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
             (tid, file)
         };
 
+        let chunk_len = core::cmp::min(len, SOCKET_IO_CHUNK_SIZE);
         let result = {
-            let mut kernel_buf = alloc::vec![0u8; len];
+            let mut kernel_buf = alloc::vec![0u8; chunk_len];
             unsafe {
                 crate::arch::ArchImpl::copy_from_user(
                     crate::arch::address::UA::from_usize(buf as usize),
                     kernel_buf.as_mut_ptr(),
-                    len,
+                    chunk_len,
                 )
                 .ok();
             }
@@ -248,11 +251,11 @@ pub fn send(sockfd: i32, buf: *const u8, len: usize, _flags: i32) -> isize {
 
         match result {
             Ok(n) => {
-                pr_debug!("send: sockfd={}, len={} -> sent={}", sockfd, len, n);
+                pr_debug!("send: sockfd={}, len={} -> sent={}", sockfd, chunk_len, n);
                 return n as isize;
             }
             Err(e) => {
-                pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+                pr_debug!("send: sockfd={}, len={} -> error={:?}", sockfd, chunk_len, e);
                 if e == crate::vfs::FsError::WouldBlock {
                     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
                         && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
@@ -301,8 +304,9 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
             (tid, file)
         };
 
+        let chunk_len = core::cmp::min(len, SOCKET_IO_CHUNK_SIZE);
         let result = {
-            let mut kernel_buf = alloc::vec![0u8; len];
+            let mut kernel_buf = alloc::vec![0u8; chunk_len];
             match file.read(&mut kernel_buf) {
                 Ok(n) => {
                     unsafe {
@@ -321,11 +325,11 @@ pub fn recv(sockfd: i32, buf: *mut u8, len: usize, _flags: i32) -> isize {
 
         match result {
             Ok(n) => {
-                pr_debug!("recv: sockfd={}, len={} -> received={}", sockfd, len, n);
+                pr_debug!("recv: sockfd={}, len={} -> received={}", sockfd, chunk_len, n);
                 return n as isize;
             }
             Err(e) => {
-                pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, len, e);
+                pr_debug!("recv: sockfd={}, len={} -> error={:?}", sockfd, chunk_len, e);
                 if e == crate::vfs::FsError::WouldBlock {
                     if let Some(socket_file) = file.as_any().downcast_ref::<SocketFile>()
                         && !socket_file.flags().contains(OpenFlags::O_NONBLOCK)
