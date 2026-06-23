@@ -551,13 +551,8 @@ impl Inode for TmpfsInode {
         }
         drop(child_children);
 
-        // 删除
-        children.remove(name);
-
-        // 更新父目录的 nlinks
-        let mut meta = self.metadata.lock();
-        meta.nlinks = meta.nlinks.saturating_sub(1);
-        drop(meta);
+        let child = children.remove(name).ok_or(FsError::NotFound)?;
+        self.remove_link_from_child(&child);
 
         self.update_mtime();
 
