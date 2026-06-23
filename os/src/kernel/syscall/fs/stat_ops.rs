@@ -220,11 +220,16 @@ pub fn faccessat(dirfd: i32, pathname: *const c_char, mode: i32, flags: u32) -> 
         Err(e) => return e.to_errno(),
     };
 
-    // 解析标志
-    let at_flags = match AtFlags::from_bits(flags) {
-        Some(f) => f,
-        None => return -(EINVAL as isize),
-    };
+    if mode & !(R_OK | W_OK | X_OK) != 0 {
+        return -(EINVAL as isize);
+    }
+
+    const FACCESSAT_ALLOWED_FLAGS: u32 = AtFlags::SYMLINK_NOFOLLOW.bits() | AtFlags::EACCESS.bits();
+    if flags & !FACCESSAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
+    let at_flags = AtFlags::from_bits_retain(flags);
 
     // 查找文件
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
