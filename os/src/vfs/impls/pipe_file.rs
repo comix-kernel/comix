@@ -61,9 +61,10 @@ impl PipeRingBuffer {
 
     /// 设置管道容量
     fn set_capacity(&mut self, new_capacity: usize) -> Result<(), FsError> {
-        if !(Self::MIN_CAPACITY..=Self::MAX_CAPACITY).contains(&new_capacity) {
+        if new_capacity > Self::MAX_CAPACITY {
             return Err(FsError::InvalidArgument);
         }
+        let new_capacity = new_capacity.max(Self::MIN_CAPACITY);
 
         // 如果新容量小于当前数据量，拒绝修改
         if new_capacity < self.buffer.len() {
