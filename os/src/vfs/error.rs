@@ -34,6 +34,7 @@ pub enum FsError {
     NoDevice,              // -ENODEV(19): 设备不存在
     NoMemory,              // -ENOMEM(12): 内存不足
     Busy,                  // -EBUSY(16): 设备或资源忙
+    CrossDeviceLink,       // -EXDEV(18): 跨设备链接/重命名
 
     // 管道相关 (新增)
     BrokenPipe, // -EPIPE(32): 管道破裂 (读端已关闭)
@@ -67,6 +68,7 @@ impl FsError {
             FsError::BadAddress => -EFAULT as isize,
             FsError::Busy => -EBUSY as isize,
             FsError::AlreadyExists => -EEXIST as isize,
+            FsError::CrossDeviceLink => -EXDEV as isize,
             FsError::NoDevice => -ENODEV as isize,
             FsError::NotDirectory => -ENOTDIR as isize,
             FsError::IsDirectory => -EISDIR as isize,
@@ -98,6 +100,7 @@ mod tests {
         kassert!(FsError::NotFound.to_errno() == -crate::uapi::errno::ENOENT as isize);
         kassert!(FsError::PermissionDenied.to_errno() == -crate::uapi::errno::EACCES as isize);
         kassert!(FsError::AlreadyExists.to_errno() == -crate::uapi::errno::EEXIST as isize);
+        kassert!(FsError::CrossDeviceLink.to_errno() == -crate::uapi::errno::EXDEV as isize);
         kassert!(FsError::BadAddress.to_errno() == -crate::uapi::errno::EFAULT as isize);
         kassert!(FsError::NotSeekable.to_errno() == -crate::uapi::errno::ESPIPE as isize);
         kassert!(FsError::NotTty.to_errno() == -crate::uapi::errno::ENOTTY as isize);

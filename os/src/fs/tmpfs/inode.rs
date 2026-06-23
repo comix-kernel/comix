@@ -709,7 +709,7 @@ impl Inode for TmpfsInode {
         let target_inode = target
             .as_any()
             .downcast_ref::<TmpfsInode>()
-            .ok_or(FsError::InvalidArgument)?;
+            .ok_or(FsError::CrossDeviceLink)?;
         let target_arc = target_inode
             .self_ref
             .lock()
@@ -763,7 +763,7 @@ impl Inode for TmpfsInode {
         let new_parent_ref = new_parent
             .as_any()
             .downcast_ref::<TmpfsInode>()
-            .ok_or(FsError::InvalidArgument)?;
+            .ok_or(FsError::CrossDeviceLink)?;
         let new_parent_arc = new_parent_ref
             .self_ref
             .lock()
@@ -771,7 +771,7 @@ impl Inode for TmpfsInode {
             .ok_or(FsError::IoError)?;
 
         if !Arc::ptr_eq(&self.stats, &new_parent_arc.stats) {
-            return Err(FsError::InvalidArgument);
+            return Err(FsError::CrossDeviceLink);
         }
 
         let new_parent_meta = new_parent_arc.metadata.lock();

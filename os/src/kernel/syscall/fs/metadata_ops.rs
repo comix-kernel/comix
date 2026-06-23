@@ -227,8 +227,6 @@ pub fn linkat(
     newpath: *const c_char,
     flags: u32,
 ) -> isize {
-    use crate::uapi::fs::AtFlags;
-
     let old_path = match get_path_safe(oldpath as usize) {
         Ok(s) => s,
         Err(e) => return e.to_errno(),
@@ -238,15 +236,12 @@ pub fn linkat(
         Err(e) => return e.to_errno(),
     };
 
-    let at_flags = match AtFlags::from_bits(flags) {
-        Some(flags) => flags,
-        None => return -(EINVAL as isize),
-    };
-    if at_flags.contains(AtFlags::EMPTY_PATH) {
+    const LINKAT_ALLOWED_FLAGS: u32 = crate::uapi::fs::AtFlags::SYMLINK_FOLLOW.bits();
+    if flags & !LINKAT_ALLOWED_FLAGS != 0 {
         return -(EINVAL as isize);
     }
 
-    let follow_symlink = at_flags.contains(AtFlags::SYMLINK_FOLLOW);
+    let follow_symlink = flags & crate::uapi::fs::AtFlags::SYMLINK_FOLLOW.bits() != 0;
     let old_dentry = match resolve_at_path_with_flags(olddirfd, &old_path, follow_symlink) {
         Ok(dentry) => dentry,
         Err(e) => return e.to_errno(),

@@ -381,7 +381,7 @@ impl Inode for Ext4Inode {
             .ok_or(FsError::InvalidArgument)?;
 
         if !Arc::ptr_eq(&self.fs, &ext4_inode.fs) {
-            return Err(FsError::InvalidArgument);
+            return Err(FsError::CrossDeviceLink);
         }
 
         let fs = self.fs.lock();
@@ -516,7 +516,7 @@ impl Inode for Ext4Inode {
 
         // 确保在同一个文件系统中
         if !Arc::ptr_eq(&self.fs, &new_parent_ext4.fs) {
-            return Err(FsError::InvalidArgument);
+            return Err(FsError::CrossDeviceLink);
         }
 
         // 防止将目录移动到其子目录中（会造成循环）
