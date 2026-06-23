@@ -24,8 +24,14 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
         Err(e) => return e.to_errno(),
     };
 
+    const FCHOWNAT_ALLOWED_FLAGS: u32 =
+        AtFlags::SYMLINK_NOFOLLOW.bits() | AtFlags::EMPTY_PATH.bits();
+    if flags & !FCHOWNAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
     // 解析标志位
-    let at_flags = AtFlags::from_bits_truncate(flags);
+    let at_flags = AtFlags::from_bits_retain(flags);
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
     let empty_path = at_flags.contains(AtFlags::EMPTY_PATH);
 
@@ -90,8 +96,13 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
         Err(e) => return e.to_errno(),
     };
 
+    const FCHMODAT_ALLOWED_FLAGS: u32 = AtFlags::SYMLINK_NOFOLLOW.bits();
+    if flags & !FCHMODAT_ALLOWED_FLAGS != 0 {
+        return -(EINVAL as isize);
+    }
+
     // 解析标志位
-    let at_flags = AtFlags::from_bits_truncate(flags);
+    let at_flags = AtFlags::from_bits_retain(flags);
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
 
     // 验证 mode 参数（只保留权限位，去除文件类型位）
