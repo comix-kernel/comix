@@ -18,8 +18,10 @@ use super::socket::{self, SocketFile, SocketHandle, UdpDatagram};
 mod adapter;
 pub use adapter::{NetDeviceAdapter, SmoltcpInterface};
 
-const TCP_RX_BUFFER_SIZE: usize = 256 * 1024;
-const TCP_TX_BUFFER_SIZE: usize = 256 * 1024;
+// 256KiB buffers can drive smoltcp's large-window path into a sequence underflow
+// under parallel loopback iperf; 128KiB-1 keeps throughput high with a stable window scale.
+const TCP_RX_BUFFER_SIZE: usize = 128 * 1024 - 1;
+const TCP_TX_BUFFER_SIZE: usize = 128 * 1024 - 1;
 const UDP_PACKET_METADATA_CAPACITY: usize = 256;
 const UDP_RX_BUFFER_SIZE: usize = 256 * 1024;
 const UDP_TX_BUFFER_SIZE: usize = 256 * 1024;
