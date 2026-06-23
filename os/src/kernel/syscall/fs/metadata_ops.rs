@@ -148,8 +148,14 @@ pub fn mknodat(dirfd: i32, pathname: *const c_char, mode: u32, dev: u64) -> isiz
     // 构造文件模式
     let file_mode = FileMode::from_bits_truncate(mode);
 
+    // 用户态传入的是 Linux ABI dev_t，VFS 内部使用自己的 major/minor 编码。
+    let internal_dev = crate::vfs::dev::decode_linux_dev(dev);
+
     // 调用 inode.mknod()
-    match parent_dentry.inode.mknod(&filename, file_mode, dev) {
+    match parent_dentry
+        .inode
+        .mknod(&filename, file_mode, internal_dev)
+    {
         Ok(child_inode) => {
             // 创建 dentry 并加入缓存
             let child_dentry = Dentry::new(filename.clone(), child_inode);
