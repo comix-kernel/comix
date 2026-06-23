@@ -29,6 +29,12 @@ pub const AT_SYMLINK_NOFOLLOW: u32 = 0x100;
 pub const AT_REMOVEDIR: u32 = 0x200;
 pub const O_CLOEXEC: u32 = 0o2000000;
 
+fn drop_cached_child(parent: &Dentry, name: &str) {
+    if let Some(child) = parent.remove_child(name) {
+        DENTRY_CACHE.remove(&child.full_path());
+    }
+}
+
 mod fd_ops;
 mod metadata_ops;
 mod mount_ops;

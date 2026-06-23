@@ -285,9 +285,9 @@ pub fn renameat2(
         );
 
         // 更新 dentry 缓存
-        old_parent.remove_child(&old_name);
-        old_parent.remove_child(&temp_name);
-        new_parent.remove_child(&new_name);
+        drop_cached_child(&old_parent, &old_name);
+        drop_cached_child(&old_parent, &temp_name);
+        drop_cached_child(&new_parent, &new_name);
     } else if rename_flags.contains(RenameFlags::NOREPLACE) {
         // 目标存在时失败
         if new_parent.inode.lookup(&new_name).is_ok() {
@@ -303,7 +303,7 @@ pub fn renameat2(
         }
 
         // 更新 dentry 缓存
-        old_parent.remove_child(&old_name);
+        drop_cached_child(&old_parent, &old_name);
     } else if rename_flags.contains(RenameFlags::WHITEOUT) {
         // WHITEOUT 暂不支持(需要 Union FS 支持)
         return FsError::NotSupported.to_errno();
@@ -317,8 +317,8 @@ pub fn renameat2(
         }
 
         // 更新 dentry 缓存
-        old_parent.remove_child(&old_name);
-        new_parent.remove_child(&new_name);
+        drop_cached_child(&old_parent, &old_name);
+        drop_cached_child(&new_parent, &new_name);
     }
 
     0

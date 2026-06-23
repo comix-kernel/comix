@@ -155,7 +155,7 @@ pub fn unlinkat(dirfd: i32, pathname: *const c_char, flags: u32) -> isize {
     match parent_dentry.inode.unlink(&filename) {
         Ok(()) => {
             // 从缓存中移除
-            parent_dentry.remove_child(&filename);
+            drop_cached_child(&parent_dentry, &filename);
             0
         }
         Err(e) => e.to_errno(),
