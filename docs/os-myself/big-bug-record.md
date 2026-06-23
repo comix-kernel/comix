@@ -74,3 +74,56 @@ BusyBox applet 的链接森林只是在运行时需要，不应该作为 Git 仓
 2. 减少 `mount`/`umount` 测试里的 VFAT 初始化成本。
 3. 对目录项查找和路径解析加缓存，减少 exec 高频路径的重复 ext4 访问。
 4. 如果评测机总时间更长，可以保留当前按组懒 staging；如果只追 basic 分数，可以进一步只运行 basic 组，避免后续组影响关机和输出。
+
+## 2026-06-23 iperf TCP 吞吐从几 KB/s 提升到数百 Mbit/s
+
+### 现象
+
+最初 iperf 组能启动，但 TCP 分数几乎没有贡献：
+
+- `BASIC_TCP` 只发送 4KiB，sender 约 16Kbit/s，receiver 为 0。
+- `REVERSE_TCP` sender 也只有 4KiB，receiver 为 0。
+- `PARALLEL_TCP` 第二条以后连接报 `Connection refused`。
+- UDP 能跑通，说明基本 socket、loopback 地址和 iperf 控制连接不是完全坏掉；问题集中在 TCP 数据面和监听队列语义。
+
+### 关键发现
+
+第一层瓶颈是监听语义。iperf3 `-P 5` 会为同一个 server port 建多条 TCP data stream。smoltcp 的 TCP socket 没有 Linux 那种单 socket backlog 队列模型，监听端需要准备多个 TCP socket 才能同时接住多个 SYN。原实现只有一个 listener handle，所以第一条连接建立后，后续 stream 容易被拒绝。
+
+第二层瓶颈是 loopback MTU 和 adapter RX buffer 不一致。loopback 设备暴露 `mtu=65535`，smoltcp 因此会发接近 64KiB 的 TCP/IP 包；但 `NetDeviceAdapter` 原来只有 2048 字节接收缓冲。结果大 TCP frame 在 adapter 层直接被丢掉，表现为客户端以为发出了少量数据，服务端几乎收不到。
+
+第三层是 syscall 和轮询节奏。iperf3 会传大 buffer；如果每次 syscall 都按用户长度一次性分配/copy，会增加内核堆压力，也让 loopback 队列 drain 不及时。写入后不主动 poll，会把推进 TCP 状态机的工作推迟到后续调度点，吞吐很差。
+
+### 处理步骤
+
+这轮 TCP 相关修复按小步提交推进：
+
+- `da0d56c tests: stage busybox for iperf script`：iperf 脚本里会调用 BusyBox 工具，staging 只复制 `iperf3` 不够，先保证测试脚本自身能稳定运行。
+- `56c01e8 net: enlarge socket buffers for iperf`：TCP/UDP buffer 扩到 256KiB，避免 iperf 数据面频繁因为小 buffer 进入 WouldBlock。
+- `de092e8 net: chunk socket syscall buffers`：`send/recv` 单次内核复制限制到 64KiB，控制临时分配和 copy 成本。
+- `e63c8a5 net: drain loopback after socket writes`：socket write/sendto 成功后 bounded poll，尽快把 loopback Tx frame 回灌到 Rx 并推进 smoltcp 状态机。
+- `eb9d8ce net: support parallel tcp listeners`：为监听 socket 维护一组 spare TCP listener，accept 时把已建立连接交给新 fd，并补充新的 listener，解决 `PARALLEL_TCP` 连接拒绝。
+- `491634c net: reduce iperf socket log noise`：把热路径 socket/TCP 连接日志从 info 降到 debug，避免串口日志本身拖慢性能。
+- `aae6897 net: size adapter rx buffer for mtu`：adapter RX buffer 改为按 `device.mtu() + Ethernet header` 分配，修复 64KiB loopback TCP frame 被 2048B buffer 丢弃的问题。
+
+### 决策和取舍
+
+没有直接 patch smoltcp。这里的问题主要是我们给 smoltcp 的设备能力、buffer 和 listen 模型不一致，先修本内核适配层更稳，也更容易解释。
+
+TCP buffer 选 256KiB 是折中值。更大可能继续提高峰值，但每个 TCP socket 都会占内存，iperf parallel 场景会放大内存占用；更小则容易回到 WouldBlock 和窗口太小的问题。
+
+listener pool 做了上限，不直接相信 iperf 传入的巨大 backlog。当前逻辑把用户 backlog clamp 到 128，实际 spare listener pool clamp 到 16，足够覆盖 iperf `-P 5`，同时避免一次 listen 分配过多 TCP buffer。
+
+保留 loopback 的大 MTU，而不是降回 1500。降 MTU 能减少单帧内存，但 TCP throughput 会被更多包处理开销限制。真正的问题是 adapter 宣告大 MTU 却没有同等大小的 RX buffer，因此修 buffer 更符合设备模型。
+
+### 验证
+
+临时把 RISC-V `rcS` 改成只跑 `iperf_testcode.sh`，重建 `make kernel-rv PROFILE=release`，用临时分区盘 `/tmp/ccyos-disk-iperf-repro.img` 跑官方 RISC-V musl iperf 组。
+
+最新一次验证中，TCP 三项都通过：
+
+- `BASIC_TCP`：sender 118MiB / 492Mbit/s，receiver 117MiB / 490Mbit/s。
+- `PARALLEL_TCP`：5 stream 全部连接成功，SUM sender 170MiB / 713Mbit/s，receiver 170MiB / 709Mbit/s。
+- `REVERSE_TCP`：sender/receiver 都约 118MiB / 494Mbit/s。
+
+这说明最初 “4KiB / receiver 0” 和 “parallel connection refused” 两个 TCP 主问题已经解决。当前 iperf 剩余明显短板转移到 UDP 单流和 reverse UDP：sender 很高，但 receiver 仍有大量丢包，需要下一步继续优化 UDP 接收路径。
