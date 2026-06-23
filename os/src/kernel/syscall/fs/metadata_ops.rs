@@ -260,6 +260,9 @@ pub fn linkat(
         Ok(s) => s,
         Err(e) => return e.to_errno(),
     };
+    if old_path.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     const LINKAT_ALLOWED_FLAGS: u32 = crate::uapi::fs::AtFlags::SYMLINK_FOLLOW.bits();
     if flags & !LINKAT_ALLOWED_FLAGS != 0 {
