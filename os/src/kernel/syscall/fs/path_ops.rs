@@ -25,9 +25,11 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
         return FsError::InvalidArgument.to_errno();
     }
 
+    let follow_symlink = !open_flags.contains(OpenFlags::O_NOFOLLOW);
+
     // 解析路径（处理AT_FDCWD和相对路径）
-    let dentry = match resolve_at_path(dirfd, &path_str) {
-        Ok(Some(d)) => {
+    let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        Ok(d) => {
             // 文件已存在
             // 检查 O_EXCL (与 O_CREAT 一起使用时，文件必须不存在)
             if open_flags.contains(OpenFlags::O_CREAT) && open_flags.contains(OpenFlags::O_EXCL) {
@@ -35,7 +37,7 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
             }
             d
         }
-        Ok(None) => {
+        Err(FsError::NotFound) => {
             // 文件不存在，检查是否需要创建
             if !open_flags.contains(OpenFlags::O_CREAT) {
                 return FsError::NotFound.to_errno();
@@ -55,6 +57,13 @@ pub fn openat(dirfd: i32, pathname: *const c_char, flags: u32, mode: u32) -> isi
         Ok(m) => m,
         Err(e) => return e.to_errno(),
     };
+
+    if open_flags.contains(OpenFlags::O_NOFOLLOW) && meta.inode_type == InodeType::Symlink {
+        if open_flags.contains(OpenFlags::O_DIRECTORY) {
+            return FsError::NotDirectory.to_errno();
+        }
+        return FsError::TooManySymlinks.to_errno();
+    }
 
     // 检查 O_DIRECTORY (必须是目录)
     if open_flags.contains(OpenFlags::O_DIRECTORY) && meta.inode_type != InodeType::Directory {
