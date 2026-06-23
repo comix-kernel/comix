@@ -86,8 +86,6 @@ __restore:
     csrwr   $t0, 0x6
     ld.d    $t0, $r21, 280     # PRMD
     csrwr   $t0, 0x1
-    ld.d    $t0, $r21, 272     # CRMD
-    csrwr   $t0, 0x0
 
     # 恢复通用寄存器（保持 r21 基址到最后）
     ld.d    $ra,  $r21, 8
