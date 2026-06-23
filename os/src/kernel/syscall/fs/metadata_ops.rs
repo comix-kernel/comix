@@ -110,7 +110,7 @@ pub fn fchownat(dirfd: i32, pathname: *const c_char, owner: u32, group: u32, fla
 /// * `dirfd` - 目录文件描述符（AT_FDCWD 表示当前目录）
 /// * `pathname` - 文件路径
 /// * `mode` - 新的权限模式（12 位权限位）
-/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW 等）
+/// * `flags` - 标志位（AT_SYMLINK_NOFOLLOW、AT_EMPTY_PATH 等）
 ///
 /// # 返回值
 /// * 0 - 成功
@@ -127,7 +127,8 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
         Err(e) => return e.to_errno(),
     };
 
-    const FCHMODAT_ALLOWED_FLAGS: u32 = AtFlags::SYMLINK_NOFOLLOW.bits();
+    const FCHMODAT_ALLOWED_FLAGS: u32 =
+        AtFlags::SYMLINK_NOFOLLOW.bits() | AtFlags::EMPTY_PATH.bits();
     if flags & !FCHMODAT_ALLOWED_FLAGS != 0 {
         return -(EINVAL as isize);
     }
@@ -135,9 +136,7 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     // 解析标志位
     let at_flags = AtFlags::from_bits_retain(flags);
     let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
-    if path_str.is_empty() {
-        return FsError::NotFound.to_errno();
-    }
+    let empty_path = at_flags.contains(AtFlags::EMPTY_PATH);
 
     // 验证 mode 参数（只保留权限位，去除文件类型位）
     let mode = mode & 0o7777; // 保留 12 位权限位（包括 setuid/setgid/sticky）
@@ -145,6 +144,34 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
         Some(m) => m,
         None => return -(EINVAL as isize),
     };
+
+    // 处理 AT_EMPTY_PATH 情况
+    if empty_path && path_str.is_empty() {
+        // pathname 为空，操作 dirfd 本身
+        if dirfd == AT_FDCWD {
+            // 不能对当前目录使用 AT_EMPTY_PATH
+            return -(EINVAL as isize);
+        }
+
+        let task = current_task();
+        let file = match task.lock().fd_table.get(dirfd as usize) {
+            Ok(f) => f,
+            Err(e) => return e.to_errno(),
+        };
+
+        let dentry = match file.dentry() {
+            Ok(d) => d,
+            Err(e) => return e.to_errno(),
+        };
+
+        return match dentry.inode.chmod(file_mode) {
+            Ok(()) => 0,
+            Err(e) => e.to_errno(),
+        };
+    }
+    if path_str.is_empty() {
+        return FsError::NotFound.to_errno();
+    }
 
     // 解析路径，获取 dentry（使用辅助函数）
     let dentry = match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
