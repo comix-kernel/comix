@@ -26,7 +26,8 @@ lazy_static! {
 use crate::uapi::fcntl::OpenFlags;
 use crate::uapi::socket::SocketOptions;
 
-const UDP_RXQ_CAP: usize = 64;
+const UDP_RXQ_INITIAL_CAP: usize = 64;
+const UDP_RXQ_MAX_CAP: usize = 512;
 pub(crate) const UDP_DGRAM_MAX: usize = 2048;
 
 #[derive(Debug)]
@@ -58,7 +59,7 @@ impl SocketFile {
             listen_backlog: SpinLock::new(0),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
-            udp_rx_queue: SpinLock::new(VecDeque::with_capacity(UDP_RXQ_CAP)),
+            udp_rx_queue: SpinLock::new(VecDeque::with_capacity(UDP_RXQ_INITIAL_CAP)),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(OpenFlags::empty()),
@@ -82,7 +83,7 @@ impl SocketFile {
             listen_backlog: SpinLock::new(0),
             local_endpoint: SpinLock::new(None),
             remote_endpoint: SpinLock::new(None),
-            udp_rx_queue: SpinLock::new(VecDeque::with_capacity(UDP_RXQ_CAP)),
+            udp_rx_queue: SpinLock::new(VecDeque::with_capacity(UDP_RXQ_INITIAL_CAP)),
             shutdown_rd: SpinLock::new(false),
             shutdown_wr: SpinLock::new(false),
             flags: SpinLock::new(flags),
@@ -123,8 +124,15 @@ impl SocketFile {
         self.listen_sockets.lock().clear();
     }
 
-    pub fn listen_sockets_len(&self) -> usize {
-        self.listen_sockets.lock().len()
+    pub fn has_listen_socket(&self, handle: SocketHandle) -> bool {
+        self.listen_sockets
+            .lock()
+            .iter()
+            .any(|h| match (*h, handle) {
+                (SocketHandle::Tcp(a), SocketHandle::Tcp(b)) => a == b,
+                (SocketHandle::Udp(a), SocketHandle::Udp(b)) => a == b,
+                _ => false,
+            })
     }
 
     /// Pop one established connection from the listener queue.
@@ -161,8 +169,19 @@ impl SocketFile {
 
     pub(crate) fn udp_push(&self, d: UdpDatagram) -> bool {
         let mut q = self.udp_rx_queue.lock();
-        if q.len() == q.capacity() {
-            return false;
+        if q.len() >= UDP_RXQ_MAX_CAP {
+            let _ = q.pop_front();
+        } else if q.len() == q.capacity() {
+            let old_capacity = q.capacity();
+            if old_capacity < UDP_RXQ_MAX_CAP {
+                let new_capacity = old_capacity
+                    .saturating_mul(2)
+                    .clamp(UDP_RXQ_INITIAL_CAP, UDP_RXQ_MAX_CAP);
+                let _ = q.try_reserve(new_capacity.saturating_sub(old_capacity));
+            }
+            if q.len() == q.capacity() {
+                let _ = q.pop_front();
+            }
         }
         q.push_back(d);
         true
