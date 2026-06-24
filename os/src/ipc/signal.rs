@@ -14,8 +14,9 @@ use bitflags::bitflags;
 use crate::{
     arch::{HwTrapFrame, TrapFrame},
     kernel::{
-        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
-        exit_process, exit_task, sleep_task, wake_up_task, yield_task,
+        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, cleanup_process_resources_on_exit,
+        current_cpu, current_task, exit_process, exit_task, sleep_task, task_group_leader,
+        wake_up_task, yield_task,
     },
     pr_err,
     uapi::signal::*,
@@ -235,10 +236,10 @@ fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
 /* 默认信号处理函数 */
 /// 默认行为：进程中止
 fn sig_terminate(sig_num: usize) {
-    let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
-    for task in tasks {
-        exit_process(task, (128 + sig_num) as i32);
-    }
+    let task = current_task();
+    let leader = task_group_leader(&task).unwrap_or(task);
+    cleanup_process_resources_on_exit(leader.clone());
+    exit_process(leader, (128 + sig_num) as i32);
 }
 
 /// 默认行为：终止并 Core Dump
