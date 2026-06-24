@@ -71,9 +71,7 @@ impl MemorySpace {
             if !is_kernel {
                 continue;
             }
-            let mut new_area = area.clone_metadata();
-            new_area.map(&mut space.page_table)?;
-            space.areas.push(new_area);
+            space.clone_direct_area(area)?;
         }
 
         // Userspace rt_sigreturn trampoline (Linux ABI).
@@ -87,6 +85,20 @@ impl MemorySpace {
     /// 注意：这里只设置固定的 heap_start，不会创建/扩展 UserHeap 映射区域。
     pub fn set_heap_start(&mut self, heap_start: Vpn) {
         self.heap_start = Some(heap_start);
+    }
+
+    pub(super) fn clone_direct_area(&mut self, area: &MappingArea) -> Result<(), PagingError> {
+        let mut new_area = area.clone_metadata();
+
+        #[cfg(target_arch = "loongarch64")]
+        if new_area.area_type() == AreaType::KernelMmio {
+            self.areas.push(new_area);
+            return Ok(());
+        }
+
+        new_area.map(&mut self.page_table)?;
+        self.areas.push(new_area);
+        Ok(())
     }
 
     pub(super) fn map_user_sigreturn_trampoline(&mut self) -> Result<(), PagingError> {
@@ -324,9 +336,7 @@ impl MemorySpace {
             match area.map_type() {
                 MapType::Direct => {
                     // 直接映射：克隆元数据并重新映射到新的页表
-                    let mut new_area = area.clone_metadata();
-                    new_area.map(&mut new_space.page_table)?;
-                    new_space.areas.push(new_area);
+                    new_space.clone_direct_area(area)?;
                 }
                 MapType::Framed => {
                     // 帧映射：深层复制数据

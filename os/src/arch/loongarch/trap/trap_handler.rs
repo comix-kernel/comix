@@ -1,6 +1,9 @@
 //! LoongArch64 陷阱处理实现（与 RISC-V 路径一致的接口）。
 
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use crate::arch::constant::{
     CSR_BADI, CSR_BADV, CSR_CRMD_PLV_MASK, CSR_EENTRY, CSR_ESTAT_IS_MASK, CSR_TLBRENT,
@@ -12,7 +15,6 @@ use crate::arch::trap::restore;
 use crate::ipc::check_signal;
 use crate::kernel::syscall::dispatch::dispatch_syscall;
 use crate::kernel::{TIMER, TIMER_QUEUE, schedule, send_signal_process, wake_up_task};
-use crate::sync::SpinLock;
 
 use super::TrapFrame;
 
@@ -22,8 +24,25 @@ macro_rules! emergency_println {
     };
 }
 
-/// 仅在单核环境下使用的默认 TrapFrame；后续可由调度器替换为 per-CPU/任务帧
-pub static BOOT_TRAP_FRAME: SpinLock<TrapFrame> = SpinLock::new(TrapFrame::empty());
+/// 仅在单核启动/兜底路径使用的 TrapFrame。
+///
+/// trap_entry 会通过 KScratch0 异步写入这里；普通 SpinLock 不能保护这种写入，
+/// 安装入口时也不应在这个保存区上持锁。
+struct BootTrapFrame(UnsafeCell<TrapFrame>);
+
+unsafe impl Sync for BootTrapFrame {}
+
+impl BootTrapFrame {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(TrapFrame::empty()))
+    }
+
+    fn get(&self) -> *mut TrapFrame {
+        self.0.get()
+    }
+}
+
+static BOOT_TRAP_FRAME: BootTrapFrame = BootTrapFrame::new();
 
 static FIRST_TRAP_LOGGED: AtomicBool = AtomicBool::new(false);
 static FIRST_USER_TIMER_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -96,21 +115,23 @@ pub(super) fn install_runtime_trap() {
 }
 
 fn install_trap_entry() {
-    // 将 TrapFrame 指针写入 KScratch0，并设置 EENTRY 指向 trap_entry
+    // 将 TrapFrame 指针写入 KScratch0，并设置 EENTRY 指向 trap_entry。
+    // BOOT_TRAP_FRAME 本身就是 trap 保存区，不能用会在安装期间释放的锁来保护。
     unsafe {
-        let mut boot_trap_frame = BOOT_TRAP_FRAME.lock();
+        let boot_trap_frame = BOOT_TRAP_FRAME.get();
         // 设置内核栈指针用于用户态陷阱的栈切换
         let sp: usize;
         core::arch::asm!("addi.d {0}, $sp, 0", out(reg) sp, options(nostack, preserves_flags));
-        boot_trap_frame.kernel_sp = sp;
-        boot_trap_frame.cpu_ptr = crate::kernel::current_cpu() as *const _ as usize;
+        (*boot_trap_frame).kernel_sp = sp;
+        (*boot_trap_frame).cpu_ptr = crate::kernel::current_cpu() as *const _ as usize;
 
         // KScratch0 <- TrapFrame 指针
         core::arch::asm!(
             "csrwr {0}, 0x30",
-            in(reg) (&mut *boot_trap_frame as *mut TrapFrame as usize),
+            in(reg) boot_trap_frame as usize,
             options(nostack, preserves_flags)
         );
+
         // EENTRY <- trap_entry（注意 CSR 编号为 0xc）
         core::arch::asm!(
             "csrwr {val}, {csr}",
@@ -260,6 +281,11 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
 /// 处理时钟中断
 fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+
+    // Loopback/null-net paths need periodic progress, but smoltcp should not run
+    // directly in hard interrupt context.
+    crate::net::socket::request_network_poll();
+
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_task(task);
     }

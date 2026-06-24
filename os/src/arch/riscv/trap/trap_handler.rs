@@ -335,10 +335,8 @@ pub fn kernel_trap(scause: scause::Scause, sepc_old: usize, sstatus_old: sstatus
 pub fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
 
-    // 推进网络栈，避免在仅有 loopback/null-net 且任务阻塞在 select/poll 时网络停滞。
-    // 在时钟中断里推进一次网络栈，保证即便缺少真实网卡中断也能推进 TCP 状态机/重传等。
-    crate::net::socket::poll_network_interfaces();
-    crate::kernel::syscall::io::wake_poll_waiters();
+    // 推进网络栈的请求放到 kworker 中执行，避免在硬中断上下文里持有网络栈锁。
+    crate::net::socket::request_network_poll();
 
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_task(task);

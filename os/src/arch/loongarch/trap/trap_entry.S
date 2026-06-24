@@ -6,6 +6,122 @@
 .globl __restore
 .globl trap_handler
 
+.equ TF_FREGS, 304
+.equ TF_FCSR, 560
+.equ TF_FCC, 568
+
+.macro save_fp_state base, tmp0, tmp1
+    fst.d   $f0,  \base, TF_FREGS + 0 * 8
+    fst.d   $f1,  \base, TF_FREGS + 1 * 8
+    fst.d   $f2,  \base, TF_FREGS + 2 * 8
+    fst.d   $f3,  \base, TF_FREGS + 3 * 8
+    fst.d   $f4,  \base, TF_FREGS + 4 * 8
+    fst.d   $f5,  \base, TF_FREGS + 5 * 8
+    fst.d   $f6,  \base, TF_FREGS + 6 * 8
+    fst.d   $f7,  \base, TF_FREGS + 7 * 8
+    fst.d   $f8,  \base, TF_FREGS + 8 * 8
+    fst.d   $f9,  \base, TF_FREGS + 9 * 8
+    fst.d   $f10, \base, TF_FREGS + 10 * 8
+    fst.d   $f11, \base, TF_FREGS + 11 * 8
+    fst.d   $f12, \base, TF_FREGS + 12 * 8
+    fst.d   $f13, \base, TF_FREGS + 13 * 8
+    fst.d   $f14, \base, TF_FREGS + 14 * 8
+    fst.d   $f15, \base, TF_FREGS + 15 * 8
+    fst.d   $f16, \base, TF_FREGS + 16 * 8
+    fst.d   $f17, \base, TF_FREGS + 17 * 8
+    fst.d   $f18, \base, TF_FREGS + 18 * 8
+    fst.d   $f19, \base, TF_FREGS + 19 * 8
+    fst.d   $f20, \base, TF_FREGS + 20 * 8
+    fst.d   $f21, \base, TF_FREGS + 21 * 8
+    fst.d   $f22, \base, TF_FREGS + 22 * 8
+    fst.d   $f23, \base, TF_FREGS + 23 * 8
+    fst.d   $f24, \base, TF_FREGS + 24 * 8
+    fst.d   $f25, \base, TF_FREGS + 25 * 8
+    fst.d   $f26, \base, TF_FREGS + 26 * 8
+    fst.d   $f27, \base, TF_FREGS + 27 * 8
+    fst.d   $f28, \base, TF_FREGS + 28 * 8
+    fst.d   $f29, \base, TF_FREGS + 29 * 8
+    fst.d   $f30, \base, TF_FREGS + 30 * 8
+    fst.d   $f31, \base, TF_FREGS + 31 * 8
+
+    movfcsr2gr \tmp0, $fcsr0
+    st.d    \tmp0, \base, TF_FCSR
+
+    movcf2gr \tmp0, $fcc0
+    move    \tmp1, \tmp0
+    movcf2gr \tmp0, $fcc1
+    bstrins.d \tmp1, \tmp0, 15, 8
+    movcf2gr \tmp0, $fcc2
+    bstrins.d \tmp1, \tmp0, 23, 16
+    movcf2gr \tmp0, $fcc3
+    bstrins.d \tmp1, \tmp0, 31, 24
+    movcf2gr \tmp0, $fcc4
+    bstrins.d \tmp1, \tmp0, 39, 32
+    movcf2gr \tmp0, $fcc5
+    bstrins.d \tmp1, \tmp0, 47, 40
+    movcf2gr \tmp0, $fcc6
+    bstrins.d \tmp1, \tmp0, 55, 48
+    movcf2gr \tmp0, $fcc7
+    bstrins.d \tmp1, \tmp0, 63, 56
+    st.d    \tmp1, \base, TF_FCC
+.endm
+
+.macro restore_fp_state base, tmp0, tmp1
+    fld.d   $f0,  \base, TF_FREGS + 0 * 8
+    fld.d   $f1,  \base, TF_FREGS + 1 * 8
+    fld.d   $f2,  \base, TF_FREGS + 2 * 8
+    fld.d   $f3,  \base, TF_FREGS + 3 * 8
+    fld.d   $f4,  \base, TF_FREGS + 4 * 8
+    fld.d   $f5,  \base, TF_FREGS + 5 * 8
+    fld.d   $f6,  \base, TF_FREGS + 6 * 8
+    fld.d   $f7,  \base, TF_FREGS + 7 * 8
+    fld.d   $f8,  \base, TF_FREGS + 8 * 8
+    fld.d   $f9,  \base, TF_FREGS + 9 * 8
+    fld.d   $f10, \base, TF_FREGS + 10 * 8
+    fld.d   $f11, \base, TF_FREGS + 11 * 8
+    fld.d   $f12, \base, TF_FREGS + 12 * 8
+    fld.d   $f13, \base, TF_FREGS + 13 * 8
+    fld.d   $f14, \base, TF_FREGS + 14 * 8
+    fld.d   $f15, \base, TF_FREGS + 15 * 8
+    fld.d   $f16, \base, TF_FREGS + 16 * 8
+    fld.d   $f17, \base, TF_FREGS + 17 * 8
+    fld.d   $f18, \base, TF_FREGS + 18 * 8
+    fld.d   $f19, \base, TF_FREGS + 19 * 8
+    fld.d   $f20, \base, TF_FREGS + 20 * 8
+    fld.d   $f21, \base, TF_FREGS + 21 * 8
+    fld.d   $f22, \base, TF_FREGS + 22 * 8
+    fld.d   $f23, \base, TF_FREGS + 23 * 8
+    fld.d   $f24, \base, TF_FREGS + 24 * 8
+    fld.d   $f25, \base, TF_FREGS + 25 * 8
+    fld.d   $f26, \base, TF_FREGS + 26 * 8
+    fld.d   $f27, \base, TF_FREGS + 27 * 8
+    fld.d   $f28, \base, TF_FREGS + 28 * 8
+    fld.d   $f29, \base, TF_FREGS + 29 * 8
+    fld.d   $f30, \base, TF_FREGS + 30 * 8
+    fld.d   $f31, \base, TF_FREGS + 31 * 8
+
+    ld.d    \tmp0, \base, TF_FCSR
+    movgr2fcsr $fcsr0, \tmp0
+
+    ld.d    \tmp0, \base, TF_FCC
+    bstrpick.d \tmp1, \tmp0, 7, 0
+    movgr2cf $fcc0, \tmp1
+    bstrpick.d \tmp1, \tmp0, 15, 8
+    movgr2cf $fcc1, \tmp1
+    bstrpick.d \tmp1, \tmp0, 23, 16
+    movgr2cf $fcc2, \tmp1
+    bstrpick.d \tmp1, \tmp0, 31, 24
+    movgr2cf $fcc3, \tmp1
+    bstrpick.d \tmp1, \tmp0, 39, 32
+    movgr2cf $fcc4, \tmp1
+    bstrpick.d \tmp1, \tmp0, 47, 40
+    movgr2cf $fcc5, \tmp1
+    bstrpick.d \tmp1, \tmp0, 55, 48
+    movgr2cf $fcc6, \tmp1
+    bstrpick.d \tmp1, \tmp0, 63, 56
+    movgr2cf $fcc7, \tmp1
+.endm
+
 trap_entry:
 boot_trap_entry:
     # 保留原始寄存器，避免覆盖 KScratch0（其长期保存 TrapFrame 指针）
@@ -69,6 +185,7 @@ boot_trap_entry:
     # 若来自用户态，则切换到保存的内核栈
     andi    $t2, $t1, 0x3      # PRMD.PLV 位
     beqz    $t2, 1f
+    save_fp_state $a0, $t2, $t3
     ld.d    $sp, $a0, 288      # kernel_sp
 1:
     # 调用 Rust trap_handler(trap_frame)
@@ -85,9 +202,12 @@ __restore:
     ld.d    $t0, $r21, 256     # ERA
     csrwr   $t0, 0x6
     ld.d    $t0, $r21, 280     # PRMD
+    andi    $t1, $t0, 0x3      # 目标 PRMD.PLV 位；csrwr 会把旧 PRMD 写回 $t0
     csrwr   $t0, 0x1
-    ld.d    $t0, $r21, 272     # CRMD
-    csrwr   $t0, 0x0
+
+    beqz    $t1, 1f
+    restore_fp_state $r21, $t0, $t1
+1:
 
     # 恢复通用寄存器（保持 r21 基址到最后）
     ld.d    $ra,  $r21, 8
@@ -133,6 +253,8 @@ __restore:
 	tlb_refill_entry:
 	    csrwr   $t0, 0x8b          # TLBRSAVE <- t0
 	    csrrd   $t0, 0x1b          # CSR.PGD (auto-selects PGDL/PGDH)
+	    # PWCH enables Dir3 as the top-level directory; Dir4 is disabled.
+	    # Walk Dir3 -> Dir2 -> Dir1 before loading the even/odd PTE pair.
 	    lddir   $t0, $t0, 3
 	    lddir   $t0, $t0, 2
 	    lddir   $t0, $t0, 1
