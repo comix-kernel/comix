@@ -2,7 +2,6 @@ use crate::ext4_defs::*;
 use crate::prelude::*;
 use crate::return_errno_with_message;
 use crate::utils::path_check;
-use core::cmp::max;
 // use std::time::{Duration, Instant};
 
 impl Ext4 {
@@ -206,20 +205,12 @@ impl Ext4 {
             let adjust_read_size = min(BLOCK_SIZE - unaligned_start_offset, read_buf_len);
 
             // get iblock physical block id
-            let pblock_idx = match self.get_pblock_idx(&inode_ref, iblock as u32) {
-                Ok(idx) => idx,
-                Err(e) => {
-                    return_errno_with_message!(
-                        Errno::EIO,
-                        "Failed to get physical block for logical block"
-                    );
-                }
+            let data = match self.get_pblock_idx(&inode_ref, iblock as u32) {
+                Ok(pblock_idx) => self
+                    .block_device
+                    .read_offset(pblock_idx as usize * BLOCK_SIZE),
+                Err(_) => vec![0u8; BLOCK_SIZE],
             };
-
-            // read data
-            let data = self
-                .block_device
-                .read_offset(pblock_idx as usize * BLOCK_SIZE);
 
             // copy data to read buffer
             read_buf[cursor..cursor + adjust_read_size].copy_from_slice(
@@ -247,20 +238,12 @@ impl Ext4 {
             }
 
             // get iblock physical block id
-            let pblock_idx = match self.get_pblock_idx(&inode_ref, iblock as u32) {
-                Ok(idx) => idx,
-                Err(e) => {
-                    return_errno_with_message!(
-                        Errno::EIO,
-                        "Failed to get physical block for logical block"
-                    );
-                }
+            let data = match self.get_pblock_idx(&inode_ref, iblock as u32) {
+                Ok(pblock_idx) => self
+                    .block_device
+                    .read_offset(pblock_idx as usize * BLOCK_SIZE),
+                Err(_) => vec![0u8; BLOCK_SIZE],
             };
-
-            // read data
-            let data = self
-                .block_device
-                .read_offset(pblock_idx as usize * BLOCK_SIZE);
             // log::trace!("[Read] Read block data - physical_block: {}, data_len: {}", pblock_idx, data.len());
 
             // copy data to read buffer
@@ -307,7 +290,11 @@ impl Ext4 {
 
         // Calculate the start and end block index
         let iblock_start = offset / BLOCK_SIZE;
-        let iblock_last = (offset + write_buf_len + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let write_end = match offset.checked_add(write_buf_len) {
+            Some(v) => v,
+            None => return return_errno_with_message!(Errno::EINVAL, "Write offset overflow"),
+        };
+        let iblock_last = (write_end + BLOCK_SIZE - 1) / BLOCK_SIZE;
         let total_blocks_needed = iblock_last - iblock_start;
 
         // start block index
@@ -328,19 +315,29 @@ impl Ext4 {
         // Start bgid for block allocation
         let mut start_bgid = 1;
 
-        // Pre-allocate blocks if needed
-        let blocks_to_allocate = if iblk_idx >= ifile_blocks as usize {
-            total_blocks_needed
-        } else {
-            max(0, total_blocks_needed - (ifile_blocks as usize - iblk_idx))
-        };
+        // Pre-allocate blocks up to the write end. This keeps extended regions
+        // zero-backed and avoids sparse holes that the current extent code
+        // cannot otherwise distinguish from missing mappings.
+        let existing_file_blocks = ifile_blocks as usize;
+        let blocks_to_allocate = iblock_last.saturating_sub(existing_file_blocks);
 
         if blocks_to_allocate > 0 {
             log::trace!("[Pre-allocation] Allocating {} blocks", blocks_to_allocate);
 
             // 使用append_inode_pblk_batch进行批量块分配
             let allocated_blocks =
-                self.append_inode_pblk_batch(&mut inode_ref, &mut start_bgid, blocks_to_allocate)?;
+                self.append_inode_pblk_batch(
+                    &mut inode_ref,
+                    &mut start_bgid,
+                    existing_file_blocks as u32,
+                    blocks_to_allocate,
+                )?;
+
+            let zero_block = vec![0u8; BLOCK_SIZE];
+            for block in &allocated_blocks {
+                self.block_device
+                    .write_offset(*block as usize * BLOCK_SIZE, &zero_block);
+            }
 
             // If we couldn't allocate all blocks, adjust the write size
             if allocated_blocks.len() < blocks_to_allocate {
@@ -387,10 +384,10 @@ impl Ext4 {
 
         // Verify we have enough blocks for the write
         let required_blocks = (write_buf_len + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        let available_blocks = if iblk_idx >= ifile_blocks as usize {
+        let available_blocks = if iblk_idx >= existing_file_blocks {
             new_blocks
         } else {
-            (ifile_blocks as usize - iblk_idx) + new_blocks
+            existing_file_blocks.saturating_sub(iblk_idx) + new_blocks
         };
 
         if available_blocks < required_blocks {
@@ -517,7 +514,10 @@ impl Ext4 {
         }
 
         // Update file size if necessary
-        let new_size = offset + written;
+        let new_size = match offset.checked_add(written) {
+            Some(v) => v,
+            None => return return_errno_with_message!(Errno::EINVAL, "File size overflow"),
+        };
         if new_size > file_size as usize {
             log::trace!(
                 "[Write] Updating file size from {} to {}",

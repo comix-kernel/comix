@@ -250,10 +250,11 @@ impl Ext4 {
         &self,
         inode_ref: &mut Ext4InodeRef,
         start_bgid: &mut u32,
+        start_lblock: u32,
         block_count: usize,
     ) -> Result<Vec<Ext4Fsblk>> {
         let inode_size = inode_ref.inode.size();
-        let iblock = ((inode_size as usize + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32;
+        let iblock = start_lblock;
 
         // Use new optimized block allocation function
         let allocated_blocks = self.balloc_alloc_block_batch(inode_ref, start_bgid, block_count)?;
@@ -412,12 +413,17 @@ impl Ext4 {
         }
 
         // Update inode size, ensuring it doesn't overflow
-        let new_size = match inode_size.checked_add((allocated_blocks.len() * BLOCK_SIZE) as u64) {
+        let new_size = match (iblock as u64)
+            .checked_add(allocated_blocks.len() as u64)
+            .and_then(|blocks| blocks.checked_mul(BLOCK_SIZE as u64))
+        {
             Some(v) => v,
             None => return return_errno_with_message!(Errno::EINVAL, "File size overflow"),
         };
-        inode_ref.inode.set_size(new_size);
-        self.write_back_inode(inode_ref);
+        if new_size > inode_size {
+            inode_ref.inode.set_size(new_size);
+            self.write_back_inode(inode_ref);
+        }
 
         Ok(allocated_blocks)
     }
