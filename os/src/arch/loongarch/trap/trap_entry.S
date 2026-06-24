@@ -202,10 +202,10 @@ __restore:
     ld.d    $t0, $r21, 256     # ERA
     csrwr   $t0, 0x6
     ld.d    $t0, $r21, 280     # PRMD
+    andi    $t1, $t0, 0x3      # 目标 PRMD.PLV 位；csrwr 会把旧 PRMD 写回 $t0
     csrwr   $t0, 0x1
 
-    andi    $t0, $t0, 0x3      # PRMD.PLV 位
-    beqz    $t0, 1f
+    beqz    $t1, 1f
     restore_fp_state $r21, $t0, $t1
 1:
 
