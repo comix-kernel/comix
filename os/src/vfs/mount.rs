@@ -313,12 +313,20 @@ impl MountTable {
         flags: MountFlags,
         device: Option<String>,
     ) -> Result<(), FsError> {
-        use crate::vfs::normalize_path;
+        use crate::vfs::{normalize_path, vfs_lookup};
 
         let normalized_path = normalize_path(path);
+        let mount_parent = if normalized_path == "/" {
+            None
+        } else {
+            vfs_lookup(&normalized_path).ok()
+        };
 
         // 创建挂载点
         let mount_point = MountPoint::new(fs, normalized_path.clone(), flags, device);
+        if let Some(parent) = mount_parent.as_ref() {
+            mount_point.root.set_mounted_on(parent);
+        }
 
         // 添加到挂载栈
         let mut mounts = self.mounts.lock();
@@ -328,7 +336,9 @@ impl MountTable {
             .push(mount_point.clone());
 
         // 如果挂载点的 dentry 已经存在于缓存中，更新其挂载信息
-        if let Some(dentry) = crate::vfs::DENTRY_CACHE.lookup(&normalized_path) {
+        if let Some(dentry) =
+            mount_parent.or_else(|| crate::vfs::DENTRY_CACHE.lookup(&normalized_path))
+        {
             dentry.set_mount(&mount_point.root);
         }
 

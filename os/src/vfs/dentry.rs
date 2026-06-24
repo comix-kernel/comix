@@ -132,6 +132,9 @@ pub struct Dentry {
 
     /// 如果此 dentry 是挂载点，指向挂载的根 dentry
     mount_point: SpinLock<Option<Weak<Dentry>>>,
+
+    /// 如果此 dentry 是某个挂载文件系统的根，指向外层挂载点 dentry
+    mounted_on: SpinLock<Option<Weak<Dentry>>>,
 }
 
 impl fmt::Debug for Dentry {
@@ -159,6 +162,7 @@ impl Dentry {
             parent: SpinLock::new(Weak::new()),
             children: SpinLock::new(BTreeMap::new()),
             mount_point: SpinLock::new(None),
+            mounted_on: SpinLock::new(None),
         });
 
         dentry.inode.set_dentry(Arc::downgrade(&dentry));
@@ -197,11 +201,22 @@ impl Dentry {
         let mut components = alloc::vec::Vec::new();
         let mut current_name = self.name.clone();
         let mut current_parent = self.parent();
+        let mut current_mounted_on = self.mounted_on.lock().as_ref().and_then(Weak::upgrade);
 
-        // 向上遍历到根目录
+        // 向上遍历到全局根目录。挂载文件系统的 root dentry 名字也是 "/"，
+        // 但它的全局路径应继续通过外层挂载点回溯。
         loop {
-            // 根目录的名字是 "/"
             if current_name == "/" {
+                if let Some(mount_parent) = current_mounted_on {
+                    current_name = mount_parent.name.clone();
+                    current_parent = mount_parent.parent();
+                    current_mounted_on = mount_parent
+                        .mounted_on
+                        .lock()
+                        .as_ref()
+                        .and_then(Weak::upgrade);
+                    continue;
+                }
                 break;
             }
 
@@ -212,6 +227,7 @@ impl Dentry {
                 Some(parent) => {
                     current_name = parent.name.clone();
                     current_parent = parent.parent();
+                    current_mounted_on = parent.mounted_on.lock().as_ref().and_then(Weak::upgrade);
                 }
                 None => break, // 到达根或孤立节点
             }
@@ -240,6 +256,11 @@ impl Dentry {
     /// 获取挂载的根 dentry（如果有）
     pub fn get_mount(&self) -> Option<Arc<Dentry>> {
         self.mount_point.lock().as_ref()?.upgrade()
+    }
+
+    /// 标记此 dentry 是挂载文件系统根，挂载在外层的 `mount_parent` 上。
+    pub fn set_mounted_on(&self, mount_parent: &Arc<Dentry>) {
+        *self.mounted_on.lock() = Some(Arc::downgrade(mount_parent));
     }
 }
 
