@@ -2,7 +2,9 @@
 /// Parameter bmap: Bitmap array
 /// Parameter bit: Bit index in the bitmap
 pub fn ext4_bmap_is_bit_set(bmap: &[u8], bit: u32) -> bool {
-    bmap[(bit >> 3) as usize] & (1 << (bit & 7)) != 0
+    bmap.get((bit >> 3) as usize)
+        .map(|byte| byte & (1 << (bit & 7)) != 0)
+        .unwrap_or(true)
 }
 
 /// Check if a bit is cleared in the bitmap
@@ -16,14 +18,18 @@ pub fn ext4_bmap_is_bit_clr(bmap: &[u8], bit: u32) -> bool {
 /// Parameter bmap: Bitmap array
 /// Parameter bit: Bit index in the bitmap
 pub fn ext4_bmap_bit_set(bmap: &mut [u8], bit: u32) {
-    bmap[(bit >> 3) as usize] |= 1 << (bit & 7);
+    if let Some(byte) = bmap.get_mut((bit >> 3) as usize) {
+        *byte |= 1 << (bit & 7);
+    }
 }
 
 /// Clear a bit in the bitmap
 /// Parameter bmap: Bitmap array
 /// Parameter bit: Bit index in the bitmap
 pub fn ext4_bmap_bit_clr(bmap: &mut [u8], bit: u32) {
-    bmap[(bit >> 3) as usize] &= !(1 << (bit & 7));
+    if let Some(byte) = bmap.get_mut((bit >> 3) as usize) {
+        *byte &= !(1 << (bit & 7));
+    }
 }
 
 /// Find a free bit in the bitmap
@@ -32,6 +38,10 @@ pub fn ext4_bmap_bit_clr(bmap: &mut [u8], bit: u32) {
 /// Parameter ebit: End bit index
 /// Parameter bit_id: Reference to store the free bit index
 pub fn ext4_bmap_bit_find_clr(bmap: &[u8], sbit: u32, ebit: u32, bit_id: &mut u32) -> bool {
+    if bmap.is_empty() || ebit <= sbit {
+        return false;
+    }
+
     let mut i: u32;
     let mut bcnt = ebit - sbit;
 
@@ -97,6 +107,10 @@ pub fn ext4_bmap_bit_find_clr(bmap: &[u8], sbit: u32, ebit: u32, bit_id: &mut u3
 /// Parameter start_bit: The start index of the bit range to clear
 /// Parameter end_bit: The end index of the bit range to clear
 pub fn ext4_bmap_bits_free(bmap: &mut [u8], start_bit: u32, end_bit: u32) {
+    if end_bit < start_bit {
+        return;
+    }
+
     for bit in start_bit..=end_bit {
         ext4_bmap_bit_clr(bmap, bit);
     }
