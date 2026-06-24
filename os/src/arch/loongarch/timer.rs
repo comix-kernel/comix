@@ -74,5 +74,5 @@ pub fn ack_timer_interrupt() {
 
 /// 获取当前时间（毫秒）
 pub fn get_time_ms() -> usize {
-    get_ticks() * 1000 / TICKS_PER_SEC
+    (get_time() as u128 * 1000u128 / clock_freq() as u128) as usize
 }

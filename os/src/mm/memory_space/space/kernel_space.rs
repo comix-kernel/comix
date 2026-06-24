@@ -218,7 +218,7 @@ impl MemorySpace {
         let vpn_start = Vpn::from_addr_floor(addr);
         let vpn_end = Vpn::from_addr_ceil(VA::from_usize(addr.as_usize() + size));
 
-        let mut area = MappingArea::new(
+        let area = MappingArea::new(
             VpnRange::new(vpn_start, vpn_end),
             AreaType::KernelMmio,
             MapType::Direct,
@@ -226,7 +226,14 @@ impl MemorySpace {
             None, // MMIO 映射无文件
         );
 
-        area.map(&mut self.page_table)?;
+        #[cfg(not(target_arch = "loongarch64"))]
+        {
+            let mut area = area;
+            area.map(&mut self.page_table)?;
+            self.areas.push(area);
+            return Ok(());
+        }
+
         self.areas.push(area);
         Ok(())
     }
@@ -234,7 +241,7 @@ impl MemorySpace {
     /// 进程手动映射MMIO区域
     pub fn map_mmio(&mut self, paddr: PA, size: usize) -> Result<VA, PagingError> {
         // 将物理地址转换为虚拟地址
-        let vaddr = crate::arch::pa_to_va(paddr);
+        let vaddr = crate::arch::mmio_pa_to_va(paddr);
         let vaddr_usize = vaddr.as_usize();
 
         // 计算VPN范围

@@ -1,10 +1,12 @@
 //! Socket implementation using smoltcp
 
 use crate::arch::Arch;
+use crate::kernel::{GLOBAL_WORK_QUEUE, WorkItem};
 use crate::net::NetworkError;
 use crate::sync::SpinLock;
 use crate::vfs::{File, FsError, InodeMetadata};
 use alloc::collections::VecDeque;
+use core::sync::atomic::{AtomicBool, Ordering};
 use lazy_static::lazy_static;
 use smoltcp::iface::SocketHandle as SmoltcpHandle;
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
@@ -22,6 +24,8 @@ lazy_static! {
     pub static ref FD_SOCKET_MAP: SpinLock<BTreeMap<(usize, usize), SocketHandle>> =
         SpinLock::new(BTreeMap::new());
 }
+
+static NETWORK_POLL_PENDING: AtomicBool = AtomicBool::new(false);
 
 use crate::uapi::fcntl::OpenFlags;
 use crate::uapi::socket::SocketOptions;
@@ -484,6 +488,27 @@ pub fn tcp_connect(
 /// Poll network interfaces to process packets.
 pub fn poll_network_interfaces() {
     crate::net::stack::network_stack().poll();
+}
+
+fn network_poll_work() {
+    NETWORK_POLL_PENDING.store(false, Ordering::Release);
+    poll_network_interfaces();
+    crate::kernel::syscall::io::wake_poll_waiters();
+}
+
+/// Request a network poll from thread context.
+///
+/// Timer interrupts use this as a lightweight bottom-half handoff so smoltcp
+/// and poll wait queues are not driven directly from hard interrupt context.
+pub fn request_network_poll() {
+    if NETWORK_POLL_PENDING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        GLOBAL_WORK_QUEUE
+            .lock()
+            .schedule_work(WorkItem::new(network_poll_work));
+    }
 }
 
 /// Poll smoltcp + dispatch UDP datagrams to per-fd queues.

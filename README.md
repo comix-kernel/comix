@@ -60,7 +60,7 @@ cd os && make test
 - 第一分区：ext4 rootfs，内容来自对应的 `os/fs-*.img`。
 - 第二分区：64 MiB FAT32/VFAT 空分区，用于 OSComp `basic/mount` 与 `basic/umount` 测试。
 
-官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 不写入 rootfs；本地运行时它们需要位于仓库根目录。`make run-rv` / `make run-la` 会将我们的 MBR 分区盘作为第一个 VirtIO 块设备 `vda`，将官方测试镜像作为第二个块设备 `vdb`。内核从 `vda1` 启动 rootfs，`rcS` 会把 `vdb` 这个裸 ext4 测试镜像挂到 `/tests` 后执行白名单 musl 测试。
+官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 不写入 rootfs，也不需要复制到本仓库。`make run-rv` / `make run-la` 默认优先使用相邻 `../CCYOS/` 目录下的测试镜像，也可通过 `TESTIMG_RV=/path/to/sdcard-rv.img` 或 `TESTIMG_LA=/path/to/sdcard-la.img` 指定任意本地路径。运行时我们的 MBR 分区盘作为第一个 VirtIO 块设备 `vda`，官方测试镜像作为第二个块设备 `vdb`。内核从 `vda1` 启动 rootfs，`rcS` 会把 `vdb` 这个裸 ext4 测试镜像挂到 `/tests` 后原地执行白名单 musl 测试。
 
 内核默认会从发现到的块设备（整盘和分区）中探测 ext4 rootfs，优先尝试分区设备，并选择含 `/bin/sh` 或 `/bin/ash` 的设备挂载为 `/`，因此评测运行形态会从我们的 `vda1` 启动。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 

@@ -30,7 +30,7 @@
 - 第一分区：ext4 rootfs。
 - 第二分区：64 MiB FAT32/VFAT 空分区，用于 `basic/mount`、`basic/umount`。
 
-我们的 MBR 分区盘作为第一个块设备 `vda`，内核从 `vda1` 启动 rootfs。官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 作为第二个块设备 `vdb` 提供测试内容，镜像根目录包含 `musl/` 与 `glibc/`。启动脚本会把 `vdb` 这个裸 ext4 测试镜像挂载到 `/tests`，再自动运行白名单 musl 测试。
+我们的 MBR 分区盘作为第一个块设备 `vda`，内核从 `vda1` 启动 rootfs。官方测试镜像 `sdcard-rv.img` / `sdcard-la.img` 作为第二个块设备 `vdb` 提供测试内容，镜像根目录包含 `musl/` 与 `glibc/`。本地运行时测试镜像可放在仓库外，并通过 `TESTIMG_RV` / `TESTIMG_LA` 指定路径；启动脚本会把 `vdb` 这个裸 ext4 测试镜像挂载到 `/tests`，再原地运行白名单 musl 测试。
 
 内核默认会从发现到的整盘与分区块设备中探测 ext4 rootfs，优先尝试分区设备，选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 `/`。`oscomp` feature 已弃用并保留为空兼容项，不再改变启动行为。
 

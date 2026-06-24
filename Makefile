@@ -30,8 +30,12 @@ VFAT_IMG := $(OS_DIR)/vfat.img
 MKFS_VFAT ?= mkfs.vfat
 ASSEMBLE_DISK := scripts/assemble_partitioned_disk.sh
 COMMA := ,
-TESTIMG_RV ?= sdcard-rv.img
-TESTIMG_LA ?= sdcard-la.img
+# Local test images can be large (LTP in particular), so keep them outside this
+# worktree and attach them directly as writable QEMU block devices. Override with
+# `make run-la TESTIMG_LA=/path/to/sdcard-la.img` when needed.
+LOCAL_TESTIMG_DIR ?= ../CCYOS
+TESTIMG_RV ?= $(firstword $(wildcard $(LOCAL_TESTIMG_DIR)/sdcard-rv.img sdcard-rv.img))
+TESTIMG_LA ?= $(firstword $(wildcard $(LOCAL_TESTIMG_DIR)/sdcard-la.img sdcard-la.img))
 RV_TEST_DRIVE := -drive file=$(TESTIMG_RV)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-device$(COMMA)drive=test0$(COMMA)bus=virtio-mmio-bus.0
 LA_TEST_DRIVE := -drive file=$(TESTIMG_LA)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-pci$(COMMA)drive=test0
 
@@ -143,7 +147,11 @@ disk-la.img: kernel-la $(VFAT_IMG) $(ASSEMBLE_DISK)
 # 官方测试盘放 bus.0，注册出来才是 vda=disk、vdb=sdcard。
 # 设备型号对齐 os/qemu-run.sh（riscv: virtio-mmio）与 os/qemu-loongarch-run.sh（loongarch: pci）。
 # ------------------------------------------------------------
-run-rv: kernel-rv disk.img $(TESTIMG_RV)
+run-rv: kernel-rv disk.img
+	@if [ -z "$(TESTIMG_RV)" ]; then \
+		echo "Error: no RISC-V test image found. Set TESTIMG_RV=/path/to/sdcard-rv.img" >&2; \
+		exit 1; \
+	fi
 	@echo "[Run] 运行 RISC-V QEMU（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
 	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
 		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
@@ -152,7 +160,11 @@ run-rv: kernel-rv disk.img $(TESTIMG_RV)
 		$(RV_TEST_DRIVE) \
 		-device virtio-net-device,netdev=net -netdev user,id=net
 
-run-la: kernel-la disk-la.img $(TESTIMG_LA)
+run-la: kernel-la disk-la.img
+	@if [ -z "$(TESTIMG_LA)" ]; then \
+		echo "Error: no LoongArch test image found. Set TESTIMG_LA=/path/to/sdcard-la.img" >&2; \
+		exit 1; \
+	fi
 	@echo "[Run] 运行 LoongArch QEMU（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
 	qemu-system-loongarch64 -machine virt -kernel kernel-la -m $(LA_MEM) -nographic \
 		-smp $(LA_SMP) -no-reboot -rtc base=utc \

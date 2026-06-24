@@ -247,6 +247,23 @@ pub fn pa_to_va(pa: address::PA) -> address::VA {
     PlatformImpl::pa_to_va(pa)
 }
 
+/// MMIO 物理地址 → 虚拟地址。
+///
+/// 普通 RAM 直映和 MMIO 直映在部分架构上使用不同窗口。LoongArch 使用
+/// DMW0 访问 uncached MMIO，避免把设备寄存器放进 DMW1 cached RAM 窗口。
+#[inline]
+pub fn mmio_pa_to_va(pa: address::PA) -> address::VA {
+    #[cfg(target_arch = "loongarch64")]
+    {
+        address::VA::from_usize(pa.as_usize() | constant::DMW0_BASE)
+    }
+
+    #[cfg(not(target_arch = "loongarch64"))]
+    {
+        pa_to_va(pa)
+    }
+}
+
 /// 虚拟地址 → 物理地址（直接映射）
 ///
 /// # Safety

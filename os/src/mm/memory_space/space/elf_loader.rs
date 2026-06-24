@@ -73,9 +73,7 @@ impl MemorySpace {
             );
             if is_kernel {
                 // 对于内核区域，只需要克隆元数据并重新映射（不复制数据）
-                let mut new_area = area.clone_metadata();
-                new_area.map(&mut space.page_table)?;
-                space.areas.push(new_area);
+                space.clone_direct_area(area)?;
             }
         }
 

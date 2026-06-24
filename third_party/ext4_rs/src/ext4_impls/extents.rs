@@ -6,6 +6,14 @@ use alloc::format;
 use core::mem::size_of;
 
 impl Ext4 {
+    fn extent_insert_pos(node: &ExtentPathNode, new_extent: &Ext4Extent) -> usize {
+        match node.extent {
+            Some(extent) if new_extent.first_block < extent.first_block => node.position,
+            Some(_) => node.position + 1,
+            None => node.position,
+        }
+    }
+
     /// Find an extent in the extent tree.
     ///
     /// Params:
@@ -422,13 +430,28 @@ impl Ext4 {
                 return self.insert_extent(inode_ref, new_extent);
             }
 
-            // Not empty, insert at search result pos + 1
+            // Not empty, insert at search result position.
+            let insert_pos = Self::extent_insert_pos(node, new_extent);
             log::info!(
                 "[insert_new_extent] Inserting at root at position {} (entries: {})",
-                node.position + 1,
+                insert_pos,
                 header.entries_count
             );
-            *inode_ref.inode.root_extent_mut_at(node.position + 1) = *new_extent;
+            let entries_count = header.entries_count as usize;
+            if insert_pos > entries_count {
+                return_errno_with_message!(Errno::EINVAL, "Invalid root extent insert position");
+            }
+            let root_capacity = (15 * core::mem::size_of::<u32>()
+                - core::mem::size_of::<Ext4ExtentHeader>())
+                / core::mem::size_of::<Ext4Extent>();
+            if entries_count >= root_capacity {
+                return_errno_with_message!(Errno::EINVAL, "Root extent node has no insert space");
+            }
+            for pos in (insert_pos..entries_count).rev() {
+                let extent = inode_ref.inode.root_extent_at(pos);
+                *inode_ref.inode.root_extent_mut_at(pos + 1) = extent;
+            }
+            *inode_ref.inode.root_extent_mut_at(insert_pos) = *new_extent;
             inode_ref.inode.root_extent_header_mut().entries_count += 1;
 
             log::debug!("[insert_new_extent] Successfully inserted at root:");
@@ -446,16 +469,33 @@ impl Ext4 {
             log::info!(
                 "[insert_new_extent] Inserting at non-root node at depth {}, position {}",
                 depth,
-                node.position + 1
+                Self::extent_insert_pos(node, new_extent)
             );
 
             // load block
             let node_block = node.pblock_of_node;
             let mut ext4block = Block::load(self.block_device.clone(), node_block * BLOCK_SIZE);
-            let new_ex_offset = core::mem::size_of::<Ext4ExtentHeader>()
-                + core::mem::size_of::<Ext4Extent>() * (node.position + 1);
+            let insert_pos = Self::extent_insert_pos(node, new_extent);
+            let entries_count = header.entries_count as usize;
+            if insert_pos > entries_count {
+                return_errno_with_message!(Errno::EINVAL, "Invalid extent insert position");
+            }
+            let extent_size = core::mem::size_of::<Ext4Extent>();
+            let extent_base = core::mem::size_of::<Ext4ExtentHeader>();
+            let new_ex_offset = extent_base + extent_size * insert_pos;
+            let used_end_after_insert = extent_base + extent_size * (entries_count + 1);
+            if used_end_after_insert > ext4block.data.len() {
+                return_errno_with_message!(Errno::EINVAL, "Extent block has no insert space");
+            }
 
             // insert new extent
+            if insert_pos < entries_count {
+                let move_start = new_ex_offset;
+                let move_end = extent_base + extent_size * entries_count;
+                ext4block
+                    .data
+                    .copy_within(move_start..move_end, move_start + extent_size);
+            }
             let ex: &mut Ext4Extent = ext4block.read_offset_as_mut(new_ex_offset);
             *ex = *new_extent;
             let header: &mut Ext4ExtentHeader = ext4block.read_offset_as_mut(0);
@@ -493,7 +533,7 @@ impl Ext4 {
                 depth
             );
             log::debug!("  - Block address: {}", node_block);
-            log::debug!("  - Extent position: {}", node.position + 1);
+            log::debug!("  - Extent position: {}", insert_pos);
             log::debug!(
                 "  - Extent: logical={}, physical={}, length={}",
                 new_extent.first_block,

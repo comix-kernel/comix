@@ -211,12 +211,10 @@ impl Ext4DirEntry {
 
     /// Copy the directory entry to a slice.
     pub fn copy_to_slice(&self, array: &mut [u8], offset: usize) {
-        let de_ptr = self as *const Ext4DirEntry as *const u8;
-        let array_ptr = array as *mut [u8] as *mut u8;
         let count = core::mem::size_of::<Ext4DirEntry>() / core::mem::size_of::<u8>();
-        unsafe {
-            core::ptr::copy_nonoverlapping(de_ptr, array_ptr.add(offset), count);
-        }
+        assert!(offset <= array.len() && array.len() - offset >= count);
+        let data = unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, count) };
+        array[offset..offset + count].copy_from_slice(data);
     }
 }
 
@@ -242,12 +240,10 @@ impl Ext4DirEntryTail {
     }
 
     pub fn copy_to_slice(&self, array: &mut [u8]) {
-        unsafe {
-            let offset = BLOCK_SIZE - core::mem::size_of::<Ext4DirEntryTail>();
-            let de_ptr = self as *const Ext4DirEntryTail as *const u8;
-            let array_ptr = array as *mut [u8] as *mut u8;
-            let count = core::mem::size_of::<Ext4DirEntryTail>();
-            core::ptr::copy_nonoverlapping(de_ptr, array_ptr.add(offset), count);
-        }
+        let offset = BLOCK_SIZE - core::mem::size_of::<Ext4DirEntryTail>();
+        let count = core::mem::size_of::<Ext4DirEntryTail>();
+        assert!(array.len() >= BLOCK_SIZE);
+        let data = unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, count) };
+        array[offset..offset + count].copy_from_slice(data);
     }
 }

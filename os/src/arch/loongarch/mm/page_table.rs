@@ -75,9 +75,10 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
 
     /// 激活页表
     ///
-    /// 将页表根 PPN 写入 PGDL（低半地址空间）或 PGDH（高半地址空间）
+    /// 将当前地址空间根写入 PGDL，并将最终内核根写入 PGDH。
     fn activate(ppn: Ppn) {
-        let pgd_paddr = ppn.start_addr().as_usize();
+        let pgdl_paddr = ppn.start_addr().as_usize();
+        let pgdh_paddr = super::kernel_root_paddr().unwrap_or(pgdl_paddr);
         unsafe {
             // 设置 STLBPS (CSR 0x1E) - STLB 页大小为 4KB (PS=12)
             core::arch::asm!(
@@ -109,13 +110,13 @@ impl PageTableInnerTrait<PageTableEntry> for PageTableInner {
             // 设置 PGDL (CSR 0x19) - 低半地址空间页全局目录基址
             core::arch::asm!(
                 "csrwr {0}, 0x19",
-                in(reg) pgd_paddr,
+                in(reg) pgdl_paddr,
                 options(nostack, preserves_flags)
             );
             // 设置 PGDH (CSR 0x1A) - 高半地址空间页全局目录基址
             core::arch::asm!(
                 "csrwr {0}, 0x1A",
-                in(reg) pgd_paddr,
+                in(reg) pgdh_paddr,
                 options(nostack, preserves_flags)
             );
             // 启用分页并关闭直接地址翻译
