@@ -90,6 +90,8 @@ bin/usleep	busybox
 bin/vi	busybox
 bin/watch	busybox
 bin/zcat	busybox
+lib/libc.so	/tests/musl/lib/libc.so
+lib64/ld-musl-loongarch-lp64d.so.1	../lib/libc.so
 linuxrc	bin/busybox
 sbin/acpid	../bin/busybox
 sbin/adjtimex	../bin/busybox
