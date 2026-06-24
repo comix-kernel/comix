@@ -101,6 +101,12 @@ pub(crate) fn terminate_task(code: usize) -> ! {
     unreachable!("terminate_task: should not return after scheduled out terminated task");
 }
 
+/// 获取任务所属线程组的 leader。
+pub fn task_group_leader(task: &SharedTask) -> Option<SharedTask> {
+    let pid = task.lock().pid;
+    TASK_MANAGER.lock().get_task(pid)
+}
+
 /// 进程退出时的资源清理（Linux 语义子集）：
 /// - 释放用户地址空间（页表 + 用户映射）
 /// - 关闭打开文件描述符（包括 socket fd）
@@ -110,6 +116,11 @@ pub(crate) fn terminate_task(code: usize) -> ! {
 /// - 必须先切换到内核页表，再释放当前进程页表资源。
 pub fn cleanup_current_process_resources_on_exit() {
     let task = current_task();
+    cleanup_process_resources_on_exit(task);
+}
+
+/// 清理指定进程/线程组 leader 持有的进程级资源。
+pub fn cleanup_process_resources_on_exit(task: SharedTask) {
     if !task.lock().is_process() {
         return;
     }

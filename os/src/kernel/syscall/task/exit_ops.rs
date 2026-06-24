@@ -38,8 +38,10 @@ pub fn exit(code: c_int) -> c_int {
 pub fn exit_group(code: c_int) -> ! {
     // TODO: 处理 tid_addr 和 robust_list
     clear_child_tid_and_wake();
-    crate::kernel::task::cleanup_current_process_resources_on_exit();
-    exit_process(current_task(), code & 0xFF);
+    let task = current_task();
+    let leader = crate::kernel::task::task_group_leader(&task).unwrap_or(task);
+    crate::kernel::task::cleanup_process_resources_on_exit(leader.clone());
+    exit_process(leader, code & 0xFF);
     schedule();
     unreachable!("exit: exit_task should not return.");
 }
