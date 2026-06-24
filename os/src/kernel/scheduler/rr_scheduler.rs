@@ -84,7 +84,7 @@ impl Scheduler for RRScheduler {
         );
 
         // 选择下一个可运行任务
-        let next_task = match self.run_queue.pop_task() {
+        let next_task = match self.run_queue.pop_highest_priority_task() {
             Some(t) => t,
             None => {
                 // 没有可运行任务：

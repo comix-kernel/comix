@@ -48,6 +48,22 @@ impl TaskQueue {
         }
     }
 
+    /// 弹出最高 realtime 优先级任务；同优先级保持 FIFO。
+    pub fn pop_highest_priority_task(&mut self) -> Option<SharedTask> {
+        let mut best_idx = None;
+        let mut best_priority = i32::MIN;
+
+        for (idx, task) in self.queue.iter().enumerate() {
+            let priority = task.lock().sched_priority;
+            if priority > best_priority {
+                best_priority = priority;
+                best_idx = Some(idx);
+            }
+        }
+
+        best_idx.map(|idx| self.queue.remove(idx))
+    }
+
     /// 检查任务是否在队列中
     pub fn contains(&self, task: &SharedTask) -> bool {
         for t in &self.queue {

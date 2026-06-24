@@ -153,6 +153,9 @@ pub fn clone(
         child_task.sched_reset_on_fork = false;
     }
     child_task.cpu_affinity = cpu_affinity & crate::kernel::online_cpu_mask();
+    if child_task.cpu_affinity == 0 {
+        child_task.cpu_affinity = crate::kernel::online_cpu_mask();
+    }
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
         unsafe {
@@ -191,7 +194,7 @@ pub fn clone(
         .push(child_task.clone());
 
     // 选择目标 CPU（负载均衡）
-    let target_cpu = crate::kernel::pick_cpu();
+    let target_cpu = crate::kernel::pick_cpu_from_mask(child_task.lock().cpu_affinity);
     child_task.lock().on_cpu = Some(target_cpu);
 
     let child_tid = child_task.lock().tid;

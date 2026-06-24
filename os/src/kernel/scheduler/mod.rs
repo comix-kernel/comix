@@ -94,8 +94,27 @@ pub fn scheduler_of(cpu_id: usize) -> &'static SpinLock<RRScheduler> {
 
 /// 通过轮询方式为新任务选择一个目标 CPU。
 pub fn pick_cpu() -> usize {
+    pick_cpu_from_mask(online_cpu_mask())
+}
+
+/// 在给定 CPU mask 内轮询选择目标 CPU。
+pub fn pick_cpu_from_mask(mask: usize) -> usize {
+    let online = online_cpu_mask();
+    let mask = mask & online;
+    if mask == 0 {
+        return crate::arch::cpu_id().min(crate::kernel::num_cpu().saturating_sub(1));
+    }
+
+    let start = NEXT_CPU.fetch_add(1, Ordering::Relaxed);
     let num_cpu = crate::kernel::num_cpu();
-    NEXT_CPU.fetch_add(1, Ordering::Relaxed) % num_cpu
+    for offset in 0..num_cpu {
+        let cpu = (start + offset) % num_cpu;
+        if mask & (1usize << cpu) != 0 {
+            return cpu;
+        }
+    }
+
+    crate::arch::cpu_id().min(num_cpu.saturating_sub(1))
 }
 
 /// 当前在线 CPU 掩码。
@@ -176,7 +195,11 @@ pub fn sleep_task(task: SharedTask, receive_signal: bool) {
 /// 参数:
 /// * `task`: 需要唤醒的任务
 pub fn wake_up_task(task: SharedTask) {
-    let target_cpu = pick_cpu();
+    let affinity = {
+        let t = task.lock();
+        t.cpu_affinity
+    };
+    let target_cpu = pick_cpu_from_mask(affinity);
     let current_cpu = crate::arch::cpu_id();
     let task_tid = { task.lock().tid };
 
