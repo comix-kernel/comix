@@ -414,6 +414,13 @@ fn create_devices() -> Result<(), FsError> {
     let dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o755);
     dev_inode.mkdir("misc", dir_mode)?;
 
+    // POSIX shm_open() in musl resolves objects under /dev/shm.
+    let shm_dir_mode = FileMode::S_IFDIR | FileMode::from_bits_truncate(0o1777);
+    match dev_inode.mkdir("shm", shm_dir_mode) {
+        Ok(_) | Err(FsError::AlreadyExists) => {}
+        Err(err) => return Err(err),
+    }
+
     // /dev/misc/rtc (10, 135)
     let misc_dentry = vfs_lookup("/dev/misc")?;
     misc_dentry
