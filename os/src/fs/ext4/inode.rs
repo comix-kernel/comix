@@ -8,6 +8,7 @@
 
 use crate::sync::{Mutex, SpinLock};
 use crate::uapi::time::TimeSpec;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -18,6 +19,70 @@ use crate::vfs::dev::{
     major as dev_major, minor as dev_minor,
 };
 use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
+
+const READ_CACHE_PAGE_SIZE: usize = 4096;
+const READ_CACHE_MAX_PAGES: usize = 128;
+
+struct CachedReadPage {
+    data: Vec<u8>,
+    age: u64,
+}
+
+struct ReadCache {
+    pages: BTreeMap<usize, CachedReadPage>,
+    clock: u64,
+    generation: u64,
+}
+
+impl ReadCache {
+    const fn new() -> Self {
+        Self {
+            pages: BTreeMap::new(),
+            clock: 0,
+            generation: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.pages.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    fn read(&mut self, page_index: usize, page_offset: usize, buf: &mut [u8]) -> Option<usize> {
+        self.clock = self.clock.wrapping_add(1);
+        let page = self.pages.get_mut(&page_index)?;
+        if page_offset >= page.data.len() {
+            return Some(0);
+        }
+
+        page.age = self.clock;
+        let n = (page.data.len() - page_offset).min(buf.len());
+        buf[..n].copy_from_slice(&page.data[page_offset..page_offset + n]);
+        Some(n)
+    }
+
+    fn insert(&mut self, generation: u64, page_index: usize, data: Vec<u8>) {
+        if self.generation != generation || data.is_empty() {
+            return;
+        }
+
+        self.clock = self.clock.wrapping_add(1);
+        if !self.pages.contains_key(&page_index) && self.pages.len() >= READ_CACHE_MAX_PAGES {
+            if let Some((&oldest_key, _)) = self.pages.iter().min_by_key(|(_, page)| page.age) {
+                self.pages.remove(&oldest_key);
+            }
+        }
+
+        self.pages.insert(page_index, CachedReadPage {
+            data,
+            age: self.clock,
+        });
+    }
+}
 
 /// Ext4 Inode 包装
 pub struct Ext4Inode {
@@ -30,6 +95,9 @@ pub struct Ext4Inode {
     /// 关联的 Dentry（弱引用，避免循环引用）
     /// 用于获取完整路径，而不是在 Inode 中重复存储
     dentry: SpinLock<Weak<Dentry>>,
+
+    /// Small per-inode page cache for repeated ELF/script/libc reads.
+    read_cache: SpinLock<ReadCache>,
 }
 
 impl Ext4Inode {
@@ -41,7 +109,12 @@ impl Ext4Inode {
             fs,
             ino,
             dentry: SpinLock::new(Weak::new()),
+            read_cache: SpinLock::new(ReadCache::new()),
         }
+    }
+
+    fn invalidate_read_cache(&self) {
+        self.read_cache.lock().clear();
     }
 
     #[cfg(test)]
@@ -220,17 +293,71 @@ impl Inode for Ext4Inode {
     }
 
     fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         // Check if this is a directory
         let metadata = self.metadata()?;
         if metadata.inode_type == InodeType::Directory {
             return Err(FsError::IsDirectory);
         }
 
-        let fs = self.fs.lock();
+        if offset >= metadata.size {
+            return Ok(0);
+        }
 
-        // ext4_rs 的 read_at 签名: pub fn read_at(&self, inode: u32, offset: usize, read_buf: &mut [u8])
-        fs.read_at(self.ino, offset, buf)
-            .map_err(|_| FsError::IoError)
+        let target_len = buf.len().min(metadata.size - offset);
+        let mut copied = 0;
+        while copied < target_len {
+            let current_offset = offset + copied;
+            let page_index = current_offset / READ_CACHE_PAGE_SIZE;
+            let page_offset = current_offset % READ_CACHE_PAGE_SIZE;
+            let chunk_len = (READ_CACHE_PAGE_SIZE - page_offset).min(target_len - copied);
+
+            if let Some(n) = self.read_cache.lock().read(
+                page_index,
+                page_offset,
+                &mut buf[copied..copied + chunk_len],
+            ) {
+                copied += n;
+                if n == 0 {
+                    break;
+                }
+                continue;
+            }
+
+            let generation = self.read_cache.lock().generation();
+            let page_start = page_index * READ_CACHE_PAGE_SIZE;
+            let page_len = READ_CACHE_PAGE_SIZE.min(metadata.size - page_start);
+            let mut page_buf = alloc::vec![0u8; page_len];
+            let nread = {
+                let fs = self.fs.lock();
+                fs.read_at(self.ino, page_start, &mut page_buf)
+                    .map_err(|_| FsError::IoError)?
+            };
+            page_buf.truncate(nread);
+
+            if page_offset >= page_buf.len() {
+                self.read_cache
+                    .lock()
+                    .insert(generation, page_index, page_buf);
+                break;
+            }
+
+            let n = (page_buf.len() - page_offset).min(chunk_len);
+            buf[copied..copied + n].copy_from_slice(&page_buf[page_offset..page_offset + n]);
+            copied += n;
+            self.read_cache
+                .lock()
+                .insert(generation, page_index, page_buf);
+
+            if n == 0 {
+                break;
+            }
+        }
+
+        Ok(copied)
     }
 
     fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
@@ -243,8 +370,11 @@ impl Inode for Ext4Inode {
         let fs = self.fs.lock();
 
         // ext4_rs 的 write_at 签名: pub fn write_at(&self, inode: u32, offset: usize, write_buf: &[u8])
-        fs.write_at(self.ino, offset, buf)
-            .map_err(|_| FsError::IoError)
+        let written = fs
+            .write_at(self.ino, offset, buf)
+            .map_err(|_| FsError::IoError)?;
+        self.invalidate_read_cache();
+        Ok(written)
     }
 
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>, FsError> {
@@ -745,6 +875,7 @@ impl Inode for Ext4Inode {
             }
         }
 
+        self.invalidate_read_cache();
         Ok(())
     }
 
