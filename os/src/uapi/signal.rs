@@ -540,8 +540,7 @@ pub struct MContextT {
     /// 通用寄存器数组
     pub gregs: [c_ulong; 32],
     /// 浮点寄存器数组
-    /// XXX: 实际并未使用浮点寄存器
-    ///      且注意struct pending?
+    /// LoongArch uses 0..31 for FPRs, 32 for FCSR, and 33 for packed FCC.
     pub fpregs: [c_ulonglong; 66],
 }
 

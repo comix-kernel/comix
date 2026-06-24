@@ -22,6 +22,12 @@ pub struct TrapFrame {
     pub kernel_sp: usize,
     /// 当前 CPU 结构体指针（供 trap_entry 设置 tp）
     pub cpu_ptr: usize,
+    /// 浮点寄存器 f0-f31。
+    pub fregs: [u64; 32],
+    /// 浮点控制状态寄存器 fcsr0。
+    pub fcsr: u64,
+    /// 浮点条件码寄存器 fcc0-fcc7，按 8-bit lane 打包。
+    pub fcc: u64,
 }
 
 impl TrapFrame {
@@ -35,6 +41,9 @@ impl TrapFrame {
             prmd: 0,
             kernel_sp: 0,
             cpu_ptr: 0,
+            fregs: [0; 32],
+            fcsr: 0,
+            fcc: 0,
         }
     }
 
@@ -234,7 +243,13 @@ impl TrapFrame {
         }
         MContextT {
             gregs,
-            fpregs: [0; 66],
+            fpregs: {
+                let mut fpregs = [0; 66];
+                fpregs[..32].copy_from_slice(&self.fregs);
+                fpregs[32] = self.fcsr;
+                fpregs[33] = self.fcc;
+                fpregs
+            },
         }
     }
 
@@ -243,6 +258,9 @@ impl TrapFrame {
         for i in 0..32 {
             self.regs[i] = mcontext.gregs[i] as usize;
         }
+        self.fregs.copy_from_slice(&mcontext.fpregs[..32]);
+        self.fcsr = mcontext.fpregs[32];
+        self.fcc = mcontext.fpregs[33];
     }
 }
 
