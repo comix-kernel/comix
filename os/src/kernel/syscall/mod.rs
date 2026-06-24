@@ -170,6 +170,11 @@ impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSpec));
 impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSpec));
 impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSpec));
 impl_syscall!(
+    sys_clock_nanosleep,
+    clock_nanosleep,
+    (c_int, c_int, *const TimeSpec, *mut TimeSpec)
+);
+impl_syscall!(
     sys_sched_setparam,
     sched_setparam,
     (c_int, *const SchedParam)

@@ -73,6 +73,7 @@ pub const SYS_SETITIMER: usize = 103;
 pub const SYS_CLOCK_SETTIME: usize = 112;
 pub const SYS_CLOCK_GETTIME: usize = 113;
 pub const SYS_CLOCK_GETRES: usize = 114;
+pub const SYS_CLOCK_NANOSLEEP: usize = 115;
 pub const SYS_SYSLOG: usize = 116;
 
 // ---- 调度 ----

@@ -98,6 +98,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_CLOCK_SETTIME => sys_clock_settime(frame),
         crate::kernel::syscall::numbers::SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
         crate::kernel::syscall::numbers::SYS_CLOCK_GETRES => sys_clock_getres(frame),
+        crate::kernel::syscall::numbers::SYS_CLOCK_NANOSLEEP => sys_clock_nanosleep(frame),
         crate::kernel::syscall::numbers::SYS_SYSLOG => sys_syslog(frame),
 
         // 调度
