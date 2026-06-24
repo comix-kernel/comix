@@ -96,6 +96,78 @@ test_case!(test_ext4_multiple_writes, {
     kassert!(&buf[..] == b"AAABBBCCC");
 });
 
+test_case!(test_ext4_chunked_write_across_blocks, {
+    const BLOCK_SIZE: usize = 4096;
+    const CHUNK_SIZE: usize = 1024;
+    const TOTAL_SIZE: usize = BLOCK_SIZE * 2 + CHUNK_SIZE;
+
+    let fs = create_test_ext4();
+    let inode = create_test_file(&fs, "chunked.bin").unwrap();
+    let mut expected = vec![0u8; TOTAL_SIZE];
+
+    for i in 0..TOTAL_SIZE {
+        expected[i] = (i % 251) as u8;
+    }
+
+    for offset in (0..TOTAL_SIZE).step_by(CHUNK_SIZE) {
+        let end = offset + CHUNK_SIZE;
+        let written = inode.write_at(offset, &expected[offset..end]).unwrap();
+        kassert!(written == CHUNK_SIZE);
+    }
+
+    let metadata = inode.metadata().unwrap();
+    kassert!(metadata.size == TOTAL_SIZE);
+
+    let mut actual = vec![0u8; TOTAL_SIZE];
+    let read = inode.read_at(0, &mut actual).unwrap();
+    kassert!(read == TOTAL_SIZE);
+    kassert!(actual == expected);
+});
+
+test_case!(test_ext4_write_beyond_eof_zero_fills_gap, {
+    const TAIL_OFFSET: usize = 8192;
+    let fs = create_test_ext4();
+    let inode = create_test_file(&fs, "gap.bin").unwrap();
+
+    let written = inode.write_at(TAIL_OFFSET, b"tail").unwrap();
+    kassert!(written == 4);
+
+    let metadata = inode.metadata().unwrap();
+    kassert!(metadata.size == TAIL_OFFSET + 4);
+
+    let mut buf = vec![0xffu8; TAIL_OFFSET + 4];
+    let read = inode.read_at(0, &mut buf).unwrap();
+    kassert!(read == TAIL_OFFSET + 4);
+
+    for byte in &buf[..TAIL_OFFSET] {
+        kassert!(*byte == 0);
+    }
+    kassert!(&buf[TAIL_OFFSET..] == b"tail");
+});
+
+test_case!(test_ext4_overwrite_existing_multiblock_file, {
+    const TOTAL_SIZE: usize = 8192;
+    const OVERWRITE_OFFSET: usize = 3072;
+    let fs = create_test_ext4();
+    let initial = vec![b'A'; TOTAL_SIZE];
+    let inode = create_test_file_with_content(&fs, "overwrite.bin", &initial).unwrap();
+
+    let written = inode.write_at(OVERWRITE_OFFSET, b"BBBBBBBB").unwrap();
+    kassert!(written == 8);
+
+    let mut actual = vec![0u8; TOTAL_SIZE];
+    let read = inode.read_at(0, &mut actual).unwrap();
+    kassert!(read == TOTAL_SIZE);
+
+    for byte in &actual[..OVERWRITE_OFFSET] {
+        kassert!(*byte == b'A');
+    }
+    kassert!(&actual[OVERWRITE_OFFSET..OVERWRITE_OFFSET + 8] == b"BBBBBBBB");
+    for byte in &actual[OVERWRITE_OFFSET + 8..] {
+        kassert!(*byte == b'A');
+    }
+});
+
 test_case!(test_ext4_sync, {
     // 创建文件并写入
     let fs = create_test_ext4();
