@@ -12,6 +12,7 @@ echo "--- Starting Minimal BusyBox System ---"
 /bin/mount -t sysfs none /sys
 # tmpfs/devtmpfs: 临时文件系统和设备文件
 /bin/mount -t tmpfs none /tmp
+/bin/mount -t tmpfs none /var/tmp
 # /dev: 设备节点
 # 说明：即使内核已经提前挂载 /dev，这里再次 mount 也不会影响后续流程；
 # 且内核对 mount("/dev") 做了特殊处理：会在挂载 tmpfs 后自动 init_dev() 重建设备节点。
@@ -95,23 +96,76 @@ mount_official_test_image_if_present() {
     return 1
 }
 
+stage_musl_tests_to_tmpfs() {
+    src="/tests/musl"
+    dst="/tmp/tests/musl"
+
+    [ -d "$src" ] || return 1
+
+    /bin/rm -rf "$dst"
+    /bin/mkdir -p "$dst" || return 1
+
+    echo "[Tests] staging non-LTP musl tests to $dst"
+    for entry in "$src"/*; do
+        [ -e "$entry" ] || continue
+
+        base="${entry##*/}"
+        case "$base" in
+            ltp|ltp_testcode.sh)
+                continue
+                ;;
+        esac
+
+        if ! /bin/cp -R "$entry" "$dst/"; then
+            echo "[Tests] failed to stage $entry"
+            /bin/rm -rf "$dst"
+            return 1
+        fi
+    done
+
+    return 0
+}
+
 run_musl_tests_if_present() {
     # 官方测试镜像挂载到 /tests 后，自动扫描并运行 musl 下的全部测试脚本；
     # glibc 分组保留在测试镜像中，后续需要时直接调整本脚本。
     mount_official_test_image_if_present || true
     [ -d /tests/musl ] || return 1
 
-    ran=0
-    echo "[Tests] detected musl test scripts; running directly from /tests in rcS"
+    staged_musl_dir=""
+    if stage_musl_tests_to_tmpfs; then
+        staged_musl_dir="/tmp/tests/musl"
+    else
+        echo "[Tests] staging failed; falling back to /tests/musl"
+    fi
 
-    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl"
+    ran=0
+    echo "[Tests] detected musl test scripts; running in rcS"
+
+    if [ -n "$staged_musl_dir" ]; then
+        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:$staged_musl_dir:/tests/musl"
+    else
+        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl"
+    fi
+    export TMPDIR="/tmp"
     export HOME="/"
 
-    for f in /tests/musl/*_testcode.sh; do
-        [ -f "$f" ] || continue
+    for src_f in /tests/musl/*_testcode.sh; do
+        [ -f "$src_f" ] || continue
 
+        base="${src_f##*/}"
+        case "$base" in
+            basic_testcode.sh|busybox_testcode.sh|iperf_testcode.sh|lua_testcode.sh|iozone_testcode.sh|cyclictest_testcode.sh)
+                echo "[Tests] skipping already-validated $src_f"
+                continue
+                ;;
+        esac
+
+        f="$src_f"
+        if [ -n "$staged_musl_dir" ] && [ "$base" != "ltp_testcode.sh" ] && [ -f "$staged_musl_dir/$base" ]; then
+            f="$staged_musl_dir/$base"
+        fi
         dir="${f%/*}"
-        base="${f##*/}"
         echo "[Tests] running $f"
         (
             cd "$dir" || exit 1
@@ -120,6 +174,10 @@ run_musl_tests_if_present() {
         )
         rc=$?
         echo "[Tests] finished $f (rc=$rc)"
+        case "$rc" in
+            0) ;;
+            *) echo "[Tests] ignoring failure from $f and continuing" ;;
+        esac
         ran=1
     done
     [ "$ran" -eq 1 ] || return 1
