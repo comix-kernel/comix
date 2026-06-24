@@ -28,12 +28,9 @@ pub fn futex(
         FUTEX_WAIT => {
             // 必须保证获取锁 → 定位等待队列 → 读取用户数据 → 比较 → 入队/释放锁 的序列是原子的
             let task = current_task();
-            let memory_space = task
-                .lock()
-                .memory_space
-                .as_ref()
-                .expect("futex: current task has no memory space.")
-                .clone();
+            let Some(memory_space) = task.lock().memory_space.clone() else {
+                return -EFAULT;
+            };
             let paddr = if let Some(paddr) = memory_space
                 .lock()
                 .translate(VA::from_usize(uaddr as usize))
@@ -106,12 +103,9 @@ pub fn futex(
         FUTEX_WAKE => {
             let mut wake_count = 0;
             let paddr = {
-                let memory_space = current_task()
-                    .lock()
-                    .memory_space
-                    .as_ref()
-                    .expect("futex: current task has no memory space.")
-                    .clone();
+                let Some(memory_space) = current_task().lock().memory_space.clone() else {
+                    return -EFAULT;
+                };
                 if let Some(paddr) = memory_space
                     .lock()
                     .translate(VA::from_usize(uaddr as usize))
