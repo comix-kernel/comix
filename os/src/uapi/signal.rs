@@ -104,7 +104,11 @@ impl Default for SignalAction {
 }
 
 /* 信号定义 */
-pub const NSIG: usize = 31;
+/// Highest signal number accepted by Linux-style signal syscalls.
+///
+/// musl uses signal 33 internally for pthread cancellation. Keeping the range at
+/// the old non-realtime boundary made pthread_cancel() fail with EINVAL.
+pub const NSIG: usize = 64;
 
 pub const NUM_SIGHUP: usize = 1;
 pub const NUM_SIGINT: usize = 2;
@@ -137,6 +141,8 @@ pub const NUM_SIGWINCH: usize = 28;
 pub const NUM_SIGIO: usize = 29;
 pub const NUM_SIGPWR: usize = 30;
 pub const NUM_SIGSYS: usize = 31;
+pub const NUM_SIGRTMIN: usize = 32;
+pub const NUM_SIGRTMAX: usize = 64;
 
 bitflags! {
     #[derive(Clone, Debug, Copy)]
@@ -174,6 +180,39 @@ bitflags! {
         const SIGIO = 1 << (NUM_SIGIO - 1);
         const SIGPWR = 1 << (NUM_SIGPWR - 1);
         const SIGSYS = 1 << (NUM_SIGSYS - 1);
+        const SIGRT32 = 1usize << 31;
+        const SIGRT33 = 1usize << 32;
+        const SIGRT34 = 1usize << 33;
+        const SIGRT35 = 1usize << 34;
+        const SIGRT36 = 1usize << 35;
+        const SIGRT37 = 1usize << 36;
+        const SIGRT38 = 1usize << 37;
+        const SIGRT39 = 1usize << 38;
+        const SIGRT40 = 1usize << 39;
+        const SIGRT41 = 1usize << 40;
+        const SIGRT42 = 1usize << 41;
+        const SIGRT43 = 1usize << 42;
+        const SIGRT44 = 1usize << 43;
+        const SIGRT45 = 1usize << 44;
+        const SIGRT46 = 1usize << 45;
+        const SIGRT47 = 1usize << 46;
+        const SIGRT48 = 1usize << 47;
+        const SIGRT49 = 1usize << 48;
+        const SIGRT50 = 1usize << 49;
+        const SIGRT51 = 1usize << 50;
+        const SIGRT52 = 1usize << 51;
+        const SIGRT53 = 1usize << 52;
+        const SIGRT54 = 1usize << 53;
+        const SIGRT55 = 1usize << 54;
+        const SIGRT56 = 1usize << 55;
+        const SIGRT57 = 1usize << 56;
+        const SIGRT58 = 1usize << 57;
+        const SIGRT59 = 1usize << 58;
+        const SIGRT60 = 1usize << 59;
+        const SIGRT61 = 1usize << 60;
+        const SIGRT62 = 1usize << 61;
+        const SIGRT63 = 1usize << 62;
+        const SIGRT64 = 1usize << 63;
     }
 }
 
@@ -182,7 +221,7 @@ impl SignalFlags {
         if sig_num == 0 || sig_num > NSIG {
             return None;
         }
-        Some(SignalFlags::from_bits(1 << (sig_num - 1)).unwrap())
+        Some(SignalFlags::from_bits(1usize << (sig_num - 1)).unwrap())
     }
 
     /// 将 SignalFlags 转换为对应的信号编号 (1-NSIG)。
@@ -190,7 +229,7 @@ impl SignalFlags {
     /// 如果不包含任何信号，则返回 0 表示无效。
     pub fn to_signal_number(&self) -> usize {
         for sig_num in 1..=NSIG {
-            if self.contains(SignalFlags::from_bits(1 << (sig_num - 1)).unwrap()) {
+            if self.contains(SignalFlags::from_bits(1usize << (sig_num - 1)).unwrap()) {
                 return sig_num;
             }
         }
@@ -456,6 +495,13 @@ pub struct UContextT {
     pub uc_stack: SignalStack,
     /// 信号掩码
     pub uc_sigmask: SigSetT,
+    /// RISC-V Linux ABI padding before `uc_mcontext`.
+    ///
+    /// The kernel sigset_t used by rt signal syscalls is 8 bytes on riscv64,
+    /// but the ucontext ABI still reserves a 128-byte signal-mask area before
+    /// the machine context. musl reads `uc_mcontext.__gregs[REG_PC]` at this
+    /// ABI offset in its pthread cancellation handler.
+    pub __reserved: [u8; UCONTEXT_SIGMASK_PADDING_SIZE],
     /// 机器上下文
     pub uc_mcontext: MContextT,
 }
@@ -477,6 +523,7 @@ impl UContextT {
             uc_link: core::ptr::null_mut(),
             uc_stack: SignalStack::default(),
             uc_sigmask: 0,
+            __reserved: [0; UCONTEXT_SIGMASK_PADDING_SIZE],
             uc_mcontext: MContextT::new(),
         }
     }
@@ -501,6 +548,7 @@ impl UContextT {
             uc_link: link,
             uc_stack: stack,
             uc_sigmask: sigmask,
+            __reserved: [0; UCONTEXT_SIGMASK_PADDING_SIZE],
             uc_mcontext: mcontext,
         }
     }
@@ -533,7 +581,9 @@ pub const SS_AUTODISARM: usize = 1 << 31;
 /// 信号栈标志位掩码
 pub const SS_FLAG_BITS: usize = SS_AUTODISARM;
 
-#[repr(C)]
+const UCONTEXT_SIGMASK_PADDING_SIZE: usize = 1024 / 8 - core::mem::size_of::<SigSetT>();
+
+#[repr(C, align(16))]
 #[derive(Clone, Copy, Debug)]
 /// 机器上下文结构体
 pub struct MContextT {

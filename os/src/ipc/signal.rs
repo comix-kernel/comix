@@ -90,7 +90,8 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
             NUM_SIGSTOP | NUM_SIGTSTP | NUM_SIGTTIN | NUM_SIGTTOU => sig_stop(sig_num),
             NUM_SIGCONT => sig_continue(sig_num),
             NUM_SIGCHLD | NUM_SIGURG | NUM_SIGWINCH | NUM_SIGIO => sig_ignore(sig_num),
-            _ => panic!("Unhandled signal"),
+            NUM_SIGRTMIN..=NUM_SIGRTMAX => sig_terminate(sig_num),
+            _ => sig_terminate(sig_num),
         },
         SIG_IGN => sig_ignore(sig_num),
         handler_addr => {
