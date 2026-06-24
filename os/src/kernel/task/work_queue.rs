@@ -75,13 +75,15 @@ pub fn kworker() {
         let mut queue = GLOBAL_WORK_QUEUE.lock();
 
         if let Some(work) = queue.work_queue.pop_front() {
+            drop(queue);
             (work.task)();
         } else {
             queue.sleeping += 1;
             sleep_task(current_task(), true);
             drop(queue);
             yield_task();
-            GLOBAL_WORK_QUEUE.lock().sleeping -= 1;
+            let mut queue = GLOBAL_WORK_QUEUE.lock();
+            queue.sleeping = queue.sleeping.saturating_sub(1);
         }
     }
 }

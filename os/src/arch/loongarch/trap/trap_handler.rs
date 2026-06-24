@@ -282,9 +282,9 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
 fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
 
-    // Loopback/null-net paths do not have device interrupts to advance smoltcp.
-    crate::net::socket::poll_network_interfaces();
-    crate::kernel::syscall::io::wake_poll_waiters();
+    // Loopback/null-net paths need periodic progress, but smoltcp should not run
+    // directly in hard interrupt context.
+    crate::net::socket::request_network_poll();
 
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_task(task);
