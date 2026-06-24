@@ -168,7 +168,7 @@
 //! ```
 
 use crate::kernel::current_task;
-use crate::vfs::{Dentry, FsError, InodeType, get_root_dentry};
+use crate::vfs::{DENTRY_CACHE, Dentry, FsError, InodeType, get_root_dentry};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -312,6 +312,16 @@ pub fn split_path(path: &str) -> Result<(String, String), FsError> {
 ///
 /// 返回：`Ok(Arc<Dentry>)` 路径对应的目录项；`Err(FsError::NotFound)` 路径不存在；`Err(FsError::NotDirectory)` 中间组件不是目录
 pub fn vfs_lookup(path: &str) -> Result<Arc<Dentry>, FsError> {
+    if path.starts_with('/') {
+        let normalized = normalize_path(path);
+        if let Some(dentry) = DENTRY_CACHE.lookup(&normalized) {
+            let dentry = check_mount_point(dentry)?;
+            if dentry.inode.metadata()?.inode_type != InodeType::Symlink {
+                return Ok(dentry);
+            }
+        }
+    }
+
     let components = parse_path(path);
 
     // 确定起始 dentry
@@ -483,6 +493,13 @@ fn get_cur_dir() -> Result<Arc<Dentry>, FsError> {
 /// 不会跟随它，而是直接返回链接文件的 dentry。
 /// 路径中间的符号链接仍然会被跟随。
 pub fn vfs_lookup_no_follow(path: &str) -> Result<Arc<Dentry>, FsError> {
+    if path.starts_with('/') {
+        let normalized = normalize_path(path);
+        if let Some(dentry) = DENTRY_CACHE.lookup(&normalized) {
+            return check_mount_point(dentry);
+        }
+    }
+
     let components = parse_path(path);
 
     if components.is_empty() {

@@ -104,7 +104,7 @@
 //! }
 //!
 //! // 删除缓存
-//! DENTRY_CACHE.remove("/etc/passwd");
+//! DENTRY_CACHE.remove_tree("/etc/passwd");
 //! ```
 
 use crate::sync::SpinLock;
@@ -275,9 +275,23 @@ impl DentryCache {
         self.cache.lock().insert(path, Arc::downgrade(dentry));
     }
 
-    /// 从缓存中移除
-    pub fn remove(&self, path: &str) {
-        self.cache.lock().remove(path);
+    /// 移除路径自身和它下面的所有子路径缓存。
+    pub fn remove_tree(&self, path: &str) {
+        let mut cache = self.cache.lock();
+        if path == "/" {
+            cache.clear();
+            return;
+        }
+
+        cache.retain(|cached_path, _| {
+            if cached_path == path {
+                return false;
+            }
+            match cached_path.strip_prefix(path) {
+                Some(rest) => !rest.starts_with('/'),
+                None => true,
+            }
+        });
     }
 
     /// 清空缓存

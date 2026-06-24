@@ -14,7 +14,7 @@ use crate::{
     kernel::current_task,
     uapi::{errno::EINVAL, log::SyslogAction},
     vfs::{
-        DENTRY_CACHE, Dentry, File, FileMode, FsError, InodeType, OpenFlags, get_root_dentry,
+        DENTRY_CACHE, Dentry, File, FileMode, FsError, InodeType, OpenFlags,
         impls::{BlockDeviceFile, CharDeviceFile, PipeFile, RegFile},
         normalize_path, vfs_lookup_from,
     },
@@ -113,7 +113,11 @@ pub fn get_args_safe(ptr_array: usize, _name: &str) -> Result<Vec<String>, FsErr
 /// 这是系统调用层的辅助函数，处理 AT_FDCWD 和相对路径逻辑
 pub fn resolve_at_path(dirfd: i32, path: &str) -> Result<Option<Arc<Dentry>>, FsError> {
     let base_dentry = if path.starts_with('/') {
-        get_root_dentry()?
+        return match crate::vfs::vfs_lookup(path) {
+            Ok(dentry) => Ok(Some(dentry)),
+            Err(FsError::NotFound) => Ok(None),
+            Err(e) => Err(e),
+        };
     } else if dirfd == super::fs::AT_FDCWD {
         current_task()
             .lock()

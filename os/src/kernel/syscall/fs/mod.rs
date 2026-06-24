@@ -31,9 +31,14 @@ pub const AT_REMOVEDIR: u32 = 0x200;
 pub const O_CLOEXEC: u32 = 0o2000000;
 
 fn drop_cached_child(parent: &Dentry, name: &str) {
-    if let Some(child) = parent.remove_child(name) {
-        DENTRY_CACHE.remove(&child.full_path());
-    }
+    let parent_path = parent.full_path();
+    let child_path = if parent_path == "/" {
+        alloc::format!("/{}", name)
+    } else {
+        alloc::format!("{}/{}", parent_path, name)
+    };
+    parent.remove_child(name);
+    DENTRY_CACHE.remove_tree(&child_path);
 }
 
 mod fd_ops;
