@@ -106,6 +106,9 @@ pub fn shmctl(shmid: i32, cmd: i32, buf: *mut ShmIdDs) -> isize {
                 Ok(segment) => segment,
                 Err(errno) => return -errno as isize,
             };
+            if let Err(errno) = shm_check_access(&segment, true) {
+                return -errno as isize;
+            }
             write_to_user(buf, segment.stat());
             0
         }

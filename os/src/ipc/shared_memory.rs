@@ -7,15 +7,15 @@ use lazy_static::lazy_static;
 
 use crate::{
     config::PAGE_SIZE,
-    kernel::current_task,
+    kernel::{Capabilities, current_task},
     mm::{
         address::{PageNum, Ppn},
         frame_allocator::{FrameTracker, alloc_frames},
     },
     sync::SpinLock,
     uapi::{
-        errno::{EACCES, EEXIST, EINVAL, ENOENT, ENOMEM},
-        ipc::{IPC_CREAT, IPC_EXCL, IPC_PRIVATE, IpcPerm, KeyT, SHM_HUGETLB, ShmIdDs},
+        errno::{EACCES, EEXIST, EINVAL, ENOENT, ENOMEM, EPERM},
+        ipc::{IPC_CREAT, IPC_EXCL, IPC_PRIVATE, IpcPerm, KeyT, SHM_DEST, SHM_HUGETLB, ShmIdDs},
         time::TimeSpec,
     },
 };
@@ -113,6 +113,11 @@ impl ShmSegment {
 
     pub fn stat(&self) -> ShmIdDs {
         let inner = self.inner.lock();
+        let mode = if inner.marked_removed {
+            self.mode | SHM_DEST as u32
+        } else {
+            self.mode
+        };
         ShmIdDs {
             shm_perm: IpcPerm {
                 key: self.key,
@@ -120,7 +125,7 @@ impl ShmSegment {
                 gid: self.gid,
                 cuid: self.cuid,
                 cgid: self.cgid,
-                mode: self.mode,
+                mode,
                 seq: 0,
                 ..IpcPerm::default()
             },
@@ -159,31 +164,35 @@ impl ShmRegistry {
     }
 
     fn get_or_create(&mut self, key: KeyT, size: usize, shmflg: c_int) -> Result<c_int, c_int> {
-        if size == 0 {
-            return Err(EINVAL);
-        }
         if shmflg & SHM_HUGETLB != 0 {
             return Err(EINVAL);
         }
 
-        if key != IPC_PRIVATE
-            && let Some(id) = self.by_key.get(&key).copied()
-        {
-            let segment = self.by_id.get(&id).ok_or(ENOENT)?;
-            if segment.is_removed() {
-                return Err(ENOENT);
+        if key != IPC_PRIVATE {
+            if let Some(id) = self.by_key.get(&key).copied() {
+                let segment = self.by_id.get(&id).cloned();
+                if let Some(segment) = segment
+                    && !segment.is_removed()
+                {
+                    if shmflg & IPC_CREAT != 0 && shmflg & IPC_EXCL != 0 {
+                        return Err(EEXIST);
+                    }
+                    if size > segment.size {
+                        return Err(EINVAL);
+                    }
+                    let requested = (shmflg as u32) & 0o666;
+                    shm_check_mode_access(&segment, requested)?;
+                    return Ok(id);
+                }
+                self.by_key.remove(&key);
             }
-            if shmflg & IPC_CREAT != 0 && shmflg & IPC_EXCL != 0 {
-                return Err(EEXIST);
-            }
-            if size > segment.size {
-                return Err(EINVAL);
-            }
-            return Ok(id);
         }
 
         if key != IPC_PRIVATE && shmflg & IPC_CREAT == 0 {
             return Err(ENOENT);
+        }
+        if size == 0 {
+            return Err(EINVAL);
         }
 
         let id = self.allocate_id();
@@ -196,15 +205,15 @@ impl ShmRegistry {
     }
 
     fn get(&self, shmid: c_int) -> Result<Arc<ShmSegment>, c_int> {
-        let segment = self.by_id.get(&shmid).cloned().ok_or(EINVAL)?;
-        if segment.is_removed() {
-            return Err(EINVAL);
-        }
-        Ok(segment)
+        self.by_id.get(&shmid).cloned().ok_or(EINVAL)
     }
 
     fn mark_removed(&mut self, shmid: c_int) -> Result<(), c_int> {
         let segment = self.by_id.get(&shmid).cloned().ok_or(EINVAL)?;
+        shm_check_control(&segment)?;
+        if segment.key != IPC_PRIVATE && self.by_key.get(&segment.key).copied() == Some(shmid) {
+            self.by_key.remove(&segment.key);
+        }
         if segment.mark_removed() {
             self.remove_segment(shmid);
         }
@@ -223,6 +232,7 @@ impl ShmRegistry {
     fn remove_segment(&mut self, shmid: c_int) {
         if let Some(segment) = self.by_id.remove(&shmid)
             && segment.key != IPC_PRIVATE
+            && self.by_key.get(&segment.key).copied() == Some(shmid)
         {
             self.by_key.remove(&segment.key);
         }
@@ -253,12 +263,20 @@ pub fn shm_detach_segment(segment: &Arc<ShmSegment>, pid: c_int) {
 }
 
 pub fn shm_check_access(segment: &ShmSegment, readonly: bool) -> Result<(), c_int> {
-    let cred = current_task().lock().credential;
-    if cred.is_root() {
+    let requested = if readonly { 0o4 } else { 0o6 };
+    shm_check_mode_access(segment, requested)
+}
+
+fn shm_check_mode_access(segment: &ShmSegment, requested: u32) -> Result<(), c_int> {
+    if requested == 0 {
         return Ok(());
     }
 
-    let requested = if readonly { 0o4 } else { 0o6 };
+    let cred = current_task().lock().credential;
+    if cred.capabilities.has(Capabilities::IPC_OWNER) {
+        return Ok(());
+    }
+
     let available = if cred.euid == segment.uid || cred.euid == segment.cuid {
         (segment.mode >> 6) & 0o7
     } else if cred.egid == segment.gid || cred.egid == segment.cgid {
@@ -271,6 +289,17 @@ pub fn shm_check_access(segment: &ShmSegment, readonly: bool) -> Result<(), c_in
         return Ok(());
     }
     Err(EACCES)
+}
+
+fn shm_check_control(segment: &ShmSegment) -> Result<(), c_int> {
+    let cred = current_task().lock().credential;
+    if cred.euid == segment.uid
+        || cred.euid == segment.cuid
+        || cred.capabilities.has(Capabilities::IPC_OWNER)
+    {
+        return Ok(());
+    }
+    Err(EPERM)
 }
 
 fn unix_time() -> i64 {
