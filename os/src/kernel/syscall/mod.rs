@@ -27,6 +27,7 @@ use crate::{
         fs::LinuxStatFs,
         futex::RobustListHead,
         iovec::IoVec,
+        ipc::{KeyT, ShmIdDs},
         resource::{Rlimit, Rusage},
         sched::SchedParam,
         signal::{SigInfoT, SignalAction},
@@ -249,6 +250,12 @@ impl_syscall!(sys_getgid, getgid, ());
 impl_syscall!(sys_getegid, getegid, ());
 impl_syscall!(sys_gettid, gettid, ());
 impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
+
+// System V IPC
+impl_syscall!(sys_shmget, shmget, (KeyT, usize, i32));
+impl_syscall!(sys_shmctl, shmctl, (i32, i32, *mut ShmIdDs));
+impl_syscall!(sys_shmat, shmat, (i32, *const u8, i32));
+impl_syscall!(sys_shmdt, shmdt, (*const u8));
 
 // 网络 (Networking/Sockets)
 impl_syscall!(sys_socket, socket, (i32, i32, i32));

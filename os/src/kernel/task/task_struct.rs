@@ -4,14 +4,14 @@
 #![allow(dead_code)]
 use core::sync::atomic::{AtomicPtr, Ordering};
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
         HwTrapFrame, TrapFrame,
         kernel::{context::Context, task::setup_exec_stack_layout},
     },
-    ipc::{SignalHandlerTable, SignalPending},
+    ipc::{ShmSegment, SignalHandlerTable, SignalPending},
     kernel::{
         WaitQueue,
         task::{forkret, task_state::TaskState},
@@ -35,6 +35,15 @@ use crate::{
 /// 共享任务句柄
 /// 用于在多个地方引用同一个任务实例
 pub type SharedTask = Arc<SpinLock<Task>>;
+
+#[derive(Debug, Clone)]
+pub struct ShmAttachment {
+    pub addr: usize,
+    pub len: usize,
+    pub segment: Arc<ShmSegment>,
+}
+
+pub type ShmAttachmentTable = Arc<SpinLock<BTreeMap<usize, ShmAttachment>>>;
 
 /// 任务
 /// 存放任务的核心信息
@@ -144,6 +153,8 @@ pub struct Task {
     pub fd_table: Arc<FDTable>,
     /// 文件系统信息
     pub fs: Arc<SpinLock<FsStruct>>,
+    /// 当前进程附加的 SysV shared memory 段，按 attach 地址索引。
+    pub shm_attachments: ShmAttachmentTable,
 }
 
 /// 文件系统信息相关结构体
@@ -443,6 +454,7 @@ impl Task {
             umask: 0o022,
             fd_table,
             fs,
+            shm_attachments: Arc::new(SpinLock::new(BTreeMap::new())),
         }
     }
 

@@ -51,6 +51,7 @@ pub fn clone(
         sched_priority,
         sched_reset_on_fork,
         cpu_affinity,
+        shm_attachments,
     ) = {
         let _guard = crate::sync::PreemptGuard::new();
         let cpu = current_cpu();
@@ -76,6 +77,11 @@ pub fn clone(
             task.sched_priority,
             task.sched_reset_on_fork,
             task.cpu_affinity,
+            if requested_flags.contains(CloneFlags::THREAD) {
+                task.shm_attachments.clone()
+            } else {
+                Arc::new(SpinLock::new(task.shm_attachments.lock().clone()))
+            },
         )
     };
     let exit_signal = requested_flags.get_exit_signal();
@@ -155,6 +161,12 @@ pub fn clone(
     child_task.cpu_affinity = cpu_affinity & crate::kernel::online_cpu_mask();
     if child_task.cpu_affinity == 0 {
         child_task.cpu_affinity = crate::kernel::online_cpu_mask();
+    }
+    child_task.shm_attachments = shm_attachments;
+    if !requested_flags.contains(CloneFlags::THREAD) {
+        for attachment in child_task.shm_attachments.lock().values() {
+            attachment.segment.mark_attached(pid as c_int);
+        }
     }
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {

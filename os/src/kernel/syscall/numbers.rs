@@ -123,6 +123,12 @@ pub const SYS_GETEGID: usize = 177;
 pub const SYS_GETTID: usize = 178;
 pub const SYS_SYSINFO: usize = 179;
 
+// ---- System V IPC ----
+pub const SYS_SHMGET: usize = 194;
+pub const SYS_SHMCTL: usize = 195;
+pub const SYS_SHMAT: usize = 196;
+pub const SYS_SHMDT: usize = 197;
+
 // ---- 网络/Socket ----
 pub const SYS_SOCKET: usize = 198;
 pub const SYS_SOCKETPAIR: usize = 199;

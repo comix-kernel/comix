@@ -1,8 +1,9 @@
-use alloc::collections::btree_map::BTreeMap;
+use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 use core::cmp::min;
 
 use crate::arch::mm::TlbBatchContext;
 use crate::config::PAGE_SIZE;
+use crate::ipc::ShmSegment;
 use crate::mm::address::{PA, PageNum, Ppn, UsizeConvert, Vpn, VpnRange};
 use crate::mm::frame_allocator::{TrackedFrames, alloc_frame};
 use crate::mm::memory_space::MmapFile;
@@ -25,6 +26,8 @@ pub enum MapType {
     /// - mmap(PROT_NONE) 需要“成功占位”但不应该映射可访问页表项
     /// - mprotect(PROT_NONE) 会把原有页表映射解除并转为 Reserved
     Reserved,
+    /// SysV shared memory segment mapping.
+    Shared,
 }
 
 /// 内存区域的类型
@@ -66,6 +69,12 @@ pub struct MappingArea {
 
     /// 文件映射信息（如果是文件映射）
     file: Option<MmapFile>,
+
+    /// SysV 共享内存段（如果是共享内存映射）
+    shared: Option<Arc<ShmSegment>>,
+
+    /// `vpn_range.start()` 对应共享段内的页偏移。
+    shared_page_offset: usize,
 }
 
 mod file_ops;

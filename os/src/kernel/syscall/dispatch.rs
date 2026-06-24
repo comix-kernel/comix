@@ -150,6 +150,12 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_GETTID => sys_gettid(frame),
         crate::kernel::syscall::numbers::SYS_SYSINFO => sys_sysinfo(frame),
 
+        // System V IPC
+        crate::kernel::syscall::numbers::SYS_SHMGET => sys_shmget(frame),
+        crate::kernel::syscall::numbers::SYS_SHMCTL => sys_shmctl(frame),
+        crate::kernel::syscall::numbers::SYS_SHMAT => sys_shmat(frame),
+        crate::kernel::syscall::numbers::SYS_SHMDT => sys_shmdt(frame),
+
         // 网络
         crate::kernel::syscall::numbers::SYS_SOCKET => sys_socket(frame),
         crate::kernel::syscall::numbers::SYS_SOCKETPAIR => sys_socketpair(frame),
