@@ -260,6 +260,11 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
 /// 处理时钟中断
 fn check_timer() {
     let _ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+
+    // Loopback/null-net paths do not have device interrupts to advance smoltcp.
+    crate::net::socket::poll_network_interfaces();
+    crate::kernel::syscall::io::wake_poll_waiters();
+
     while let Some(task) = TIMER_QUEUE.lock().pop_due_task(get_time()) {
         wake_up_task(task);
     }
