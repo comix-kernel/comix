@@ -76,6 +76,12 @@ pub const SYS_CLOCK_GETRES: usize = 114;
 pub const SYS_SYSLOG: usize = 116;
 
 // ---- 调度 ----
+pub const SYS_SCHED_SETPARAM: usize = 118;
+pub const SYS_SCHED_SETSCHEDULER: usize = 119;
+pub const SYS_SCHED_GETSCHEDULER: usize = 120;
+pub const SYS_SCHED_GETPARAM: usize = 121;
+pub const SYS_SCHED_SETAFFINITY: usize = 122;
+pub const SYS_SCHED_GETAFFINITY: usize = 123;
 pub const SYS_SCHED_YIELD: usize = 124;
 
 // ---- 信号 ----

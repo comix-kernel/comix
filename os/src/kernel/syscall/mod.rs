@@ -28,6 +28,7 @@ use crate::{
         futex::RobustListHead,
         iovec::IoVec,
         resource::{Rlimit, Rusage},
+        sched::SchedParam,
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
         time::{Itimerval, TimeSpec, Tms, timeval, timezone},
@@ -167,6 +168,28 @@ impl_syscall!(
 impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSpec));
 impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSpec));
 impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSpec));
+impl_syscall!(
+    sys_sched_setparam,
+    sched_setparam,
+    (c_int, *const SchedParam)
+);
+impl_syscall!(
+    sys_sched_setscheduler,
+    sched_setscheduler,
+    (c_int, c_int, *const SchedParam)
+);
+impl_syscall!(sys_sched_getscheduler, sched_getscheduler, (c_int));
+impl_syscall!(sys_sched_getparam, sched_getparam, (c_int, *mut SchedParam));
+impl_syscall!(
+    sys_sched_setaffinity,
+    sched_setaffinity,
+    (c_int, usize, *const u8)
+);
+impl_syscall!(
+    sys_sched_getaffinity,
+    sched_getaffinity,
+    (c_int, usize, *mut u8)
+);
 impl_syscall!(sys_sched_yield, sched_yield, ());
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 

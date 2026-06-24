@@ -47,6 +47,10 @@ pub fn clone(
         uts,
         rlimit,
         exe_path,
+        sched_policy,
+        sched_priority,
+        sched_reset_on_fork,
+        cpu_affinity,
     ) = {
         let _guard = crate::sync::PreemptGuard::new();
         let cpu = current_cpu();
@@ -68,6 +72,10 @@ pub fn clone(
             task.uts_namespace.clone(),
             task.rlimit.clone(),
             task.exe_path.clone(),
+            task.sched_policy,
+            task.sched_priority,
+            task.sched_reset_on_fork,
+            task.cpu_affinity,
         )
     };
     let exit_signal = requested_flags.get_exit_signal();
@@ -135,6 +143,16 @@ pub fn clone(
         fs,
     );
     child_task.exe_path = exe_path;
+    if sched_reset_on_fork {
+        child_task.sched_policy = crate::uapi::sched::SCHED_NORMAL;
+        child_task.sched_priority = 0;
+        child_task.sched_reset_on_fork = false;
+    } else {
+        child_task.sched_policy = sched_policy;
+        child_task.sched_priority = sched_priority;
+        child_task.sched_reset_on_fork = false;
+    }
+    child_task.cpu_affinity = cpu_affinity & crate::kernel::online_cpu_mask();
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
         unsafe {

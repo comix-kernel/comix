@@ -25,6 +25,7 @@ use crate::{
     sync::SpinLock,
     uapi::{
         resource::RlimitStruct,
+        sched::SCHED_NORMAL,
         signal::{SignalFlags, SignalStack},
         uts_namespace::UtsNamespace,
     },
@@ -67,8 +68,13 @@ pub struct Task {
     /// None 表示任务未运行在任何 CPU 上
     pub on_cpu: Option<usize>,
     /// CPU 亲和性掩码
-    /// -1 表示可以在任何 CPU 上运行
-    pub cpu_affinity: i32,
+    pub cpu_affinity: usize,
+    /// Linux 调度策略（SCHED_*，不含 SCHED_RESET_ON_FORK 标志位）
+    pub sched_policy: i32,
+    /// Linux realtime 调度优先级。普通策略固定为 0。
+    pub sched_priority: i32,
+    /// fork/clone 时是否将子任务调度属性重置为普通策略。
+    pub sched_reset_on_fork: bool,
     /// 任务当前的状态
     pub state: TaskState,
     /// 任务的id
@@ -404,7 +410,10 @@ impl Task {
             priority: 0,
             processor_id: 0,
             on_cpu: None,
-            cpu_affinity: -1,
+            cpu_affinity: crate::kernel::online_cpu_mask(),
+            sched_policy: SCHED_NORMAL,
+            sched_priority: 0,
+            sched_reset_on_fork: false,
             state: TaskState::Running,
             tid,
             pid,

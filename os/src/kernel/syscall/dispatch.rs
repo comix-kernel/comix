@@ -101,6 +101,12 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_SYSLOG => sys_syslog(frame),
 
         // 调度
+        crate::kernel::syscall::numbers::SYS_SCHED_SETPARAM => sys_sched_setparam(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_SETSCHEDULER => sys_sched_setscheduler(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_GETSCHEDULER => sys_sched_getscheduler(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_GETPARAM => sys_sched_getparam(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_SETAFFINITY => sys_sched_setaffinity(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_GETAFFINITY => sys_sched_getaffinity(frame),
         crate::kernel::syscall::numbers::SYS_SCHED_YIELD => sys_sched_yield(frame),
 
         // 信号

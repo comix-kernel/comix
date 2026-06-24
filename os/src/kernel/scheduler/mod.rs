@@ -98,6 +98,19 @@ pub fn pick_cpu() -> usize {
     NEXT_CPU.fetch_add(1, Ordering::Relaxed) % num_cpu
 }
 
+/// 当前在线 CPU 掩码。
+///
+/// 该内核的 RISC-V 配置上限是 `MAX_CPU_COUNT`，因此一个 `usize` 足够表达
+/// sched affinity ABI 需要返回的在线 CPU 集。
+pub fn online_cpu_mask() -> usize {
+    let num_cpu = crate::kernel::num_cpu().min(usize::BITS as usize);
+    if num_cpu == usize::BITS as usize {
+        usize::MAX
+    } else {
+        (1usize << num_cpu) - 1
+    }
+}
+
 /// 执行一次调度操作，切换到下一个任务
 pub fn schedule() {
     // 读取并禁用中断，保护整个调度过程，并在返回时恢复原状态
