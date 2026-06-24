@@ -77,6 +77,12 @@ impl Ext4 {
         if let Ok(path) = search_path {
             // get the last path
             let path = path.path.last().unwrap();
+            let Some(extent) = path.extent else {
+                return_errno_with_message!(Errno::ENOENT, "extent not found");
+            };
+            if !extent.contains_lblock(lblock) {
+                return_errno_with_message!(Errno::ENOENT, "logical block is not mapped");
+            }
 
             // get physical block id
             let fblock = path.pblock;
@@ -423,9 +429,14 @@ impl Ext4 {
             return return_errno_with_message!(Errno::ENOENT, "No extents found");
         }
 
-        let mut current_header = root_header;
-        let mut current_block = inode_ref.inode.root_extent_block();
         let mut depth = root_header.depth;
+        if depth == 0 {
+            let last_pos = root_header.entries_count as usize - 1;
+            let mut inode = inode_ref.inode;
+            return Ok(inode.root_extent_at(last_pos));
+        }
+
+        let mut current_block = inode_ref.inode.root_extent_block();
 
         while depth > 0 {
             let index_block = Block::load(
@@ -443,7 +454,6 @@ impl Ext4 {
                     + (index_header.entries_count - 1) as usize * EXT4_EXTENT_INDEX_SIZE..],
             );
             current_block = last_idx.leaf_lo as u64 | ((last_idx.leaf_hi as u64) << 32);
-            current_header = index_header;
             depth -= 1;
         }
 
