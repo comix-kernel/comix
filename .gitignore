@@ -44,12 +44,12 @@ testsuits-for-oskernel/
 
 # Logs
 os/loongarch.log
-
+*.log
 # Local notes
 os/可能的改进.md
 
 # Local agent guidance
 **/AGENTS.md
-
+**/CLAUDE.md
 # Local planning/refactor notes
 docs/
