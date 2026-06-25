@@ -281,18 +281,8 @@ impl ExtentNode {
 impl ExtentNode {
     /// Binary search for the extent that contains the given block.
     pub fn binsearch_extent(&mut self, lblock: Ext4Lblk) -> Option<(Ext4Extent, usize)> {
-        // empty node
         if self.header.entries_count == 0 {
-            match &self.data {
-                NodeData::Root(root_data) => {
-                    let extent = Ext4Extent::load_from_u32(&root_data[3..]);
-                    return Some((extent, 0));
-                }
-                NodeData::Internal(internal_data) => {
-                    let extent = Ext4Extent::load_from_u8(&internal_data[12..]);
-                    return Some((extent, 0));
-                }
-            }
+            return None;
         }
 
         match &mut self.data {
@@ -472,6 +462,19 @@ impl Ext4Extent {
         let lo = u64::from(self.start_lo);
         let hi = u64::from(self.start_hi) << 32;
         lo | hi
+    }
+
+    /// Returns true if this extent covers the given logical block.
+    pub fn contains_lblock(&self, lblock: Ext4Lblk) -> bool {
+        let len = self.get_actual_len() as u64;
+        if len == 0 {
+            return false;
+        }
+
+        let start = self.first_block as u64;
+        let end = start + len;
+        let lblock = lblock as u64;
+        start <= lblock && lblock < end
     }
 
     /// Stores the physical block number to which this extent points.

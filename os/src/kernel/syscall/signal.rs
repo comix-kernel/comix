@@ -62,7 +62,6 @@ pub fn rt_sigprocmask(
         } else {
             return -EINVAL;
         };
-
         match how {
             SIG_BLOCK => {
                 t.blocked |= new_flags;
@@ -288,7 +287,7 @@ pub fn signal_stack(uss: *const StackT, uoss: *mut StackT) -> c_int {
 /// * 成功时返回 0
 /// * 失败时返回负的错误码
 pub fn kill(pid: c_int, sig: c_int) -> c_int {
-    if sig < 0 || sig as usize >= NSIG {
+    if sig < 0 || sig as usize > NSIG {
         return -EINVAL;
     }
     let task_manager = TASK_MANAGER.lock();
@@ -339,16 +338,17 @@ pub fn kill(pid: c_int, sig: c_int) -> c_int {
 /// * 成功时返回 0
 /// * 失败时返回负的错误码
 pub fn tkill(tid: c_int, sig: c_int) -> c_int {
-    if sig < 0 || sig as usize >= NSIG {
+    if tid <= 0 || sig < 0 || sig as usize > NSIG {
         return -EINVAL;
     }
+    let current_pid = current_task().lock().pid;
     let task_manager = TASK_MANAGER.lock();
     let task = if let Some(task) = task_manager.get_task(tid as u32) {
         task
     } else {
         return -ESRCH;
     };
-    if task.lock().pid != current_task().lock().pid {
+    if task.lock().pid != current_pid {
         return -EINVAL;
     }
     task_manager.send_signal(task, sig as usize);
@@ -364,7 +364,7 @@ pub fn tkill(tid: c_int, sig: c_int) -> c_int {
 /// * 成功时返回 0
 /// * 失败时返回负的错误码
 pub fn tgkill(tgid: c_int, tid: c_int, sig: c_int) -> c_int {
-    if sig < 0 || sig as usize >= NSIG {
+    if tgid <= 0 || tid <= 0 || sig < 0 || sig as usize > NSIG {
         return -EINVAL;
     }
     let task_manager = TASK_MANAGER.lock();

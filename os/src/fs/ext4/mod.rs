@@ -57,7 +57,7 @@ pub mod adpaters;
 pub mod inode;
 
 pub use adpaters::BlockDeviceAdapter;
-pub use inode::Ext4Inode;
+pub use inode::{Ext4Inode, Ext4InodeCaches};
 
 use crate::device::block::BlockDriver;
 use crate::pr_info;
@@ -125,8 +125,10 @@ impl Ext4FileSystem {
 
         let ext4 = Arc::new(Mutex::new(ext4));
 
+        let inode_caches = Arc::new(Ext4InodeCaches::new());
+
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
-        let root = Arc::new(Ext4Inode::new(ext4.clone(), 2));
+        let root = Arc::new(Ext4Inode::new(ext4.clone(), inode_caches, 2));
 
         let fs = Arc::new(Ext4FileSystem {
             device,

@@ -14,8 +14,9 @@ use bitflags::bitflags;
 use crate::{
     arch::{HwTrapFrame, TrapFrame},
     kernel::{
-        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, current_cpu, current_task,
-        exit_process, exit_task, sleep_task, wake_up_task, yield_task,
+        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, cleanup_process_resources_on_exit,
+        current_cpu, current_task, exit_process, exit_task, schedule, sleep_task,
+        task_group_leader, wake_up_task, yield_task,
     },
     pr_err,
     uapi::signal::*,
@@ -90,7 +91,8 @@ fn handle_one_signal(sig_flag: SignalFlags, action: SignalAction, task: &SharedT
             NUM_SIGSTOP | NUM_SIGTSTP | NUM_SIGTTIN | NUM_SIGTTOU => sig_stop(sig_num),
             NUM_SIGCONT => sig_continue(sig_num),
             NUM_SIGCHLD | NUM_SIGURG | NUM_SIGWINCH | NUM_SIGIO => sig_ignore(sig_num),
-            _ => panic!("Unhandled signal"),
+            NUM_SIGRTMIN..=NUM_SIGRTMAX => sig_terminate(sig_num),
+            _ => sig_terminate(sig_num),
         },
         SIG_IGN => sig_ignore(sig_num),
         handler_addr => {
@@ -233,16 +235,18 @@ fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
 
 /* 默认信号处理函数 */
 /// 默认行为：进程中止
-fn sig_terminate(sig_num: usize) {
-    let tasks = TASK_MANAGER.lock().get_process_threads(current_task());
-    for task in tasks {
-        exit_process(task, (128 + sig_num) as i32);
-    }
+fn sig_terminate(sig_num: usize) -> ! {
+    let task = current_task();
+    let leader = task_group_leader(&task).unwrap_or(task);
+    cleanup_process_resources_on_exit(leader.clone());
+    exit_process(leader, (128 + sig_num) as i32);
+    schedule();
+    unreachable!("sig_terminate: exited task should not return");
 }
 
 /// 默认行为：终止并 Core Dump
 /// TODO: 实现生成 core dump 的功能
-fn sig_dump(sig_num: usize) {
+fn sig_dump(sig_num: usize) -> ! {
     pr_err!("signal {}: generating core (stub)", sig_num);
     sig_terminate(sig_num);
 }

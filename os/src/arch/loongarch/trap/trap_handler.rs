@@ -258,6 +258,7 @@ fn handle_interrupt(estat: usize) {
 }
 
 fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
+    let ecode = (estat >> 16) & 0x3f;
     let badv: usize;
     let badi: usize;
     unsafe {
@@ -268,9 +269,15 @@ fn user_panic(estat: usize, era: usize, trap_frame: &TrapFrame) {
     emergency_println!("   UNEXPECTED TRAP IN USER MODE (PLV>0)");
     emergency_println!("===============================================");
     emergency_println!("estat: {:#x}", estat);
+    emergency_println!("ecode: {:#x}", ecode);
     emergency_println!("era  : {:#x}", era);
     emergency_println!("badv : {:#x}", badv);
     emergency_println!("badi : {:#x}", badi);
+    emergency_println!(
+        "a7/sp: {:#x}/{:#x}",
+        trap_frame.regs[11],
+        trap_frame.regs[3]
+    );
     emergency_println!("regs : {:#x?}", trap_frame.regs);
     panic!(
         "Unexpected trap in user mode: estat={:#x}, era={:#x}, badv={:#x}, badi={:#x}",

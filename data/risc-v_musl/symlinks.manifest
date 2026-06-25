@@ -91,6 +91,7 @@ bin/vi	busybox
 bin/watch	busybox
 bin/zcat	busybox
 lib/ld-musl-riscv64-sf.so.1	libc.so
+lib/ld-musl-riscv64.so.1	libc.so
 linuxrc	bin/busybox
 sbin/acpid	../bin/busybox
 sbin/adjtimex	../bin/busybox

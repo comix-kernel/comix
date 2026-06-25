@@ -81,15 +81,7 @@ pub fn ioctl(fd: i32, request: u32, arg: usize) -> isize {
         TIOCGWINSZ | TIOCSWINSZ | TCGETS | TCSETS | TCSETSW | TCSETSF => {
             match file.ioctl(request, arg) {
                 Ok(ret) => ret,
-                Err(FsError::NotSupported | FsError::NotTty) => {
-                    pr_warn!(
-                        "ioctl: fd={}, terminal request {:#x} ({}) not supported by file type",
-                        fd,
-                        request,
-                        request
-                    );
-                    -ENOTTY as isize
-                }
+                Err(FsError::NotSupported | FsError::NotTty) => -ENOTTY as isize,
                 Err(e) => e.to_errno(),
             }
         }

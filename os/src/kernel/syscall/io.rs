@@ -6,6 +6,7 @@ use crate::kernel::current_task;
 use crate::uapi::errno::EFAULT;
 use crate::uapi::errno::EINVAL;
 use crate::uapi::iovec::IoVec;
+use crate::uapi::select::FdSet;
 use crate::util::user_buffer::{
     read_from_user, validate_user_ptr, validate_user_ptr_mut, write_to_user,
 };
@@ -833,6 +834,38 @@ pub fn select(
     select_common(nfds, readfds, writefds, exceptfds, timeout_trigger)
 }
 
+fn write_select_fd_sets(
+    readfds: usize,
+    writefds: usize,
+    exceptfds: usize,
+    read_set: Option<&FdSet>,
+    write_set: Option<&FdSet>,
+    except_set: Option<&FdSet>,
+) {
+    if let Some(set) = read_set {
+        write_to_user(readfds as *mut FdSet, *set);
+    }
+    if let Some(set) = write_set {
+        write_to_user(writefds as *mut FdSet, *set);
+    }
+    if let Some(set) = except_set {
+        write_to_user(exceptfds as *mut FdSet, *set);
+    }
+}
+
+fn clear_select_fd_sets(readfds: usize, writefds: usize, exceptfds: usize) {
+    let empty = FdSet::new();
+    if readfds != 0 {
+        write_to_user(readfds as *mut FdSet, empty);
+    }
+    if writefds != 0 {
+        write_to_user(writefds as *mut FdSet, empty);
+    }
+    if exceptfds != 0 {
+        write_to_user(exceptfds as *mut FdSet, empty);
+    }
+}
+
 fn select_common(
     nfds: usize,
     readfds: usize,
@@ -842,7 +875,6 @@ fn select_common(
 ) -> isize {
     use crate::kernel::current_task;
     use crate::uapi::errno::{EBADF, EINTR, EINVAL};
-    use crate::uapi::select::FdSet;
 
     if nfds > crate::uapi::select::FD_SETSIZE {
         return -(EINVAL as isize);
@@ -925,58 +957,77 @@ fn select_common(
     };
 
     loop {
+        let cleanup_timer = || {
+            if timeout_trigger.is_some() {
+                use crate::kernel::timer::TIMER_QUEUE;
+                TIMER_QUEUE.lock().remove_task(&task);
+            }
+        };
+
         // 关键：在阻塞等待前主动推进网络栈（同 ppoll），并分发 UDP
         crate::net::socket::poll_network_and_dispatch();
 
         let (ready_count, read_set, write_set, except_set) = check_fds();
         if ready_count < 0 {
+            cleanup_timer();
             return ready_count;
         } // EBADF
 
         if ready_count > 0 {
-            if let Some(ref set) = read_set {
-                write_to_user(readfds as *mut FdSet, *set);
-            }
-            if let Some(ref set) = write_set {
-                write_to_user(writefds as *mut FdSet, *set);
-            }
-            if let Some(ref set) = except_set {
-                write_to_user(exceptfds as *mut FdSet, *set);
-            }
+            cleanup_timer();
+            write_select_fd_sets(
+                readfds,
+                writefds,
+                exceptfds,
+                read_set.as_ref(),
+                write_set.as_ref(),
+                except_set.as_ref(),
+            );
             return ready_count;
         }
 
         // If interrupted by a deliverable signal, return EINTR so userland can run the handler.
         // Signals are only checked on return-to-user; without this, we can sleep forever in-kernel.
         if crate::ipc::signal_interrupts_syscall(&task) {
+            cleanup_timer();
             return -(EINTR as isize);
         }
 
-        if let Some(0) = timeout_trigger {
-            return 0;
-        }
-
         if let Some(trigger) = timeout_trigger {
-            use crate::kernel::timer::TIMER_QUEUE;
-            TIMER_QUEUE.lock().push(trigger, task.clone());
+            if trigger == 0 || crate::arch::get_time() >= trigger {
+                cleanup_timer();
+                clear_select_fd_sets(readfds, writefds, exceptfds);
+                return 0;
+            }
         }
 
-        // Atomic check-and-sleep to prevent lost wakeup
-        let slept = {
-            let mut wq = POLL_WAIT_QUEUE.lock();
-            wq.sleep_if(task.clone(), || {
-                let (ready, _, _, _) = check_fds();
-                ready > 0
-            })
+        let should_not_sleep = || {
+            let (ready, _, _, _) = check_fds();
+            ready > 0 || timeout_trigger.is_some_and(|trigger| crate::arch::get_time() >= trigger)
+        };
+
+        // Keep the timer from firing before sleep_if has actually moved this task out of Running.
+        let slept = if let Some(trigger) = timeout_trigger {
+            use crate::kernel::timer::TIMER_QUEUE;
+            let mut timer_q = TIMER_QUEUE.lock();
+            timer_q.push(trigger, task.clone());
+            let slept = POLL_WAIT_QUEUE
+                .lock()
+                .sleep_if(task.clone(), should_not_sleep);
+            if !slept {
+                timer_q.remove_task(&task);
+            }
+            slept
+        } else {
+            POLL_WAIT_QUEUE
+                .lock()
+                .sleep_if(task.clone(), should_not_sleep)
         };
 
         if slept {
             crate::kernel::schedule();
 
-            if timeout_trigger.is_some() {
-                use crate::kernel::timer::TIMER_QUEUE;
-                TIMER_QUEUE.lock().remove_task(&task);
-            }
+            cleanup_timer();
 
             if crate::ipc::signal_interrupts_syscall(&task) {
                 return -(EINTR as isize);
@@ -988,6 +1039,7 @@ fn select_common(
             if let Some(trigger) = timeout_trigger
                 && crate::arch::get_time() >= trigger
             {
+                clear_select_fd_sets(readfds, writefds, exceptfds);
                 return 0;
             }
         }

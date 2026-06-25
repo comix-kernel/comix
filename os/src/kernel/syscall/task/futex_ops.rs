@@ -22,18 +22,13 @@ pub fn futex(
     let _private = (op & FUTEX_PRIVATE as c_int) != 0; // TODO: 目前不区分 PRIVATE 和 SHARED
     let realtime = (op & FUTEX_CLOCK_REALTIME as c_int) != 0;
     let op = op & !(FUTEX_PRIVATE as c_int) & !(FUTEX_CLOCK_REALTIME as c_int);
-    // HACK: 其实只需要锁定与 uaddr 对应的 Futex 等待队列
-    let mut fm = FUTEX_MANAGER.lock();
     match op as u32 {
         FUTEX_WAIT => {
             // 必须保证获取锁 → 定位等待队列 → 读取用户数据 → 比较 → 入队/释放锁 的序列是原子的
             let task = current_task();
-            let memory_space = task
-                .lock()
-                .memory_space
-                .as_ref()
-                .expect("futex: current task has no memory space.")
-                .clone();
+            let Some(memory_space) = task.lock().memory_space.clone() else {
+                return -EFAULT;
+            };
             let paddr = if let Some(paddr) = memory_space
                 .lock()
                 .translate(VA::from_usize(uaddr as usize))
@@ -60,9 +55,18 @@ pub fn futex(
                 return -EAGAIN;
             }
 
+            // HACK: 其实只需要锁定与 uaddr 对应的 Futex 等待队列
+            let mut fm = FUTEX_MANAGER.lock();
             let waitq = fm.get_wait_queue(paddr);
-            waitq.sleep(task.clone());
-            sleep_task(task.clone(), true);
+            waitq.add_task(task.clone());
+            let slept = sleep_task_prepare(task.clone(), true, |t| {
+                t.pending.has_deliverable_signal(t.blocked)
+                    || t.shared_pending.lock().has_deliverable_signal(t.blocked)
+            });
+            if !slept {
+                waitq.remove_task(&task);
+                return -EINTR;
+            }
 
             if !timeout.is_null() {
                 let ts = unsafe { read_from_user(timeout) };
@@ -106,12 +110,9 @@ pub fn futex(
         FUTEX_WAKE => {
             let mut wake_count = 0;
             let paddr = {
-                let memory_space = current_task()
-                    .lock()
-                    .memory_space
-                    .as_ref()
-                    .expect("futex: current task has no memory space.")
-                    .clone();
+                let Some(memory_space) = current_task().lock().memory_space.clone() else {
+                    return -EFAULT;
+                };
                 if let Some(paddr) = memory_space
                     .lock()
                     .translate(VA::from_usize(uaddr as usize))

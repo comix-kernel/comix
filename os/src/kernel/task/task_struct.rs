@@ -4,14 +4,14 @@
 #![allow(dead_code)]
 use core::sync::atomic::{AtomicPtr, Ordering};
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{
         HwTrapFrame, TrapFrame,
         kernel::{context::Context, task::setup_exec_stack_layout},
     },
-    ipc::{SignalHandlerTable, SignalPending},
+    ipc::{ShmSegment, SignalHandlerTable, SignalPending},
     kernel::{
         WaitQueue,
         task::{forkret, task_state::TaskState},
@@ -25,6 +25,7 @@ use crate::{
     sync::SpinLock,
     uapi::{
         resource::RlimitStruct,
+        sched::SCHED_NORMAL,
         signal::{SignalFlags, SignalStack},
         uts_namespace::UtsNamespace,
     },
@@ -34,6 +35,15 @@ use crate::{
 /// 共享任务句柄
 /// 用于在多个地方引用同一个任务实例
 pub type SharedTask = Arc<SpinLock<Task>>;
+
+#[derive(Debug, Clone)]
+pub struct ShmAttachment {
+    pub addr: usize,
+    pub len: usize,
+    pub segment: Arc<ShmSegment>,
+}
+
+pub type ShmAttachmentTable = Arc<SpinLock<BTreeMap<usize, ShmAttachment>>>;
 
 /// 任务
 /// 存放任务的核心信息
@@ -67,8 +77,13 @@ pub struct Task {
     /// None 表示任务未运行在任何 CPU 上
     pub on_cpu: Option<usize>,
     /// CPU 亲和性掩码
-    /// -1 表示可以在任何 CPU 上运行
-    pub cpu_affinity: i32,
+    pub cpu_affinity: usize,
+    /// Linux 调度策略（SCHED_*，不含 SCHED_RESET_ON_FORK 标志位）
+    pub sched_policy: i32,
+    /// Linux realtime 调度优先级。普通策略固定为 0。
+    pub sched_priority: i32,
+    /// fork/clone 时是否将子任务调度属性重置为普通策略。
+    pub sched_reset_on_fork: bool,
     /// 任务当前的状态
     pub state: TaskState,
     /// 任务的id
@@ -138,6 +153,8 @@ pub struct Task {
     pub fd_table: Arc<FDTable>,
     /// 文件系统信息
     pub fs: Arc<SpinLock<FsStruct>>,
+    /// 当前进程附加的 SysV shared memory 段，按 attach 地址索引。
+    pub shm_attachments: ShmAttachmentTable,
 }
 
 /// 文件系统信息相关结构体
@@ -404,7 +421,10 @@ impl Task {
             priority: 0,
             processor_id: 0,
             on_cpu: None,
-            cpu_affinity: -1,
+            cpu_affinity: crate::kernel::online_cpu_mask(),
+            sched_policy: SCHED_NORMAL,
+            sched_priority: 0,
+            sched_reset_on_fork: false,
             state: TaskState::Running,
             tid,
             pid,
@@ -434,6 +454,7 @@ impl Task {
             umask: 0o022,
             fd_table,
             fs,
+            shm_attachments: Arc::new(SpinLock::new(BTreeMap::new())),
         }
     }
 

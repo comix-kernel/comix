@@ -88,7 +88,8 @@ const CURRENTLY_SUPPORTED_FLAGS: CloneFlags = CloneFlags::from_bits_truncate(
         | CloneFlags::THREAD.bits()
         | CloneFlags::PARENT_SETTID.bits()
         | CloneFlags::CHILD_CLEARTID.bits()
-        | CloneFlags::CHILD_SETTID.bits(),
+        | CloneFlags::CHILD_SETTID.bits()
+        | CloneFlags::DETACHED.bits(),
 );
 
 impl CloneFlags {
@@ -151,6 +152,30 @@ pub enum SchedulingPolicy {
     Deadline = 6, // SCHED_DEADLINE (基于 EDF 算法的抢占式调度)
     Ext = 7,      // SCHED_EXT (保留用于外部调度器)
 }
+
+impl SchedulingPolicy {
+    pub const fn as_raw(self) -> c_int {
+        self as c_int
+    }
+}
+
+/// Linux `struct sched_param`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SchedParam {
+    pub sched_priority: c_int,
+}
+
+pub const SCHED_NORMAL: c_int = SchedulingPolicy::Normal.as_raw();
+pub const SCHED_FIFO: c_int = SchedulingPolicy::Fifo.as_raw();
+pub const SCHED_RR: c_int = SchedulingPolicy::Rr.as_raw();
+pub const SCHED_BATCH: c_int = SchedulingPolicy::Batch.as_raw();
+pub const SCHED_IDLE: c_int = SchedulingPolicy::Idle.as_raw();
+pub const SCHED_DEADLINE: c_int = SchedulingPolicy::Deadline.as_raw();
+pub const SCHED_EXT: c_int = SchedulingPolicy::Ext.as_raw();
+
+pub const SCHED_RT_PRIORITY_MIN: c_int = 1;
+pub const SCHED_RT_PRIORITY_MAX: c_int = 99;
 
 /// 调度标志：在 fork 时重置为 SCHED_NORMAL。
 pub const SCHED_RESET_ON_FORK: c_int = 0x40000000;

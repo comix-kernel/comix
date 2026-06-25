@@ -27,7 +27,9 @@ use crate::{
         fs::LinuxStatFs,
         futex::RobustListHead,
         iovec::IoVec,
+        ipc::{KeyT, ShmIdDs},
         resource::{Rlimit, Rusage},
+        sched::SchedParam,
         signal::{SigInfoT, SignalAction},
         sysinfo::SysInfo,
         time::{Itimerval, TimeSpec, Tms, timeval, timezone},
@@ -167,6 +169,33 @@ impl_syscall!(
 impl_syscall!(sys_clock_settime, clock_settime, (c_int, *const TimeSpec));
 impl_syscall!(sys_clock_gettime, clock_gettime, (c_int, *mut TimeSpec));
 impl_syscall!(sys_clock_getres, clock_getres, (c_int, *mut TimeSpec));
+impl_syscall!(
+    sys_clock_nanosleep,
+    clock_nanosleep,
+    (c_int, c_int, *const TimeSpec, *mut TimeSpec)
+);
+impl_syscall!(
+    sys_sched_setparam,
+    sched_setparam,
+    (c_int, *const SchedParam)
+);
+impl_syscall!(
+    sys_sched_setscheduler,
+    sched_setscheduler,
+    (c_int, c_int, *const SchedParam)
+);
+impl_syscall!(sys_sched_getscheduler, sched_getscheduler, (c_int));
+impl_syscall!(sys_sched_getparam, sched_getparam, (c_int, *mut SchedParam));
+impl_syscall!(
+    sys_sched_setaffinity,
+    sched_setaffinity,
+    (c_int, usize, *const u8)
+);
+impl_syscall!(
+    sys_sched_getaffinity,
+    sched_getaffinity,
+    (c_int, usize, *mut u8)
+);
 impl_syscall!(sys_sched_yield, sched_yield, ());
 impl_syscall!(sys_syslog, syslog, (i32, *mut u8, i32));
 
@@ -227,6 +256,12 @@ impl_syscall!(sys_getegid, getegid, ());
 impl_syscall!(sys_gettid, gettid, ());
 impl_syscall!(sys_sysinfo, sysinfo, (*mut SysInfo));
 
+// System V IPC
+impl_syscall!(sys_shmget, shmget, (KeyT, usize, i32));
+impl_syscall!(sys_shmctl, shmctl, (i32, i32, *mut ShmIdDs));
+impl_syscall!(sys_shmat, shmat, (i32, *const u8, i32));
+impl_syscall!(sys_shmdt, shmdt, (*const u8));
+
 // 网络 (Networking/Sockets)
 impl_syscall!(sys_socket, socket, (i32, i32, i32));
 impl_syscall!(sys_socketpair, socketpair, (i32, i32, i32, *mut i32));
@@ -261,8 +296,8 @@ impl_syscall!(
         c_ulong,     // flags (a0)
         c_ulong,     // stack (a1)
         *mut c_int,  // parent_tid (a2)
-        *mut c_int,  // child_tid (a3)
-        *mut c_void  // tls (a4)
+        *mut c_void, // tls (a3)
+        *mut c_int   // child_tid (a4)
     )
 );
 impl_syscall!(

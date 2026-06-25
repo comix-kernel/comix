@@ -98,9 +98,16 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_CLOCK_SETTIME => sys_clock_settime(frame),
         crate::kernel::syscall::numbers::SYS_CLOCK_GETTIME => sys_clock_gettime(frame),
         crate::kernel::syscall::numbers::SYS_CLOCK_GETRES => sys_clock_getres(frame),
+        crate::kernel::syscall::numbers::SYS_CLOCK_NANOSLEEP => sys_clock_nanosleep(frame),
         crate::kernel::syscall::numbers::SYS_SYSLOG => sys_syslog(frame),
 
         // 调度
+        crate::kernel::syscall::numbers::SYS_SCHED_SETPARAM => sys_sched_setparam(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_SETSCHEDULER => sys_sched_setscheduler(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_GETSCHEDULER => sys_sched_getscheduler(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_GETPARAM => sys_sched_getparam(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_SETAFFINITY => sys_sched_setaffinity(frame),
+        crate::kernel::syscall::numbers::SYS_SCHED_GETAFFINITY => sys_sched_getaffinity(frame),
         crate::kernel::syscall::numbers::SYS_SCHED_YIELD => sys_sched_yield(frame),
 
         // 信号
@@ -143,6 +150,12 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_GETEGID => sys_getegid(frame),
         crate::kernel::syscall::numbers::SYS_GETTID => sys_gettid(frame),
         crate::kernel::syscall::numbers::SYS_SYSINFO => sys_sysinfo(frame),
+
+        // System V IPC
+        crate::kernel::syscall::numbers::SYS_SHMGET => sys_shmget(frame),
+        crate::kernel::syscall::numbers::SYS_SHMCTL => sys_shmctl(frame),
+        crate::kernel::syscall::numbers::SYS_SHMAT => sys_shmat(frame),
+        crate::kernel::syscall::numbers::SYS_SHMDT => sys_shmdt(frame),
 
         // 网络
         crate::kernel::syscall::numbers::SYS_SOCKET => sys_socket(frame),

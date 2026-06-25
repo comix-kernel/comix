@@ -265,6 +265,18 @@ impl MemorySpace {
         Ok(())
     }
 
+    /// 插入 SysV shared memory 映射区域。
+    pub fn insert_shared_area(
+        &mut self,
+        vpn_range: VpnRange,
+        flags: UniversalPTEFlag,
+        segment: alloc::sync::Arc<crate::ipc::ShmSegment>,
+    ) -> Result<(), PagingError> {
+        let area = MappingArea::new_shared(vpn_range, flags, segment);
+        self.insert_area(area)?;
+        Ok(())
+    }
+
     /// 插入一个帧映射区域，并可选择复制数据（带偏移量）
     pub fn insert_framed_area_with_offset(
         &mut self,
@@ -346,6 +358,11 @@ impl MemorySpace {
                 MapType::Reserved => {
                     // 保留区：仅克隆元数据（无页表映射、无帧）
                     let new_area = area.clone_metadata();
+                    new_space.areas.push(new_area);
+                }
+                MapType::Shared => {
+                    let mut new_area = area.clone_metadata();
+                    new_area.map(&mut new_space.page_table)?;
                     new_space.areas.push(new_area);
                 }
             }

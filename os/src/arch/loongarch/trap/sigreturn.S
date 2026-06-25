@@ -7,6 +7,7 @@
 __sigreturn_trampoline:
     li.w   $a7, 139          # __NR_rt_sigreturn
     syscall 0
+    break 0                  # rt_sigreturn must not return
 
 .globl __sigreturn_trampoline_end
 __sigreturn_trampoline_end:

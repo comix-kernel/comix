@@ -10,6 +10,7 @@ pub mod fs;
 pub mod futex;
 pub mod ioctl;
 pub mod iovec;
+pub mod ipc;
 pub mod log;
 pub mod mm;
 pub mod reboot;

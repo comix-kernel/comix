@@ -2,7 +2,7 @@
 //!
 //! 包含任务的创建、调度、终止等功能
 //! 并由任务管理器维护所有任务的信息
-use core::sync::atomic::Ordering;
+use core::{ffi::c_int, sync::atomic::Ordering};
 
 mod cap;
 mod cred;
@@ -30,12 +30,14 @@ pub use task_manager::{TASK_MANAGER, TaskManagerTrait};
 pub use task_state::TaskState;
 pub use task_struct::FsStruct;
 pub use task_struct::SharedTask;
+pub use task_struct::ShmAttachment;
 pub use task_struct::Task as TaskStruct;
 pub use work_queue::*;
 
 use alloc::sync::Arc;
 
-use crate::mm::memory_space::MemorySpace;
+use crate::ipc::shm_detach_segment;
+use crate::mm::{address::VA, memory_space::MemorySpace};
 use crate::sync::SpinLock;
 use crate::uapi::signal::NUM_SIGCHLD;
 use crate::{
@@ -89,6 +91,7 @@ pub(crate) fn terminate_task(code: usize) -> ! {
         let leader = TASK_MANAGER.lock().get_task(pid);
         if let Some(leader) = leader {
             if leader.lock().is_process() {
+                cleanup_process_resources_on_exit(leader.clone());
                 exit_process(leader, exit_code);
             } else {
                 TASK_MANAGER.lock().exit_task(task, exit_code);
@@ -101,6 +104,12 @@ pub(crate) fn terminate_task(code: usize) -> ! {
     unreachable!("terminate_task: should not return after scheduled out terminated task");
 }
 
+/// 获取任务所属线程组的 leader。
+pub fn task_group_leader(task: &SharedTask) -> Option<SharedTask> {
+    let pid = task.lock().pid;
+    TASK_MANAGER.lock().get_task(pid)
+}
+
 /// 进程退出时的资源清理（Linux 语义子集）：
 /// - 释放用户地址空间（页表 + 用户映射）
 /// - 关闭打开文件描述符（包括 socket fd）
@@ -110,6 +119,11 @@ pub(crate) fn terminate_task(code: usize) -> ! {
 /// - 必须先切换到内核页表，再释放当前进程页表资源。
 pub fn cleanup_current_process_resources_on_exit() {
     let task = current_task();
+    cleanup_process_resources_on_exit(task);
+}
+
+/// 清理指定进程/线程组 leader 持有的进程级资源。
+pub fn cleanup_process_resources_on_exit(task: SharedTask) {
     if !task.lock().is_process() {
         return;
     }
@@ -135,8 +149,50 @@ pub fn cleanup_current_process_resources_on_exit() {
         drop(file);
     }
 
-    // 3) 释放用户地址空间。
+    // 3) 分离 SysV shared memory 映射，更新全局 registry 的 attach 计数。
+    detach_all_shm(task.clone());
+
+    // 4) 释放用户地址空间。
     task.lock().memory_space = None;
+}
+
+/// 分离一个进程持有的所有 SysV shared memory 映射。
+///
+/// 调用方可以在 exit/execve 清理路径中使用。该函数会先从 Task 中取走
+/// attachment 元数据，再释放 task 锁后执行 munmap 和 registry 更新，避免
+/// task -> address_space -> shm registry 的嵌套锁长期持有。
+pub fn detach_all_shm(task: SharedTask) {
+    let (pid, memory_space, attachment_table) = {
+        let t = task.lock();
+        (
+            t.pid as c_int,
+            t.memory_space.clone(),
+            t.shm_attachments.clone(),
+        )
+    };
+
+    let attachments = core::mem::take(&mut *attachment_table.lock());
+    if attachments.is_empty() {
+        return;
+    }
+
+    if let Some(memory_space) = memory_space {
+        let mut space = memory_space.lock();
+        for attachment in attachments.values() {
+            if let Err(err) = space.munmap(VA::from_usize(attachment.addr), attachment.len) {
+                crate::pr_warn!(
+                    "detach_all_shm: failed to unmap shmid {} at 0x{:x}: {:?}",
+                    attachment.segment.id,
+                    attachment.addr,
+                    err
+                );
+            }
+        }
+    }
+
+    for attachment in attachments.values() {
+        shm_detach_segment(&attachment.segment, pid);
+    }
 }
 
 /// 尝试获取当前task

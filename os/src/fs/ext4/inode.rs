@@ -8,6 +8,7 @@
 
 use crate::sync::{Mutex, SpinLock};
 use crate::uapi::time::TimeSpec;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -18,6 +19,155 @@ use crate::vfs::dev::{
     major as dev_major, minor as dev_minor,
 };
 use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, InodeType};
+
+const READ_CACHE_PAGE_SIZE: usize = 4096;
+const READ_CACHE_MAX_PAGES: usize = 512;
+const LOOKUP_CACHE_MAX_ENTRIES: usize = 4096;
+
+struct CachedReadPage {
+    data: Vec<u8>,
+    age: u64,
+}
+
+struct ReadCache {
+    pages: BTreeMap<(u32, usize), CachedReadPage>,
+    clock: u64,
+    generations: BTreeMap<u32, u64>,
+}
+
+impl ReadCache {
+    const fn new() -> Self {
+        Self {
+            pages: BTreeMap::new(),
+            clock: 0,
+            generations: BTreeMap::new(),
+        }
+    }
+
+    fn clear_inode(&mut self, ino: u32) {
+        self.pages.retain(|(page_ino, _), _| *page_ino != ino);
+        let generation = self.generations.entry(ino).or_insert(0);
+        *generation = generation.wrapping_add(1);
+    }
+
+    fn generation(&self, ino: u32) -> u64 {
+        self.generations.get(&ino).copied().unwrap_or(0)
+    }
+
+    fn read(
+        &mut self,
+        ino: u32,
+        page_index: usize,
+        page_offset: usize,
+        buf: &mut [u8],
+    ) -> Option<usize> {
+        self.clock = self.clock.wrapping_add(1);
+        let page = self.pages.get_mut(&(ino, page_index))?;
+        if page_offset >= page.data.len() {
+            return Some(0);
+        }
+
+        page.age = self.clock;
+        let n = (page.data.len() - page_offset).min(buf.len());
+        buf[..n].copy_from_slice(&page.data[page_offset..page_offset + n]);
+        Some(n)
+    }
+
+    fn insert(&mut self, ino: u32, generation: u64, page_index: usize, data: Vec<u8>) {
+        if self.generation(ino) != generation || data.is_empty() {
+            return;
+        }
+
+        self.clock = self.clock.wrapping_add(1);
+        let key = (ino, page_index);
+        if !self.pages.contains_key(&key) && self.pages.len() >= READ_CACHE_MAX_PAGES {
+            if let Some((&oldest_key, _)) = self.pages.iter().min_by_key(|(_, page)| page.age) {
+                self.pages.remove(&oldest_key);
+            }
+        }
+
+        self.pages.insert(key, CachedReadPage {
+            data,
+            age: self.clock,
+        });
+    }
+}
+
+struct LookupCache {
+    entries: BTreeMap<u32, BTreeMap<String, u32>>,
+    len: usize,
+}
+
+impl LookupCache {
+    const fn new() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            len: 0,
+        }
+    }
+
+    fn get(&self, parent_ino: u32, name: &str) -> Option<u32> {
+        self.entries.get(&parent_ino)?.get(name).copied()
+    }
+
+    fn insert(&mut self, parent_ino: u32, name: &str, ino: u32) {
+        let old = self
+            .entries
+            .entry(parent_ino)
+            .or_default()
+            .insert(String::from(name), ino);
+        if old.is_none() {
+            self.len += 1;
+        }
+        self.evict_if_needed();
+    }
+
+    fn remove(&mut self, parent_ino: u32, name: &str) {
+        let Some(entries) = self.entries.get_mut(&parent_ino) else {
+            return;
+        };
+        if entries.remove(name).is_some() {
+            self.len = self.len.saturating_sub(1);
+        }
+        if entries.is_empty() {
+            self.entries.remove(&parent_ino);
+        }
+    }
+
+    fn evict_if_needed(&mut self) {
+        while self.len > LOOKUP_CACHE_MAX_ENTRIES {
+            let Some(parent_ino) = self.entries.keys().next().copied() else {
+                self.len = 0;
+                return;
+            };
+            let remove_parent = {
+                let entries = self.entries.get_mut(&parent_ino).unwrap();
+                if let Some(name) = entries.keys().next().cloned() {
+                    entries.remove(&name);
+                    self.len -= 1;
+                }
+                entries.is_empty()
+            };
+            if remove_parent {
+                self.entries.remove(&parent_ino);
+            }
+        }
+    }
+}
+
+pub struct Ext4InodeCaches {
+    read: SpinLock<ReadCache>,
+    lookup: SpinLock<LookupCache>,
+}
+
+impl Ext4InodeCaches {
+    pub const fn new() -> Self {
+        Self {
+            read: SpinLock::new(ReadCache::new()),
+            lookup: SpinLock::new(LookupCache::new()),
+        }
+    }
+}
 
 /// Ext4 Inode 包装
 pub struct Ext4Inode {
@@ -30,18 +180,30 @@ pub struct Ext4Inode {
     /// 关联的 Dentry（弱引用，避免循环引用）
     /// 用于获取完整路径，而不是在 Inode 中重复存储
     dentry: SpinLock<Weak<Dentry>>,
+
+    /// Shared filesystem-level caches for regular reads and directory lookup.
+    caches: Arc<Ext4InodeCaches>,
 }
 
 impl Ext4Inode {
     /// 创建新的 Ext4Inode
     ///
     /// 注意：初始创建时 dentry 为空，VFS 会在创建 Dentry 后调用 set_dentry()
-    pub fn new(fs: Arc<Mutex<ext4_rs::Ext4>>, ino: u32) -> Self {
+    pub fn new(fs: Arc<Mutex<ext4_rs::Ext4>>, caches: Arc<Ext4InodeCaches>, ino: u32) -> Self {
         Self {
             fs,
             ino,
             dentry: SpinLock::new(Weak::new()),
+            caches,
         }
+    }
+
+    fn invalidate_read_cache(&self) {
+        self.caches.read.lock().clear_inode(self.ino);
+    }
+
+    fn drop_lookup_cache_entry(&self, name: &str) {
+        self.caches.lookup.lock().remove(self.ino, name);
     }
 
     #[cfg(test)]
@@ -220,17 +382,74 @@ impl Inode for Ext4Inode {
     }
 
     fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         // Check if this is a directory
         let metadata = self.metadata()?;
         if metadata.inode_type == InodeType::Directory {
             return Err(FsError::IsDirectory);
         }
 
-        let fs = self.fs.lock();
+        if offset >= metadata.size {
+            return Ok(0);
+        }
 
-        // ext4_rs 的 read_at 签名: pub fn read_at(&self, inode: u32, offset: usize, read_buf: &mut [u8])
-        fs.read_at(self.ino, offset, buf)
-            .map_err(|_| FsError::IoError)
+        let target_len = buf.len().min(metadata.size - offset);
+        let mut copied = 0;
+        while copied < target_len {
+            let current_offset = offset + copied;
+            let page_index = current_offset / READ_CACHE_PAGE_SIZE;
+            let page_offset = current_offset % READ_CACHE_PAGE_SIZE;
+            let chunk_len = (READ_CACHE_PAGE_SIZE - page_offset).min(target_len - copied);
+
+            if let Some(n) = self.caches.read.lock().read(
+                self.ino,
+                page_index,
+                page_offset,
+                &mut buf[copied..copied + chunk_len],
+            ) {
+                copied += n;
+                if n == 0 {
+                    break;
+                }
+                continue;
+            }
+
+            let generation = self.caches.read.lock().generation(self.ino);
+            let page_start = page_index * READ_CACHE_PAGE_SIZE;
+            let page_len = READ_CACHE_PAGE_SIZE.min(metadata.size - page_start);
+            let mut page_buf = alloc::vec![0u8; page_len];
+            let nread = {
+                let fs = self.fs.lock();
+                fs.read_at(self.ino, page_start, &mut page_buf)
+                    .map_err(|_| FsError::IoError)?
+            };
+            page_buf.truncate(nread);
+
+            if page_offset >= page_buf.len() {
+                self.caches
+                    .read
+                    .lock()
+                    .insert(self.ino, generation, page_index, page_buf);
+                break;
+            }
+
+            let n = (page_buf.len() - page_offset).min(chunk_len);
+            buf[copied..copied + n].copy_from_slice(&page_buf[page_offset..page_offset + n]);
+            copied += n;
+            self.caches
+                .read
+                .lock()
+                .insert(self.ino, generation, page_index, page_buf);
+
+            if n == 0 {
+                break;
+            }
+        }
+
+        Ok(copied)
     }
 
     fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
@@ -243,8 +462,11 @@ impl Inode for Ext4Inode {
         let fs = self.fs.lock();
 
         // ext4_rs 的 write_at 签名: pub fn write_at(&self, inode: u32, offset: usize, write_buf: &[u8])
-        fs.write_at(self.ino, offset, buf)
-            .map_err(|_| FsError::IoError)
+        let written = fs
+            .write_at(self.ino, offset, buf)
+            .map_err(|_| FsError::IoError)?;
+        self.invalidate_read_cache();
+        Ok(written)
     }
 
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>, FsError> {
@@ -252,6 +474,14 @@ impl Inode for Ext4Inode {
         let metadata = self.metadata()?;
         if metadata.inode_type != InodeType::Directory {
             return Err(FsError::NotDirectory);
+        }
+
+        if let Some(child_ino) = self.caches.lookup.lock().get(self.ino, name) {
+            return Ok(Arc::new(Ext4Inode::new(
+                self.fs.clone(),
+                self.caches.clone(),
+                child_ino,
+            )));
         }
 
         // 类似 create,lookup 也应该使用相对路径
@@ -264,9 +494,14 @@ impl Inode for Ext4Inode {
         let child_ino = fs
             .generic_open(name, &mut parent, false, 0, &mut name_off)
             .map_err(|_| FsError::NotFound)?;
+        self.caches.lookup.lock().insert(self.ino, name, child_ino);
 
         // 创建子 Inode（暂时没有 dentry，VFS 会调用 set_dentry）
-        Ok(Arc::new(Ext4Inode::new(self.fs.clone(), child_ino)))
+        Ok(Arc::new(Ext4Inode::new(
+            self.fs.clone(),
+            self.caches.clone(),
+            child_ino,
+        )))
     }
 
     fn create(&self, name: &str, mode: FileMode) -> Result<Arc<dyn Inode>, FsError> {
@@ -290,8 +525,10 @@ impl Inode for Ext4Inode {
         child_inode.inode.set_mode(file_mode);
         fs.write_back_inode(&mut child_inode);
 
+        self.drop_lookup_cache_entry(name);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
+            self.caches.clone(),
             child_inode.inode_num,
         )))
     }
@@ -324,7 +561,12 @@ impl Inode for Ext4Inode {
         inode_ref.inode.set_mode(dir_mode);
         fs.write_back_inode(&mut inode_ref);
 
-        Ok(Arc::new(Ext4Inode::new(self.fs.clone(), inode_id)))
+        self.drop_lookup_cache_entry(name);
+        Ok(Arc::new(Ext4Inode::new(
+            self.fs.clone(),
+            self.caches.clone(),
+            inode_id,
+        )))
     }
 
     fn symlink(&self, name: &str, target: &str) -> Result<Arc<dyn Inode>, FsError> {
@@ -362,8 +604,10 @@ impl Inode for Ext4Inode {
                 .map_err(|_| FsError::IoError)?;
         }
 
+        self.drop_lookup_cache_entry(name);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
+            self.caches.clone(),
             new_inode.inode_num,
         )))
     }
@@ -390,6 +634,7 @@ impl Inode for Ext4Inode {
         fs.link(&mut self_ref, &mut target_ref, name)
             .map_err(|_| FsError::NoSpace)?;
 
+        self.drop_lookup_cache_entry(name);
         Ok(())
     }
 
@@ -435,6 +680,7 @@ impl Inode for Ext4Inode {
             fs.write_back_inode(&mut parent_ref);
         }
 
+        self.drop_lookup_cache_entry(name);
         Ok(())
     }
 
@@ -449,7 +695,9 @@ impl Inode for Ext4Inode {
         let parent = self.ino;
 
         fs.dir_remove(parent, name)
-            .map(|_| ())
+            .map(|_| {
+                self.drop_lookup_cache_entry(name);
+            })
             .map_err(|_| FsError::NotFound)
     }
 
@@ -672,6 +920,8 @@ impl Inode for Ext4Inode {
         fs.write_back_inode(&mut old_parent_ref);
         fs.write_back_inode(&mut new_parent_ref);
 
+        self.drop_lookup_cache_entry(old_name);
+        new_parent_ext4.drop_lookup_cache_entry(new_name);
         Ok(())
     }
 
@@ -745,6 +995,7 @@ impl Inode for Ext4Inode {
             }
         }
 
+        self.invalidate_read_cache();
         Ok(())
     }
 
@@ -908,8 +1159,10 @@ impl Inode for Ext4Inode {
 
         fs.write_back_inode(&mut new_inode);
 
+        self.drop_lookup_cache_entry(name);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
+            self.caches.clone(),
             new_inode.inode_num,
         )))
     }

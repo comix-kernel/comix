@@ -73,9 +73,16 @@ pub const SYS_SETITIMER: usize = 103;
 pub const SYS_CLOCK_SETTIME: usize = 112;
 pub const SYS_CLOCK_GETTIME: usize = 113;
 pub const SYS_CLOCK_GETRES: usize = 114;
+pub const SYS_CLOCK_NANOSLEEP: usize = 115;
 pub const SYS_SYSLOG: usize = 116;
 
 // ---- 调度 ----
+pub const SYS_SCHED_SETPARAM: usize = 118;
+pub const SYS_SCHED_SETSCHEDULER: usize = 119;
+pub const SYS_SCHED_GETSCHEDULER: usize = 120;
+pub const SYS_SCHED_GETPARAM: usize = 121;
+pub const SYS_SCHED_SETAFFINITY: usize = 122;
+pub const SYS_SCHED_GETAFFINITY: usize = 123;
 pub const SYS_SCHED_YIELD: usize = 124;
 
 // ---- 信号 ----
@@ -116,6 +123,12 @@ pub const SYS_GETGID: usize = 176;
 pub const SYS_GETEGID: usize = 177;
 pub const SYS_GETTID: usize = 178;
 pub const SYS_SYSINFO: usize = 179;
+
+// ---- System V IPC ----
+pub const SYS_SHMGET: usize = 194;
+pub const SYS_SHMCTL: usize = 195;
+pub const SYS_SHMAT: usize = 196;
+pub const SYS_SHMDT: usize = 197;
 
 // ---- 网络/Socket ----
 pub const SYS_SOCKET: usize = 198;
