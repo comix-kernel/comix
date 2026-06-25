@@ -238,7 +238,8 @@ impl TrapFrame {
     /// 将 TrapFrame 转换为 MContextT
     pub fn to_mcontext(&self) -> MContextT {
         let mut gregs = [0u64; 32];
-        for i in 0..32 {
+        gregs[0] = self.era as u64;
+        for i in 1..32 {
             gregs[i] = self.regs[i] as u64;
         }
         MContextT {
@@ -255,7 +256,8 @@ impl TrapFrame {
 
     /// 从 MContextT 恢复 TrapFrame
     pub fn restore_from_mcontext(&mut self, mcontext: &MContextT) {
-        for i in 0..32 {
+        self.era = mcontext.gregs[0] as usize;
+        for i in 1..32 {
             self.regs[i] = mcontext.gregs[i] as usize;
         }
         self.fregs.copy_from_slice(&mcontext.fpregs[..32]);

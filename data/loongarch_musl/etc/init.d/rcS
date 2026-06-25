@@ -116,7 +116,7 @@ stage_musl_tests_to_tmpfs() {
                 ;;
         esac
 
-        if ! /bin/cp -R "$entry" "$dst/"; then
+        if ! /bin/cp -a "$entry" "$dst/"; then
             echo "[Tests] failed to stage $entry"
             /bin/rm -rf "$dst"
             return 1
