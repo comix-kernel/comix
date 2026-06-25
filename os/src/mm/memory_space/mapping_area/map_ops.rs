@@ -34,6 +34,7 @@ impl MappingArea {
                     TrackedFrames::Multiple(v) => v.len(),
                 })
                 .sum(),
+            MapType::Shared => self.vpn_range.len(),
             _ => 0,
         }
     }
@@ -60,6 +61,25 @@ impl MappingArea {
             permission,
             frames: BTreeMap::new(),
             file,
+            shared: None,
+            shared_page_offset: 0,
+        }
+    }
+
+    pub fn new_shared(
+        vpn_range: VpnRange,
+        permission: UniversalPTEFlag,
+        segment: Arc<ShmSegment>,
+    ) -> Self {
+        MappingArea {
+            vpn_range,
+            area_type: AreaType::UserMmap,
+            map_type: MapType::Shared,
+            permission,
+            frames: BTreeMap::new(),
+            file: None,
+            shared: Some(segment),
+            shared_page_offset: 0,
         }
     }
 
@@ -96,6 +116,17 @@ impl MappingArea {
             MapType::Reserved => {
                 // PROT_NONE：不建立页表映射
                 return Ok(());
+            }
+            MapType::Shared => {
+                let segment = self
+                    .shared
+                    .as_ref()
+                    .ok_or(page_table::PagingError::InvalidAddress)?;
+                let page_idx =
+                    self.shared_page_offset + vpn.as_usize() - self.vpn_range.start().as_usize();
+                segment
+                    .ppn_at(page_idx)
+                    .ok_or(page_table::PagingError::InvalidAddress)?
             }
         };
 

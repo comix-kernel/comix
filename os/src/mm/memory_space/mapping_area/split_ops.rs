@@ -18,6 +18,8 @@ impl MappingArea {
                 prot: f.prot,
                 flags: f.flags,
             }),
+            shared: self.shared.clone(),
+            shared_page_offset: self.shared_page_offset,
         }
     }
 
@@ -180,6 +182,8 @@ impl MappingArea {
             self.permission,
             left_file,
         );
+        left_area.shared = self.shared.clone();
+        left_area.shared_page_offset = self.shared_page_offset;
 
         let mut right_area = MappingArea::new(
             right_range,
@@ -188,6 +192,8 @@ impl MappingArea {
             self.permission,
             right_file,
         );
+        right_area.shared = self.shared.clone();
+        right_area.shared_page_offset = self.shared_page_offset + left_pages;
 
         // 分配帧：遍历原区域的 frames，根据 VPN 分配到左右区域 - 手动迭代并清空
         let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();
@@ -291,6 +297,10 @@ impl MappingArea {
         } else {
             None
         };
+        if let Some(ref mut l) = left_area {
+            l.shared = self.shared.clone();
+            l.shared_page_offset = self.shared_page_offset;
+        }
 
         let mut middle_area = MappingArea::new(
             middle_range,
@@ -303,6 +313,8 @@ impl MappingArea {
             new_perm,
             middle_file,
         );
+        middle_area.shared = self.shared.clone();
+        middle_area.shared_page_offset = self.shared_page_offset + left_pages;
 
         let mut right_area = if change_end < area_end {
             Some(MappingArea::new(
@@ -315,6 +327,10 @@ impl MappingArea {
         } else {
             None
         };
+        if let Some(ref mut r) = right_area {
+            r.shared = self.shared.clone();
+            r.shared_page_offset = self.shared_page_offset + left_pages + middle_pages;
+        }
 
         match self.map_type {
             MapType::Direct => return Err(page_table::PagingError::UnsupportedMapType),
@@ -385,6 +401,18 @@ impl MappingArea {
                     // Reserved + PROT_NONE：无需页表操作
                 }
             }
+            MapType::Shared => {
+                if !wants_mapping {
+                    return Err(page_table::PagingError::UnsupportedMapType);
+                }
+                TlbBatchContext::execute(|batch| {
+                    for vpn in VpnRange::new(change_start, change_end) {
+                        page_table.update_flags_with_batch(vpn, new_perm, Some(batch))?;
+                    }
+                    Ok::<(), page_table::PagingError>(())
+                })?;
+                middle_area.map_type = MapType::Shared;
+            }
         }
 
         let mut out = alloc::vec::Vec::new();
@@ -448,6 +476,7 @@ impl MappingArea {
         } else if unmap_start == area_start {
             // 情况 2: 解除映射了前半部分，保留 [unmap_end, area_end)
             self.vpn_range = VpnRange::new(unmap_end, area_end);
+            self.shared_page_offset += unmap_end.as_usize() - area_start.as_usize();
             Ok(Some((self, None)))
         } else if unmap_end == area_end {
             // 情况 3: 解除映射了后半部分，保留 [area_start, unmap_start)
@@ -495,6 +524,10 @@ impl MappingArea {
                 self.permission,
                 right_file,
             );
+            left_area.shared = self.shared.clone();
+            left_area.shared_page_offset = self.shared_page_offset;
+            right_area.shared = self.shared.clone();
+            right_area.shared_page_offset = self.shared_page_offset + left_pages + middle_pages;
 
             // 分配 frames - 手动迭代并清空
             let vpns: alloc::vec::Vec<Vpn> = self.frames.keys().copied().collect();

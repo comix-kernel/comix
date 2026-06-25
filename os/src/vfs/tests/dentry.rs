@@ -83,6 +83,23 @@ test_case!(test_dentry_full_path, {
     kassert!(path == "/dir1/dir2/file.txt");
 });
 
+test_case!(test_mounted_root_full_path, {
+    let fs = SimpleFs::new();
+    let root_inode = fs.root_inode();
+
+    let root = Dentry::new("/".to_string(), root_inode.clone());
+    let tmp = Dentry::new("tmp".to_string(), root_inode.clone());
+    root.add_child(tmp.clone());
+
+    let mounted_root = Dentry::new("/".to_string(), root_inode.clone());
+    mounted_root.set_mounted_on(&tmp);
+    let tests = Dentry::new("tests".to_string(), root_inode.clone());
+    mounted_root.add_child(tests.clone());
+
+    kassert!(mounted_root.full_path() == "/tmp");
+    kassert!(tests.full_path() == "/tmp/tests");
+});
+
 test_case!(test_dentry_multiple_children, {
     let fs = SimpleFs::new();
     let root_inode = fs.root_inode();

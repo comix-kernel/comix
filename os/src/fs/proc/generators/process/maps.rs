@@ -94,6 +94,7 @@ impl ContentGenerator for MapsGenerator {
                 MapType::Direct => "direct",
                 MapType::Framed => "framed",
                 MapType::Reserved => "reserved",
+                MapType::Shared => "shared",
             };
             let pages = a.vpn_range().len();
             let rss_pages = a.mapped_pages();

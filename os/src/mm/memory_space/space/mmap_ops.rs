@@ -399,9 +399,11 @@ impl MemorySpace {
 
         for (idx, area) in self.areas.iter().enumerate() {
             if area.vpn_range().overlaps(&change_range) {
-                // 只处理 Framed / Reserved，Direct 映射不允许修改权限
+                // 只处理 Framed / Reserved / Shared，Direct 映射不允许修改权限
                 match area.map_type() {
-                    MapType::Framed | MapType::Reserved => affected_indices.push(idx),
+                    MapType::Framed | MapType::Reserved | MapType::Shared => {
+                        affected_indices.push(idx)
+                    }
                     MapType::Direct => return Err(PagingError::UnsupportedMapType),
                 }
             }
@@ -412,12 +414,15 @@ impl MemorySpace {
             return Err(PagingError::InvalidAddress);
         }
 
-        // 验证所有需要修改的 VPN 都在某个 Framed 区域中
+        // 验证所有需要修改的 VPN 都在某个可修改的用户区域中
         for vpn in start_vpn.as_usize()..end_vpn.as_usize() {
             let vpn = Vpn::from_usize(vpn);
             let found = self.areas.iter().any(|area| {
                 area.vpn_range().contains(vpn)
-                    && matches!(area.map_type(), MapType::Framed | MapType::Reserved)
+                    && matches!(
+                        area.map_type(),
+                        MapType::Framed | MapType::Reserved | MapType::Shared
+                    )
             });
             if !found {
                 return Err(PagingError::InvalidAddress);

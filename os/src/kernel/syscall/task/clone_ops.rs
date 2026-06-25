@@ -47,6 +47,11 @@ pub fn clone(
         uts,
         rlimit,
         exe_path,
+        sched_policy,
+        sched_priority,
+        sched_reset_on_fork,
+        cpu_affinity,
+        shm_attachments,
     ) = {
         let _guard = crate::sync::PreemptGuard::new();
         let cpu = current_cpu();
@@ -68,6 +73,15 @@ pub fn clone(
             task.uts_namespace.clone(),
             task.rlimit.clone(),
             task.exe_path.clone(),
+            task.sched_policy,
+            task.sched_priority,
+            task.sched_reset_on_fork,
+            task.cpu_affinity,
+            if requested_flags.contains(CloneFlags::THREAD) {
+                task.shm_attachments.clone()
+            } else {
+                Arc::new(SpinLock::new(task.shm_attachments.lock().clone()))
+            },
         )
     };
     let exit_signal = requested_flags.get_exit_signal();
@@ -135,6 +149,25 @@ pub fn clone(
         fs,
     );
     child_task.exe_path = exe_path;
+    if sched_reset_on_fork {
+        child_task.sched_policy = crate::uapi::sched::SCHED_NORMAL;
+        child_task.sched_priority = 0;
+        child_task.sched_reset_on_fork = false;
+    } else {
+        child_task.sched_policy = sched_policy;
+        child_task.sched_priority = sched_priority;
+        child_task.sched_reset_on_fork = false;
+    }
+    child_task.cpu_affinity = cpu_affinity & crate::kernel::online_cpu_mask();
+    if child_task.cpu_affinity == 0 {
+        child_task.cpu_affinity = crate::kernel::online_cpu_mask();
+    }
+    child_task.shm_attachments = shm_attachments;
+    if !requested_flags.contains(CloneFlags::THREAD) {
+        for attachment in child_task.shm_attachments.lock().values() {
+            attachment.segment.mark_attached(pid as c_int);
+        }
+    }
 
     if requested_flags.contains(CloneFlags::CHILD_SETTID) {
         unsafe {
@@ -173,7 +206,7 @@ pub fn clone(
         .push(child_task.clone());
 
     // 选择目标 CPU（负载均衡）
-    let target_cpu = crate::kernel::pick_cpu();
+    let target_cpu = crate::kernel::pick_cpu_from_mask(child_task.lock().cpu_affinity);
     child_task.lock().on_cpu = Some(target_cpu);
 
     let child_tid = child_task.lock().tid;

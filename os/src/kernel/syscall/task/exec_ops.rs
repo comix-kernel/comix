@@ -229,6 +229,7 @@ fn do_execve_switch(
     let task = current_task();
 
     task.lock().fd_table.close_exec();
+    crate::kernel::task::detach_all_shm(task.clone());
 
     // 换掉当前任务的地址空间，e.g. 切换 satp
     {
