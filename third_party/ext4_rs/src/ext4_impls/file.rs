@@ -325,13 +325,12 @@ impl Ext4 {
             log::trace!("[Pre-allocation] Allocating {} blocks", blocks_to_allocate);
 
             // 使用append_inode_pblk_batch进行批量块分配
-            let allocated_blocks =
-                self.append_inode_pblk_batch(
-                    &mut inode_ref,
-                    &mut start_bgid,
-                    existing_file_blocks as u32,
-                    blocks_to_allocate,
-                )?;
+            let allocated_blocks = self.append_inode_pblk_batch(
+                &mut inode_ref,
+                &mut start_bgid,
+                existing_file_blocks as u32,
+                blocks_to_allocate,
+            )?;
 
             let zero_block = vec![0u8; BLOCK_SIZE];
             for block in &allocated_blocks {

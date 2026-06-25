@@ -3,6 +3,7 @@
 use alloc::sync::Arc;
 
 use crate::{
+    arch::{ArchImpl, virtual_memory::VirtualMemory},
     config::PAGE_SIZE,
     ipc::{shm_check_access, shm_detach_segment, shm_mark_removed, shm_segment, shmget_segment},
     kernel::{ShmAttachment, current_memory_space, current_task},
@@ -11,7 +12,7 @@ use crate::{
         page_table::UniversalPTEFlag,
     },
     uapi::{
-        errno::{EFAULT, EINVAL},
+        errno::{EFAULT, EINVAL, ENOMEM},
         ipc::{
             IPC_RMID, IPC_STAT, KeyT, SHM_EXEC, SHM_RDONLY, SHM_REMAP, SHM_RND, SHMLBA, ShmIdDs,
         },
@@ -157,6 +158,9 @@ pub fn shmat(shmid: i32, shmaddr: *const u8, shmflg: i32) -> isize {
         Some(end) => end,
         None => return -EINVAL as isize,
     };
+    if end == 0 || end - 1 > <ArchImpl as VirtualMemory>::USER_TOP {
+        return -EINVAL as isize;
+    }
 
     let start_vpn = Vpn::from_addr_floor(VA::from_usize(start));
     let end_vpn = Vpn::from_addr_ceil(VA::from_usize(end));
@@ -171,24 +175,40 @@ pub fn shmat(shmid: i32, shmaddr: *const u8, shmflg: i32) -> isize {
         flags |= UniversalPTEFlag::EXECUTABLE;
     }
 
-    let memory_space = current_memory_space();
-    let mut space = memory_space.lock();
-    if shmflg & SHM_REMAP != 0 {
-        if let Err(_) = space.munmap(VA::from_usize(start), len) {
-            return -EINVAL as isize;
-        }
-    }
-    if let Err(_) = space.insert_shared_area(range, flags, segment.clone()) {
-        return -EINVAL as isize;
-    }
-    drop(space);
-
     let task = current_task();
     let (pid, table) = {
         let t = task.lock();
         (t.pid as i32, t.shm_attachments.clone())
     };
-    if let Some(old) = table.lock().remove(&start) {
+    if shmflg & SHM_REMAP == 0 && table.lock().contains_key(&start) {
+        return -EINVAL as isize;
+    }
+
+    let memory_space = current_memory_space();
+    let mut space = memory_space.lock();
+    let old_attachment = if shmflg & SHM_REMAP != 0 {
+        table.lock().remove(&start)
+    } else {
+        None
+    };
+    if shmflg & SHM_REMAP != 0 && space.munmap(VA::from_usize(start), len).is_err() {
+        if let Some(old) = old_attachment {
+            table.lock().insert(start, old);
+        }
+        return -EINVAL as isize;
+    }
+    if space
+        .insert_shared_area(range, flags, segment.clone())
+        .is_err()
+    {
+        if let Some(old) = old_attachment {
+            shm_detach_segment(&old.segment, pid);
+        }
+        return -ENOMEM as isize;
+    }
+    drop(space);
+
+    if let Some(old) = old_attachment {
         shm_detach_segment(&old.segment, pid);
     }
     segment.mark_attached(pid);

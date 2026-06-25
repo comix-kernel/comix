@@ -128,7 +128,7 @@ impl Ext4FileSystem {
         let inode_caches = Arc::new(Ext4InodeCaches::new());
 
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
-        let root = Arc::new(Ext4Inode::new(ext4.clone(), inode_caches.clone(), 2));
+        let root = Arc::new(Ext4Inode::new(ext4.clone(), inode_caches, 2));
 
         let fs = Arc::new(Ext4FileSystem {
             device,

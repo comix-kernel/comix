@@ -957,15 +957,24 @@ fn select_common(
     };
 
     loop {
+        let cleanup_timer = || {
+            if timeout_trigger.is_some() {
+                use crate::kernel::timer::TIMER_QUEUE;
+                TIMER_QUEUE.lock().remove_task(&task);
+            }
+        };
+
         // 关键：在阻塞等待前主动推进网络栈（同 ppoll），并分发 UDP
         crate::net::socket::poll_network_and_dispatch();
 
         let (ready_count, read_set, write_set, except_set) = check_fds();
         if ready_count < 0 {
+            cleanup_timer();
             return ready_count;
         } // EBADF
 
         if ready_count > 0 {
+            cleanup_timer();
             write_select_fd_sets(
                 readfds,
                 writefds,
@@ -980,11 +989,13 @@ fn select_common(
         // If interrupted by a deliverable signal, return EINTR so userland can run the handler.
         // Signals are only checked on return-to-user; without this, we can sleep forever in-kernel.
         if crate::ipc::signal_interrupts_syscall(&task) {
+            cleanup_timer();
             return -(EINTR as isize);
         }
 
         if let Some(trigger) = timeout_trigger {
             if trigger == 0 || crate::arch::get_time() >= trigger {
+                cleanup_timer();
                 clear_select_fd_sets(readfds, writefds, exceptfds);
                 return 0;
             }
@@ -1016,10 +1027,7 @@ fn select_common(
         if slept {
             crate::kernel::schedule();
 
-            if timeout_trigger.is_some() {
-                use crate::kernel::timer::TIMER_QUEUE;
-                TIMER_QUEUE.lock().remove_task(&task);
-            }
+            cleanup_timer();
 
             if crate::ipc::signal_interrupts_syscall(&task) {
                 return -(EINTR as isize);

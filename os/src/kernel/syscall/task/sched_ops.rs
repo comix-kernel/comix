@@ -222,5 +222,22 @@ pub fn sched_getaffinity(pid: c_int, cpusetsize: usize, mask: *mut u8) -> c_int 
     {
         return -EFAULT;
     }
+    if cpusetsize > raw.len() {
+        let zero = [0u8; CPU_SET_BYTES];
+        let mut offset = raw.len();
+        while offset < cpusetsize {
+            let n = core::cmp::min(cpusetsize - offset, zero.len());
+            // SAFETY: `zero` is a live kernel buffer and copy_to_user validates
+            // the user destination range for this chunk.
+            if unsafe {
+                ArchImpl::copy_to_user(zero.as_ptr(), UA::from_usize(mask as usize + offset), n)
+            }
+            .is_err()
+            {
+                return -EFAULT;
+            }
+            offset += n;
+        }
+    }
     CPU_SET_BYTES as c_int
 }

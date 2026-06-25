@@ -22,6 +22,7 @@ use crate::vfs::{Dentry, DirEntry, FileMode, FsError, Inode, InodeMetadata, Inod
 
 const READ_CACHE_PAGE_SIZE: usize = 4096;
 const READ_CACHE_MAX_PAGES: usize = 512;
+const LOOKUP_CACHE_MAX_ENTRIES: usize = 4096;
 
 struct CachedReadPage {
     data: Vec<u8>,
@@ -94,12 +95,14 @@ impl ReadCache {
 
 struct LookupCache {
     entries: BTreeMap<u32, BTreeMap<String, u32>>,
+    len: usize,
 }
 
 impl LookupCache {
     const fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
+            len: 0,
         }
     }
 
@@ -108,19 +111,46 @@ impl LookupCache {
     }
 
     fn insert(&mut self, parent_ino: u32, name: &str, ino: u32) {
-        self.entries
+        let old = self
+            .entries
             .entry(parent_ino)
             .or_default()
             .insert(String::from(name), ino);
+        if old.is_none() {
+            self.len += 1;
+        }
+        self.evict_if_needed();
     }
 
     fn remove(&mut self, parent_ino: u32, name: &str) {
         let Some(entries) = self.entries.get_mut(&parent_ino) else {
             return;
         };
-        entries.remove(name);
+        if entries.remove(name).is_some() {
+            self.len = self.len.saturating_sub(1);
+        }
         if entries.is_empty() {
             self.entries.remove(&parent_ino);
+        }
+    }
+
+    fn evict_if_needed(&mut self) {
+        while self.len > LOOKUP_CACHE_MAX_ENTRIES {
+            let Some(parent_ino) = self.entries.keys().next().copied() else {
+                self.len = 0;
+                return;
+            };
+            let remove_parent = {
+                let entries = self.entries.get_mut(&parent_ino).unwrap();
+                if let Some(name) = entries.keys().next().cloned() {
+                    entries.remove(&name);
+                    self.len -= 1;
+                }
+                entries.is_empty()
+            };
+            if remove_parent {
+                self.entries.remove(&parent_ino);
+            }
         }
     }
 }
