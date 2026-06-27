@@ -963,6 +963,12 @@ impl Inode for Ext4Inode {
             let mut inode_ref = fs.get_inode_ref(self.ino);
             fs.truncate_inode(&mut inode_ref, size as u64)
                 .map_err(|_| FsError::IoError)?;
+            let invalidate_start = (size / PAGE_CACHE_PAGE_SIZE) * PAGE_CACHE_PAGE_SIZE;
+            self.page_cache.invalidate_range(
+                self.cache_object_id(),
+                invalidate_start,
+                old_size - invalidate_start,
+            );
         } else {
             // 扩展文件：ext4_rs 的 truncate_inode 不支持扩展（有 assert）
             // Workaround: 在文件末尾写入零字节来扩展
@@ -981,9 +987,9 @@ impl Inode for Ext4Inode {
                     .map_err(|_| FsError::IoError)?;
                 written += to_write;
             }
+            self.refresh_zero_cache_range(old_size, extend_size);
         }
 
-        self.invalidate_read_cache();
         Ok(())
     }
 
