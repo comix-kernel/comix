@@ -86,6 +86,10 @@ impl CachedPageStorage {
             }
         }
     }
+
+    fn is_frame_backed(&self) -> bool {
+        matches!(self, Self::Frame(_, _))
+    }
 }
 
 /// A clean cached file page.
@@ -148,6 +152,11 @@ impl CachedPage {
             CachedPageStorage::Frame(_, page_len) => *page_len = len,
         }
     }
+
+    /// Returns whether this page is backed by a physical frame.
+    pub fn is_frame_backed(&self) -> bool {
+        self.storage.is_frame_backed()
+    }
 }
 
 /// Page cache counters.
@@ -163,6 +172,12 @@ pub struct PageCacheStats {
     pub evicts: usize,
     /// Number of pages removed by explicit invalidation.
     pub invalidates: usize,
+    /// Number of fill closures that returned an error.
+    pub fill_errors: usize,
+    /// Current number of cached pages.
+    pub resident_pages: usize,
+    /// Current number of cached pages backed by physical frames.
+    pub frame_pages: usize,
 }
 
 struct CacheEntry {
@@ -187,6 +202,9 @@ impl PageCacheInner {
                 inserts: 0,
                 evicts: 0,
                 invalidates: 0,
+                fill_errors: 0,
+                resident_pages: 0,
+                frame_pages: 0,
             },
         }
     }
@@ -209,6 +227,17 @@ impl PageCacheInner {
             self.pages.remove(&oldest_key);
             self.stats.evicts += 1;
         }
+    }
+
+    fn stats_snapshot(&self) -> PageCacheStats {
+        let mut stats = self.stats;
+        stats.resident_pages = self.pages.len();
+        stats.frame_pages = self
+            .pages
+            .values()
+            .filter(|entry| entry.page.is_frame_backed())
+            .count();
+        stats
     }
 }
 
@@ -312,7 +341,13 @@ impl PageCache {
 
         if self.max_pages == 0 {
             let mut data = alloc::vec![0u8; PAGE_CACHE_PAGE_SIZE];
-            let len = fill_fn(&mut data)?.min(PAGE_CACHE_PAGE_SIZE);
+            let len = match fill_fn(&mut data) {
+                Ok(len) => len.min(PAGE_CACHE_PAGE_SIZE),
+                Err(err) => {
+                    self.inner.lock().stats.fill_errors += 1;
+                    return Err(err);
+                }
+            };
             data.truncate(len);
             return Ok(CachedPage::new(data));
         }
@@ -320,7 +355,13 @@ impl PageCache {
         let mut page = CachedPage::new_frame_backed(&[])?;
         let len = {
             let buffer = page.full_page_mut();
-            fill_fn(buffer)?.min(PAGE_CACHE_PAGE_SIZE)
+            match fill_fn(buffer) {
+                Ok(len) => len.min(PAGE_CACHE_PAGE_SIZE),
+                Err(err) => {
+                    self.inner.lock().stats.fill_errors += 1;
+                    return Err(err);
+                }
+            }
         };
         page.set_len(len);
 
@@ -379,7 +420,7 @@ impl PageCache {
 
     /// Returns a snapshot of page cache counters.
     pub fn stats(&self) -> PageCacheStats {
-        self.inner.lock().stats
+        self.inner.lock().stats_snapshot()
     }
 }
 

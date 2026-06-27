@@ -29,6 +29,8 @@ test_case!(test_page_cache_lookup_and_read_hit, {
     kassert!(stats.hits == 2);
     kassert!(stats.misses == 0);
     kassert!(stats.inserts == 1);
+    kassert!(stats.resident_pages == 1);
+    kassert!(stats.frame_pages == 0);
 });
 
 test_case!(test_page_cache_miss_counter, {
@@ -238,6 +240,8 @@ test_case!(test_get_or_insert_clean_page_fills_miss_once, {
 
     let stats = cache.stats();
     kassert!(stats.inserts == 1);
+    kassert!(stats.resident_pages == 1);
+    kassert!(stats.frame_pages == 1);
 });
 
 test_case!(test_get_or_insert_clean_page_fill_error_does_not_insert, {
@@ -251,4 +255,29 @@ test_case!(test_get_or_insert_clean_page_fill_error_does_not_insert, {
 
     let stats = cache.stats();
     kassert!(stats.inserts == 0);
+    kassert!(stats.fill_errors == 1);
+    kassert!(stats.resident_pages == 0);
+    kassert!(stats.frame_pages == 0);
+});
+
+test_case!(test_page_cache_stats_tracks_resident_and_frame_pages, {
+    let cache = PageCache::with_capacity(4);
+    let obj = object(1, 44);
+
+    cache.insert_clean(obj, 0, b"bytes".to_vec());
+    cache
+        .get_or_insert_clean_page(obj, 1, |buf| {
+            buf[..5].copy_from_slice(b"frame");
+            Ok(5)
+        })
+        .unwrap();
+
+    let stats = cache.stats();
+    kassert!(stats.resident_pages == 2);
+    kassert!(stats.frame_pages == 1);
+
+    cache.invalidate_range(obj, PAGE_CACHE_PAGE_SIZE, 1);
+    let stats = cache.stats();
+    kassert!(stats.resident_pages == 1);
+    kassert!(stats.frame_pages == 0);
 });
