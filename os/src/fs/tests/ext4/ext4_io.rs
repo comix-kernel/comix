@@ -183,6 +183,28 @@ test_case!(test_ext4_cached_read_invalidated_by_write, {
     kassert!(&reread[..] == b"BBBB");
 });
 
+test_case!(
+    test_ext4_frame_cached_read_invalidated_by_cross_page_write,
+    {
+        const TOTAL_SIZE: usize = 4096 + 16;
+        let fs = create_test_ext4();
+        let initial = vec![b'A'; TOTAL_SIZE];
+        let inode = create_test_file_with_content(&fs, "cached-cross-write.bin", &initial).unwrap();
+
+        let mut cached = vec![0u8; 32];
+        kassert!(inode.read_at(4096 - 8, &mut cached).unwrap() == 24);
+        kassert!(&cached[..24] == &initial[4096 - 8..]);
+
+        kassert!(inode.write_at(4096 - 4, b"BBBBCCCC").unwrap() == 8);
+
+        let mut reread = vec![0u8; 24];
+        kassert!(inode.read_at(4096 - 8, &mut reread).unwrap() == 24);
+        kassert!(&reread[..4] == b"AAAA");
+        kassert!(&reread[4..12] == b"BBBBCCCC");
+        kassert!(&reread[12..] == &[b'A'; 12]);
+    }
+);
+
 test_case!(test_ext4_cached_read_invalidated_by_truncate, {
     let fs = create_test_ext4();
     let inode = create_test_file_with_content(&fs, "cached-truncate.bin", b"ABCDEFGH").unwrap();
