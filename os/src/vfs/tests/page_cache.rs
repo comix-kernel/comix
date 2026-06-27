@@ -1,9 +1,11 @@
 use crate::kassert;
 use crate::test_case;
+use crate::vfs::FsError;
 use crate::vfs::page_cache::{
     CachedPage, PAGE_CACHE_PAGE_SIZE, PageCache, PageCacheKey, PageCacheObjectId,
 };
 use alloc::vec;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 fn object(fs_id: u64, inode_no: u64) -> PageCacheObjectId {
     PageCacheObjectId::new(fs_id, inode_no)
@@ -144,4 +146,44 @@ test_case!(test_frame_backed_cached_page_truncates_to_page, {
     let n = page.copy_out(PAGE_CACHE_PAGE_SIZE - 4, &mut buf);
     kassert!(n == 4);
     kassert!(&buf[..n] == &[0xAB; 4]);
+});
+
+test_case!(test_get_or_insert_clean_page_fills_miss_once, {
+    let cache = PageCache::with_capacity(4);
+    let obj = object(1, 42);
+    let fills = AtomicUsize::new(0);
+
+    let page = cache
+        .get_or_insert_clean_page(obj, 0, |buf| {
+            fills.fetch_add(1, Ordering::Relaxed);
+            buf[..5].copy_from_slice(b"first");
+            Ok(5)
+        })
+        .unwrap();
+    kassert!(page.data() == b"first");
+
+    let cached = cache
+        .get_or_insert_clean_page(obj, 0, |_| {
+            fills.fetch_add(1, Ordering::Relaxed);
+            Ok(0)
+        })
+        .unwrap();
+    kassert!(cached.data() == b"first");
+    kassert!(fills.load(Ordering::Relaxed) == 1);
+
+    let stats = cache.stats();
+    kassert!(stats.inserts == 1);
+});
+
+test_case!(test_get_or_insert_clean_page_fill_error_does_not_insert, {
+    let cache = PageCache::with_capacity(4);
+    let obj = object(1, 43);
+    let mut buf = [0u8; 4];
+
+    let result = cache.get_or_insert_clean_page(obj, 0, |_| Err(FsError::IoError));
+    kassert!(matches!(result, Err(FsError::IoError)));
+    kassert!(cache.read_hit(obj, 0, &mut buf).is_none());
+
+    let stats = cache.stats();
+    kassert!(stats.inserts == 0);
 });
