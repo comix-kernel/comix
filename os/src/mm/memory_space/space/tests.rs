@@ -575,6 +575,59 @@ mod memory_space_tests {
         println!("  load_from_file loaded mapped pages");
     });
 
+    test_case!(test_load_from_ext4_cached_file, {
+        use crate::uapi::mm::MapFlags;
+        use crate::vfs::{FileMode, FileSystem};
+
+        println!("Testing load_from_file through ext4 cached read path");
+
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("mmap-load-ext4.bin", FileMode::from_bits_truncate(0o644))
+            .expect("Failed to create ext4 file");
+
+        let mut test_data = alloc::vec![0u8; PAGE_SIZE + 37];
+        for (idx, byte) in test_data.iter_mut().enumerate() {
+            *byte = ((idx * 7) % 251) as u8;
+        }
+        inode.write_at(0, &test_data).expect("Failed to write");
+
+        let mut warm_cache = alloc::vec![0u8; test_data.len()];
+        kassert!(inode.read_at(0, &mut warm_cache).unwrap() == test_data.len());
+        kassert!(warm_cache == test_data);
+
+        let mut ms = new_memory_space();
+        let start_vpn = Vpn::from_usize(0x2200);
+        let vpn_range = VpnRange::new(start_vpn, Vpn::from_usize(start_vpn.as_usize() + 2));
+        let mmap_file = create_test_mmap_file(
+            "mmap-load-ext4.bin",
+            inode.clone(),
+            test_data.len(),
+            MapFlags::PRIVATE,
+        );
+
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            Some(mmap_file),
+        )
+        .expect("Failed to insert ext4 file mapping");
+
+        let area = ms.find_area_mut(start_vpn).expect("mmap area should exist");
+        area.load_from_file()
+            .expect("load_from_file should read ext4 cached pages");
+
+        let mut actual = alloc::vec![0u8; test_data.len()];
+        ms.read_bytes_at(start_vpn.start_addr().as_usize(), &mut actual)
+            .expect("read ext4 mapped bytes");
+        kassert!(actual == test_data);
+
+        println!("  load_from_file read ext4 cached pages");
+    });
+
     // 18. 测试 sync_file 方法（验证写回逻辑）
     test_case!(test_sync_file_logic, {
         use crate::mm::page_table::PageTableInner as _;
