@@ -47,22 +47,42 @@ impl PageCacheKey {
     }
 }
 
+/// Backing storage for a clean cached file page.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CachedPageStorage {
+    Bytes(Vec<u8>),
+}
+
+impl CachedPageStorage {
+    fn from_bytes(mut data: Vec<u8>) -> Self {
+        data.truncate(PAGE_CACHE_PAGE_SIZE);
+        Self::Bytes(data)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Bytes(data) => data,
+        }
+    }
+}
+
 /// A clean cached file page.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CachedPage {
-    data: Vec<u8>,
+    storage: CachedPageStorage,
 }
 
 impl CachedPage {
     /// Creates a clean cached page, truncating data to one page.
-    pub fn new(mut data: Vec<u8>) -> Self {
-        data.truncate(PAGE_CACHE_PAGE_SIZE);
-        Self { data }
+    pub fn new(data: Vec<u8>) -> Self {
+        Self {
+            storage: CachedPageStorage::from_bytes(data),
+        }
     }
 
     /// Returns the bytes stored in this clean page.
     pub fn data(&self) -> &[u8] {
-        &self.data
+        self.storage.as_slice()
     }
 }
 
