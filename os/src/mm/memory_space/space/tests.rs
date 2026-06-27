@@ -700,6 +700,90 @@ mod memory_space_tests {
         println!("  sync_file invalidated cached ext4 reads");
     });
 
+    test_case!(test_sync_file_refreshes_precise_ext4_cached_range, {
+        use crate::mm::page_table::PageTableInner as _;
+        use crate::uapi::mm::MapFlags;
+        use crate::vfs::{FileMode, FileSystem};
+
+        println!("Testing sync_file precise ext4 cache refresh");
+
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("mmap-sync-precise.bin", FileMode::from_bits_truncate(0o644))
+            .expect("Failed to create ext4 file");
+
+        let mut initial = alloc::vec![0u8; PAGE_SIZE * 2];
+        for (idx, byte) in initial.iter_mut().enumerate() {
+            *byte = (idx % 251) as u8;
+        }
+        inode.write_at(0, &initial).expect("Failed to write");
+
+        let mut cached = alloc::vec![0u8; initial.len()];
+        kassert!(inode.read_at(0, &mut cached).unwrap() == initial.len());
+        kassert!(cached == initial);
+
+        let mut ms = new_memory_space();
+        let start_vpn = Vpn::from_usize(0x2300);
+        let vpn_range = VpnRange::new(start_vpn, Vpn::from_usize(start_vpn.as_usize() + 2));
+        let mmap_file = create_test_mmap_file(
+            "mmap-sync-precise.bin",
+            inode.clone(),
+            initial.len(),
+            MapFlags::SHARED,
+        );
+
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            Some(mmap_file),
+        )
+        .expect("Failed to insert area");
+
+        {
+            let area = ms.find_area_mut(start_vpn).expect("mmap area should exist");
+            area.load_from_file()
+                .expect("load_from_file should succeed");
+        }
+
+        let write_offset = 128;
+        let update = [0xA5u8; 64];
+        ms.write_bytes_at(start_vpn.start_addr().as_usize() + write_offset, &update)
+            .expect("write mapped bytes");
+
+        let (_, _, flags) = ms.page_table().walk(start_vpn).expect("mapped page");
+        ms.page_table_mut()
+            .update_flags(start_vpn, flags | UniversalPTEFlag::DIRTY)
+            .expect("mark first page dirty");
+
+        let areas_len = ms.areas().len();
+        {
+            let page_table = &mut ms.page_table;
+            let area = &ms.areas[areas_len - 1];
+            area.sync_file(page_table)
+                .expect("sync_file should write dirty shared mapping");
+        }
+
+        let mut expected = initial.clone();
+        expected[write_offset..write_offset + update.len()].copy_from_slice(&update);
+
+        let mut reread = alloc::vec![0u8; expected.len()];
+        kassert!(inode.read_at(0, &mut reread).unwrap() == expected.len());
+        kassert!(reread == expected);
+
+        let (_, _, first_flags) = ms.page_table().walk(start_vpn).expect("first page");
+        let (_, _, second_flags) = ms
+            .page_table()
+            .walk(Vpn::from_usize(start_vpn.as_usize() + 1))
+            .expect("second page");
+        kassert!(!first_flags.contains(UniversalPTEFlag::DIRTY));
+        kassert!(!second_flags.contains(UniversalPTEFlag::DIRTY));
+
+        println!("  sync_file precisely refreshed ext4 cached range");
+    });
+
     // 19. 测试 Drop trait 实现
     test_case!(test_memory_space_drop, {
         println!("Testing MemorySpace Drop trait");
