@@ -116,7 +116,7 @@ stage_musl_tests_to_tmpfs() {
                 ;;
         esac
 
-        if ! /bin/cp -a "$entry" "$dst/"; then
+        if ! /bin/cp -R "$entry" "$dst/"; then
             echo "[Tests] failed to stage $entry"
             /bin/rm -rf "$dst"
             return 1
@@ -155,7 +155,7 @@ run_musl_tests_if_present() {
 
         base="${src_f##*/}"
         case "$base" in
-            unixbench_testcode.sh|lmbench_testcode.sh|libcbench_testcode.sh|libctest_testcode.sh)
+            basic_testcode.sh|busybox_testcode.sh|iperf_testcode.sh|lua_testcode.sh|netperf_testcode.sh|iozone_testcode.sh|ltp_testcode.sh|unixbench_testcode.sh)
                 echo "[Tests] skipping already-validated $src_f"
                 continue
                 ;;
