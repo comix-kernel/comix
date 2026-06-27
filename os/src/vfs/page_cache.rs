@@ -153,6 +153,31 @@ impl CachedPage {
         }
     }
 
+    fn refresh_range(&mut self, page_offset: usize, data: &[u8]) {
+        if data.is_empty() || page_offset >= PAGE_CACHE_PAGE_SIZE {
+            return;
+        }
+
+        let len = data.len().min(PAGE_CACHE_PAGE_SIZE - page_offset);
+        let refreshed_len = page_offset + len;
+        match &mut self.storage {
+            CachedPageStorage::Bytes(page) => {
+                if page.len() < refreshed_len {
+                    page.resize(refreshed_len, 0);
+                }
+                page[page_offset..refreshed_len].copy_from_slice(&data[..len]);
+            }
+            CachedPageStorage::Frame(frame, page_len) => {
+                let va = pa_to_va(frame.ppn().start_addr());
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(va.as_usize() as *mut u8, PAGE_CACHE_PAGE_SIZE)
+                };
+                dst[page_offset..refreshed_len].copy_from_slice(&data[..len]);
+                *page_len = (*page_len).max(refreshed_len).min(PAGE_CACHE_PAGE_SIZE);
+            }
+        }
+    }
+
     /// Returns whether this page is backed by a physical frame.
     pub fn is_frame_backed(&self) -> bool {
         self.storage.is_frame_backed()
@@ -398,6 +423,44 @@ impl PageCache {
             key.object != object || key.page_index < start || key.page_index >= end
         });
         inner.stats.invalidates += before - inner.pages.len();
+    }
+
+    /// Refreshes cached clean pages intersecting `[offset, offset + data.len())`.
+    ///
+    /// Pages that are not already cached are left untouched. This is intended
+    /// for write-through filesystems after the backing write has succeeded.
+    pub fn refresh_clean_range(
+        &self,
+        object: PageCacheObjectId,
+        offset: usize,
+        data: &[u8],
+    ) -> usize {
+        if data.is_empty() {
+            return 0;
+        }
+
+        let mut inner = self.inner.lock();
+        let mut refreshed = 0;
+        let mut copied = 0;
+        while copied < data.len() {
+            let current_offset = offset.saturating_add(copied);
+            let page_index = current_offset / PAGE_CACHE_PAGE_SIZE;
+            let page_offset = current_offset % PAGE_CACHE_PAGE_SIZE;
+            let chunk_len = (PAGE_CACHE_PAGE_SIZE - page_offset).min(data.len() - copied);
+            let age = inner.tick();
+
+            if let Some(entry) = inner.pages.get_mut(&PageCacheKey::new(object, page_index)) {
+                entry.age = age;
+                entry
+                    .page
+                    .refresh_range(page_offset, &data[copied..copied + chunk_len]);
+                refreshed += 1;
+            }
+
+            copied += chunk_len;
+        }
+
+        refreshed
     }
 
     /// Invalidates every cached page for one file object.
