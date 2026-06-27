@@ -65,6 +65,35 @@ test_case!(test_page_cache_cross_page_read, {
     kassert!(&second == b"bcdef");
 });
 
+test_case!(test_page_cache_boundary_offsets, {
+    let cache = PageCache::with_capacity(4);
+    let obj = object(1, 20);
+
+    cache.insert_clean(obj, 0, vec![b'a'; PAGE_CACHE_PAGE_SIZE]);
+    cache.insert_clean(obj, 1, b"xyz".to_vec());
+
+    let mut at_4095 = [0u8; 1];
+    let n = cache
+        .read_hit(obj, PAGE_CACHE_PAGE_SIZE - 1, &mut at_4095)
+        .unwrap();
+    kassert!(n == 1);
+    kassert!(at_4095 == [b'a']);
+
+    let mut at_4096 = [0u8; 3];
+    let n = cache
+        .read_hit(obj, PAGE_CACHE_PAGE_SIZE, &mut at_4096)
+        .unwrap();
+    kassert!(n == 3);
+    kassert!(&at_4096 == b"xyz");
+
+    let mut past_partial = [0xEE; 1];
+    let n = cache
+        .read_hit(obj, PAGE_CACHE_PAGE_SIZE + 3, &mut past_partial)
+        .unwrap();
+    kassert!(n == 0);
+    kassert!(past_partial == [0xEE]);
+});
+
 test_case!(test_page_cache_lru_eviction, {
     let cache = PageCache::with_capacity(2);
     let obj = object(1, 2);
@@ -80,6 +109,24 @@ test_case!(test_page_cache_lru_eviction, {
 
     let stats = cache.stats();
     kassert!(stats.evicts == 1);
+});
+
+test_case!(test_page_cache_lru_eviction_counts_multiple_pages, {
+    let cache = PageCache::with_capacity(2);
+    let obj = object(1, 21);
+
+    cache.insert_clean(obj, 0, b"zero".to_vec());
+    cache.insert_clean(obj, 1, b"one".to_vec());
+    cache.insert_clean(obj, 2, b"two".to_vec());
+    cache.insert_clean(obj, 3, b"three".to_vec());
+
+    kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 1)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 2)).is_some());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 3)).is_some());
+
+    let stats = cache.stats();
+    kassert!(stats.evicts == 2);
 });
 
 test_case!(test_page_cache_range_inode_and_fs_invalidation, {
@@ -107,6 +154,24 @@ test_case!(test_page_cache_range_inode_and_fs_invalidation, {
 
     let stats = cache.stats();
     kassert!(stats.invalidates == 4);
+});
+
+test_case!(test_page_cache_invalidate_range_inside_single_page, {
+    let cache = PageCache::with_capacity(8);
+    let obj = object(1, 22);
+
+    cache.insert_clean(obj, 0, b"zero".to_vec());
+    cache.insert_clean(obj, 1, b"one".to_vec());
+    cache.insert_clean(obj, 2, b"two".to_vec());
+
+    cache.invalidate_range(obj, PAGE_CACHE_PAGE_SIZE + 7, 11);
+
+    kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_some());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 1)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 2)).is_some());
+
+    let stats = cache.stats();
+    kassert!(stats.invalidates == 1);
 });
 
 test_case!(test_page_cache_object_id_includes_fs_id, {
