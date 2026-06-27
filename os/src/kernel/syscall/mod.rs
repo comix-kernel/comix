@@ -83,7 +83,7 @@ impl_syscall!(sys_statfs, statfs, (*const c_char, *mut LinuxStatFs));
 // 文件大小/权限/所有权 (File Size/Permissions/Ownership)
 impl_syscall!(sys_faccessat, faccessat, (i32, *const c_char, i32, u32));
 impl_syscall!(sys_chdir, chdir, (*const c_char));
-impl_syscall!(sys_fchmodat, fchmodat, (i32, *const c_char, u32, u32));
+impl_syscall!(sys_fchmodat, fchmodat_legacy, (i32, *const c_char, u32));
 impl_syscall!(sys_fchownat, fchownat, (i32, *const c_char, u32, u32, u32));
 
 // 文件描述符操作 (File Descriptor Operations)
