@@ -4,7 +4,10 @@
 //! 故此模块变得相对简单，主要负责适配传统的进程概念与内核任务之间的关系。
 
 use crate::{
-    kernel::{SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, notify_parent, wake_up_task},
+    kernel::{
+        SharedTask, TASK_MANAGER, TaskExitStatus, TaskManagerTrait, TaskState, notify_parent,
+        wake_up_task,
+    },
     uapi::signal::SignalFlags,
 };
 
@@ -16,12 +19,16 @@ use crate::{
 /// * `task` - 进程对应的任务
 /// * `code` - 退出码
 pub fn exit_process(task: SharedTask, code: i32) {
+    exit_process_with_status(task, TaskExitStatus::Exited(code));
+}
+
+pub fn exit_process_with_status(task: SharedTask, status: TaskExitStatus) {
     if !task.lock().is_process() {
         panic!("exit_process called on a non-process task");
     }
     let (children, threads, init_task) = {
         let mut t = TASK_MANAGER.lock();
-        t.exit_task(task.clone(), code);
+        t.exit_task_with_status(task.clone(), status);
         (
             t.get_process_children(task.clone()),
             t.get_process_threads(task.clone()),

@@ -108,16 +108,19 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         yield_task();
     };
 
-    let (tid, state, exit_code) = {
+    let (tid, state, exit_status) = {
         let t = task.lock();
-        (t.tid, t.state, t.exit_code)
+        (t.tid, t.state, t.exit_status)
     };
 
     let status = match state {
-        TaskState::Zombie => {
-            // TODO: 处理信号退出的情况
-            WaitStatus::exit_code(exit_code.expect("Zombie must set exit code.") as u8, 0)
-        }
+        TaskState::Zombie => match exit_status.expect("Zombie must set exit status.") {
+            TaskExitStatus::Exited(code) => WaitStatus::exit_code(code as u8, 0),
+            TaskExitStatus::Signaled {
+                signal,
+                core_dumped,
+            } => WaitStatus::signaled(signal as u8, core_dumped),
+        },
         TaskState::Stopped => {
             WaitStatus::stop_code(0) // TODO: 停止信号
         }
