@@ -5,9 +5,14 @@
 //! mutations.
 
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::arch::pa_to_va;
+use crate::mm::address::PageNum;
+use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::sync::SpinLock;
+use crate::vfs::FsError;
 
 /// Size of one cached file page.
 pub const PAGE_CACHE_PAGE_SIZE: usize = 4096;
@@ -48,9 +53,10 @@ impl PageCacheKey {
 }
 
 /// Backing storage for a clean cached file page.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 enum CachedPageStorage {
     Bytes(Vec<u8>),
+    Frame(Arc<FrameTracker>, usize),
 }
 
 impl CachedPageStorage {
@@ -62,12 +68,28 @@ impl CachedPageStorage {
     fn as_slice(&self) -> &[u8] {
         match self {
             Self::Bytes(data) => data,
+            Self::Frame(frame, len) => {
+                let va = pa_to_va(frame.ppn().start_addr());
+                unsafe { core::slice::from_raw_parts(va.as_usize() as *const u8, *len) }
+            }
+        }
+    }
+
+    fn as_mut_page_slice(&mut self) -> &mut [u8] {
+        match self {
+            Self::Bytes(data) => data.as_mut_slice(),
+            Self::Frame(frame, _) => {
+                let va = pa_to_va(frame.ppn().start_addr());
+                unsafe {
+                    core::slice::from_raw_parts_mut(va.as_usize() as *mut u8, PAGE_CACHE_PAGE_SIZE)
+                }
+            }
         }
     }
 }
 
 /// A clean cached file page.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct CachedPage {
     storage: CachedPageStorage,
 }
@@ -80,9 +102,39 @@ impl CachedPage {
         }
     }
 
+    /// Allocates a frame-backed clean cached page initialized from `data`.
+    pub fn new_frame_backed(data: &[u8]) -> Result<Self, FsError> {
+        let mut page = Self {
+            storage: CachedPageStorage::Frame(
+                Arc::new(alloc_frame().ok_or(FsError::NoMemory)?),
+                data.len().min(PAGE_CACHE_PAGE_SIZE),
+            ),
+        };
+        page.write_prefix(data);
+        Ok(page)
+    }
+
     /// Returns the bytes stored in this clean page.
     pub fn data(&self) -> &[u8] {
         self.storage.as_slice()
+    }
+
+    /// Copies bytes from this page into `buf`, starting at `page_offset`.
+    pub fn copy_out(&self, page_offset: usize, buf: &mut [u8]) -> usize {
+        let data = self.data();
+        if page_offset >= data.len() {
+            return 0;
+        }
+
+        let n = (data.len() - page_offset).min(buf.len());
+        buf[..n].copy_from_slice(&data[page_offset..page_offset + n]);
+        n
+    }
+
+    fn write_prefix(&mut self, data: &[u8]) {
+        let len = data.len().min(PAGE_CACHE_PAGE_SIZE);
+        let dst = self.storage.as_mut_page_slice();
+        dst[..len].copy_from_slice(&data[..len]);
     }
 }
 

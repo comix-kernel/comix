@@ -1,6 +1,8 @@
 use crate::kassert;
 use crate::test_case;
-use crate::vfs::page_cache::{PAGE_CACHE_PAGE_SIZE, PageCache, PageCacheKey, PageCacheObjectId};
+use crate::vfs::page_cache::{
+    CachedPage, PAGE_CACHE_PAGE_SIZE, PageCache, PageCacheKey, PageCacheObjectId,
+};
 use alloc::vec;
 
 fn object(fs_id: u64, inode_no: u64) -> PageCacheObjectId {
@@ -117,4 +119,29 @@ test_case!(test_page_cache_object_id_includes_fs_id, {
     let n = cache.read_hit(right, 0, &mut buf).unwrap();
     kassert!(n == 5);
     kassert!(&buf == b"right");
+});
+
+test_case!(test_frame_backed_cached_page_copy_out, {
+    let page = CachedPage::new_frame_backed(b"frame-data").unwrap();
+
+    kassert!(page.data() == b"frame-data");
+
+    let mut buf = [0u8; 5];
+    let n = page.copy_out(6, &mut buf);
+    kassert!(n == 4);
+    kassert!(&buf[..n] == b"data");
+});
+
+test_case!(test_frame_backed_cached_page_truncates_to_page, {
+    let oversized = vec![0xAB; PAGE_CACHE_PAGE_SIZE + 17];
+    let page = CachedPage::new_frame_backed(&oversized).unwrap();
+
+    kassert!(page.data().len() == PAGE_CACHE_PAGE_SIZE);
+    kassert!(page.data()[0] == 0xAB);
+    kassert!(page.data()[PAGE_CACHE_PAGE_SIZE - 1] == 0xAB);
+
+    let mut buf = [0u8; 8];
+    let n = page.copy_out(PAGE_CACHE_PAGE_SIZE - 4, &mut buf);
+    kassert!(n == 4);
+    kassert!(&buf[..n] == &[0xAB; 4]);
 });
