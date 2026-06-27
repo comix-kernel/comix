@@ -369,25 +369,20 @@ impl Inode for Ext4Inode {
             }
 
             let page_start = page_index * PAGE_CACHE_PAGE_SIZE;
-            let page_len = PAGE_CACHE_PAGE_SIZE.min(metadata.size - page_start);
-            let mut page_buf = alloc::vec![0u8; page_len];
-            let nread = {
-                let fs = self.fs.lock();
-                let nread = fs
-                    .read_at(self.ino, page_start, &mut page_buf)
-                    .map_err(|_| FsError::IoError)?;
-                page_buf.truncate(nread);
+            let page_len = PAGE_CACHE_PAGE_SIZE.min(metadata.size.saturating_sub(page_start));
+            let page =
                 self.page_cache
-                    .insert_clean(object, page_index, page_buf.clone());
-                nread
-            };
+                    .get_or_insert_clean_page(object, page_index, |page_buf| {
+                        let fs = self.fs.lock();
+                        fs.read_at(self.ino, page_start, &mut page_buf[..page_len])
+                            .map_err(|_| FsError::IoError)
+                    })?;
 
-            if nread == 0 || page_offset >= page_buf.len() {
+            if page_offset >= page.data().len() {
                 break;
             }
 
-            let n = (page_buf.len() - page_offset).min(chunk_len);
-            buf[copied..copied + n].copy_from_slice(&page_buf[page_offset..page_offset + n]);
+            let n = page.copy_out(page_offset, &mut buf[copied..copied + chunk_len]);
             copied += n;
 
             if n == 0 {

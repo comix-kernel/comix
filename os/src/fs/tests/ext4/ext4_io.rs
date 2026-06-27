@@ -249,6 +249,26 @@ test_case!(test_ext4_read_beyond_eof, {
     kassert!(bytes_read <= 5); // 最多只能读取 5 字节
 });
 
+test_case!(test_ext4_cached_read_cross_page_partial_eof, {
+    const TOTAL_SIZE: usize = 4096 + 9;
+    let fs = create_test_ext4();
+    let mut data = vec![0u8; TOTAL_SIZE];
+    for i in 0..TOTAL_SIZE {
+        data[i] = (i % 251) as u8;
+    }
+    let inode = create_test_file_with_content(&fs, "partial-eof.bin", &data).unwrap();
+
+    let mut first = vec![0u8; 32];
+    let read = inode.read_at(4096 - 8, &mut first).unwrap();
+    kassert!(read == 17);
+    kassert!(&first[..17] == &data[4096 - 8..]);
+
+    let mut cached = vec![0u8; 32];
+    let read = inode.read_at(4096 - 8, &mut cached).unwrap();
+    kassert!(read == 17);
+    kassert!(&cached[..17] == &data[4096 - 8..]);
+});
+
 test_case!(test_ext4_empty_file_read, {
     // 创建空文件
     let fs = create_test_ext4();
