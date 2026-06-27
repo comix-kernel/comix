@@ -144,6 +144,11 @@ impl Ext4Inode {
         self.page_cache.invalidate_inode(self.cache_object_id());
     }
 
+    fn invalidate_inode_no(&self, ino: u32) {
+        self.page_cache
+            .invalidate_inode(PageCacheObjectId::new(self.fs_id, ino as u64));
+    }
+
     fn drop_lookup_cache_entry(&self, name: &str) {
         self.caches.lookup.lock().remove(self.ino, name);
     }
@@ -471,6 +476,7 @@ impl Inode for Ext4Inode {
         fs.write_back_inode(&mut child_inode);
 
         self.drop_lookup_cache_entry(name);
+        self.invalidate_inode_no(child_inode.inode_num);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
             self.caches.clone(),
@@ -509,6 +515,7 @@ impl Inode for Ext4Inode {
         fs.write_back_inode(&mut inode_ref);
 
         self.drop_lookup_cache_entry(name);
+        self.invalidate_inode_no(inode_id);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
             self.caches.clone(),
@@ -554,6 +561,7 @@ impl Inode for Ext4Inode {
         }
 
         self.drop_lookup_cache_entry(name);
+        self.invalidate_inode_no(new_inode.inode_num);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
             self.caches.clone(),
@@ -586,6 +594,7 @@ impl Inode for Ext4Inode {
             .map_err(|_| FsError::NoSpace)?;
 
         self.drop_lookup_cache_entry(name);
+        self.invalidate_inode_no(ext4_inode.ino);
         Ok(())
     }
 
@@ -632,6 +641,7 @@ impl Inode for Ext4Inode {
         }
 
         self.drop_lookup_cache_entry(name);
+        self.invalidate_inode_no(child_ext4.ino);
         Ok(())
     }
 
@@ -648,6 +658,7 @@ impl Inode for Ext4Inode {
         fs.dir_remove(parent, name)
             .map(|_| {
                 self.drop_lookup_cache_entry(name);
+                self.page_cache.invalidate_fs(self.fs_id);
             })
             .map_err(|_| FsError::NotFound)
     }
@@ -873,6 +884,10 @@ impl Inode for Ext4Inode {
 
         self.drop_lookup_cache_entry(old_name);
         new_parent_ext4.drop_lookup_cache_entry(new_name);
+        self.invalidate_inode_no(old_child_ext4.ino);
+        if let Some(replaced_ino) = replaced_inode {
+            self.invalidate_inode_no(replaced_ino);
+        }
         Ok(())
     }
 
@@ -1111,6 +1126,7 @@ impl Inode for Ext4Inode {
         fs.write_back_inode(&mut new_inode);
 
         self.drop_lookup_cache_entry(name);
+        self.invalidate_inode_no(new_inode.inode_num);
         Ok(Arc::new(Ext4Inode::new(
             self.fs.clone(),
             self.caches.clone(),
