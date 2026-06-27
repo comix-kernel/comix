@@ -302,6 +302,81 @@ test_case!(test_ext4_cached_read_invalidated_by_truncate, {
     kassert!(&shrunk[..3] == b"ABC");
 });
 
+test_case!(test_ext4_cached_truncate_shrink_invalidates_tail_page, {
+    const TOTAL_SIZE: usize = 4096 + 16;
+    let fs = create_test_ext4();
+    let initial = vec![b'A'; TOTAL_SIZE];
+    let inode = create_test_file_with_content(&fs, "cached-truncate-tail.bin", &initial).unwrap();
+
+    let mut warm = vec![0u8; TOTAL_SIZE];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == TOTAL_SIZE);
+    kassert!(warm == initial);
+
+    kassert!(inode.truncate(4096 + 3).is_ok());
+
+    let mut reread = vec![0xFF; 32];
+    kassert!(inode.read_at(4096 - 8, &mut reread).unwrap() == 11);
+    kassert!(&reread[..8] == &[b'A'; 8]);
+    kassert!(&reread[8..11] == &[b'A'; 3]);
+    kassert!(&reread[11..] == &[0xFF; 21]);
+});
+
+test_case!(test_ext4_cached_truncate_to_zero_drops_cached_pages, {
+    let fs = create_test_ext4();
+    let inode =
+        create_test_file_with_content(&fs, "cached-truncate-zero.bin", &[b'Z'; 4096]).unwrap();
+
+    let mut warm = vec![0u8; 4096];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == 4096);
+    kassert!(warm == vec![b'Z'; 4096]);
+
+    kassert!(inode.truncate(0).is_ok());
+
+    let mut reread = vec![0xEE; 8];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 0);
+    kassert!(reread == vec![0xEE; 8]);
+});
+
+test_case!(test_ext4_cached_truncate_extend_zero_fills_new_range, {
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-truncate-extend.bin", b"head").unwrap();
+
+    let mut warm = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == 4);
+    kassert!(&warm[..] == b"head");
+
+    kassert!(inode.truncate(32).is_ok());
+
+    let mut reread = vec![0xFF; 32];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 32);
+    kassert!(&reread[..4] == b"head");
+    kassert!(reread[4..].iter().all(|byte| *byte == 0));
+});
+
+test_case!(
+    test_ext4_cached_truncate_extend_across_pages_preserves_old_data,
+    {
+        const OLD_SIZE: usize = 4096 - 3;
+        const NEW_SIZE: usize = 4096 + 9;
+        let fs = create_test_ext4();
+        let initial = vec![b'K'; OLD_SIZE];
+        let inode =
+            create_test_file_with_content(&fs, "cached-truncate-cross-extend.bin", &initial)
+                .unwrap();
+
+        let mut warm = vec![0u8; OLD_SIZE];
+        kassert!(inode.read_at(0, &mut warm).unwrap() == OLD_SIZE);
+        kassert!(warm == initial);
+
+        kassert!(inode.truncate(NEW_SIZE).is_ok());
+
+        let mut reread = vec![0xFF; 16];
+        kassert!(inode.read_at(OLD_SIZE - 4, &mut reread).unwrap() == 16);
+        kassert!(&reread[..4] == &[b'K'; 4]);
+        kassert!(reread[4..].iter().all(|byte| *byte == 0));
+    }
+);
+
 test_case!(test_ext4_unlink_recreate_does_not_read_old_cached_page, {
     let fs = create_test_ext4();
     let root = fs.root_inode();
