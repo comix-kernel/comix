@@ -389,10 +389,8 @@ impl PageCache {
         }
 
         let start = offset / PAGE_CACHE_PAGE_SIZE;
-        let end = offset
-            .saturating_add(len)
-            .saturating_add(PAGE_CACHE_PAGE_SIZE - 1)
-            / PAGE_CACHE_PAGE_SIZE;
+        let last = offset.saturating_add(len - 1) / PAGE_CACHE_PAGE_SIZE;
+        let end = last.saturating_add(1);
 
         let mut inner = self.inner.lock();
         let before = inner.pages.len();

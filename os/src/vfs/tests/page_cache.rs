@@ -176,6 +176,108 @@ test_case!(test_page_cache_invalidate_range_inside_single_page, {
     kassert!(stats.invalidates == 1);
 });
 
+test_case!(test_page_cache_invalidate_range_zero_len_is_noop, {
+    let cache = PageCache::with_capacity(4);
+    let obj = object(1, 23);
+
+    cache.insert_clean(obj, 0, b"zero".to_vec());
+
+    cache.invalidate_range(obj, 0, 0);
+    cache.invalidate_range(obj, PAGE_CACHE_PAGE_SIZE, 0);
+
+    kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_some());
+    let stats = cache.stats();
+    kassert!(stats.invalidates == 0);
+});
+
+test_case!(test_page_cache_invalidate_range_page_boundaries, {
+    let cache = PageCache::with_capacity(8);
+    let obj = object(1, 24);
+
+    cache.insert_clean(obj, 0, b"zero".to_vec());
+    cache.insert_clean(obj, 1, b"one".to_vec());
+    cache.insert_clean(obj, 2, b"two".to_vec());
+
+    cache.invalidate_range(obj, PAGE_CACHE_PAGE_SIZE - 1, 1);
+    kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 1)).is_some());
+
+    cache.invalidate_range(obj, PAGE_CACHE_PAGE_SIZE, 1);
+    kassert!(cache.lookup(PageCacheKey::new(obj, 1)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 2)).is_some());
+
+    let stats = cache.stats();
+    kassert!(stats.invalidates == 2);
+});
+
+test_case!(test_page_cache_invalidate_range_crosses_multiple_pages, {
+    let cache = PageCache::with_capacity(8);
+    let obj = object(1, 25);
+
+    for page_index in 0..4 {
+        cache.insert_clean(obj, page_index, vec![page_index as u8 + b'0']);
+    }
+
+    cache.invalidate_range(obj, PAGE_CACHE_PAGE_SIZE - 8, PAGE_CACHE_PAGE_SIZE + 16);
+
+    kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 1)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 2)).is_none());
+    kassert!(cache.lookup(PageCacheKey::new(obj, 3)).is_some());
+
+    let stats = cache.stats();
+    kassert!(stats.invalidates == 3);
+});
+
+test_case!(test_page_cache_invalidate_range_saturates_on_overflow, {
+    let cache = PageCache::with_capacity(8);
+    let obj = object(1, 26);
+    let last_page = usize::MAX / PAGE_CACHE_PAGE_SIZE;
+
+    cache.insert_clean(obj, last_page - 1, b"before".to_vec());
+    cache.insert_clean(obj, last_page, b"last".to_vec());
+
+    cache.invalidate_range(obj, usize::MAX - 7, 32);
+
+    kassert!(
+        cache
+            .lookup(PageCacheKey::new(obj, last_page - 1))
+            .is_some()
+    );
+    kassert!(cache.lookup(PageCacheKey::new(obj, last_page)).is_none());
+
+    let stats = cache.stats();
+    kassert!(stats.invalidates == 1);
+});
+
+test_case!(test_page_cache_invalidate_range_only_target_object, {
+    let cache = PageCache::with_capacity(8);
+    let target = object(1, 27);
+    let same_inode_other_fs = object(2, 27);
+    let same_fs_other_inode = object(1, 28);
+
+    cache.insert_clean(target, 0, b"target".to_vec());
+    cache.insert_clean(same_inode_other_fs, 0, b"other-fs".to_vec());
+    cache.insert_clean(same_fs_other_inode, 0, b"other-inode".to_vec());
+
+    cache.invalidate_range(target, 0, 1);
+
+    kassert!(cache.lookup(PageCacheKey::new(target, 0)).is_none());
+    kassert!(
+        cache
+            .lookup(PageCacheKey::new(same_inode_other_fs, 0))
+            .is_some()
+    );
+    kassert!(
+        cache
+            .lookup(PageCacheKey::new(same_fs_other_inode, 0))
+            .is_some()
+    );
+
+    let stats = cache.stats();
+    kassert!(stats.invalidates == 1);
+});
+
 test_case!(test_page_cache_object_id_includes_fs_id, {
     let cache = PageCache::with_capacity(4);
     let left = object(1, 7);
