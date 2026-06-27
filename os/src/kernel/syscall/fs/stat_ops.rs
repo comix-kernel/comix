@@ -74,16 +74,9 @@ pub fn getdents64(fd: usize, dirp: *mut u8, count: usize) -> isize {
         Err(e) => return e.to_errno(),
     };
 
-    // 获取 inode（目录必须通过 inode 读取）
-    let inode = match file.inode() {
-        Ok(i) => i,
-        Err(e) => return e.to_errno(),
-    };
-
-    // 读取目录项
-    // TODO: readdir 返回所有项，对于大目录效率低，且 racey。
-    // 应改进为支持从 offset 读取，或者缓存 readdir 结果。
-    let entries = match inode.readdir() {
+    // 读取目录项。普通文件会在 File 会话层缓存目录快照，避免 getdents64
+    // 使用小缓冲区时对同一目录反复触发底层 readdir。
+    let entries = match file.readdir_cached() {
         Ok(e) => e,
         Err(e) => return e.to_errno(),
     };

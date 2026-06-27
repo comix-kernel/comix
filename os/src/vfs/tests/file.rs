@@ -193,3 +193,30 @@ test_case!(test_file_lseek_negative_set, {
     kassert!(result.is_err());
     kassert!(matches!(result, Err(FsError::InvalidArgument)));
 });
+
+test_case!(test_directory_readdir_cached_until_rewind, {
+    let fs = create_test_simplefs();
+    let root = fs.root_inode();
+    root.create("before.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+
+    let file = create_test_file("/", root.clone(), OpenFlags::O_RDONLY);
+
+    let first = file.readdir_cached().unwrap();
+    kassert!(first.iter().any(|entry| entry.name == "before.txt"));
+    kassert!(!first.iter().any(|entry| entry.name == "after.txt"));
+
+    root.create("after.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+
+    let second = file.readdir_cached().unwrap();
+    kassert!(Arc::ptr_eq(&first, &second));
+    kassert!(!second.iter().any(|entry| entry.name == "after.txt"));
+
+    file.lseek(1, SeekWhence::Set).unwrap();
+    file.lseek(0, SeekWhence::Set).unwrap();
+
+    let refreshed = file.readdir_cached().unwrap();
+    kassert!(!Arc::ptr_eq(&first, &refreshed));
+    kassert!(refreshed.iter().any(|entry| entry.name == "after.txt"));
+});
