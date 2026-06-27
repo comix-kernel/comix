@@ -117,9 +117,18 @@ pub fn list_net_devices() -> Vec<NetworkDeviceInfo> {
 
 /// 根据名称查找块设备
 pub fn find_block_device(name: &str) -> Option<BlockDeviceInfo> {
-    list_block_devices()
-        .into_iter()
-        .find(|dev| dev.name == name)
+    let devices = list_block_devices();
+
+    if let Some(device) = devices.iter().find(|dev| dev.name == name) {
+        return Some(device.clone());
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    if name == "vda2" {
+        return devices.into_iter().find(|dev| dev.name == "vdb2");
+    }
+
+    None
 }
 
 /// 根据名称查找网络设备
