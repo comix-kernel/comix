@@ -168,6 +168,60 @@ test_case!(test_ext4_overwrite_existing_multiblock_file, {
     }
 });
 
+test_case!(test_ext4_cached_read_invalidated_by_write, {
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-write.bin", b"AAAA").unwrap();
+
+    let mut buf = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut buf).unwrap() == 4);
+    kassert!(&buf[..] == b"AAAA");
+
+    kassert!(inode.write_at(0, b"BBBB").unwrap() == 4);
+
+    let mut reread = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 4);
+    kassert!(&reread[..] == b"BBBB");
+});
+
+test_case!(test_ext4_cached_read_invalidated_by_truncate, {
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-truncate.bin", b"ABCDEFGH").unwrap();
+
+    let mut buf = vec![0u8; 8];
+    kassert!(inode.read_at(0, &mut buf).unwrap() == 8);
+    kassert!(&buf[..] == b"ABCDEFGH");
+
+    kassert!(inode.truncate(3).is_ok());
+
+    let mut shrunk = vec![0xFF; 8];
+    kassert!(inode.read_at(0, &mut shrunk).unwrap() == 3);
+    kassert!(&shrunk[..3] == b"ABC");
+});
+
+test_case!(test_ext4_unlink_recreate_does_not_read_old_cached_page, {
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+    let inode = root
+        .create("reuse-name.bin", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+
+    kassert!(inode.write_at(0, b"OLD!").unwrap() == 4);
+    let mut old = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut old).unwrap() == 4);
+    kassert!(&old[..] == b"OLD!");
+
+    kassert!(root.unlink("reuse-name.bin").is_ok());
+    let new_inode = root
+        .create("reuse-name.bin", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+    kassert!(new_inode.write_at(0, b"NEW?").unwrap() == 4);
+
+    let found = root.lookup("reuse-name.bin").unwrap();
+    let mut new = vec![0u8; 4];
+    kassert!(found.read_at(0, &mut new).unwrap() == 4);
+    kassert!(&new[..] == b"NEW?");
+});
+
 test_case!(test_ext4_sync, {
     // 创建文件并写入
     let fs = create_test_ext4();

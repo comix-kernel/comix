@@ -62,6 +62,7 @@ pub use inode::{Ext4Inode, Ext4InodeCaches};
 use crate::device::block::BlockDriver;
 use crate::pr_info;
 use crate::sync::Mutex;
+use crate::vfs::page_cache::PageCache;
 use crate::vfs::{FileSystem, FsError, Inode, StatFs};
 use alloc::sync::Arc;
 use ext4_rs::BlockDevice;
@@ -80,8 +81,14 @@ pub struct Ext4FileSystem {
     /// 设备 ID
     device_id: usize,
 
+    /// VFS clean page cache object id prefix.
+    fs_id: u64,
+
     /// ext4_rs 文件系统对象
     ext4: Arc<Mutex<ext4_rs::Ext4>>,
+
+    /// Shared clean file page cache.
+    page_cache: Arc<PageCache>,
 
     /// 根 inode
     root: Arc<dyn Inode>,
@@ -126,16 +133,26 @@ impl Ext4FileSystem {
         let ext4 = Arc::new(Mutex::new(ext4));
 
         let inode_caches = Arc::new(Ext4InodeCaches::new());
+        let fs_id = device_id as u64;
+        let page_cache = Arc::new(PageCache::new());
 
         // 创建根 inode (inode 号 2 是 Ext4 的根目录)
-        let root = Arc::new(Ext4Inode::new(ext4.clone(), inode_caches, 2));
+        let root = Arc::new(Ext4Inode::new(
+            ext4.clone(),
+            inode_caches,
+            page_cache.clone(),
+            fs_id,
+            2,
+        ));
 
         let fs = Arc::new(Ext4FileSystem {
             device,
             block_size,
             total_blocks,
             device_id,
+            fs_id,
             ext4,
+            page_cache,
             root,
         });
 

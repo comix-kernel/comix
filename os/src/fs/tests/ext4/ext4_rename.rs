@@ -192,6 +192,45 @@ fn test_ext4_rename_overwrite_file() {
     assert_eq!(&buf, content1);
 }
 
+/// Test rename overwrite after the target file has populated page cache.
+#[test_case]
+fn test_ext4_rename_overwrite_file_invalidates_cached_target() {
+    let (_fs, root_dentry) = create_test_ext4_with_root();
+    let root = root_dentry.inode.clone();
+
+    let file1 = root
+        .create("cache-src.txt", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create source");
+    let file2 = root
+        .create("cache-dst.txt", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create target");
+
+    file1
+        .write_at(0, b"source")
+        .expect("Failed to write source");
+    file2
+        .write_at(0, b"target")
+        .expect("Failed to write target");
+
+    let mut cached_target = [0u8; 6];
+    file2
+        .read_at(0, &mut cached_target)
+        .expect("Failed to read target");
+    assert_eq!(&cached_target, b"target");
+
+    root.rename("cache-src.txt", root.clone(), "cache-dst.txt")
+        .expect("Failed to overwrite target");
+
+    let result_file = root
+        .lookup("cache-dst.txt")
+        .expect("Failed to find overwritten target");
+    let mut buf = [0u8; 6];
+    result_file
+        .read_at(0, &mut buf)
+        .expect("Failed to read overwritten target");
+    assert_eq!(&buf, b"source");
+}
+
 /// Test rename with target overwrite (empty directory)
 #[test_case]
 fn test_ext4_rename_overwrite_empty_dir() {
