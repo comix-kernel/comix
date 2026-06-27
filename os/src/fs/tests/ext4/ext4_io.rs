@@ -401,6 +401,34 @@ test_case!(test_ext4_unlink_recreate_does_not_read_old_cached_page, {
     kassert!(&new[..] == b"NEW?");
 });
 
+test_case!(
+    test_ext4_unlink_recreate_inode_reuse_drops_frame_cached_page,
+    {
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("reuse-frame.bin", FileMode::from_bits_truncate(0o644))
+            .unwrap();
+        let old = vec![b'O'; 4096 + 16];
+
+        kassert!(inode.write_at(0, &old).unwrap() == old.len());
+        let mut cached = vec![0u8; old.len()];
+        kassert!(inode.read_at(0, &mut cached).unwrap() == old.len());
+        kassert!(cached == old);
+
+        kassert!(root.unlink("reuse-frame.bin").is_ok());
+        let new_inode = root
+            .create("reuse-frame.bin", FileMode::from_bits_truncate(0o644))
+            .unwrap();
+        kassert!(new_inode.write_at(0, b"NEW").unwrap() == 3);
+
+        let found = root.lookup("reuse-frame.bin").unwrap();
+        let mut new = vec![0u8; 4096 + 16];
+        kassert!(found.read_at(0, &mut new).unwrap() == 3);
+        kassert!(&new[..3] == b"NEW");
+    }
+);
+
 test_case!(test_ext4_sync, {
     // 创建文件并写入
     let fs = create_test_ext4();
