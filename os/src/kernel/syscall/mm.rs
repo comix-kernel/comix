@@ -6,8 +6,9 @@ use crate::mm::address::{PageNum, VA, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
-use crate::uapi::errno::{EACCES, EBADF, EEXIST, EINVAL, EIO, ENOMEM};
+use crate::uapi::errno::{EACCES, EAGAIN, EBADF, EEXIST, EINVAL, EIO, ENOMEM};
 use crate::uapi::mm::{MAP_FAILED, MapFlags, ProtFlags};
+use crate::uapi::resource::ResourceId;
 use crate::{pr_err, pr_warn};
 
 /// brk - 改变数据段的结束地址（堆顶）
@@ -427,4 +428,109 @@ pub fn mprotect(addr: *mut c_void, len: usize, prot: i32) -> isize {
             -ENOMEM as isize
         }
     }
+}
+
+const MCL_CURRENT: i32 = 1;
+const MCL_FUTURE: i32 = 2;
+
+fn range_is_mapped(start: usize, len: usize) -> bool {
+    let Some(end) = start.checked_add(len) else {
+        return false;
+    };
+    if len == 0 {
+        return true;
+    }
+
+    let start_vpn = Vpn::from_addr_floor(VA::from_usize(start));
+    let end_vpn = Vpn::from_addr_ceil(VA::from_usize(end));
+    let mut cursor = start_vpn;
+    let memory_space = current_memory_space();
+    let space = memory_space.lock();
+
+    while cursor < end_vpn {
+        let Some(area) = space
+            .areas()
+            .iter()
+            .find(|area| area.vpn_range().contains(cursor))
+        else {
+            return false;
+        };
+        cursor = core::cmp::min(area.vpn_range().end(), end_vpn);
+    }
+
+    true
+}
+
+fn memlock_limit_allows(len: usize) -> bool {
+    let limit = current_task().lock().rlimit.lock().limits[ResourceId::Memlock as usize].rlim_cur;
+    limit == crate::uapi::resource::rlimit_value::RLIM_INFINITY || len <= limit
+}
+
+/// mlock - lock a user address range in memory.
+///
+/// CCYOS does not swap user pages out, so the lock operation is a Linux-compatible no-op after
+/// validating the range and RLIMIT_MEMLOCK. This still matters for userland feature probing.
+pub fn mlock(addr: *const c_void, len: usize) -> isize {
+    if len == 0 {
+        return 0;
+    }
+
+    let start = addr as usize;
+    if start.checked_add(len).is_none() {
+        return -EINVAL as isize;
+    }
+    if !memlock_limit_allows(len) {
+        return -EAGAIN as isize;
+    }
+    if !range_is_mapped(start, len) {
+        return -ENOMEM as isize;
+    }
+
+    0
+}
+
+/// munlock - unlock a user address range.
+pub fn munlock(addr: *const c_void, len: usize) -> isize {
+    if len == 0 {
+        return 0;
+    }
+
+    let start = addr as usize;
+    if start.checked_add(len).is_none() {
+        return -EINVAL as isize;
+    }
+    if !range_is_mapped(start, len) {
+        return -ENOMEM as isize;
+    }
+
+    0
+}
+
+/// mlockall - lock current/future user mappings.
+pub fn mlockall(flags: i32) -> isize {
+    if flags & !(MCL_CURRENT | MCL_FUTURE) != 0 || flags == 0 {
+        return -EINVAL as isize;
+    }
+
+    if flags & MCL_CURRENT != 0 {
+        let mapped_bytes = {
+            let memory_space = current_memory_space();
+            let space = memory_space.lock();
+            space
+                .areas()
+                .iter()
+                .map(|area| area.vpn_range().len() * PAGE_SIZE)
+                .sum::<usize>()
+        };
+        if !memlock_limit_allows(mapped_bytes) {
+            return -EAGAIN as isize;
+        }
+    }
+
+    0
+}
+
+/// munlockall - unlock all user mappings.
+pub fn munlockall() -> isize {
+    0
 }
