@@ -5,9 +5,14 @@
 //! mutations.
 
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::arch::pa_to_va;
+use crate::mm::address::PageNum;
+use crate::mm::frame_allocator::{FrameTracker, alloc_frame};
 use crate::sync::SpinLock;
+use crate::vfs::FsError;
 
 /// Size of one cached file page.
 pub const PAGE_CACHE_PAGE_SIZE: usize = 4096;
@@ -47,22 +52,135 @@ impl PageCacheKey {
     }
 }
 
+/// Backing storage for a clean cached file page.
+#[derive(Clone, Debug)]
+enum CachedPageStorage {
+    Bytes(Vec<u8>),
+    Frame(Arc<FrameTracker>, usize),
+}
+
+impl CachedPageStorage {
+    fn from_bytes(mut data: Vec<u8>) -> Self {
+        data.truncate(PAGE_CACHE_PAGE_SIZE);
+        Self::Bytes(data)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Bytes(data) => data,
+            Self::Frame(frame, len) => {
+                let va = pa_to_va(frame.ppn().start_addr());
+                unsafe { core::slice::from_raw_parts(va.as_usize() as *const u8, *len) }
+            }
+        }
+    }
+
+    fn as_mut_page_slice(&mut self) -> &mut [u8] {
+        match self {
+            Self::Bytes(data) => data.as_mut_slice(),
+            Self::Frame(frame, _) => {
+                let va = pa_to_va(frame.ppn().start_addr());
+                unsafe {
+                    core::slice::from_raw_parts_mut(va.as_usize() as *mut u8, PAGE_CACHE_PAGE_SIZE)
+                }
+            }
+        }
+    }
+
+    fn is_frame_backed(&self) -> bool {
+        matches!(self, Self::Frame(_, _))
+    }
+}
+
 /// A clean cached file page.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct CachedPage {
-    data: Vec<u8>,
+    storage: CachedPageStorage,
 }
 
 impl CachedPage {
     /// Creates a clean cached page, truncating data to one page.
-    pub fn new(mut data: Vec<u8>) -> Self {
-        data.truncate(PAGE_CACHE_PAGE_SIZE);
-        Self { data }
+    pub fn new(data: Vec<u8>) -> Self {
+        Self {
+            storage: CachedPageStorage::from_bytes(data),
+        }
+    }
+
+    /// Allocates a frame-backed clean cached page initialized from `data`.
+    pub fn new_frame_backed(data: &[u8]) -> Result<Self, FsError> {
+        let mut page = Self {
+            storage: CachedPageStorage::Frame(
+                Arc::new(alloc_frame().ok_or(FsError::NoMemory)?),
+                data.len().min(PAGE_CACHE_PAGE_SIZE),
+            ),
+        };
+        page.write_prefix(data);
+        Ok(page)
     }
 
     /// Returns the bytes stored in this clean page.
     pub fn data(&self) -> &[u8] {
-        &self.data
+        self.storage.as_slice()
+    }
+
+    /// Copies bytes from this page into `buf`, starting at `page_offset`.
+    pub fn copy_out(&self, page_offset: usize, buf: &mut [u8]) -> usize {
+        let data = self.data();
+        if page_offset >= data.len() {
+            return 0;
+        }
+
+        let n = (data.len() - page_offset).min(buf.len());
+        buf[..n].copy_from_slice(&data[page_offset..page_offset + n]);
+        n
+    }
+
+    fn write_prefix(&mut self, data: &[u8]) {
+        let len = data.len().min(PAGE_CACHE_PAGE_SIZE);
+        let dst = self.storage.as_mut_page_slice();
+        dst[..len].copy_from_slice(&data[..len]);
+    }
+
+    fn full_page_mut(&mut self) -> &mut [u8] {
+        self.storage.as_mut_page_slice()
+    }
+
+    fn set_len(&mut self, len: usize) {
+        let len = len.min(PAGE_CACHE_PAGE_SIZE);
+        match &mut self.storage {
+            CachedPageStorage::Bytes(data) => data.truncate(len),
+            CachedPageStorage::Frame(_, page_len) => *page_len = len,
+        }
+    }
+
+    fn refresh_range(&mut self, page_offset: usize, data: &[u8]) {
+        if data.is_empty() || page_offset >= PAGE_CACHE_PAGE_SIZE {
+            return;
+        }
+
+        let len = data.len().min(PAGE_CACHE_PAGE_SIZE - page_offset);
+        let refreshed_len = page_offset + len;
+        match &mut self.storage {
+            CachedPageStorage::Bytes(page) => {
+                if page.len() < refreshed_len {
+                    page.resize(refreshed_len, 0);
+                }
+                page[page_offset..refreshed_len].copy_from_slice(&data[..len]);
+            }
+            CachedPageStorage::Frame(frame, page_len) => {
+                let va = pa_to_va(frame.ppn().start_addr());
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(va.as_usize() as *mut u8, PAGE_CACHE_PAGE_SIZE)
+                };
+                dst[page_offset..refreshed_len].copy_from_slice(&data[..len]);
+                *page_len = (*page_len).max(refreshed_len).min(PAGE_CACHE_PAGE_SIZE);
+            }
+        }
+    }
+
+    /// Returns whether this page is backed by a physical frame.
+    pub fn is_frame_backed(&self) -> bool {
+        self.storage.is_frame_backed()
     }
 }
 
@@ -79,6 +197,12 @@ pub struct PageCacheStats {
     pub evicts: usize,
     /// Number of pages removed by explicit invalidation.
     pub invalidates: usize,
+    /// Number of fill closures that returned an error.
+    pub fill_errors: usize,
+    /// Current number of cached pages.
+    pub resident_pages: usize,
+    /// Current number of cached pages backed by physical frames.
+    pub frame_pages: usize,
 }
 
 struct CacheEntry {
@@ -103,6 +227,9 @@ impl PageCacheInner {
                 inserts: 0,
                 evicts: 0,
                 invalidates: 0,
+                fill_errors: 0,
+                resident_pages: 0,
+                frame_pages: 0,
             },
         }
     }
@@ -110,6 +237,32 @@ impl PageCacheInner {
     fn tick(&mut self) -> u64 {
         self.clock = self.clock.wrapping_add(1);
         self.clock
+    }
+
+    fn evict_until_space(&mut self, max_pages: usize) {
+        while self.pages.len() >= max_pages {
+            let Some(oldest_key) = self
+                .pages
+                .iter()
+                .min_by_key(|(_, entry)| entry.age)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            self.pages.remove(&oldest_key);
+            self.stats.evicts += 1;
+        }
+    }
+
+    fn stats_snapshot(&self) -> PageCacheStats {
+        let mut stats = self.stats;
+        stats.resident_pages = self.pages.len();
+        stats.frame_pages = self
+            .pages
+            .values()
+            .filter(|entry| entry.page.is_frame_backed())
+            .count();
+        stats
     }
 }
 
@@ -185,18 +338,7 @@ impl PageCache {
         let age = inner.tick();
 
         if !inner.pages.contains_key(&key) {
-            while inner.pages.len() >= self.max_pages {
-                let Some(oldest_key) = inner
-                    .pages
-                    .iter()
-                    .min_by_key(|(_, entry)| entry.age)
-                    .map(|(key, _)| *key)
-                else {
-                    break;
-                };
-                inner.pages.remove(&oldest_key);
-                inner.stats.evicts += 1;
-            }
+            inner.evict_until_space(self.max_pages);
         }
 
         inner.pages.insert(key, CacheEntry {
@@ -206,6 +348,65 @@ impl PageCache {
         inner.stats.inserts += 1;
     }
 
+    /// Returns an existing clean page or fills and inserts a new frame-backed page.
+    pub fn get_or_insert_clean_page<F>(
+        &self,
+        object: PageCacheObjectId,
+        page_index: usize,
+        fill_fn: F,
+    ) -> Result<CachedPage, FsError>
+    where
+        F: FnOnce(&mut [u8]) -> Result<usize, FsError>,
+    {
+        let key = PageCacheKey::new(object, page_index);
+
+        if let Some(page) = self.lookup(key) {
+            return Ok(page);
+        }
+
+        if self.max_pages == 0 {
+            let mut data = alloc::vec![0u8; PAGE_CACHE_PAGE_SIZE];
+            let len = match fill_fn(&mut data) {
+                Ok(len) => len.min(PAGE_CACHE_PAGE_SIZE),
+                Err(err) => {
+                    self.inner.lock().stats.fill_errors += 1;
+                    return Err(err);
+                }
+            };
+            data.truncate(len);
+            return Ok(CachedPage::new(data));
+        }
+
+        let mut page = CachedPage::new_frame_backed(&[])?;
+        let len = {
+            let buffer = page.full_page_mut();
+            match fill_fn(buffer) {
+                Ok(len) => len.min(PAGE_CACHE_PAGE_SIZE),
+                Err(err) => {
+                    self.inner.lock().stats.fill_errors += 1;
+                    return Err(err);
+                }
+            }
+        };
+        page.set_len(len);
+
+        if len == 0 {
+            return Ok(page);
+        }
+
+        let mut inner = self.inner.lock();
+        let age = inner.tick();
+        if !inner.pages.contains_key(&key) {
+            inner.evict_until_space(self.max_pages);
+        }
+        inner.pages.insert(key, CacheEntry {
+            page: page.clone(),
+            age,
+        });
+        inner.stats.inserts += 1;
+        Ok(page)
+    }
+
     /// Invalidates cached pages intersecting byte range `[offset, offset + len)`.
     pub fn invalidate_range(&self, object: PageCacheObjectId, offset: usize, len: usize) {
         if len == 0 {
@@ -213,10 +414,8 @@ impl PageCache {
         }
 
         let start = offset / PAGE_CACHE_PAGE_SIZE;
-        let end = offset
-            .saturating_add(len)
-            .saturating_add(PAGE_CACHE_PAGE_SIZE - 1)
-            / PAGE_CACHE_PAGE_SIZE;
+        let last = offset.saturating_add(len - 1) / PAGE_CACHE_PAGE_SIZE;
+        let end = last.saturating_add(1);
 
         let mut inner = self.inner.lock();
         let before = inner.pages.len();
@@ -224,6 +423,44 @@ impl PageCache {
             key.object != object || key.page_index < start || key.page_index >= end
         });
         inner.stats.invalidates += before - inner.pages.len();
+    }
+
+    /// Refreshes cached clean pages intersecting `[offset, offset + data.len())`.
+    ///
+    /// Pages that are not already cached are left untouched. This is intended
+    /// for write-through filesystems after the backing write has succeeded.
+    pub fn refresh_clean_range(
+        &self,
+        object: PageCacheObjectId,
+        offset: usize,
+        data: &[u8],
+    ) -> usize {
+        if data.is_empty() {
+            return 0;
+        }
+
+        let mut inner = self.inner.lock();
+        let mut refreshed = 0;
+        let mut copied = 0;
+        while copied < data.len() {
+            let current_offset = offset.saturating_add(copied);
+            let page_index = current_offset / PAGE_CACHE_PAGE_SIZE;
+            let page_offset = current_offset % PAGE_CACHE_PAGE_SIZE;
+            let chunk_len = (PAGE_CACHE_PAGE_SIZE - page_offset).min(data.len() - copied);
+            let age = inner.tick();
+
+            if let Some(entry) = inner.pages.get_mut(&PageCacheKey::new(object, page_index)) {
+                entry.age = age;
+                entry
+                    .page
+                    .refresh_range(page_offset, &data[copied..copied + chunk_len]);
+                refreshed += 1;
+            }
+
+            copied += chunk_len;
+        }
+
+        refreshed
     }
 
     /// Invalidates every cached page for one file object.
@@ -244,7 +481,7 @@ impl PageCache {
 
     /// Returns a snapshot of page cache counters.
     pub fn stats(&self) -> PageCacheStats {
-        self.inner.lock().stats
+        self.inner.lock().stats_snapshot()
     }
 }
 

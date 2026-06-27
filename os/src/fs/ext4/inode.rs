@@ -149,6 +149,24 @@ impl Ext4Inode {
             .invalidate_inode(PageCacheObjectId::new(self.fs_id, ino as u64));
     }
 
+    fn refresh_zero_cache_range(&self, offset: usize, len: usize) {
+        if len == 0 {
+            return;
+        }
+
+        let object = self.cache_object_id();
+        let zero_buf = alloc::vec![0u8; PAGE_CACHE_PAGE_SIZE];
+        let mut refreshed = 0;
+        while refreshed < len {
+            let current_offset = offset + refreshed;
+            let page_offset = current_offset % PAGE_CACHE_PAGE_SIZE;
+            let chunk_len = (PAGE_CACHE_PAGE_SIZE - page_offset).min(len - refreshed);
+            self.page_cache
+                .refresh_clean_range(object, current_offset, &zero_buf[..chunk_len]);
+            refreshed += chunk_len;
+        }
+    }
+
     fn drop_lookup_cache_entry(&self, name: &str) {
         self.caches.lookup.lock().remove(self.ino, name);
     }
@@ -369,25 +387,20 @@ impl Inode for Ext4Inode {
             }
 
             let page_start = page_index * PAGE_CACHE_PAGE_SIZE;
-            let page_len = PAGE_CACHE_PAGE_SIZE.min(metadata.size - page_start);
-            let mut page_buf = alloc::vec![0u8; page_len];
-            let nread = {
-                let fs = self.fs.lock();
-                let nread = fs
-                    .read_at(self.ino, page_start, &mut page_buf)
-                    .map_err(|_| FsError::IoError)?;
-                page_buf.truncate(nread);
+            let page_len = PAGE_CACHE_PAGE_SIZE.min(metadata.size.saturating_sub(page_start));
+            let page =
                 self.page_cache
-                    .insert_clean(object, page_index, page_buf.clone());
-                nread
-            };
+                    .get_or_insert_clean_page(object, page_index, |page_buf| {
+                        let fs = self.fs.lock();
+                        fs.read_at(self.ino, page_start, &mut page_buf[..page_len])
+                            .map_err(|_| FsError::IoError)
+                    })?;
 
-            if nread == 0 || page_offset >= page_buf.len() {
+            if page_offset >= page.data().len() {
                 break;
             }
 
-            let n = (page_buf.len() - page_offset).min(chunk_len);
-            buf[copied..copied + n].copy_from_slice(&page_buf[page_offset..page_offset + n]);
+            let n = page.copy_out(page_offset, &mut buf[copied..copied + chunk_len]);
             copied += n;
 
             if n == 0 {
@@ -411,7 +424,16 @@ impl Inode for Ext4Inode {
         let written = fs
             .write_at(self.ino, offset, buf)
             .map_err(|_| FsError::IoError)?;
-        self.invalidate_read_cache();
+        if written > 0 {
+            if offset > metadata.size {
+                self.refresh_zero_cache_range(metadata.size, offset - metadata.size);
+            }
+            self.page_cache.refresh_clean_range(
+                self.cache_object_id(),
+                offset,
+                &buf[..written.min(buf.len())],
+            );
+        }
         Ok(written)
     }
 
@@ -941,6 +963,12 @@ impl Inode for Ext4Inode {
             let mut inode_ref = fs.get_inode_ref(self.ino);
             fs.truncate_inode(&mut inode_ref, size as u64)
                 .map_err(|_| FsError::IoError)?;
+            let invalidate_start = (size / PAGE_CACHE_PAGE_SIZE) * PAGE_CACHE_PAGE_SIZE;
+            self.page_cache.invalidate_range(
+                self.cache_object_id(),
+                invalidate_start,
+                old_size - invalidate_start,
+            );
         } else {
             // 扩展文件：ext4_rs 的 truncate_inode 不支持扩展（有 assert）
             // Workaround: 在文件末尾写入零字节来扩展
@@ -959,9 +987,9 @@ impl Inode for Ext4Inode {
                     .map_err(|_| FsError::IoError)?;
                 written += to_write;
             }
+            self.refresh_zero_cache_range(old_size, extend_size);
         }
 
-        self.invalidate_read_cache();
         Ok(())
     }
 
