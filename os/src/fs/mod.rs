@@ -94,7 +94,7 @@ use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::pr_info;
 use crate::vfs::dev::makedev;
-use crate::vfs::devno::chrdev_major;
+use crate::vfs::devno::{chrdev_major, misc_minor};
 use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
 // lazy_static! {
@@ -426,6 +426,16 @@ fn create_devices() -> Result<(), FsError> {
     misc_dentry
         .inode
         .mknod("rtc", char_mode, makedev(chrdev_major::MISC, 135))?;
+
+    // /dev/cpu_dma_latency (10, 123): PM QoS compatibility no-op for cyclictest.
+    match dev_inode.mknod(
+        "cpu_dma_latency",
+        char_mode,
+        makedev(chrdev_major::MISC, misc_minor::CPU_DMA_LATENCY),
+    ) {
+        Ok(_) | Err(FsError::AlreadyExists) => {}
+        Err(err) => return Err(err),
+    }
 
     // 块设备：0660 权限
     let block_mode = FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660);

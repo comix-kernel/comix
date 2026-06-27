@@ -193,14 +193,15 @@ pub fn clock_settime(clk_id: c_int, tp: *const TimeSpec) -> c_int {
 /// * **成功**：返回 0，`tp` 被填充时钟分辨率
 /// * **失败**：返回负的 errno
 pub fn clock_getres(clk_id: c_int, tp: *mut TimeSpec) -> c_int {
+    let nsec = core::cmp::max(1, 1_000_000_000 / (clock_freq() as c_long));
     let res = match clk_id {
         CLOCK_REALTIME | CLOCK_REALTIME_COARSE => TimeSpec {
             tv_sec: 0,
-            tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+            tv_nsec: nsec,
         },
         CLOCK_MONOTONIC | CLOCK_MONOTONIC_COARSE | CLOCK_MONOTONIC_RAW => TimeSpec {
             tv_sec: 0,
-            tv_nsec: 1_000_000_000 / (clock_freq() as c_long),
+            tv_nsec: nsec,
         },
         id if id < MAX_CLOCKS as c_int && id >= 0 => {
             return -ENOSYS;
