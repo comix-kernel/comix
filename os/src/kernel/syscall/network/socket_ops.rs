@@ -166,10 +166,16 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
-    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+    let is_unix_socket = file.as_any().is::<UnixSocketFile>();
+    if is_unix_socket {
         let unix_addr = match parse_sockaddr_un(addr, addrlen) {
             Ok(addr) => addr,
             Err(e) => return e,
+        };
+        drop(task_lock);
+        let unix_socket = match file.as_any().downcast_ref::<UnixSocketFile>() {
+            Some(socket) => socket,
+            None => return -88, // ENOTSOCK
         };
         return unix_socket.bind(unix_addr);
     }
