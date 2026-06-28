@@ -1,6 +1,36 @@
 use super::*;
 
 const TCP_LISTENER_POOL_LIMIT: usize = 16;
+const AF_INET_U16: u16 = 2;
+
+fn is_local_bind_address(addr: IpAddress) -> bool {
+    match addr {
+        IpAddress::Ipv4(addr) => {
+            addr.is_unspecified()
+                || addr.octets()[0] == 127
+                || NETWORK_INTERFACE_MANAGER
+                    .lock()
+                    .get_interfaces()
+                    .iter()
+                    .any(|iface| {
+                        iface
+                            .ip_addresses()
+                            .iter()
+                            .any(|cidr| match cidr.address() {
+                                IpAddress::Ipv4(local) => local == addr,
+                                #[cfg(feature = "proto-ipv6")]
+                                IpAddress::Ipv6(_) => false,
+                                #[cfg(not(feature = "proto-ipv6"))]
+                                _ => false,
+                            })
+                    })
+        }
+        #[cfg(feature = "proto-ipv6")]
+        IpAddress::Ipv6(addr) => addr.is_unspecified() || addr.is_loopback(),
+        #[cfg(not(feature = "proto-ipv6"))]
+        _ => false,
+    }
+}
 
 /// 创建套接字
 pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
@@ -144,10 +174,21 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         return unix_socket.bind(unix_addr);
     }
 
+    let family = match read_sockaddr_family(addr, addrlen) {
+        Ok(family) => family,
+        Err(e) => return e.to_errno(),
+    };
+    if family != AF_INET_U16 {
+        return -(crate::uapi::errno::EAFNOSUPPORT as isize);
+    }
+
     let endpoint = match parse_sockaddr_in(addr, addrlen) {
         Ok(e) => e,
         Err(e) => return e.to_errno(),
     };
+    if !is_local_bind_address(endpoint.addr) {
+        return -(crate::uapi::errno::EADDRNOTAVAIL as isize);
+    }
 
     let tid = task_lock.tid as usize;
 
