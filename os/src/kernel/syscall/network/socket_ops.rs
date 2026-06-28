@@ -442,6 +442,10 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         None => return -88, // ENOTSOCK
     };
 
+    if matches!(socket_file.handle(), SocketHandle::Udp(_)) {
+        return -95; // EOPNOTSUPP - UDP doesn't support accept
+    }
+
     if !socket_file.is_listener() {
         return -22; // EINVAL - not a listening socket
     }
