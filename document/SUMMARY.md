@@ -19,8 +19,8 @@
   - [架构设计](log/architecture.md)
   - [日志级别](log/level.md)
   - [缓冲区和条目](log/buffer_and_entry.md)
-  - [使用方法](log/usage.md)
-  - [API 参考](log/api_reference.md)
+  - [使用边界](log/usage.md)
+  - [API 文档入口](log/api_reference.md)
 
 # 网络
 
@@ -31,16 +31,16 @@
   - [Socket 与 syscall](net/socket_syscall.md)
   - [Loopback 与 poll](net/loopback_poll.md)
   - [测试与排查](net/testing.md)
-  - [网络实现指南](net/network_implementation_guide.md)
+  - [网络维护边界](net/network_implementation_guide.md)
   - [netperf / netserver 测试说明](net/netperf.md)
 
 # 同步原语
 
 - [同步机制概述](sync/README.md)
+  - [RawSpinLock](sync/raw_spin_lock.md)
   - [自旋锁](sync/spin_lock.md)
+  - [互斥锁](sync/mutex.md)
   - [读写锁](sync/rwlock.md)
-  - [票号锁](sync/ticket_lock.md)
-  - [睡眠锁](sync/sleep_lock.md)
   - [中断保护](sync/intr_guard.md)
   - [Per-CPU 变量](sync/per_cpu.md)
   - [抢占控制](sync/preempt.md)
@@ -48,6 +48,8 @@
   - [死锁检测](sync/deadlock.md)
 
 # 内核子系统
+
+- [启动流程](kernel/boot.md)
 
 ## 任务管理
 
@@ -73,7 +75,7 @@
   - [路径解析与挂载](vfs/path_and_mount.md)
   - [FileSystem 与错误处理](vfs/filesystem_and_errors.md)
   - [文件锁与设备管理](vfs/filelock_and_devices.md)
-  - [使用指南](vfs/usage.md)
+  - [维护边界](vfs/usage.md)
 
 # 文件系统实现
 
@@ -82,6 +84,7 @@
   - [ProcFS - 进程信息](fs/procfs.md)
   - [SysFS - 系统设备](fs/sysfs.md)
   - [Ext4 - Linux文件系统](fs/ext4.md)
+  - [VFAT/FAT - mount 兼容路径](fs/vfat.md)
   - [SimpleFS - 测试文件系统](fs/simple_fs.md)
 
 # 设备与驱动
@@ -101,6 +104,8 @@
 - [系统调用速查](syscall/README.md)
 
 # 架构相关
+
+- [架构抽象概览](arch/README.md)
 
 ## RISC-V
 

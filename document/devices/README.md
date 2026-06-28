@@ -1,71 +1,107 @@
-# 设备与驱动概览
+# 设备与存储路径
 
-面向内核贡献者的设备子系统说明，覆盖驱动模型、设备树探测、VirtIO 适配、块/网/控制台/RTC 等核心组件。架构与代码入口位于 os/src/device/ 下。
+设备层为 Comix 提供驱动注册, 设备树探测, VirtIO 传输, 块设备, 网络, 控制台, RTC 等基础能力. 对文档同步最关键的是存储路径: 块设备和分区被枚举为 `vda`, `vda1`, `vda2` 等名字, 上层 FS 再从这些候选中探测 rootfs 或挂载 VFAT 测试分区.
 
-## 驱动模型与注册表
+## 当前状态
 
-- 抽象：所有驱动实现 `Driver`，统一提供 `try_handle_interrupt`、`device_type`、`get_id`，并通过可选的 `as_block/as_net/as_rtc/as_serial` 返回具体接口。
-- 注册：全局表 `DRIVERS/BLK_DRIVERS/RTC_DRIVERS/SERIAL_DRIVERS`（见 os/src/device/mod.rs）存放已初始化驱动；`register_driver()` 用于统一登记并在中断路径可遍历。
-- 中断派发：`IRQ_MANAGER`（根级）基于中断号或全局列表调用驱动的 `try_handle_interrupt`（见 os/src/device/irq/mod.rs）。
+- 所有驱动实现 `Driver`, 按类型可向下暴露 `BlockDriver`, `NetDevice`, `RtcDriver`, `SerialDriver`.
+- 全局注册表包括 `DRIVERS`, `BLK_DRIVERS`, `RTC_DRIVERS`, `SERIAL_DRIVERS`.
+- 设备树初始化先处理中断控制器, 再处理普通设备.
+- VirtIO MMIO 是主要设备传输路径, PCI 也有部分驱动入口.
+- 块设备支持整盘和 MBR/GPT 分区包装.
+- sysfs 通过设备注册表构建 `/sys/class/*`, FS 初始化通过同一设备列表创建 `/dev` 节点.
 
-## 设备树探测流程
+## 目标
 
-- 引导期将 DTP 指针指向内核可见的 FDT，`device_tree::init()` 解析 CPU/时钟/内存信息并读取 `bootargs`（见 os/src/device/device_tree.rs）。
-- `DEVICE_TREE_REGISTRY` 按 `compatible` 注册探测函数；初始化时分两轮遍历：先初始化中断控制器，再初始化其他设备。
-- `DEVICE_TREE_INTC` 保存 phandle→中断控制器驱动映射，供设备解析其 `interrupts` 属性时使用。
+- 为 FS 层提供稳定的块设备抽象.
+- 为 VFS 设备文件提供字符/块设备驱动入口.
+- 让 rootfs 探测不依赖固定 virtio 设备枚举顺序.
+- 让 VFAT/FAT 测试分区能作为普通分区块设备被挂载和卸载.
 
-## 中断控制器：PLIC
+## 非目标
 
-- 驱动位于 os/src/device/irq/plic.rs，使用 MMIO 寄存器完成 claim/complete。
-- 初始化：在 device tree 中匹配 `riscv,plic0`，映射 MMIO，注册到根 `IRQ_MANAGER` 的 `SUPERVISOR_EXTERNAL` 路径。
-- 提供 `IntcDriver::register_local_irq` 辅助驱动将中断号与处理器上下文绑定。
+- 不在设备文档中描述具体文件系统格式.
+- 不承诺完整热插拔设备管理.
+- 不复制每个驱动寄存器和队列实现.
 
-## 总线与 VirtIO 传输
+## 模块边界
 
-- bus/virtio_mmio.rs、bus/pcie.rs 提供传输层占位/适配（目前主要使用 VirtIO MMIO）。
-- VirtIO 设备驱动共享 `VirtIOHal`（os/src/device/virtio_hal.rs）作为 DMA/内存屏障实现。
+- `device/mod.rs`: 驱动 trait 和全局注册表.
+- `device_tree.rs`: FDT 解析, bootargs, compatible 到 probe 的分发.
+- `bus/virtio_mmio.rs`: VirtIO MMIO transport 探测和设备类型分发.
+- `virtio_hal.rs`: virtio-drivers 使用的 DMA/MMIO HAL.
+- `block/mod.rs`: `BlockDriver` 接口.
+- `block/virtio_blk.rs`: virtio block 整盘设备.
+- `block/partition.rs`: MBR/GPT 分区发现和 `PartitionBlockDevice`.
+- `console/`, `serial/`, `rtc/`, `net/`: 字符, 时间和网络设备来源.
+- `fs/sysfs/device_registry.rs`: 设备列表投影到 sysfs 和 FS 初始化.
 
-## 块设备
+## 存储关键流程
 
-- 接口：`BlockDriver` trait（os/src/device/block/mod.rs）定义读写/flush/块大小/容量。
-- RAMDisk：`ram_disk.rs`，纯内存实现，用于测试或引导阶段；无中断，支持读写与容量查询。
-- VirtIO-Block：`virtio_blk.rs`，基于 virtio-drivers 的 `VirtIOBlk`；初始化后注册到 `DRIVERS`、`BLK_DRIVERS`、`IRQ_MANAGER`。块大小 512 字节，容量由设备报告。
-- 文件系统集成：VFS/ext4 通过 `BlockDriver` 适配层访问块设备，首次构建会生成 ext4 镜像 `fs.img` 并通过 virtio-blk 挂载。
+### 设备发现
 
-## 网络设备
+```text
+device_tree init
+  -> virtio mmio probe
+  -> virtio block init
+  -> BLK_DRIVERS push whole disk
+  -> sysfs device_registry list_block_devices
+  -> discover partitions
+  -> vda, vda1, vda2 ...
+```
 
-- 接口：`NetDevice` trait（os/src/device/net/net_device.rs）提供 send/receive/MTU/MAC 信息。
-- VirtIO-Net：`virtio_net.rs` 使用 `VirtioNetDevice` 包装 virtio-drivers 的实现，默认 MTU 1500。`init()` 创建设备后同时：
-  - 加入 `NETWORK_DEVICES` 列表；
-  - 创建 `NetworkInterface`（os/src/net/interface.rs）并注册到接口管理器；
-  - 通过 `register_driver` 让 IRQ 路径可见。
+`BLK_DRIVERS` 只保存整盘驱动. 分区设备是在 `list_block_devices` 时根据分区表动态包装出来的逻辑块设备.
 
-## 控制台与串口
+### rootfs selection
 
-- 接口：`Console` trait（os/src/device/console/mod.rs）提供读写/flush；`CONSOLES` 与 `MAIN_CONSOLE` 管理活动控制台。
-- 实现：`uart_console.rs`、`frame_console.rs`（后者可用于图形帧缓冲输出）。串口驱动还可通过 `SerialDriver`（os/src/device/serial/mod.rs）统一暴露给 VFS/日志。
+```text
+list block devices
+  -> prefer partition names
+  -> FS tries ext4
+  -> accept if /bin/sh or /bin/ash exists
+```
 
-## RTC 与时间
+默认分区盘设计是 ext4 rootfs 和 VFAT 测试分区共存. 一般情况下 ext4 rootfs 在 `vda1`, VFAT/FAT 测试分区在 `vda2`, 但代码以内容探测为准, 不写死设备名.
 
-- RTC 驱动接口在 os/src/device/rtc/mod.rs，当前实现 `rtc_goldfish.rs` 对接 virtio/goldfish RTC（用于墙钟时间/定时）。
+### VFAT test partition
 
-## 其他占位
+VFAT/FAT 分区通过同一 `BlockDriver` 路径进入 `os/src/fs/vfat/`. 它用于 mount/umount, statfs, flush 和跨文件系统路径解析测试, 不参与默认 rootfs 选择.
 
-- GPU：`gpu/virtio_gpu.rs` 占位实现，提供未来图形输出路径。
-- 输入：`input/virtio_input.rs` 占位，为键鼠/触摸设备预留。
-- IRQ：`irq/mod.rs` 定义通用中断管理逻辑，除 PLIC 外可扩展本地或板级控制器。
+### `/dev` and `/sys`
 
-## 初始化顺序（概览）
+```text
+list_block_devices
+  -> /sys/class/block entries
+  -> /dev block nodes
+```
 
-1. device_tree::init() 解析 FDT，注册 compatible→init 钩子。
-2. 先初始化中断控制器（如 PLIC），完成根 IRQ 管理器设置。
-3. 逐个设备匹配 compatible：VirtIO-MMIO → virtio-blk / virtio-net / virtio-gpu / virtio-input / virtio-console 等。
-4. 驱动完成自注册：加入 DRIVERS/子列表，必要时在 IRQ_MANAGER 中登记。
-5. 上层子系统使用对应 trait（BlockDriver/NetDevice/Console/SerialDriver/RTC）完成挂载与服务暴露。
+这保证用户态能通过 `/sys/class/block/vda1` 观察分区, 也能通过 `/dev/vda1` 作为 mount source 使用.
 
-## 调试提示
+## 并发和生命周期约束
 
-- 查看已注册驱动：在调试或日志中读取 DRIVERS/BLK_DRIVERS/NETWORK_DEVICES 等全局表。
-- 中断无法响应：确认 PLIC `register_local_irq` 是否被调用、IRQ 号与设备树一致、`IRQ_MANAGER.try_handle_interrupt` 返回路径。
-- 块设备异常：检查 `fs.img` 是否生成、块大小与 `config::VIRTIO_BLK_SECTOR_SIZE` 保持一致。
-- 网络收发异常：确认 virtio-net 设备已添加到接口管理器、MTU 未超限，并检查队列是否因 `QueueFull/QueueEmpty` 返回错误。
+- 驱动注册表初始化后主要读多写少.
+- `PartitionBlockDevice` 持有底层整盘 `Arc<dyn BlockDriver>`, 不复制数据.
+- 分区读写会检查逻辑块范围, 再偏移到底层整盘块号.
+- VirtIO 设备通过内部锁串行化驱动对象访问, IRQ 路径通过 `IRQ_MANAGER` 分发.
+- DMA allocation 由 `VirtIOHal` 记录物理帧范围, 释放时注意锁顺序.
+
+## 已知限制
+
+- 设备热插拔后 `/dev` 和 `/sys` 不是自动增量更新模型.
+- 分区解析支持 primary MBR 和基础 GPT 条目, 不覆盖所有复杂分区格式.
+- 分区发现假设 512 字节扇区.
+- 多块设备命名使用 `vda`, `vdb` 顺序, 仍应避免在 rootfs 策略中硬编码.
+
+## 源码索引
+
+- `os/src/device/mod.rs`: 驱动模型和注册表.
+- `os/src/device/device_tree.rs`: FDT 初始化和 probe 分发.
+- `os/src/device/bus/virtio_mmio.rs`: VirtIO MMIO 设备识别.
+- `os/src/device/virtio_hal.rs`: DMA/MMIO HAL.
+- `os/src/device/block/mod.rs`: `BlockDriver`.
+- `os/src/device/block/virtio_blk.rs`: virtio block 驱动.
+- `os/src/device/block/partition.rs`: MBR/GPT 分区和分区块设备.
+- `os/src/fs/sysfs/device_registry.rs`: 块设备和分区枚举.
+- `os/src/fs/mod.rs`: rootfs 探测和 `/dev` 节点创建.
+- `os/src/fs/vfat/`: VFAT/FAT 分区挂载路径.
+- `os/src/fs/ext4/`: ext4 rootfs 挂载路径.

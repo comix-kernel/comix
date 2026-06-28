@@ -1,0 +1,8 @@
+[book]
+title = "Comix Documentation"
+language = "zh-CN"
+src = "."
+
+[build]
+build-dir = "../target/mdbook-document"
+create-missing = false

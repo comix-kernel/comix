@@ -3,7 +3,7 @@
 //! 组合 `CpuOps + VirtualMemory`，并添加进程管理、信号处理、
 //! 用户/内核内存复制等高层 CPU/MMU 操作。
 //!
-//! 平台级操作（控制台 I/O、电源管理、地址映射）已移至 [`crate::arch::platform::Platform`]。
+//! 平台级操作（控制台 I/O、电源管理、地址映射）已移至 [`crate::arch::Platform`]。
 //!
 //! 注意：此 trait 使用关联类型来避免直接引用内核数据结构，
 //! 确保架构层与内核其余部分的解耦。
@@ -57,7 +57,7 @@ pub trait HwTrapFrame: Copy + Debug + Send + Sync + SyscallFrame + 'static {
 /// 这是移植新架构时需要实现的第三个 trait（在 `CpuOps` 和 `VirtualMemory` 之后）。
 /// [`Platform`] 应同时实现以覆盖控制台、电源等平台操作。
 ///
-/// [`Platform`]: crate::arch::platform::Platform
+/// [`Platform`]: crate::arch::Platform
 pub trait Arch: CpuOps + VirtualMemory {
     /// 用户上下文类型（保存/恢复寄存器状态）
     type UserContext: Sized + Send + Sync + Clone;

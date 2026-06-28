@@ -1,33 +1,56 @@
-# 管道（Pipe）
+# 管道
 
-管道提供基于内核缓冲区的单向字节流通信，典型用于父子任务或线程间的数据传递。
+Pipe 提供单向字节流 IPC。当前设计分成两层: `ipc::Pipe` 负责共享环形缓冲区, VFS `PipeFile` 负责 fd 语义, 阻塞/非阻塞和 poll 边界。
 
-- 源码：
-  - 内核对象与缓冲：`os/src/ipc/pipe.rs`
-  - VFS 文件封装：`os/src/vfs/impls/pipe_file.rs`
+## 当前状态
 
-## 设计与数据路径
-- 内核缓冲：通常使用环形缓冲区（参考 `os/src/tool/ring_buffer.rs`），在写端写入字节，在读端按序读出。
-- 引用计数：读/写端在 `File` 层分别持有到同一管道对象的引用，端点关闭逻辑据此判断 EOF/EPIPE。
-- 同步与阻塞：内部维护两个 `WaitQueue`（读队列/写队列），在缓冲区空/满时进行睡眠与唤醒；配合调度器实现让出 CPU。
+- `make_pipe()` 创建读端和写端, 两端共享同一个 `PipeRingBuffer`。
+- 底层缓冲以字节为单位读写, 不保存消息边界。
+- syscall 层的 `pipe2()` 创建 `PipeFile` 对, 放入当前任务 fd table, 再把 fd 写回用户空间。
+- `PipeRingBuffer` 保存写端弱引用, 用于判断写端是否已经全部释放。
 
-## 语义要点
-- EOF：写端全部关闭后，读端读到缓冲区耗尽返回 0。
-- EPIPE/SIGPIPE：无读者时写入返回错误，并可触发 `SIGPIPE`（由 `signal` 模块注入）。
-- 阻塞/非阻塞：
-  - 阻塞读：缓冲为空则睡眠，直到有新数据或写端全部关闭。
-  - 阻塞写：缓冲为满则睡眠，直到有空间或读端全部关闭（报错）。
-  - 非阻塞模式返回类 `EAGAIN`/`EWOULDBLOCK`（具体常量以实现为准）。
-- 原子性：小于等于实现规定的原子写入大小的写操作在语义上应尽量保持原子（同一写调用中的字节不被其他写穿插）。
+## 目标
 
-## 与 VFS 的集成
-- `pipe()` 创建成对的读/写端 `File`，通过 `fd_table` 暴露为整数 fd。
-- 文件操作实现 `read/write/poll/close` 等通用接口，支持被 `dup`/`fork` 共享。
+- 把 pipe 作为普通 fd 暴露给 VFS I/O 路径。
+- 让底层 IPC 代码只关心字节流和端点生命周期。
+- 让用户指针复制, fd 分配, close-on-exec 等策略停留在 syscall/VFS 层。
 
-## 与调度/等待队列
-- 读空或写满路径进入 `WaitQueue::sleep()`；数据到达或空间释放时 `wake_up_one()`。
-- 可中断睡眠：收到信号时从睡眠返回并携带中断错误码。
+## 非目标
 
-## 性能与边界
-- 缓冲区大小固定（实现依赖），背压由写阻塞或错误返回体现。
-- 内核态单次拷贝：调用方缓冲区与内核环形缓冲之间的拷贝；跨任务通信无需额外拷贝。
+- `ipc::Pipe` 不直接实现 Linux pipe syscall 的全部错误分支。
+- 不在 pipe 层保存应用协议消息边界。
+- 不在本文维护 ring buffer 容量和每个 errno 的清单。
+
+## 模块边界
+
+- `os/src/ipc/pipe.rs`: 共享缓冲区和读写端对象。
+- `os/src/vfs/impls/pipe_file.rs`: `File` trait, read/write/poll/close 语义。
+- `os/src/kernel/syscall/ipc.rs`: `pipe2()` 参数校验和 fd table 写入。
+- `os/src/kernel/syscall/io.rs`: 通用 read/write 重试, `WouldBlock`, 信号中断。
+
+## 关键流程
+
+1. `pipe2()` 校验 flag, 创建读端和写端文件对象。
+2. fd table 分配两个 fd, 失败时回滚已分配 fd。
+3. 读写 syscall 通过 VFS `File` 进入 pipe 文件对象。
+4. pipe 文件对象在需要时访问 `ipc::Pipe` 的 ring buffer。
+5. 写端全部关闭后, 读侧可根据 VFS 层状态形成 EOF。
+
+## 并发和生命周期约束
+
+- 共享缓冲区由 `Arc<Mutex<PipeRingBuffer>>` 保护。
+- `PipeRingBuffer` 使用写端 `Weak<Pipe>` 判断端点释放, 避免写端和缓冲区互相强引用。
+- 用户缓冲区复制发生在 syscall/VFS I/O 边界, IPC 层不保存用户指针。
+- 阻塞等待必须在释放缓冲区锁后进行。
+
+## 已知限制
+
+- 底层 `ipc::Pipe` 是尽量简单的字节缓冲封装, 复杂语义依赖 VFS pipe 文件实现。
+- 文档不承诺固定的 pipe 原子写大小, 以源码和测试为准。
+
+## 源码索引
+
+- `os/src/ipc/pipe.rs`: `Pipe`, `PipeRingBuffer`, `make_pipe()`。
+- `os/src/vfs/impls/pipe_file.rs`: pipe 作为 `File` 的行为。
+- `os/src/kernel/syscall/ipc.rs`: `pipe2()`。
+- `os/src/kernel/syscall/io.rs`: 通用 I/O 等待和信号中断。

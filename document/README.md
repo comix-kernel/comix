@@ -1,46 +1,58 @@
-# 文档总览（document/）
+# 文档总览
 
-本目录存放 comix 项目的设计文档、模块说明与写作指南。此 README 面向“文档作者与维护者”，用于解释组织结构、写作约定、如何预览/发布。
+`document/` 是 Comix 的正式设计文档入口，面向内核贡献者和评审者。这里解释系统为什么这样分层、模块如何协作、哪些约束不能破坏；具体函数签名、字段语义和局部实现细节应优先维护在 rustdoc、模块注释和源码注释中。
 
-## 快速浏览与预览
+## 文档分层
 
-- 直接阅读：按下述“目录导航”中的链接浏览各子模块文档。
-- 使用 mdBook 预览（若需书籍化浏览）：
-  1. 安装 mdBook（一次性）
-     - 使用 Rust 工具链：`cargo install mdbook`
-     - 或从发行包获取，参考 mdBook 官方说明
-  2. 在仓库根目录执行（假定 book.toml 位于 document/ 或仓库根）：
-     - 预览：`mdbook serve document -n 0.0.0.0 -p 4000`
-     - 构建：`mdbook build document`
-  3. 浏览器打开预览
-     - 终端：`$BROWSER http://127.0.0.1:4000/`
-- 无 book.toml 时：你仍可直接阅读 Markdown 文件；如需 mdBook 视图，请新增 book.toml 并确保 SUMMARY.md 正确列出条目。
+- `document/`：设计、边界、关键流程、不变量、已知限制和维护约束。
+- `os/src/**` rustdoc：公共类型、函数、错误条件、调用约束和小型示例。
+- 源码行内注释：unsafe 依据、架构细节、锁顺序、性能取舍和非显而易见的局部逻辑。
+- `local_doc/`：本地草稿和阶段性研究资料，不作为正式文档同步目标。
 
-## 写作与维护约定
+## 写作契约
 
-- 文件组织
-  - 每个子系统一个子目录；跨子系统主题放在更高层次目录（如 kernel 与 mm 的交叉主题）。
-  - 子目录首选提供一个该子系统的 README.md 做概览与导航。
-- 链接与路径
-  - 文档内引用源码时，尽量使用以仓库根为基准的绝对路径提示（便于读者搜索源文件），例如：`os/src/ipc/pipe.rs`
-  - 面向 mdBook 的导航请在 SUMMARY.md 中登记；面向贡献者的说明放在各自 README.md。
-- 风格与结构
-  - 先给结论与关键 API，再给背景与细节；长文档建议提供“导航/目录”与“总结/要点”。
-  - 代码片段应最小可读，可附运行/调用路径。
-- 校验与工具
-  - 风格与链接检查可参考：`document/scripts/style-check.md`、`document/scripts/rewrite_links.md`
-  - 提交前自查：新增文档是否需要出现在 SUMMARY.md；是否在对应子目录 README 中被导航到。
+- 每个子系统首选一个 `README.md` 做概览，子页面只覆盖清晰的设计主题。
+- 一篇设计文档应说明当前状态、目标/非目标、模块边界、关键流程、并发或生命周期约束、已知限制和源码索引。
+- 源码路径使用仓库根相对路径，例如 `os/src/ipc/pipe.rs`。
+- 避免维护函数清单、字段大全、完整错误分支和长代码示例；这些内容更适合 rustdoc。
+- 文档只描述当前代码已经提供的能力。未实现能力必须明确标为限制或后续方向。
+- 新增正式页面后必须更新 `document/SUMMARY.md`，并在对应子系统 README 中加入导航。
 
-## 新增或更新文档的建议流程
+## 导航策略
 
-1. 在对应子目录内新增 Markdown 文件，或同步更新该子目录 README 的导航。
-2. 若需要在 mdBook 中展示，更新 `document/SUMMARY.md`，保持目录结构清晰。
-3. 本地预览（如使用 mdBook）：`mdbook serve document -n 0.0.0.0 -p 4000`，浏览器打开：`$BROWSER http://127.0.0.1:4000/`
-4. 在 PR 描述中简述新增内容与对应源码位置，便于评审。
+Comix 采用"细项主导航 + 简洁页面"的混合风格。主导航保留当前实现相关的细分设计页，方便读者直接跳到具体主题；页面内容则保持设计优先，避免膨胀成 API 手册。
+
+- `document/SUMMARY.md` 可以列出有维护价值的细项，例如 MM 的地址/页表/地址空间、VFS 的 File/FDTable/路径挂载、IPC 的 pipe/shared memory/signal。
+- 历史状态、未实现方案或重复 rustdoc 的页面不进入主导航，只从子系统 README 的历史或延伸阅读区域链接。
+- 子系统 README 必须解释这些细项的阅读顺序和用途，避免主导航只是文件列表。
+- 参考 SanktaOS 的短页面写法，但不照搬它的极简主导航。
+
+## 预览与构建
+
+在仓库根目录执行：
+
+```bash
+mdbook serve document -n 0.0.0.0 -p 4000
+mdbook build
+```
+
+API 细节通过 rustdoc 生成：
+
+```bash
+cd os
+cargo doc --no-deps --target riscv64gc-unknown-none-elf
+```
+
+## 维护流程
+
+1. 先读最新源码入口和现有文档，确认文档要表达的是设计而不是代码搬运。
+2. 在对应子系统目录更新 Markdown；跨子系统主题放到更高层级。
+3. 更新 `document/SUMMARY.md` 和子系统 README 导航。
+4. 运行 `mdbook build`，必要时运行 `python3 scripts/rewrite_links.py document/` 后再次构建。
+5. 若改动涉及公共 API 文档，运行 `cargo doc --no-deps --target riscv64gc-unknown-none-elf`。
 
 ## 常见问题
 
-- 为什么我新增的文档在左侧目录看不到？
-  - 需要把文档添加到 `document/SUMMARY.md` 中。README 只提供作者指引，不参与 mdBook 的目录生成。
-- 链接在 mdBook 中 404？
-  - 检查相对路径是否以 `document/` 为根进行组织；必要时使用脚本 `document/scripts/rewrite_links.md` 的建议重写规则。
+- 新页面没有出现在左侧目录：需要加入 `document/SUMMARY.md`。
+- 文档和 rustdoc 内容重复：正式文档保留设计说明，把 API 细节移回 rustdoc。
+- 文档引用了不存在的源码路径：以 `os/src` 当前目录结构为准修正，不保留历史路径作为当前实现。

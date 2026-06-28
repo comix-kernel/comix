@@ -1,156 +1,67 @@
-# ProcFS - 进程信息文件系统
+# ProcFS
 
-## 概述
+ProcFS 把进程和系统运行时状态暴露为 `/proc` 文件树. 它是动态伪文件系统, 文件内容通常在读取时生成.
 
-ProcFS 是一个虚拟文件系统，用于导出内核状态和进程信息。所有文件内容都是动态生成的，不占用磁盘空间。
+## 当前状态
 
-**主要特点**:
-- 虚拟文件系统：文件内容动态生成
-- 只读：不支持写入操作
-- 标准接口：兼容Linux `/proc` 接口
-- 可扩展：易于添加新的信息导出
+- 源码位于 `os/src/fs/proc/`.
+- `ProcFS::init_tree` 创建固定根条目, 如 `meminfo`, `uptime`, `cpuinfo`, `mounts`, `psmem`, `self`.
+- 进程相关路径由 proc inode/generator 动态提供.
+- 文件内容由 generator 生成, 不落盘.
+- 部分动态 inode 使用非缓存策略, 避免进程退出后路径陈旧.
 
-## 架构设计
+## 目标
 
-### 核心组件
+- 为用户态工具提供 Linux 风格 `/proc` 入口.
+- 暴露进程, 内存, CPU, mount 等调试信息.
+- 让动态内容以 VFS inode 方式接入, 不绕过路径和 fd 模型.
 
-```mermaid
-graph TB
-    A[ProcFS] -->|root| B[ProcInode]
-    B -->|静态子节点| C[meminfo/cpuinfo/uptime...]
-    B -->|动态子节点| D["/proc/self"]
-    B -->|进程目录| E["/proc/[pid]/"]
-    
-    C -->|Generator| F[MeminfoGenerator]
-    C -->|Generator| G[CpuinfoGenerator]
-    E -->|Generator| H[StatGenerator]
-    E -->|Generator| I[StatusGenerator]
-    
-    style A fill:#87CEEB
-    style F fill:#90EE90
-    style G fill:#90EE90
-    style H fill:#FFD700
-    style I fill:#FFD700
+## 非目标
+
+- 不实现完整 Linux procfs.
+- 不保证每个字段和 Linux 完全一致.
+- 不把 generator 的输出格式细节写入设计文档.
+
+## 模块边界
+
+- `proc.rs`: 文件系统实例和根树初始化.
+- `inode.rs`: proc inode 类型, 动态文件, 动态 symlink, 目录行为.
+- `generators/`: 具体内容生成器.
+- `generators/process/`: 进程相关文件内容.
+
+## 关键流程
+
+### read dynamic file
+
+```text
+vfs lookup /proc/...
+  -> ProcInode
+  -> generator snapshot
+  -> File read path returns bytes
 ```
 
-### Generator机制
+generator 应尽量生成一个一致的快照, 避免读取过程中依赖长期锁.
 
-所有proc文件使用Generator模式动态生成内容：
+### /proc/self
 
-```rust
-pub trait Generator: Send + Sync {
-    /// 生成文件内容
-    fn generate(&self) -> alloc::vec::Vec<u8>;
-}
+`/proc/self` 是动态 symlink, 每次解析时根据当前任务 pid 指向对应进程目录.
 
-// 示例：内存信息生成器
-pub struct MeminfoGenerator;
+## 并发和生命周期约束
 
-impl Generator for MeminfoGenerator {
-    fn generate(&self) -> Vec<u8> {
-        let total = get_total_memory();
-        let free = get_free_memory();
-        
-        format!(
-            "MemTotal: {} kB\nMemFree: {} kB\nMemAvailable: {} kB\n",
-            total / 1024,
-            free / 1024,
-            free / 1024
-        ).into_bytes()
-    }
-}
-```
+- 进程状态会变化, generator 需要容忍目标进程退出.
+- 动态进程路径不应无条件缓存 dentry.
+- 读取 proc 文件不应长期阻塞全局调度或任务锁.
 
-## 文件列表
+## 已知限制
 
-### 系统信息文件
+- 当前 procfs 以只读信息为主.
+- Linux 工具依赖的某些 `/proc` 文件和字段尚未实现.
+- `/proc/mounts` 反映当前 VFS mount table 的可见状态, 不是完整 namespace 视图.
 
-| 文件 | 内容 | 示例 |
-|------|------|------|
-| `/proc/meminfo` | 内存使用信息 | `MemTotal: 2048 MB` |
-| `/proc/cpuinfo` | CPU信息 | `processor: 0` |
-| `/proc/uptime` | 系统运行时间 | `12345.67 12345.67` |
-| `/proc/mounts` | 挂载点列表 | `tmpfs /tmp tmpfs rw 0 0` |
+## 源码索引
 
-### 进程信息文件
-
-| 文件 | 内容 | 生成器 |
-|------|------|--------|
-| `/proc/[pid]/cmdline` | 命令行参数 | CmdlineGenerator |
-| `/proc/[pid]/stat` | 进程状态 | StatGenerator |
-| `/proc/[pid]/status` | 详细状态 | StatusGenerator |
-| `/proc/[pid]/maps` | 内存映射 | MapsGenerator |
-
-### 特殊符号链接
-
-| 链接 | 目标 |  说明 |
-|------|------|--------|
-| `/proc/self` | `/proc/[current_pid]` | 指向当前进程 |
-
-## 使用示例
-
-### 读取系统信息
-
-```rust
-// 读取内存信息
-let meminfo = vfs_load_file("/proc/meminfo")?;
-pr_info!("Memory info:\n{}", String::from_utf8_lossy(&meminfo));
-
-// 读取CPU信息
-let cpuinfo = vfs_load_file("/proc/cpuinfo")?;
-
-// 读取系统运行时间
-let uptime = vfs_load_file("/proc/uptime")?;
-```
-
-### 读取进程信息
-
-```rust
-// 读取当前进程状态
-let stat = vfs_load_file("/proc/self/stat")?;
-
-// 读取特定进程的状态
-let pid1_status = vfs_load_file("/proc/1/status")?;
-
-// 读取命令行参数
-let cmdline = vfs_load_file("/proc/self/cmdline")?;
-```
-
-## 添加新的Proc文件
-
-###  步骤1：实现Generator
-
-```rust
-pub struct MyInfoGenerator;
-
-impl Generator for MyInfoGenerator {
-    fn generate(&self) -> Vec<u8> {
-        format!("my_value: {}\n", get_my_value())
-            .into_bytes()
-    }
-}
-```
-
-### 步骤2：注册到ProcFS
-
-```rust
-pub fn init_tree(self: &Arc<Self>) -> Result<(), FsError> {
-    // ... 其他文件 ...
-    
-    // 添加新文件
-    let myinfo = ProcInode::new_dynamic_file(
-        "myinfo",
-        Arc::new(MyInfoGenerator),
-        FileMode::from_bits_truncate(0o444),
-    );
-    root.add_child("myinfo", myinfo)?;
-    
-    Ok(())
-}
-```
-
-## 相关资源
-
-- **源代码**: `os/src/fs/proc/`
-- **生成器**: `os/src/fs/proc/generators/`
-- [FS模块概览](README.md)
+- `os/src/fs/proc/proc.rs`: `ProcFS` 和根树初始化.
+- `os/src/fs/proc/inode.rs`: proc inode 类型.
+- `os/src/fs/proc/generators/`: 系统级动态文件.
+- `os/src/fs/proc/generators/process/`: 进程级动态文件.
+- `os/src/fs/tests/proc/`: procfs 测试.

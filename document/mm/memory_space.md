@@ -1,448 +1,130 @@
 # 地址空间管理
 
-## 概述
+地址空间管理是 MM 子系统的策略层.它把页表后端, 物理帧所有权, VMA 元数据和系统调用语义组合成 `MemorySpace`.
 
-地址空间管理是 MM 子系统的最高抽象层，负责管理整个虚拟地址空间的布局、映射区域和页表操作。每个进程拥有独立的虚拟地址空间，支持内核和用户态的内存隔离。
+## 当前状态
 
-### 设计目标
+- `MemorySpace` 持有一个 `ActivePageTableInner`, 一个 `Vec<MappingArea>` 和用户堆起点 `heap_start`.
+- `MappingArea` 持有 VMA 范围, 区域类型, 映射策略, 权限, 私有帧, 文件映射信息和共享内存段信息.
+- 映射策略包括 `Direct`, `Framed`, `Reserved`, `Shared`.
+- `memory_space` 当前按职责拆成:
+  - `mapping_area/mod.rs` - VMA 元数据类型.
+  - `mapping_area/map_ops.rs` - 单页/整区映射和复制数据.
+  - `mapping_area/split_ops.rs` - fork 克隆, split, mprotect 局部修改, munmap 局部解除.
+  - `mapping_area/resize_ops.rs` - brk 场景下尾部扩缩.
+  - `mapping_area/file_ops.rs` - 文件映射加载和脏页写回.
+  - `space/address_space.rs` - `MemorySpace` 基本操作和 fork.
+  - `space/kernel_space.rs` - 内核地址空间和 MMIO 映射.
+  - `space/elf_loader.rs` - ELF 用户程序装载.
+  - `space/mmap_ops.rs` - `brk`, `mmap`, `munmap`, `mprotect`.
 
-1. **地址空间隔离**：每个进程拥有独立的虚拟地址空间
-2. **灵活的内存布局**：支持代码段、数据段、堆、栈等多种区域
-3. **按需分配**：延迟分配物理内存，节省资源
-4. **系统调用支持**：实现 brk、mmap、munmap 等内存管理系统调用
+## 目标
 
-## 核心结构
+- 用 VMA 记录虚拟地址空间布局, 用页表记录硬件映射.
+- 支持内核共享映射和用户私有映射共存.
+- 为 `brk`, `mmap`, `munmap`, `mprotect`, ELF 加载和 fork 提供一致的区域操作.
+- 让帧所有权跟随 VMA 生命周期自动释放.
 
-### MemorySpace
+## 非目标
 
-```rust
-pub struct MemorySpace {
-    page_table: ActivePageTableInner,    // 页表（管理虚拟→物理映射）
-    areas: Vec<MappingArea>,             // 映射区域列表
-    heap_top: Option<Vpn>,               // 用户堆顶（brk）
-}
-```
-
-### MappingArea
-
-```rust
-pub struct MappingArea {
-    vpn_range: VpnRange,                 // 虚拟页号范围 [start, end)
-    area_type: AreaType,                 // 区域类型（代码/数据/堆/栈）
-    map_type: MapType,                   // 映射策略（Direct/Framed）
-    permission: UniversalPTEFlag,        // 权限标志（R/W/X/U）
-    frames: BTreeMap<Vpn, TrackedFrames>,  // 物理帧映射（Framed 类型使用）
-}
-```
+- 不实现完整 Linux VMA 红黑树或 mmap policy.
+- fork 不是 COW, `Framed` 区域会深拷贝.
+- 不在文档中列出所有 syscall 参数检查和错误分支, 这些细节看 rustdoc 和源码.
 
 ## 映射策略
 
-### Direct 直接映射
+### Direct
 
-用于内核空间，虚拟地址直接对应物理地址：
+用于内核直接映射和内核段映射.`MappingArea` 不持有物理帧, 映射时从虚拟地址通过架构直接映射函数得到物理页.
 
-```
-虚拟地址                    物理地址
-0xFFFF_FFC0_8000_0000  ←→  0x8000_0000
-0xFFFF_FFC0_8000_1000  ←→  0x8000_1000
+### Framed
 
-特点:
-✓ 无需分配物理帧
-✓ 访问物理内存无需查页表
-✓ 仅用于内核空间
-```
+用于用户私有页和匿名映射.每个虚拟页分配 `FrameTracker`, tracker 放在 `MappingArea.frames` 中.VMA 被移除或拆分时, tracker 的所有权同步移动或释放.
 
-```rust
-// 实现
-for vpn in self.vpn_range {
-    let vaddr = vpn.start_addr();
-    let paddr = vaddr.to_paddr();
-    let ppn = Ppn::from_addr_floor(paddr);
-    page_table.map(vpn, ppn, PageSize::Size4K, self.permission)?;
-}
-```
+### Reserved
 
-### Framed 帧映射
+用于占位但不可访问的区域, 例如 `PROT_NONE`.这种区域参与 VMA 重叠检查, 但不建立叶子 PTE.
 
-用于用户空间，每个虚拟页分配独立的物理帧：
+### Shared
 
-```
-虚拟页号      物理页号
-VPN 0x1000  ←→  PPN 0x8234_5  (分配)
-VPN 0x1001  ←→  PPN 0x8456_7  (分配)
+用于 SysV shared memory.VMA 保存共享段引用和段内页偏移, 映射时从共享段取 PPN, 不拥有私有帧.
 
-特点:
-✓ 每个虚拟页分配独立物理帧
-✓ 物理内存可能不连续
-✓ 自动管理物理帧生命周期（RAII）
-```
-
-```rust
-// 实现
-for vpn in self.vpn_range {
-    let frame = alloc_frame()?;
-    let ppn = frame.ppn();
-    page_table.map(vpn, ppn, PageSize::Size4K, self.permission)?;
-    self.frames.insert(vpn, TrackedFrames::Single(frame));
-}
-```
-
-## 地址空间创建
+## 关键流程
 
 ### 内核地址空间
 
-```rust
-pub fn new_kernel() -> Self {
-    let mut space = Self {
-        page_table: ActivePageTableInner::new(),
-        areas: Vec::new(),
-        heap_top: None,
-    };
+`MemorySpace::new_kernel()` 创建空页表后调用 `map_kernel_space()`:
 
-    // 1. 映射跳板页
-    space.map_trampoline();
-
-    // 2. 映射内核各段（Direct 映射）
-    space.map_kernel_text();    // .text   R+X
-    space.map_kernel_rodata();  // .rodata R
-    space.map_kernel_data();    // .data   R+W
-    space.map_kernel_bss();     // .bss    R+W
-    space.map_kernel_heap();    // heap    R+W
-
-    // 3. 直接映射物理内存
-    space.map_physical_memory();
-
-    space
-}
-```
-
-**内核段映射示例**：
-
-```rust
-// .text 段（只读可执行）
-let text_start = Vaddr::new(stext as usize);
-let text_end = Vaddr::new(etext as usize);
-space.push(MappingArea::new(
-    VaddrRange::new(text_start, text_end),
-    MapType::Direct,
-    UniversalPTEFlag::kernel_r() | UniversalPTEFlag::X,
-    AreaType::KernelText,
-));
-```
+1. 按链接器符号映射 `.text`, `.rodata`, `.data`, `.bss.stack`, `.bss`, 堆.
+2. 直接映射可用物理内存范围.RISC-V 覆盖设备树 DRAM, LoongArch64 对页表直映射窗口做 1GiB cap.
+3. RISC-V 在需要时额外确保 DTB 所在页可访问.
+4. MMIO 自动映射目前不是默认路径, 显式 MMIO 映射通过 `map_mmio` 系列接口管理.
 
 ### 用户地址空间
 
-```rust
-pub fn from_elf(elf_data: &[u8]) -> Self {
-    let mut space = Self {
-        page_table: ActivePageTableInner::new(),
-        areas: Vec::new(),
-        heap_top: None,
-    };
-
-    // 1. 解析 ELF 文件，映射各段（Framed 映射）
-    let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
-    for program_header in elf.program_iter() {
-        if program_header.get_type() == Ok(xmas_elf::program::Type::Load) {
-            // 创建映射区域
-            let area = MappingArea::new(
-                vaddr_range,
-                MapType::Framed,
-                permission,
-                area_type,
-            );
-            // 拷贝数据到物理页
-            area.copy_data(&space.page_table, program_header.get_data(&elf).unwrap());
-            space.areas.push(area);
-        }
-    }
-
-    // 2. 映射用户栈
-    space.map_user_stack();
-
-    // 3. 映射 trap 上下文
-    space.map_trap_context();
-
-    // 4. 初始化堆
-    space.heap_top = Some(space.infer_heap_start());
-
-    space
-}
-```
-
-## 系统调用支持
-
-### brk - 堆扩展
-
-```rust
-pub fn brk(&mut self, new_end: Vaddr) -> SyscallResult<Vaddr> {
-    let new_end_vpn = Vpn::from_addr_ceil(new_end);
-    let current_end_vpn = self.heap_top.unwrap();
-
-    if new_end_vpn > current_end_vpn {
-        // 扩展堆
-        let heap_area = self.find_heap_area_mut()?;
-        heap_area.extend(&mut self.page_table, new_end_vpn)?;
-        self.heap_top = Some(new_end_vpn);
-    } else if new_end_vpn < current_end_vpn {
-        // 收缩堆
-        let heap_area = self.find_heap_area_mut()?;
-        heap_area.shrink(&mut self.page_table, new_end_vpn)?;
-        self.heap_top = Some(new_end_vpn);
-    }
-
-    Ok(new_end)
-}
-```
-
-**使用场景**：
-
-```rust
-// C 标准库 malloc 底层调用
-let old_brk = process.memory_space.brk(Vaddr::new(0))?;  // 获取当前堆顶
-let new_brk = old_brk + Vaddr::new(size);
-process.memory_space.brk(new_brk)?;  // 扩展堆
-```
-
-### mmap - 匿名内存映射
-
-```rust
-pub fn mmap(&mut self, start: Vaddr, len: usize, prot: usize) -> SyscallResult<Vaddr> {
-    let start_vpn = Vpn::from_addr_floor(start);
-    let end_vpn = Vpn::from_addr_ceil(start + Vaddr::new(len));
-
-    // 检查地址范围是否可用
-    self.check_range_available(VpnRange::new(start_vpn, end_vpn))?;
-
-    // 创建新的映射区域
-    let permission = Self::prot_to_pte_flags(prot);
-    let area = MappingArea::new(
-        VaddrRange::new(start, start + Vaddr::new(len)),
-        MapType::Framed,
-        permission,
-        AreaType::UserAnonymous,
-    );
-
-    // 映射到页表
-    area.map(&mut self.page_table)?;
-    self.areas.push(area);
-
-    Ok(start)
-}
-```
-
-**使用场景**：
-
-```rust
-// 用户程序请求匿名内存
-let addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-                MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-```
-
-### munmap - 取消映射
-
-```rust
-pub fn munmap(&mut self, start: Vaddr, len: usize) -> SyscallResult<()> {
-    let start_vpn = Vpn::from_addr_floor(start);
-    let end_vpn = Vpn::from_addr_ceil(start + Vaddr::new(len));
-    let unmap_range = VpnRange::new(start_vpn, end_vpn);
-
-    // 找到重叠的映射区域并取消映射
-    let mut areas_to_remove = Vec::new();
-    for (idx, area) in self.areas.iter().enumerate() {
-        if area.vpn_range.intersects(&unmap_range) {
-            areas_to_remove.push(idx);
-        }
-    }
-
-    // 取消映射并释放资源
-    for idx in areas_to_remove.iter().rev() {
-        let area = self.areas.remove(*idx);
-        area.unmap(&mut self.page_table)?;
-    }
-
-    Ok(())
-}
-```
-
-## 进程管理
-
-### fork 时的地址空间复制
-
-```rust
-pub fn clone_for_fork(&self) -> Self {
-    let mut new_space = Self {
-        page_table: ActivePageTableInner::new(),
-        areas: Vec::new(),
-        heap_top: self.heap_top,
-    };
-
-    // 深拷贝所有映射区域
-    for area in &self.areas {
-        let mut new_area = area.clone_structure();
-
-        // 拷贝物理页内容
-        for vpn in area.vpn_range {
-            if let Some(old_frame) = area.frames.get(&vpn) {
-                let new_frame = old_frame.clone();  // 分配新帧并拷贝数据
-                new_area.frames.insert(vpn, new_frame);
-            }
-        }
-
-        // 映射到新页表
-        new_area.map(&mut new_space.page_table)?;
-        new_space.areas.push(new_area);
-    }
-
-    new_space
-}
-```
-
-**写时复制（COW）优化**（未来改进）：
-
-fork 时共享物理页并标记为只读，写入时触发缺页异常再复制，可显著提升性能并减少内存占用。
-
-### 激活地址空间
-
-```rust
-pub fn activate(&self) {
-    let root_ppn = self.page_table.root_ppn();
-    ActivePageTableInner::activate(root_ppn);
-}
-```
-
-**使用场景**：
-
-```rust
-// 进程切换
-fn switch_to_process(process: &mut Process) {
-    process.memory_space.activate();  // 切换页表
-    // 跳转到用户态
-}
-```
-
-## 区域类型
-
-```rust
-pub enum AreaType {
-    KernelText,       // 内核代码段
-    KernelData,       // 内核数据段
-    KernelHeap,       // 内核堆
-    UserText,         // 用户代码段
-    UserData,         // 用户数据段
-    UserHeap,         // 用户堆
-    UserStack,        // 用户栈
-    UserAnonymous,    // 用户匿名映射（mmap）
-    Trampoline,       // 跳板页
-    TrapContext,      // Trap 上下文
-}
-```
-
-## 使用场景
-
-### 场景 1：创建新进程
-
-```rust
-// 从 ELF 文件加载程序
-let elf_data = load_elf_from_disk("/bin/hello")?;
-let memory_space = MemorySpace::from_elf(&elf_data);
-
-let process = Process {
-    memory_space,
-    // ... 其他字段
-};
-```
-
-### 场景 2：进程 fork
-
-```rust
-fn sys_fork() -> SyscallResult<Pid> {
-    let parent = current_process();
-    let child_space = parent.memory_space.clone_for_fork();
-
-    let child = Process {
-        memory_space: child_space,
-        parent: Some(parent.pid()),
-        // ... 其他字段
-    };
-
-    Ok(child.pid())
-}
-```
-
-### 场景 3：动态内存分配（brk）
-
-```rust
-fn sys_brk(new_brk: usize) -> SyscallResult<usize> {
-    let process = current_process_mut();
-    let new_end = Vaddr::new(new_brk);
-    process.memory_space.brk(new_end)?;
-    Ok(new_brk)
-}
-```
-
-### 场景 4：内存映射（mmap）
-
-```rust
-fn sys_mmap(start: usize, len: usize, prot: usize) -> SyscallResult<usize> {
-    let process = current_process_mut();
-    let start_vaddr = Vaddr::new(start);
-    let mapped_addr = process.memory_space.mmap(start_vaddr, len, prot)?;
-    Ok(mapped_addr.as_usize())
-}
-```
-
-## 常见问题
-
-### Q1: 内核和用户地址空间如何隔离？
-
-**A**: 通过虚拟地址范围和 U 标志位：
-- 内核空间：高半核（0xffff_ffc0_0000_0000 以上），U=0
-- 用户空间：低地址（0x0 开始），U=1
-- CPU 在用户态无法访问 U=0 的页面
-
-### Q2: fork 时为什么要深拷贝？
-
-**A**: 当前实现保证父子进程完全独立。未来可改用写时复制（COW）优化性能。
-
-### Q3: 如何防止用户程序访问内核内存？
-
-**A**: 两层保护：
-1. 页表权限：内核页面设置 U=0
-2. 地址检查：系统调用参数验证用户指针合法性
-
-### Q4: mmap 分配的地址范围如何选择？
-
-**A**: 当前实现要求用户指定地址。未来可实现地址分配器自动选择空闲区域。
-
-## 性能优化
-
-### TLB 刷新优化
-
-```rust
-// ✅ 高效：批量映射后一次性刷新
-for vpn in vpn_range {
-    area.map_single_page(vpn, &mut page_table)?;
-}
-PageTableInner::tlb_flush_all();
-```
-
-### 内存占用优化
-
-- 共享只读页面（代码段、只读数据）
-- 写时复制（COW）
-- 大页支持（减少页表级数）
-- 延迟分配（按需分配物理帧）
-
-## 相关文档
-
-- [地址抽象层](address.md) - Vaddr/Vpn 类型
-- [页表抽象层](page_table.md) - 页表操作接口
-- [物理帧分配器](frame_allocator.md) - 物理内存分配
-- [整体架构](architecture.md) - MM 子系统架构
-- [API 参考](api_reference.md) - API 快速查询
-
-## 参考实现
-
-- **源代码**：`os/src/mm/memory_space/`
-- **初始化**：`os/src/mm/mod.rs:47-51`（内核地址空间）
+用户地址空间会复制当前内核映射的元数据并重新建立直接映射, 然后装入用户私有区域:
+
+- `from_elf()` 解析 loadable segment, 建立 `Framed` 用户段.
+- ET_DYN 使用固定 load bias, 并处理当前支持的最小重定位集合.
+- 用户栈, sigreturn trampoline 和 heap 起点按内核配置设置.
+
+### brk
+
+`brk` 以 `heap_start` 为下界:
+
+- 第一次扩展时创建 `UserHeap` 区域.
+- 后续扩展只允许向未占用区域增长.
+- 收缩会解除尾部映射, 收缩到起点则移除整个 heap VMA.
+
+### mmap 与地址选择
+
+匿名 `mmap` 在无 hint 时从用户堆顶和用户栈 guard 之间自顶向下找洞, 避免和向上增长的 brk 冲突.hint 会先向下页对齐, 如果冲突则回退到自动找洞.
+
+### munmap 和 mprotect
+
+`munmap` 和 `mprotect` 都先收集受影响 VMA 下标, 再倒序处理, 避免修改 `areas` 时下标失效.
+
+- `munmap` 对中间区间解除映射时可能把一个 VMA 拆成左右两个 VMA.
+- `mprotect(PROT_NONE)` 会把 `Framed` 区间转为 `Reserved` 并释放中间帧.
+- 从 `Reserved` 改回可访问权限会重新分配帧并建立映射.
+- `Direct` 映射不允许通过用户 mprotect 路径修改.
+
+### fork
+
+`clone_for_fork()` 按映射策略处理:
+
+- `Direct` 只克隆元数据并重新映射.
+- `Framed` 分配新帧并复制页内容.
+- `Reserved` 只克隆元数据.
+- `Shared` 复制共享段引用并重新建立共享映射.
+
+## 并发与生命周期约束
+
+- 进程级 `MemorySpace` 通常由外层锁保护.文档不假设 `MemorySpace` 本身可无锁并发修改.
+- `MappingArea.frames` 是私有帧所有权边界.split, mprotect, munmap 必须移动或释放 tracker, 不能只改页表.
+- 文件映射在 `munmap` 前和 `MemorySpace::drop()` 时尽力写回脏页.
+- 页表修改经 `map_with_batch`, `unmap_with_batch`, `update_flags_with_batch` 进入架构 TLB 刷新策略.
+
+## 已知限制
+
+- VMA 容器是线性 `Vec`, 地址空间碎片多时查找成本会上升.
+- 文件映射和共享映射能力仍是基础实现, 与 Linux 完整 mmap 语义存在差距.
+- `mmap` hint 冲突时不会做复杂的邻近搜索.
+- 当前没有完整 COW, fork 成本随私有页数量线性增长.
+
+## 源码索引
+
+- `os/src/mm/memory_space/mod.rs:1` - 模块组织和重导出.
+- `os/src/mm/memory_space/mmap_file.rs:8` - 文件映射元数据.
+- `os/src/mm/memory_space/mapping_area/mod.rs:16` - `MapType`, `AreaType`, `MappingArea`.
+- `os/src/mm/memory_space/mapping_area/map_ops.rs:86` - 单页和整区映射.
+- `os/src/mm/memory_space/mapping_area/split_ops.rs:4` - VMA 元数据克隆和 fork 数据复制.
+- `os/src/mm/memory_space/mapping_area/split_ops.rs:234` - `mprotect` 局部权限修改.
+- `os/src/mm/memory_space/mapping_area/split_ops.rs:444` - `munmap` 局部解除映射.
+- `os/src/mm/memory_space/mapping_area/resize_ops.rs:8` - 区域尾部扩缩.
+- `os/src/mm/memory_space/mapping_area/file_ops.rs:9` - 文件映射读入.
+- `os/src/mm/memory_space/mapping_area/file_ops.rs:73` - 文件映射写回.
+- `os/src/mm/memory_space/space/address_space.rs:3` - `MemorySpace` 基本操作.
+- `os/src/mm/memory_space/space/kernel_space.rs:30` - 内核空间构建.
+- `os/src/mm/memory_space/space/elf_loader.rs:22` - ELF 装载.
+- `os/src/mm/memory_space/space/mmap_ops.rs:10` - 用户内存系统调用支持.

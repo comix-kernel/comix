@@ -285,12 +285,12 @@ unsafe impl Sync for LogCore {}
 /// - `buffer::calculate_formatted_length` - 用于精确字节计数
 ///
 /// # 格式
-/// ```
+/// ```text
 /// <color_code>[LEVEL] [timestamp] [CPU<id>/T<tid>] message<reset>
 /// ```
 ///
 /// # 示例
-/// ```
+/// ```text
 /// \x1b[37m[INFO] [      123456] [CPU0/T  1] Kernel initialized\x1b[0m
 /// \x1b[31m[ERR] [      789012] [CPU0/T  5] Failed to mount /dev/sda1\x1b[0m
 /// ```

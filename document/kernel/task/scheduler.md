@@ -1,78 +1,80 @@
-# 任务的调度
+# 调度器设计
 
-本文档阐述了 `comix` 内核中的任务调度机制，包括调度器设计、调度时机以及上下文切换流程。
+## 当前状态
 
-## 1. 调度器设计 (`Scheduler` Trait)
+调度器采用 per-CPU `RRScheduler`.每个 CPU 有独立 run queue 和 idle task, 新任务或被唤醒任务按 affinity mask 选择目标 CPU.RISC-V 跨核唤醒会发送 reschedule IPI; LoongArch 当前单核 IPI 为 no-op.
 
-为了实现可扩展和可替换的调度策略，我们抽象出了一个 `Scheduler` Trait。任何具体的调度器实现都必须实现这个 Trait 中定义的方法。
+策略上仍是简单 RR, 但 run queue 弹出时会优先选择更高 `sched_priority` 的任务, 同优先级保持队列相对顺序.
 
-**源码链接**: [`os/src/kernel/scheduler/mod.rs`](/os/src/kernel/scheduler/mod.rs)
+## 目标和非目标
 
-`Scheduler` Trait 定义了以下核心接口：
+目标:
 
-- `new() -> Self`: 创建一个新的调度器实例。
-- `add_task(&mut self, task: SharedTask)`: 将一个新任务添加到调度器的运行队列中。
-- `next_task(&mut self) -> Option<SharedTask>`: 从运行队列中选择下一个要执行的任务。
-- `prepare_switch(&mut self) -> Option<SwitchPlan>`: 准备进行任务切换。这是调度的核心决策逻辑，它会选择下一个任务，并返回一个包含新旧任务上下文指针的 `SwitchPlan`。
-- `sleep_task(&mut self, task: SharedTask, ...)`: 将一个任务置于睡眠状态，并将其从运行队列中移除。
-- `wake_up(&mut self, task: SharedTask)`: 唤醒一个睡眠中的任务，将其重新放回运行队列。
-- `exit_task(&mut self, task: SharedTask, ...)`: 处理一个任务的退出，将其从调度系统中永久移除。
+- 在每个 CPU 上维护独立运行队列, 减少全局调度锁.
+- 保证 wakeup 幂等, 避免同一任务同时进入多个 CPU 的 run queue.
+- 用统一 `Scheduler` trait 隔离调度策略和外部任务生命周期调用.
+- 在没有可运行任务时切到本 CPU idle task.
 
-## 2. 轮转调度器 (`RRScheduler`)
+非目标:
 
-当前内核中实现的具体调度策略是简单的 **轮转调度（Round-Robin Scheduler）**。
+- 不实现完整 CFS/RT 调度语义.
+- 不实现通用内核抢占模型.
+- 不在调度器里负责进程资源释放或 wait 语义.
 
-**源码链接**: [`os/src/kernel/scheduler/rr_scheduler.rs`](/os/src/kernel/scheduler/rr_scheduler.rs)
+## 模块边界
 
-### 实现机制
+- `scheduler/mod.rs`: per-CPU 调度器数组,CPU 选择,公共 sleep/wake/exit/schedule 接口.
+- `rr_scheduler.rs`: run queue 选择,时间片,上下文切换计划.
+- `task_queue.rs`: 基于 `SharedTask` 身份的队列容器.
+- `wait_queue.rs`: 事件等待队列, 调用调度器完成睡眠和唤醒.
+- `kernel/cpu.rs`: 当前任务,当前地址空间和 idle task 切换.
 
-- **运行队列**: `RRScheduler` 内部使用一个 `TaskQueue`（基于 `Vec` 的 FIFO 队列）作为运行队列。新加入的任务被放在队尾，调度器总是从队首取出任务执行。
-- **时间片**: 每个任务被分配一个固定的时间片（`DEFAULT_TIME_SLICE`）。当时钟中断发生时，`RRScheduler::update_time_slice` 方法会被调用，减少当前任务的剩余时间片。当时间片耗尽时，就会触发一次抢占式调度。
+## 关键流程
 
-## 3. 调度时机
+### schedule
 
-调度器在以下几个关键时刻被触发，以决定是否切换任务：
+```text
+disable interrupts
+  -> if current task can keep running and run queue empty, return
+  -> lock current CPU scheduler
+  -> choose next task or idle
+  -> current_cpu.switch_task
+  -> build SwitchPlan
+  -> unlock scheduler
+  -> arch context_switch
+restore interrupt state
+```
 
-1.  **时钟中断（抢占式调度）**:
-    - `riscv::timer` 模块设置了定时器，在固定间隔后触发时钟中断。
-    - 中断处理程序 `trap_handler` 会调用 `schedule()`。
-    - `schedule()` 内部会检查当前任务的时间片是否耗尽。如果是，则会执行 `prepare_switch` 来选择下一个任务，实现抢占。
+调度器锁不覆盖汇编切换本身.`next_task` 生成旧/新 `Context` 指针, 真正保存恢复由架构 `context_switch` 完成.
 
-2.  **任务主动让出 (`yield`)**:
-    - 任务可以调用 `yield_task()` 主动放弃 CPU。
-    - `yield_task()` 会直接调用 `schedule()`，立即触发一次调度，将当前任务放回运行队列末尾，并切换到下一个任务。
+### sleep
 
-3.  **任务阻塞**:
-    - 当任务因等待资源（如 `SleepLock`）而需要睡眠时，它会调用 `sleep_task()`。
-    - `sleep_task()` 将任务从运行队列中移除，并改变其状态为 `Interruptible` 或 `Uninterruptible`。
-    - 随后会调用 `schedule()` 来切换到一个新的可运行任务。
+sleep 只改变任务状态并从所属 CPU run queue 移除, 不隐式切换.调用方通常随后调用 `schedule` 或在当前路径返回到可调度点.
 
-## 4. 上下文切换流程
+`sleep_task_prepare` 把条件检查和睡眠状态转换放在调度器锁内, 用于避免 lost wakeup.
 
-上下文切换是调度机制的核心，它实现了 CPU 执行流从一个任务到另一个任务的平滑过渡。
+### wake
 
-**核心函数**: `schedule()` in [`os/src/kernel/scheduler/mod.rs`](/os/src/kernel/scheduler/mod.rs)
+唤醒先按任务 affinity 和在线 CPU mask 选择目标 CPU.随后在目标 CPU 调度器锁下持有任务锁, 如果任务已经是 `Running`,`Zombie` 或 `Stopped`, 直接返回; 否则设置 `Running`,更新 `on_cpu` 并入队.目标 CPU 不是当前 CPU 时发送 reschedule IPI.
 
-**流程详解**:
+## 并发和生命周期约束
 
-1.  **触发调度**: 当上述任一调度时机发生时，`schedule()` 函数被调用。
+- 调度入口会禁用中断并在返回时恢复原状态.
+- `current_cpu().switch_task` 会切换用户地址空间并更新 `TrapFrame.cpu_ptr`.
+- wakeup 必须以任务状态为幂等屏障, 防止同一任务被两个 CPU 同时运行.
+- idle task 不在普通 run queue 中, 只作为空队列兜底.
+- run queue 内的身份判断基于 `Arc::ptr_eq`, 不是 tid 值.
 
-2.  **准备切换 (`prepare_switch`)**:
-    - `schedule()` 函数会调用当前调度器（`RRScheduler`）的 `prepare_switch` 方法。
-    - `prepare_switch` 从 CPU 的本地存储中取出当前任务 (`prev_task`)，并从运行队列中选出下一个任务 (`next_task`)。
-    - 如果没有其他可运行任务，则不进行切换。
-    - 如果有，它会获取 `prev_task` 和 `next_task` 的上下文指针 (`Context`)。
-    - 如果 `prev_task` 仍然是可运行状态（例如，时间片用完但未阻塞），它会被重新放回运行队列的末尾。
-    - 最后，更新 CPU 的当前任务为 `next_task`，并返回包含新旧上下文指针的 `SwitchPlan`。
+## 已知限制
 
-3.  **执行切换 (`__switch`)**:
-    - `schedule()` 函数拿到 `SwitchPlan` 后，会调用一个底层的汇编函数 `__switch(old_ctx_ptr, new_ctx_ptr)`。
-    - **源码链接**: [`os/src/arch/riscv/kernel/switch.S`](/os/src/arch/riscv/kernel/switch.S)
-    - `__switch` 函数执行以下操作：
-        a. **保存旧上下文**: 将当前任务（`old_task`）的 callee-saved 寄存器（如 `ra`, `sp`, `s0-s11`）保存到其 `Context` 结构体中（由 `old_ctx_ptr` 指向）。
-        b. **恢复新上下文**: 从新任务（`next_task`）的 `Context` 结构体中（由 `new_ctx_ptr` 指向），将之前保存的寄存器值加载回 CPU 的物理寄存器。
-        c. **返回**: `__switch` 函数的最后一条指令是 `ret`。它会跳转到新任务 `Context` 中保存的 `ra` (返回地址)。
-            - 对于一个从未执行过的新任务，其 `ra` 在创建时被设置为 `forkret`。
-            - 对于一个之前被切换出去的任务，其 `ra` 指向它被切换时 `__switch` 调用的下一条指令。
+- 时间片默认很小, 当前用于可用性而非性能调优.
+- `sched_policy` 字段存在, 但完整 Linux 调度策略尚未实现.
+- LoongArch 暂无跨核唤醒能力, 因此 per-CPU 设计在该架构上仍以单核方式运行.
 
-通过这个流程，CPU 的执行状态被完整地从一个任务切换到另一个任务，实现了多任务的并发执行。
+## 源码索引
+
+- `os/src/kernel/scheduler/mod.rs`: per-CPU 调度器,CPU 选择,sleep/wake/schedule.
+- `os/src/kernel/scheduler/rr_scheduler.rs`: RR 策略,idle fallback 和 `SwitchPlan` 创建.
+- `os/src/kernel/scheduler/task_queue.rs`: run queue 容器.
+- `os/src/kernel/scheduler/wait_queue.rs`: wait queue 与调度器交互.
+- `os/src/kernel/cpu.rs`: `switch_task`,地址空间切换和 idle task.
