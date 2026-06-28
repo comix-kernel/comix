@@ -127,32 +127,63 @@ stage_musl_tests_to_tmpfs() {
 }
 
 run_musl_tests_if_present() {
-    # 官方测试镜像挂载到 /tests 后，仅运行完整 LTP wrapper。
-    # workflow 保存全量输出，再按 case/症状分片交给多个 agent 分析。
+    # 官方测试镜像挂载到 /tests 后，自动扫描 musl 下的全部测试脚本；
+    # 需要排除的脚本维护在 skip-list 中。
     mount_official_test_image_if_present || true
     [ -d /tests/musl ] || return 1
 
-    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl:/tests/musl/ltp/testcases/bin"
+    staged_musl_dir=""
+    if stage_musl_tests_to_tmpfs; then
+        staged_musl_dir="/tmp/tests/musl"
+    else
+        echo "[Tests] staging failed; falling back to /tests/musl"
+    fi
+
+    ran=0
+    echo "[Tests] detected musl test scripts; running in rcS"
+
+    if [ -n "$staged_musl_dir" ]; then
+        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:$staged_musl_dir:/tests/musl:/tests/musl/ltp/testcases/bin"
+    else
+        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl:/tests/musl/ltp/testcases/bin"
+    fi
     export TMPDIR="/tmp"
     export HOME="/"
 
-    ltp_wrapper="/tests/musl/ltp_testcode.sh"
-    if [ ! -f "$ltp_wrapper" ]; then
-        echo "[Tests] missing LTP wrapper at $ltp_wrapper"
-        /sbin/poweroff -f || /sbin/reboot -f || true
-        while true; do sleep 3600; done
-    fi
+    for src_f in /tests/musl/*_testcode.sh; do
+        [ -f "$src_f" ] || continue
 
-    echo "[Tests] running full LTP wrapper $ltp_wrapper"
-    (
-        cd /tests/musl || exit 1
-        # 用 "." 执行避免依赖内核 shebang/ENOEXEC 行为；重定向 stdin 避免阻塞。
-        . ./ltp_testcode.sh </dev/null
-    )
-    rc=$?
-    echo "[Tests] finished full LTP wrapper (rc=$rc)"
+        base="${src_f##*/}"
+        case "$base" in
+            ltp_testcode.sh|\
+            unixbench_testcode.sh)
+                echo "[Tests] skipping $src_f"
+                continue
+                ;;
+        esac
 
-    echo "[Tests] full LTP finished; powering off"
+        f="$src_f"
+        if [ -n "$staged_musl_dir" ] && [ "$base" != "ltp_testcode.sh" ] && [ -f "$staged_musl_dir/$base" ]; then
+            f="$staged_musl_dir/$base"
+        fi
+        dir="${f%/*}"
+        echo "[Tests] running $f"
+        (
+            cd "$dir" || exit 1
+            # 用 "." 执行避免依赖内核 shebang/ENOEXEC 行为；重定向 stdin 避免阻塞。
+            . "./$base" </dev/null
+        )
+        rc=$?
+        echo "[Tests] finished $f (rc=$rc)"
+        case "$rc" in
+            0) ;;
+            *) echo "[Tests] ignoring failure from $f and continuing" ;;
+        esac
+        ran=1
+    done
+    [ "$ran" -eq 1 ] || return 1
+
+    echo "[Tests] all tests finished; powering off"
     /sbin/poweroff -f || /sbin/reboot -f || true
     echo "[Tests] poweroff returned unexpectedly; sleeping"
     while true; do sleep 3600; done
