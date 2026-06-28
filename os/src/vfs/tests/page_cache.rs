@@ -384,18 +384,25 @@ test_case!(test_page_cache_stats_tracks_resident_and_frame_pages, {
     kassert!(stats.frame_pages == 0);
 });
 
-test_case!(test_page_cache_refresh_clean_range_updates_cached_page, {
-    let cache = PageCache::with_capacity(4);
-    let obj = object(1, 45);
+test_case!(
+    test_page_cache_refresh_clean_range_invalidates_cached_page,
+    {
+        let cache = PageCache::with_capacity(4);
+        let obj = object(1, 45);
 
-    cache.insert_clean(obj, 0, b"abcdef".to_vec());
+        cache.insert_clean(obj, 0, b"abcdef".to_vec());
+        let old_page = cache.lookup(PageCacheKey::new(obj, 0)).unwrap();
 
-    let refreshed = cache.refresh_clean_range(obj, 2, b"XYZ");
-    kassert!(refreshed == 1);
+        let invalidated = cache.refresh_clean_range(obj, 2, b"XYZ");
+        kassert!(invalidated == 1);
 
-    let page = cache.lookup(PageCacheKey::new(obj, 0)).unwrap();
-    kassert!(page.data() == b"abXYZf");
-});
+        kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
+        kassert!(old_page.data() == b"abcdef");
+
+        let stats = cache.stats();
+        kassert!(stats.invalidates == 1);
+    }
+);
 
 test_case!(test_page_cache_refresh_clean_range_miss_is_noop, {
     let cache = PageCache::with_capacity(4);
@@ -410,58 +417,56 @@ test_case!(test_page_cache_refresh_clean_range_miss_is_noop, {
     kassert!(stats.resident_pages == 0);
 });
 
-test_case!(test_page_cache_refresh_clean_range_crosses_cached_pages, {
-    let cache = PageCache::with_capacity(4);
-    let obj = object(1, 47);
+test_case!(
+    test_page_cache_refresh_clean_range_crosses_and_invalidates_cached_pages,
+    {
+        let cache = PageCache::with_capacity(4);
+        let obj = object(1, 47);
 
-    cache.insert_clean(obj, 0, vec![b'a'; PAGE_CACHE_PAGE_SIZE]);
-    cache.insert_clean(obj, 1, vec![b'b'; 8]);
+        cache.insert_clean(obj, 0, vec![b'a'; PAGE_CACHE_PAGE_SIZE]);
+        cache.insert_clean(obj, 1, vec![b'b'; 8]);
 
-    let refreshed = cache.refresh_clean_range(obj, PAGE_CACHE_PAGE_SIZE - 2, b"WXYZ");
-    kassert!(refreshed == 2);
+        let invalidated = cache.refresh_clean_range(obj, PAGE_CACHE_PAGE_SIZE - 2, b"WXYZ");
+        kassert!(invalidated == 2);
 
-    let first = cache.lookup(PageCacheKey::new(obj, 0)).unwrap();
-    let second = cache.lookup(PageCacheKey::new(obj, 1)).unwrap();
-    kassert!(&first.data()[PAGE_CACHE_PAGE_SIZE - 4..PAGE_CACHE_PAGE_SIZE - 2] == b"aa");
-    kassert!(&first.data()[PAGE_CACHE_PAGE_SIZE - 2..] == b"WX");
-    kassert!(&second.data()[..2] == b"YZ");
-    kassert!(&second.data()[2..8] == &[b'b'; 6]);
-});
+        kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
+        kassert!(cache.lookup(PageCacheKey::new(obj, 1)).is_none());
+    }
+);
 
 test_case!(
-    test_page_cache_refresh_clean_range_partial_preserves_unwritten_bytes,
+    test_page_cache_refresh_clean_range_keeps_old_frame_clone_readable,
     {
         let cache = PageCache::with_capacity(4);
         let obj = object(1, 48);
 
-        cache
+        let old_page = cache
             .get_or_insert_clean_page(obj, 0, |buf| {
                 buf[..6].copy_from_slice(b"abcdef");
                 Ok(6)
             })
             .unwrap();
 
-        let refreshed = cache.refresh_clean_range(obj, 1, b"23");
-        kassert!(refreshed == 1);
+        let invalidated = cache.refresh_clean_range(obj, 1, b"23");
+        kassert!(invalidated == 1);
 
-        let page = cache.lookup(PageCacheKey::new(obj, 0)).unwrap();
-        kassert!(page.data() == b"a23def");
-        kassert!(page.is_frame_backed());
+        kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
+        kassert!(old_page.data() == b"abcdef");
+        kassert!(old_page.is_frame_backed());
     }
 );
 
 test_case!(
-    test_page_cache_refresh_clean_range_extends_short_cached_page_with_zero_gap,
+    test_page_cache_refresh_clean_range_invalidates_short_cached_page,
     {
         let cache = PageCache::with_capacity(4);
         let obj = object(1, 49);
 
         cache.insert_clean(obj, 0, b"abc".to_vec());
 
-        let refreshed = cache.refresh_clean_range(obj, 5, b"Z");
-        kassert!(refreshed == 1);
+        let invalidated = cache.refresh_clean_range(obj, 5, b"Z");
+        kassert!(invalidated == 1);
 
-        let page = cache.lookup(PageCacheKey::new(obj, 0)).unwrap();
-        kassert!(page.data() == b"abc\0\0Z");
+        kassert!(cache.lookup(PageCacheKey::new(obj, 0)).is_none());
     }
 );
