@@ -90,6 +90,8 @@ pub struct Task {
     pub sched_priority: i32,
     /// fork/clone 时是否将子任务调度属性重置为普通策略。
     pub sched_reset_on_fork: bool,
+    /// Linux-ish OOM badness adjustment exposed through /proc/[pid]/oom_score_adj.
+    pub oom_score_adj: i32,
     /// 任务当前的状态
     pub state: TaskState,
     /// 任务的id
@@ -429,6 +431,7 @@ impl Task {
             sched_policy: SCHED_NORMAL,
             sched_priority: 0,
             sched_reset_on_fork: false,
+            oom_score_adj: 0,
             state: TaskState::Running,
             tid,
             pid,
