@@ -349,13 +349,18 @@ impl FDTable {
         }
 
         // 3. 如果没有空闲槽位，在数组末尾分配新的 fd
-        let fd = files.len();
+        let fd = core::cmp::max(files.len(), min_fd);
         if fd >= max_fds {
             return Err(FsError::TooManyOpenFiles);
         }
 
-        files.push(Some(file));
-        fd_flags.push(flags);
+        while files.len() <= fd {
+            files.push(None);
+            fd_flags.push(FdFlags::empty());
+        }
+
+        files[fd] = Some(file);
+        fd_flags[fd] = flags;
         Ok(fd)
     }
 
