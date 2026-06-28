@@ -26,4 +26,14 @@ impl FutexManager {
     pub fn get_wait_queue(&mut self, uaddr: usize) -> &mut WaitQueue {
         self.futexes.entry(uaddr).or_insert_with(WaitQueue::new)
     }
+
+    pub fn take_wait_queue(&mut self, uaddr: usize) -> WaitQueue {
+        self.futexes.remove(&uaddr).unwrap_or_else(WaitQueue::new)
+    }
+
+    pub fn put_wait_queue(&mut self, uaddr: usize, waitq: WaitQueue) {
+        if !waitq.is_empty() {
+            self.futexes.insert(uaddr, waitq);
+        }
+    }
 }

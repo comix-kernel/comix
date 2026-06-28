@@ -33,8 +33,11 @@ use crate::{
             EACCES, EAGAIN, EFAULT, EINTR, EINVAL, EIO, EISDIR, ENOENT, ENOEXEC, ENOMEM, ENOSYS,
             EPERM, ESRCH, ETIMEDOUT,
         },
-        futex::{FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE, FUTEX_WAIT, FUTEX_WAKE, RobustListHead},
-        resource::{RLIM_NLIMITS, Rlimit, Rusage},
+        futex::{
+            FUTEX_CLOCK_REALTIME, FUTEX_CMP_REQUEUE, FUTEX_PRIVATE, FUTEX_REQUEUE, FUTEX_WAIT,
+            FUTEX_WAIT_BITSET, FUTEX_WAKE, FUTEX_WAKE_BITSET, RobustListHead,
+        },
+        resource::{RLIM_NLIMITS, ResourceId, Rlimit, Rusage},
         sched::CloneFlags,
         signal::{NUM_SIGALRM, NUM_SIGPROF, NUM_SIGVTALRM},
         time::{

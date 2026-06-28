@@ -155,55 +155,7 @@ pub fn connect(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         SocketHandle::Udp(h) => {
             pr_debug!("connect: sockfd={} UDP", sockfd);
 
-            // Ensure this fd is attached to the shared per-port UDP socket.
-            // If not yet bound, implicitly bind to an ephemeral port (49152-65535).
-            let local_port = match file
-                .as_any()
-                .downcast_ref::<SocketFile>()
-                .and_then(|sf| sf.get_local_endpoint())
-            {
-                Some(ep) if ep.port != 0 => ep.port,
-                _ => alloc_ephemeral_port(),
-            };
-
-            if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
-                // IMPORTANT: use a concrete local source address for loopback, otherwise smoltcp
-                // will emit packets with src=0.0.0.0 and iperf3 UDP server will "connect()" to
-                // 127.0.0.1 and then drop subsequent datagrams (remote endpoint mismatch).
-                let local_addr = match endpoint.addr {
-                    IpAddress::Ipv4(a) if a.octets()[0] == 127 => {
-                        IpAddress::Ipv4(Ipv4Address::LOCALHOST)
-                    }
-                    #[cfg(feature = "proto-ipv6")]
-                    IpAddress::Ipv6(a) if a.is_loopback() => {
-                        use smoltcp::wire::Ipv6Address;
-                        IpAddress::Ipv6(Ipv6Address::LOCALHOST)
-                    }
-                    _ => IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
-                };
-                sf.set_local_endpoint(IpEndpoint::new(local_addr, local_port));
-            }
-
-            let bind_addr = match endpoint.addr {
-                IpAddress::Ipv4(a) if a.octets()[0] == 127 => {
-                    Some(IpAddress::Ipv4(Ipv4Address::LOCALHOST))
-                }
-                #[cfg(feature = "proto-ipv6")]
-                IpAddress::Ipv6(a) if a.is_loopback() => {
-                    use smoltcp::wire::Ipv6Address;
-                    Some(IpAddress::Ipv6(Ipv6Address::LOCALHOST))
-                }
-                _ => None,
-            };
-
-            if let Err(e) = crate::net::socket::udp_attach_fd_to_port(
-                tid,
-                sockfd as usize,
-                &file,
-                h,
-                local_port,
-                bind_addr,
-            ) {
+            if let Err(e) = ensure_udp_bound_for_peer(tid, sockfd as usize, &file, h, endpoint) {
                 return e.to_errno();
             }
             pr_debug!("connect: sockfd={} UDP -> success", sockfd);

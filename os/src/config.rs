@@ -34,7 +34,7 @@ pub const USER_SIGRETURN_TRAMPOLINE: usize =
     align_down(<ArchImpl as VirtualMemory>::USER_TOP, PAGE_SIZE);
 
 /// Maximum heap size (prevent OOM)
-pub const MAX_USER_HEAP_SIZE: usize = 64 * 1024 * 1024; // 64MB
+pub const MAX_USER_HEAP_SIZE: usize = 128 * 1024 * 1024; // 128MB
 
 pub const DEFAULT_MAX_FDS: usize = 256;
 

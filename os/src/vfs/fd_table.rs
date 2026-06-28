@@ -139,7 +139,10 @@ use crate::uapi::fcntl::{FdFlags, OpenFlags};
 use crate::vfs::{File, FsError};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::fmt;
+use core::{
+    fmt,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 /// 文件描述符表
 ///
@@ -156,7 +159,7 @@ pub struct FDTable {
     fd_flags: SpinLock<Vec<FdFlags>>,
 
     /// 最大文件描述符数量
-    max_fds: usize,
+    max_fds: AtomicUsize,
 }
 
 impl FdFlags {
@@ -177,7 +180,7 @@ impl fmt::Debug for FDTable {
         let files = self.files.lock();
         let used = files.iter().filter(|slot| slot.is_some()).count();
         f.debug_struct("FDTable")
-            .field("max_fds", &self.max_fds)
+            .field("max_fds", &self.max_fds.load(Ordering::Relaxed))
             .field("slots", &files.len())
             .field("used", &used)
             .finish()
@@ -190,8 +193,12 @@ impl FDTable {
         Self {
             files: SpinLock::new(Vec::new()),
             fd_flags: SpinLock::new(Vec::new()),
-            max_fds: DEFAULT_MAX_FDS,
+            max_fds: AtomicUsize::new(DEFAULT_MAX_FDS),
         }
+    }
+
+    pub fn set_max_fds(&self, max_fds: usize) {
+        self.max_fds.store(max_fds, Ordering::Relaxed);
     }
 
     /// 取走并清空所有已打开的文件描述符。
@@ -226,9 +233,10 @@ impl FDTable {
     pub fn alloc_with_flags(&self, file: Arc<dyn File>, flags: FdFlags) -> Result<usize, FsError> {
         let mut files = self.files.lock();
         let mut fd_flags = self.fd_flags.lock();
+        let max_fds = self.max_fds.load(Ordering::Relaxed);
 
         // 查找最小可用 FD
-        for (fd, slot) in files.iter_mut().enumerate() {
+        for (fd, slot) in files.iter_mut().enumerate().take(max_fds) {
             if slot.is_none() {
                 *slot = Some(file);
                 fd_flags[fd] = flags;
@@ -238,7 +246,7 @@ impl FDTable {
 
         // 如果没有空闲槽位，扩展数组
         let fd = files.len();
-        if fd >= self.max_fds {
+        if fd >= max_fds {
             return Err(FsError::TooManyOpenFiles);
         }
 
@@ -261,8 +269,9 @@ impl FDTable {
     ) -> Result<(), FsError> {
         let mut files = self.files.lock();
         let mut fd_flags = self.fd_flags.lock();
+        let max_fds = self.max_fds.load(Ordering::Relaxed);
 
-        if fd >= self.max_fds {
+        if fd >= max_fds {
             return Err(FsError::InvalidArgument);
         }
 
@@ -314,7 +323,8 @@ impl FDTable {
     /// 返回新的 fd，与 old_fd 指向同一个 `Arc<dyn File>` (共享 offset)。
     /// 新分配的 fd 是 >= min_fd 的最小未使用文件描述符。
     pub fn dup_from(&self, old_fd: usize, min_fd: usize, flags: FdFlags) -> Result<usize, FsError> {
-        if min_fd >= self.max_fds {
+        let max_fds = self.max_fds.load(Ordering::Relaxed);
+        if min_fd >= max_fds {
             return Err(FsError::InvalidArgument);
         }
 
@@ -329,9 +339,10 @@ impl FDTable {
         }
 
         // 2. 从 min_fd 开始查找最小可用 FD
-        for (fd, slot) in files.iter_mut().enumerate().skip(min_fd) {
-            if slot.is_none() {
-                *slot = Some(file);
+        let search_end = core::cmp::min(files.len(), max_fds);
+        for fd in min_fd..search_end {
+            if files[fd].is_none() {
+                files[fd] = Some(file);
                 fd_flags[fd] = flags;
                 return Ok(fd);
             }
@@ -339,7 +350,7 @@ impl FDTable {
 
         // 3. 如果没有空闲槽位，在数组末尾分配新的 fd
         let fd = files.len();
-        if fd >= self.max_fds {
+        if fd >= max_fds {
             return Err(FsError::TooManyOpenFiles);
         }
 
@@ -398,7 +409,7 @@ impl FDTable {
         Self {
             files: SpinLock::new(files),
             fd_flags: SpinLock::new(fd_flags),
-            max_fds: self.max_fds,
+            max_fds: AtomicUsize::new(self.max_fds.load(Ordering::Relaxed)),
         }
     }
 
