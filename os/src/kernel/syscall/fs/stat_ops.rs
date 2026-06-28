@@ -417,9 +417,13 @@ pub fn statx(
 
 pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, flags: u32) -> isize {
     // 解析路径
-    let path_str = match get_path_safe(pathname as usize) {
-        Ok(s) => s,
-        Err(e) => return e.to_errno(),
+    let path_str = if pathname.is_null() {
+        None
+    } else {
+        match get_path_safe(pathname as usize) {
+            Ok(s) => Some(s),
+            Err(e) => return e.to_errno(),
+        }
     };
 
     const UTIMENSAT_ALLOWED_FLAGS: u32 =
@@ -431,7 +435,17 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
     let at_flags = AtFlags::from_bits_retain(flags);
 
     // 查找文件
-    let dentry = if path_str.is_empty() {
+    let dentry = if pathname.is_null() {
+        let task = current_task();
+        let file = match task.lock().fd_table.get(dirfd as usize) {
+            Ok(file) => file,
+            Err(e) => return e.to_errno(),
+        };
+        match file.dentry() {
+            Ok(dentry) => dentry,
+            Err(e) => return e.to_errno(),
+        }
+    } else if path_str.as_deref() == Some("") {
         if !at_flags.contains(AtFlags::EMPTY_PATH) {
             return FsError::NotFound.to_errno();
         }
@@ -453,8 +467,9 @@ pub fn utimensat(dirfd: i32, pathname: *const c_char, times: *const TimeSpec, fl
             }
         }
     } else {
+        let path_str = path_str.as_deref().unwrap_or("");
         let follow_symlink = !at_flags.contains(AtFlags::SYMLINK_NOFOLLOW);
-        match resolve_at_path_with_flags(dirfd, &path_str, follow_symlink) {
+        match resolve_at_path_with_flags(dirfd, path_str, follow_symlink) {
             Ok(d) => d,
             Err(e) => return e.to_errno(),
         }

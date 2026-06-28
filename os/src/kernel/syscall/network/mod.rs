@@ -122,6 +122,60 @@ use crate::{
 use alloc::sync::Arc;
 use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address};
 
+fn udp_local_addr_for_peer(endpoint: IpEndpoint) -> IpAddress {
+    match endpoint.addr {
+        IpAddress::Ipv4(a) if a.octets()[0] == 127 => IpAddress::Ipv4(Ipv4Address::LOCALHOST),
+        #[cfg(feature = "proto-ipv6")]
+        IpAddress::Ipv6(a) if a.is_loopback() => {
+            use smoltcp::wire::Ipv6Address;
+            IpAddress::Ipv6(Ipv6Address::LOCALHOST)
+        }
+        _ => IpAddress::Ipv4(Ipv4Address::UNSPECIFIED),
+    }
+}
+
+fn udp_bind_addr_for_peer(endpoint: IpEndpoint) -> Option<IpAddress> {
+    match endpoint.addr {
+        IpAddress::Ipv4(a) if a.octets()[0] == 127 => Some(IpAddress::Ipv4(Ipv4Address::LOCALHOST)),
+        #[cfg(feature = "proto-ipv6")]
+        IpAddress::Ipv6(a) if a.is_loopback() => {
+            use smoltcp::wire::Ipv6Address;
+            Some(IpAddress::Ipv6(Ipv6Address::LOCALHOST))
+        }
+        _ => None,
+    }
+}
+
+fn ensure_udp_bound_for_peer(
+    tid: usize,
+    fd: usize,
+    file: &Arc<dyn File>,
+    old_handle: smoltcp::iface::SocketHandle,
+    peer: IpEndpoint,
+) -> Result<smoltcp::iface::SocketHandle, crate::net::NetworkError> {
+    let local_port = file
+        .as_any()
+        .downcast_ref::<SocketFile>()
+        .and_then(|sf| sf.get_local_endpoint())
+        .filter(|ep| ep.port != 0)
+        .map(|ep| ep.port)
+        .unwrap_or_else(alloc_ephemeral_port);
+
+    if let Some(sf) = file.as_any().downcast_ref::<SocketFile>() {
+        let local_addr = udp_local_addr_for_peer(peer);
+        sf.set_local_endpoint(IpEndpoint::new(local_addr, local_port));
+    }
+
+    crate::net::socket::udp_attach_fd_to_port(
+        tid,
+        fd,
+        file,
+        old_handle,
+        local_port,
+        udp_bind_addr_for_peer(peer),
+    )
+}
+
 /// 安全地从用户空间拷贝C字符串
 fn copy_c_str_from_user(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
