@@ -122,6 +122,12 @@ pub fn setrlimit(resource: c_int, rlim: *const Rlimit) -> c_int {
         let rlimit_lock = current_task().lock().rlimit.clone();
         rlimit_lock.lock().limits[resource as usize] = new_limit;
     }
+    if resource == ResourceId::Nofile as c_int {
+        current_task()
+            .lock()
+            .fd_table
+            .set_max_fds(new_limit.rlim_cur);
+    }
     0
     // TODO: EPERM, EPERM 和 EFAULT
 }
@@ -167,6 +173,9 @@ pub fn prlimit(
         }
         let rlimit_lock = target_task.lock().rlimit.clone();
         rlimit_lock.lock().limits[resource as usize] = new_rlim;
+        if resource == ResourceId::Nofile as c_int {
+            target_task.lock().fd_table.set_max_fds(new_rlim.rlim_cur);
+        }
     }
 
     0

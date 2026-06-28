@@ -78,6 +78,21 @@ test_case!(test_fdtable_dup, {
     kassert!(Arc::ptr_eq(&file1, &file2));
 });
 
+test_case!(test_fdtable_dup_from_respects_min_fd_past_table_end, {
+    let fd_table = FDTable::new();
+    let fs = create_test_simplefs();
+    let inode = create_test_file_with_content(&fs, "test.txt", b"test").unwrap();
+    let file = create_test_file("test.txt", inode, OpenFlags::O_RDONLY);
+
+    let old_fd = fd_table.alloc(file.clone()).unwrap();
+    let new_fd = fd_table.dup_from(old_fd, 8, FdFlags::empty()).unwrap();
+
+    kassert!(new_fd == 8);
+    kassert!(fd_table.get(7).is_err());
+    let duplicated = fd_table.get(new_fd).unwrap();
+    kassert!(Arc::ptr_eq(&duplicated, &file));
+});
+
 test_case!(test_fdtable_dup2, {
     // 创建 FDTable 和文件
     let fd_table = FDTable::new();

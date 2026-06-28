@@ -13,6 +13,51 @@ mod memory_space_tests {
         }
     }
 
+    fn create_test_file(
+        name: &str,
+        inode: alloc::sync::Arc<dyn crate::vfs::Inode>,
+    ) -> alloc::sync::Arc<dyn crate::vfs::File> {
+        use crate::vfs::{Dentry, OpenFlags, RegFile};
+        use alloc::string::String;
+
+        let dentry = Dentry::new(String::from(name), inode);
+        alloc::sync::Arc::new(RegFile::new(dentry, OpenFlags::O_RDWR))
+    }
+
+    fn create_test_mmap_file(
+        name: &str,
+        inode: alloc::sync::Arc<dyn crate::vfs::Inode>,
+        len: usize,
+        flags: crate::uapi::mm::MapFlags,
+    ) -> MmapFile {
+        MmapFile {
+            file: create_test_file(name, inode),
+            offset: 0,
+            len,
+            prot: crate::uapi::mm::ProtFlags::READ | crate::uapi::mm::ProtFlags::WRITE,
+            flags,
+        }
+    }
+
+    fn create_test_ext4() -> alloc::sync::Arc<crate::fs::ext4::Ext4FileSystem> {
+        use crate::config::EXT4_BLOCK_SIZE;
+        use crate::device::block::BlockDriver;
+        use crate::device::block::ram_disk::RamDisk;
+        use crate::fs::ext4::Ext4FileSystem;
+
+        const SECTOR_SIZE: usize = 512;
+        const DEVICE_ID: usize = 0;
+
+        let image_data = include_bytes!(env!("EXT4_FS_IMAGE")).to_vec();
+        let ramdisk = RamDisk::from_bytes(image_data, SECTOR_SIZE, DEVICE_ID);
+        let total_blocks = ramdisk.total_blocks();
+        let device_id = ramdisk.device_id();
+        let block_driver: alloc::sync::Arc<dyn BlockDriver> = ramdisk;
+
+        Ext4FileSystem::open(block_driver, EXT4_BLOCK_SIZE, total_blocks, device_id)
+            .expect("failed to create ext4 test filesystem")
+    }
+
     // 1. 创建内存空间
     test_case!(test_memspace_create, {
         #[allow(unused)]
@@ -446,93 +491,297 @@ mod memory_space_tests {
     // 16. 测试 mmap 文件映射基本功能
     test_case!(test_mmap_file_basic, {
         use crate::fs::tmpfs::TmpFs;
-
-        use crate::vfs::{File, FileMode, FileSystem};
+        use crate::uapi::mm::MapFlags;
+        use crate::vfs::{FileMode, FileSystem};
 
         println!("Testing mmap file mapping basic functionality");
 
-        // 1. 创建临时文件系统和文件
-        let tmpfs = TmpFs::new(16); // 16 MB
+        let tmpfs = TmpFs::new(16);
         let root = tmpfs.root_inode();
         let inode = root
             .create("test_mmap.txt", FileMode::from_bits_truncate(0o644))
             .expect("Failed to create file");
 
-        // 2. 写入测试数据
         let test_data = b"Hello, mmap! This is a test file for memory mapping.";
         let written = inode.write_at(0, test_data).expect("Failed to write data");
         kassert!(written == test_data.len());
-        println!("  Written {} bytes to file", written);
 
-        // 3. 创建 File 包装器（需要实现一个简单的 File trait）
-        // 注意：这里我们直接使用 Inode，因为 File trait 可能需要额外实现
-        // 由于测试环境限制，我们先跳过完整的 mmap 测试
-        // 这个测试主要验证数据结构和编译正确性
+        let mmap_file = create_test_mmap_file(
+            "test_mmap.txt",
+            inode.clone(),
+            test_data.len(),
+            MapFlags::PRIVATE,
+        );
+        let file_inode = mmap_file
+            .file
+            .inode()
+            .expect("mmap file should expose inode");
+        let mut reread = [0u8; 16];
+        let read = file_inode.read_at(7, &mut reread).expect("mmap inode read");
+        kassert!(read == reread.len());
+        kassert!(&reread[..] == b"mmap! This is a ");
 
-        println!("  File mapping test structure validated");
+        println!("  File mapping test passed");
     });
 
     // 17. 测试 load_from_file 方法
     test_case!(test_load_from_file, {
         use crate::fs::tmpfs::TmpFs;
+        use crate::uapi::mm::MapFlags;
         use crate::vfs::{FileMode, FileSystem};
 
         println!("Testing load_from_file method");
 
-        // 1. 创建文件并写入数据
         let tmpfs = TmpFs::new(16);
         let root = tmpfs.root_inode();
         let inode = root
             .create("test_load.txt", FileMode::from_bits_truncate(0o644))
             .expect("Failed to create file");
 
-        let test_data = b"Test data for loading into memory pages.";
-        inode.write_at(0, test_data).expect("Failed to write");
-        println!("  Created file with {} bytes", test_data.len());
+        let mut test_data = alloc::vec![0u8; PAGE_SIZE + 64];
+        for (idx, byte) in test_data.iter_mut().enumerate() {
+            *byte = (idx % 251) as u8;
+        }
+        inode.write_at(0, &test_data).expect("Failed to write");
 
-        // 注意：由于 MmapFile 需要 Arc<dyn File>，而我们只有 Inode，
-        // 完整测试需要实现 File wrapper
-        // 这里主要验证结构编译正确
-
-        println!("  load_from_file structure validated");
-    });
-
-    // 18. 测试 sync_file 方法（验证写回逻辑）
-    test_case!(test_sync_file_logic, {
-        println!("Testing sync_file logic");
-
-        // 由于 sync_file 需要：
-        // 1. MmapFile（包含 Arc<dyn File>）
-        // 2. 页表中的 Dirty 位
-        // 3. 实际的文件系统操作
-        // 完整测试需要更复杂的设置
-
-        // 这里验证编译和结构正确性
         let mut ms = new_memory_space();
-        let vpn_range = VpnRange::new(Vpn::from_usize(0x2000), Vpn::from_usize(0x2002));
+        let start_vpn = Vpn::from_usize(0x2000);
+        let vpn_range = VpnRange::new(start_vpn, Vpn::from_usize(start_vpn.as_usize() + 2));
+        let mmap_file = create_test_mmap_file(
+            "test_load.txt",
+            inode.clone(),
+            test_data.len(),
+            MapFlags::PRIVATE,
+        );
 
-        // 创建一个没有文件映射的区域
         ms.insert_framed_area(
             vpn_range,
             AreaType::UserMmap,
             UniversalPTEFlag::user_rw(),
             None,
+            Some(mmap_file),
+        )
+        .expect("Failed to insert file mapping");
+
+        let area = ms.find_area_mut(start_vpn).expect("mmap area should exist");
+        area.load_from_file()
+            .expect("load_from_file should succeed");
+
+        let mut actual = alloc::vec![0u8; test_data.len()];
+        ms.read_bytes_at(start_vpn.start_addr().as_usize(), &mut actual)
+            .expect("read mapped bytes");
+        kassert!(actual == test_data);
+
+        println!("  load_from_file loaded mapped pages");
+    });
+
+    test_case!(test_load_from_ext4_cached_file, {
+        use crate::uapi::mm::MapFlags;
+        use crate::vfs::{FileMode, FileSystem};
+
+        println!("Testing load_from_file through ext4 cached read path");
+
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("mmap-load-ext4.bin", FileMode::from_bits_truncate(0o644))
+            .expect("Failed to create ext4 file");
+
+        let mut test_data = alloc::vec![0u8; PAGE_SIZE + 37];
+        for (idx, byte) in test_data.iter_mut().enumerate() {
+            *byte = ((idx * 7) % 251) as u8;
+        }
+        inode.write_at(0, &test_data).expect("Failed to write");
+
+        let mut warm_cache = alloc::vec![0u8; test_data.len()];
+        kassert!(inode.read_at(0, &mut warm_cache).unwrap() == test_data.len());
+        kassert!(warm_cache == test_data);
+
+        let mut ms = new_memory_space();
+        let start_vpn = Vpn::from_usize(0x2200);
+        let vpn_range = VpnRange::new(start_vpn, Vpn::from_usize(start_vpn.as_usize() + 2));
+        let mmap_file = create_test_mmap_file(
+            "mmap-load-ext4.bin",
+            inode.clone(),
+            test_data.len(),
+            MapFlags::PRIVATE,
+        );
+
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
             None,
+            Some(mmap_file),
+        )
+        .expect("Failed to insert ext4 file mapping");
+
+        let area = ms.find_area_mut(start_vpn).expect("mmap area should exist");
+        area.load_from_file()
+            .expect("load_from_file should read ext4 cached pages");
+
+        let mut actual = alloc::vec![0u8; test_data.len()];
+        ms.read_bytes_at(start_vpn.start_addr().as_usize(), &mut actual)
+            .expect("read ext4 mapped bytes");
+        kassert!(actual == test_data);
+
+        println!("  load_from_file read ext4 cached pages");
+    });
+
+    // 18. 测试 sync_file 方法（验证写回逻辑）
+    test_case!(test_sync_file_logic, {
+        use crate::mm::page_table::PageTableInner as _;
+        use crate::uapi::mm::MapFlags;
+        use crate::vfs::{FileMode, FileSystem};
+
+        println!("Testing sync_file logic");
+
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("mmap-sync.bin", FileMode::from_bits_truncate(0o644))
+            .expect("Failed to create ext4 file");
+        let initial = b"cached-before-mmap-sync";
+        inode.write_at(0, initial).expect("Failed to write");
+
+        let mut cached = alloc::vec![0u8; initial.len()];
+        kassert!(inode.read_at(0, &mut cached).unwrap() == initial.len());
+        kassert!(&cached[..] == initial);
+
+        let updated = b"cache-after-mmap-sync!";
+        let mut ms = new_memory_space();
+        let start_vpn = Vpn::from_usize(0x2100);
+        let vpn_range = VpnRange::new(start_vpn, Vpn::from_usize(start_vpn.as_usize() + 1));
+        let mmap_file = create_test_mmap_file(
+            "mmap-sync.bin",
+            inode.clone(),
+            initial.len(),
+            MapFlags::SHARED,
+        );
+
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            Some(mmap_file),
         )
         .expect("Failed to insert area");
 
-        // 对于没有文件映射的区域，sync_file 应该直接返回 Ok
-        // 需要分两步以避免借用冲突
-        let areas_len = ms.areas().len();
-        if areas_len > 0 {
-            let page_table = &mut ms.page_table;
-            let area = &ms.areas[areas_len - 1];
-            let result = area.sync_file(page_table);
-            kassert!(result.is_ok());
-            println!("  sync_file returns Ok for non-file mapping");
+        {
+            let area = ms.find_area_mut(start_vpn).expect("mmap area should exist");
+            area.load_from_file()
+                .expect("load_from_file should succeed");
         }
 
-        println!("  sync_file logic validated");
+        ms.write_bytes_at(start_vpn.start_addr().as_usize(), updated)
+            .expect("write mapped bytes");
+
+        let (_, _, flags) = ms.page_table().walk(start_vpn).expect("mapped page");
+        ms.page_table_mut()
+            .update_flags(start_vpn, flags | UniversalPTEFlag::DIRTY)
+            .expect("mark page dirty");
+
+        let areas_len = ms.areas().len();
+        {
+            let page_table = &mut ms.page_table;
+            let area = &ms.areas[areas_len - 1];
+            area.sync_file(page_table)
+                .expect("sync_file should write dirty shared mapping");
+        }
+
+        let mut reread = alloc::vec![0u8; initial.len()];
+        kassert!(inode.read_at(0, &mut reread).unwrap() == initial.len());
+        kassert!(&reread[..updated.len()] == updated);
+
+        let (_, _, clean_flags) = ms.page_table().walk(start_vpn).expect("mapped page");
+        kassert!(!clean_flags.contains(UniversalPTEFlag::DIRTY));
+
+        println!("  sync_file invalidated cached ext4 reads");
+    });
+
+    test_case!(test_sync_file_refreshes_precise_ext4_cached_range, {
+        use crate::mm::page_table::PageTableInner as _;
+        use crate::uapi::mm::MapFlags;
+        use crate::vfs::{FileMode, FileSystem};
+
+        println!("Testing sync_file precise ext4 cache refresh");
+
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("mmap-sync-precise.bin", FileMode::from_bits_truncate(0o644))
+            .expect("Failed to create ext4 file");
+
+        let mut initial = alloc::vec![0u8; PAGE_SIZE * 2];
+        for (idx, byte) in initial.iter_mut().enumerate() {
+            *byte = (idx % 251) as u8;
+        }
+        inode.write_at(0, &initial).expect("Failed to write");
+
+        let mut cached = alloc::vec![0u8; initial.len()];
+        kassert!(inode.read_at(0, &mut cached).unwrap() == initial.len());
+        kassert!(cached == initial);
+
+        let mut ms = new_memory_space();
+        let start_vpn = Vpn::from_usize(0x2300);
+        let vpn_range = VpnRange::new(start_vpn, Vpn::from_usize(start_vpn.as_usize() + 2));
+        let mmap_file = create_test_mmap_file(
+            "mmap-sync-precise.bin",
+            inode.clone(),
+            initial.len(),
+            MapFlags::SHARED,
+        );
+
+        ms.insert_framed_area(
+            vpn_range,
+            AreaType::UserMmap,
+            UniversalPTEFlag::user_rw(),
+            None,
+            Some(mmap_file),
+        )
+        .expect("Failed to insert area");
+
+        {
+            let area = ms.find_area_mut(start_vpn).expect("mmap area should exist");
+            area.load_from_file()
+                .expect("load_from_file should succeed");
+        }
+
+        let write_offset = 128;
+        let update = [0xA5u8; 64];
+        ms.write_bytes_at(start_vpn.start_addr().as_usize() + write_offset, &update)
+            .expect("write mapped bytes");
+
+        let (_, _, flags) = ms.page_table().walk(start_vpn).expect("mapped page");
+        ms.page_table_mut()
+            .update_flags(start_vpn, flags | UniversalPTEFlag::DIRTY)
+            .expect("mark first page dirty");
+
+        let areas_len = ms.areas().len();
+        {
+            let page_table = &mut ms.page_table;
+            let area = &ms.areas[areas_len - 1];
+            area.sync_file(page_table)
+                .expect("sync_file should write dirty shared mapping");
+        }
+
+        let mut expected = initial.clone();
+        expected[write_offset..write_offset + update.len()].copy_from_slice(&update);
+
+        let mut reread = alloc::vec![0u8; expected.len()];
+        kassert!(inode.read_at(0, &mut reread).unwrap() == expected.len());
+        kassert!(reread == expected);
+
+        let (_, _, first_flags) = ms.page_table().walk(start_vpn).expect("first page");
+        let (_, _, second_flags) = ms
+            .page_table()
+            .walk(Vpn::from_usize(start_vpn.as_usize() + 1))
+            .expect("second page");
+        kassert!(!first_flags.contains(UniversalPTEFlag::DIRTY));
+        kassert!(!second_flags.contains(UniversalPTEFlag::DIRTY));
+
+        println!("  sync_file precisely refreshed ext4 cached range");
     });
 
     // 19. 测试 Drop trait 实现

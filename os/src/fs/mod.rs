@@ -94,7 +94,7 @@ use crate::fs::tmpfs::TmpFs;
 // use crate::fs::smfs::SimpleMemoryFileSystem;
 use crate::pr_info;
 use crate::vfs::dev::makedev;
-use crate::vfs::devno::chrdev_major;
+use crate::vfs::devno::{chrdev_major, misc_minor};
 use crate::vfs::{FileMode, FsError, MOUNT_TABLE, MountFlags, vfs_lookup};
 
 // lazy_static! {
@@ -427,15 +427,39 @@ fn create_devices() -> Result<(), FsError> {
         .inode
         .mknod("rtc", char_mode, makedev(chrdev_major::MISC, 135))?;
 
+    // /dev/cpu_dma_latency (10, 123): PM QoS compatibility no-op for cyclictest.
+    match dev_inode.mknod(
+        "cpu_dma_latency",
+        char_mode,
+        makedev(chrdev_major::MISC, misc_minor::CPU_DMA_LATENCY),
+    ) {
+        Ok(_) | Err(FsError::AlreadyExists) => {}
+        Err(err) => return Err(err),
+    }
+
     // 块设备：0660 权限
     let block_mode = FileMode::S_IFBLK | FileMode::from_bits_truncate(0o660);
 
-    for dev_info in list_block_devices() {
+    let block_devices = list_block_devices();
+    for dev_info in &block_devices {
         dev_inode.mknod(
             &dev_info.name,
             block_mode,
             makedev(dev_info.major, dev_info.minor),
         )?;
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    if !block_devices.iter().any(|dev_info| dev_info.name == "vda2") {
+        if let Some(dev_info) = block_devices
+            .iter()
+            .find(|dev_info| dev_info.name == "vdb2")
+        {
+            match dev_inode.mknod("vda2", block_mode, makedev(dev_info.major, dev_info.minor)) {
+                Ok(_) | Err(FsError::AlreadyExists) => {}
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     Ok(())

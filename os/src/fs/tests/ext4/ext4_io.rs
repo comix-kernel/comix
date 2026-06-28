@@ -168,6 +168,267 @@ test_case!(test_ext4_overwrite_existing_multiblock_file, {
     }
 });
 
+test_case!(test_ext4_cached_read_invalidated_by_write, {
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-write.bin", b"AAAA").unwrap();
+
+    let mut buf = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut buf).unwrap() == 4);
+    kassert!(&buf[..] == b"AAAA");
+
+    kassert!(inode.write_at(0, b"BBBB").unwrap() == 4);
+
+    let mut reread = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 4);
+    kassert!(&reread[..] == b"BBBB");
+});
+
+test_case!(
+    test_ext4_frame_cached_read_invalidated_by_cross_page_write,
+    {
+        const TOTAL_SIZE: usize = 4096 + 16;
+        let fs = create_test_ext4();
+        let initial = vec![b'A'; TOTAL_SIZE];
+        let inode = create_test_file_with_content(&fs, "cached-cross-write.bin", &initial).unwrap();
+
+        let mut cached = vec![0u8; 32];
+        kassert!(inode.read_at(4096 - 8, &mut cached).unwrap() == 24);
+        kassert!(&cached[..24] == &initial[4096 - 8..]);
+
+        kassert!(inode.write_at(4096 - 4, b"BBBBCCCC").unwrap() == 8);
+
+        let mut reread = vec![0u8; 24];
+        kassert!(inode.read_at(4096 - 8, &mut reread).unwrap() == 24);
+        kassert!(&reread[..4] == b"AAAA");
+        kassert!(&reread[4..12] == b"BBBBCCCC");
+        kassert!(&reread[12..] == &[b'A'; 12]);
+    }
+);
+
+test_case!(test_ext4_cached_partial_write_refreshes_single_page, {
+    let fs = create_test_ext4();
+    let inode =
+        create_test_file_with_content(&fs, "cached-partial-write.bin", b"0123456789").unwrap();
+
+    let mut cached = vec![0u8; 10];
+    kassert!(inode.read_at(0, &mut cached).unwrap() == 10);
+    kassert!(&cached[..] == b"0123456789");
+
+    kassert!(inode.write_at(3, b"abc").unwrap() == 3);
+
+    let mut reread = vec![0u8; 10];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 10);
+    kassert!(&reread[..] == b"012abc6789");
+});
+
+test_case!(test_ext4_cached_cross_page_write_refreshes_intersections, {
+    const TOTAL_SIZE: usize = 4096 * 2;
+    let fs = create_test_ext4();
+    let initial = vec![b'A'; TOTAL_SIZE];
+    let inode =
+        create_test_file_with_content(&fs, "cached-cross-page-refresh.bin", &initial).unwrap();
+
+    let mut warm = vec![0u8; TOTAL_SIZE];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == TOTAL_SIZE);
+    kassert!(warm == initial);
+
+    kassert!(inode.write_at(4096 - 2, b"WXYZ").unwrap() == 4);
+
+    let mut reread = vec![0u8; 8];
+    kassert!(inode.read_at(4096 - 4, &mut reread).unwrap() == 8);
+    kassert!(&reread[..2] == b"AA");
+    kassert!(&reread[2..6] == b"WXYZ");
+    kassert!(&reread[6..] == b"AA");
+});
+
+test_case!(test_ext4_cached_write_preserves_adjacent_cached_page, {
+    const TOTAL_SIZE: usize = 4096 * 3;
+    let fs = create_test_ext4();
+    let mut initial = vec![0u8; TOTAL_SIZE];
+    for page in 0..3 {
+        for byte in &mut initial[page * 4096..(page + 1) * 4096] {
+            *byte = b'0' + page as u8;
+        }
+    }
+    let inode =
+        create_test_file_with_content(&fs, "cached-adjacent-preserve.bin", &initial).unwrap();
+
+    let mut warm = vec![0u8; TOTAL_SIZE];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == TOTAL_SIZE);
+    kassert!(warm == initial);
+
+    kassert!(inode.write_at(4096 + 17, b"MIDDLE").unwrap() == 6);
+
+    let mut first_page = vec![0u8; 4096];
+    let mut third_page = vec![0u8; 4096];
+    kassert!(inode.read_at(0, &mut first_page).unwrap() == 4096);
+    kassert!(inode.read_at(4096 * 2, &mut third_page).unwrap() == 4096);
+    kassert!(first_page == vec![b'0'; 4096]);
+    kassert!(third_page == vec![b'2'; 4096]);
+});
+
+test_case!(test_ext4_cached_write_beyond_eof_keeps_zero_gap, {
+    const TAIL_OFFSET: usize = 4096 + 8;
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-gap-write.bin", b"head").unwrap();
+
+    let mut head = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut head).unwrap() == 4);
+    kassert!(&head[..] == b"head");
+
+    kassert!(inode.write_at(TAIL_OFFSET, b"tail").unwrap() == 4);
+
+    let mut all = vec![0xFF; TAIL_OFFSET + 4];
+    kassert!(inode.read_at(0, &mut all).unwrap() == TAIL_OFFSET + 4);
+    kassert!(&all[..4] == b"head");
+    for byte in &all[4..TAIL_OFFSET] {
+        kassert!(*byte == 0);
+    }
+    kassert!(&all[TAIL_OFFSET..] == b"tail");
+});
+
+test_case!(test_ext4_cached_read_invalidated_by_truncate, {
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-truncate.bin", b"ABCDEFGH").unwrap();
+
+    let mut buf = vec![0u8; 8];
+    kassert!(inode.read_at(0, &mut buf).unwrap() == 8);
+    kassert!(&buf[..] == b"ABCDEFGH");
+
+    kassert!(inode.truncate(3).is_ok());
+
+    let mut shrunk = vec![0xFF; 8];
+    kassert!(inode.read_at(0, &mut shrunk).unwrap() == 3);
+    kassert!(&shrunk[..3] == b"ABC");
+});
+
+test_case!(test_ext4_cached_truncate_shrink_invalidates_tail_page, {
+    const TOTAL_SIZE: usize = 4096 + 16;
+    let fs = create_test_ext4();
+    let initial = vec![b'A'; TOTAL_SIZE];
+    let inode = create_test_file_with_content(&fs, "cached-truncate-tail.bin", &initial).unwrap();
+
+    let mut warm = vec![0u8; TOTAL_SIZE];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == TOTAL_SIZE);
+    kassert!(warm == initial);
+
+    kassert!(inode.truncate(4096 + 3).is_ok());
+
+    let mut reread = vec![0xFF; 32];
+    kassert!(inode.read_at(4096 - 8, &mut reread).unwrap() == 11);
+    kassert!(&reread[..8] == &[b'A'; 8]);
+    kassert!(&reread[8..11] == &[b'A'; 3]);
+    kassert!(&reread[11..] == &[0xFF; 21]);
+});
+
+test_case!(test_ext4_cached_truncate_to_zero_drops_cached_pages, {
+    let fs = create_test_ext4();
+    let inode =
+        create_test_file_with_content(&fs, "cached-truncate-zero.bin", &[b'Z'; 4096]).unwrap();
+
+    let mut warm = vec![0u8; 4096];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == 4096);
+    kassert!(warm == vec![b'Z'; 4096]);
+
+    kassert!(inode.truncate(0).is_ok());
+
+    let mut reread = vec![0xEE; 8];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 0);
+    kassert!(reread == vec![0xEE; 8]);
+});
+
+test_case!(test_ext4_cached_truncate_extend_zero_fills_new_range, {
+    let fs = create_test_ext4();
+    let inode = create_test_file_with_content(&fs, "cached-truncate-extend.bin", b"head").unwrap();
+
+    let mut warm = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut warm).unwrap() == 4);
+    kassert!(&warm[..] == b"head");
+
+    kassert!(inode.truncate(32).is_ok());
+
+    let mut reread = vec![0xFF; 32];
+    kassert!(inode.read_at(0, &mut reread).unwrap() == 32);
+    kassert!(&reread[..4] == b"head");
+    kassert!(reread[4..].iter().all(|byte| *byte == 0));
+});
+
+test_case!(
+    test_ext4_cached_truncate_extend_across_pages_preserves_old_data,
+    {
+        const OLD_SIZE: usize = 4096 - 3;
+        const NEW_SIZE: usize = 4096 + 9;
+        let fs = create_test_ext4();
+        let initial = vec![b'K'; OLD_SIZE];
+        let inode =
+            create_test_file_with_content(&fs, "cached-truncate-cross-extend.bin", &initial)
+                .unwrap();
+
+        let mut warm = vec![0u8; OLD_SIZE];
+        kassert!(inode.read_at(0, &mut warm).unwrap() == OLD_SIZE);
+        kassert!(warm == initial);
+
+        kassert!(inode.truncate(NEW_SIZE).is_ok());
+
+        let mut reread = vec![0xFF; 16];
+        kassert!(inode.read_at(OLD_SIZE - 4, &mut reread).unwrap() == 16);
+        kassert!(&reread[..4] == &[b'K'; 4]);
+        kassert!(reread[4..].iter().all(|byte| *byte == 0));
+    }
+);
+
+test_case!(test_ext4_unlink_recreate_does_not_read_old_cached_page, {
+    let fs = create_test_ext4();
+    let root = fs.root_inode();
+    let inode = root
+        .create("reuse-name.bin", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+
+    kassert!(inode.write_at(0, b"OLD!").unwrap() == 4);
+    let mut old = vec![0u8; 4];
+    kassert!(inode.read_at(0, &mut old).unwrap() == 4);
+    kassert!(&old[..] == b"OLD!");
+
+    kassert!(root.unlink("reuse-name.bin").is_ok());
+    let new_inode = root
+        .create("reuse-name.bin", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+    kassert!(new_inode.write_at(0, b"NEW?").unwrap() == 4);
+
+    let found = root.lookup("reuse-name.bin").unwrap();
+    let mut new = vec![0u8; 4];
+    kassert!(found.read_at(0, &mut new).unwrap() == 4);
+    kassert!(&new[..] == b"NEW?");
+});
+
+test_case!(
+    test_ext4_unlink_recreate_inode_reuse_drops_frame_cached_page,
+    {
+        let fs = create_test_ext4();
+        let root = fs.root_inode();
+        let inode = root
+            .create("reuse-frame.bin", FileMode::from_bits_truncate(0o644))
+            .unwrap();
+        let old = vec![b'O'; 4096 + 16];
+
+        kassert!(inode.write_at(0, &old).unwrap() == old.len());
+        let mut cached = vec![0u8; old.len()];
+        kassert!(inode.read_at(0, &mut cached).unwrap() == old.len());
+        kassert!(cached == old);
+
+        kassert!(root.unlink("reuse-frame.bin").is_ok());
+        let new_inode = root
+            .create("reuse-frame.bin", FileMode::from_bits_truncate(0o644))
+            .unwrap();
+        kassert!(new_inode.write_at(0, b"NEW").unwrap() == 3);
+
+        let found = root.lookup("reuse-frame.bin").unwrap();
+        let mut new = vec![0u8; 4096 + 16];
+        kassert!(found.read_at(0, &mut new).unwrap() == 3);
+        kassert!(&new[..3] == b"NEW");
+    }
+);
+
 test_case!(test_ext4_sync, {
     // 创建文件并写入
     let fs = create_test_ext4();
@@ -193,6 +454,26 @@ test_case!(test_ext4_read_beyond_eof, {
     let mut buf = vec![0u8; 10];
     let bytes_read = inode.read_at(0, &mut buf).unwrap();
     kassert!(bytes_read <= 5); // 最多只能读取 5 字节
+});
+
+test_case!(test_ext4_cached_read_cross_page_partial_eof, {
+    const TOTAL_SIZE: usize = 4096 + 9;
+    let fs = create_test_ext4();
+    let mut data = vec![0u8; TOTAL_SIZE];
+    for i in 0..TOTAL_SIZE {
+        data[i] = (i % 251) as u8;
+    }
+    let inode = create_test_file_with_content(&fs, "partial-eof.bin", &data).unwrap();
+
+    let mut first = vec![0u8; 32];
+    let read = inode.read_at(4096 - 8, &mut first).unwrap();
+    kassert!(read == 17);
+    kassert!(&first[..17] == &data[4096 - 8..]);
+
+    let mut cached = vec![0u8; 32];
+    let read = inode.read_at(4096 - 8, &mut cached).unwrap();
+    kassert!(read == 17);
+    kassert!(&cached[..17] == &data[4096 - 8..]);
 });
 
 test_case!(test_ext4_empty_file_read, {

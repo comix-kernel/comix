@@ -186,6 +186,12 @@ pub fn fchmodat(dirfd: i32, pathname: *const c_char, mode: u32, flags: u32) -> i
     }
 }
 
+/// Linux syscall 53 is the historical 3-argument fchmodat. The 4-argument
+/// fchmodat2 variant uses a different syscall number and is not wired here.
+pub fn fchmodat_legacy(dirfd: i32, pathname: *const c_char, mode: u32) -> isize {
+    fchmodat(dirfd, pathname, mode, 0)
+}
+
 /// mknodat 系统调用
 ///
 /// # 参数

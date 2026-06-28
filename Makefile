@@ -37,7 +37,7 @@ LOCAL_TESTIMG_DIR ?= ../CCYOS
 TESTIMG_RV ?= $(firstword $(wildcard $(LOCAL_TESTIMG_DIR)/sdcard-rv.img sdcard-rv.img))
 TESTIMG_LA ?= $(firstword $(wildcard $(LOCAL_TESTIMG_DIR)/sdcard-la.img sdcard-la.img))
 RV_TEST_DRIVE := -drive file=$(TESTIMG_RV)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-device$(COMMA)drive=test0$(COMMA)bus=virtio-mmio-bus.0
-LA_TEST_DRIVE := -drive file=$(TESTIMG_LA)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=test0 -device virtio-blk-pci$(COMMA)drive=test0
+LA_TEST_DRIVE := -drive file=$(TESTIMG_LA)$(COMMA)if=none$(COMMA)format=raw$(COMMA)id=x0 -device virtio-blk-pci$(COMMA)drive=x0
 
 # 评测构建 profile：默认 release（提交用）。本地调试可 `make all PROFILE=debug`。
 PROFILE ?= release
@@ -141,11 +141,11 @@ disk-la.img: kernel-la $(VFAT_IMG) $(ASSEMBLE_DISK)
 	@$(ASSEMBLE_DISK) $(OS_DIR)/fs-loongarch.img $(VFAT_IMG) $@
 
 # ------------------------------------------------------------
-# 本地运行评测形态：我们的 MBR 分区盘作为 /dev/vda（vda1=rootfs，vda2=VFAT）；
-# 官方测试盘作为额外裸 ext4 块设备 /dev/vdb，由 rcS 挂载到 /tests。
+# 本地运行评测形态：官方测试盘作为额外裸 ext4 块设备，由 rcS 挂载到 /tests。
 # RISC-V virtio-mmio 设备树按高地址先探测，因此我们的分区盘放 bus.1，
 # 官方测试盘放 bus.0，注册出来才是 vda=disk、vdb=sdcard。
-# 设备型号对齐 os/qemu-run.sh（riscv: virtio-mmio）与 os/qemu-loongarch-run.sh（loongarch: pci）。
+# LoongArch 评测命令先挂官方测试盘、后挂 disk-la.img，因此 la 下是
+# vda=sdcard-la.img、vdb=disk-la.img、vdb1=rootfs。
 # ------------------------------------------------------------
 run-rv: kernel-rv disk.img
 	@if [ -z "$(TESTIMG_RV)" ]; then \
@@ -165,12 +165,12 @@ run-la: kernel-la disk-la.img
 		echo "Error: no LoongArch test image found. Set TESTIMG_LA=/path/to/sdcard-la.img" >&2; \
 		exit 1; \
 	fi
-	@echo "[Run] 运行 LoongArch QEMU（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
+	@echo "[Run] 运行 LoongArch QEMU（测试盘：vda；内核盘：vdb1 rootfs，vdb2 VFAT）"
 	qemu-system-loongarch64 -machine virt -kernel kernel-la -m $(LA_MEM) -nographic \
 		-smp $(LA_SMP) -no-reboot -rtc base=utc \
-		-drive file=disk-la.img,if=none,format=raw,id=x0 \
-		-device virtio-blk-pci,drive=x0 \
 		$(LA_TEST_DRIVE) \
+		-drive file=disk-la.img,if=none,format=raw,id=x1 \
+		-device virtio-blk-pci,drive=x1 \
 		-device virtio-net-pci,netdev=net0 \
 		-netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
 

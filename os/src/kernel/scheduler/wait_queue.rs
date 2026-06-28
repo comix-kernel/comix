@@ -67,6 +67,12 @@ impl WaitQueue {
         }
     }
 
+    /// 弹出队首任务但不唤醒，用于 futex requeue。
+    pub fn pop_task_no_wake(&mut self) -> Option<SharedTask> {
+        let _g = self.lock.lock();
+        self.tasks.pop_task()
+    }
+
     /// 唤醒队列中所有任务：一次性把要唤醒的任务收集出来，释放锁后逐个唤醒
     pub fn wake_up_all(&mut self) {
         let mut to_wake: Vec<SharedTask> = Vec::new();

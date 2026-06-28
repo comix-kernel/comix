@@ -45,6 +45,12 @@ pub struct ShmAttachment {
 
 pub type ShmAttachmentTable = Arc<SpinLock<BTreeMap<usize, ShmAttachment>>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskExitStatus {
+    Exited(i32),
+    Signaled { signal: usize, core_dumped: bool },
+}
+
 /// 任务
 /// 存放任务的核心信息
 /// 其中的信息可以分为几大类：
@@ -84,6 +90,8 @@ pub struct Task {
     pub sched_priority: i32,
     /// fork/clone 时是否将子任务调度属性重置为普通策略。
     pub sched_reset_on_fork: bool,
+    /// Linux-ish OOM badness adjustment exposed through /proc/[pid]/oom_score_adj.
+    pub oom_score_adj: i32,
     /// 任务当前的状态
     pub state: TaskState,
     /// 任务的id
@@ -110,11 +118,9 @@ pub struct Task {
     /// 任务的内存空间
     /// 对于内核任务，该字段为 None
     pub memory_space: Option<Arc<SpinLock<MemorySpace>>>,
-    /// 退出码
-    /// 存储任务退出时的状态码，通常用于表示任务的执行结果
-    /// 由 exit 接口设置
-    /// 对应于 waitpid 的 exit_status
-    pub exit_code: Option<i32>,
+    /// 退出状态。
+    /// 正常 exit 和致命信号退出在 wait(2) 中有不同编码，不能混用。
+    pub exit_status: Option<TaskExitStatus>,
     /// 内核栈跟踪器
     kstack_tracker: FrameRangeTracker,
     /// 任务的 TrapFrame 跟踪器
@@ -425,6 +431,7 @@ impl Task {
             sched_policy: SCHED_NORMAL,
             sched_priority: 0,
             sched_reset_on_fork: false,
+            oom_score_adj: 0,
             state: TaskState::Running,
             tid,
             pid,
@@ -438,7 +445,7 @@ impl Task {
             trap_frame_tracker,
             trap_frame_ptr: AtomicPtr::new(trap_frame_ptr as *mut TrapFrame),
             memory_space,
-            exit_code: None,
+            exit_status: None,
             signal_handlers,
             signal_stack,
             exit_signal,

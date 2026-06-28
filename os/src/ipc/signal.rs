@@ -14,9 +14,9 @@ use bitflags::bitflags;
 use crate::{
     arch::{HwTrapFrame, TrapFrame},
     kernel::{
-        SharedTask, TASK_MANAGER, TaskManagerTrait, TaskState, cleanup_process_resources_on_exit,
-        current_cpu, current_task, exit_process, exit_task, schedule, sleep_task,
-        task_group_leader, wake_up_task, yield_task,
+        SharedTask, TASK_MANAGER, TaskExitStatus, TaskManagerTrait, TaskState,
+        cleanup_process_resources_on_exit, current_cpu, current_task, exit_process_with_status,
+        exit_task, schedule, sleep_task, task_group_leader, wake_up_task, yield_task,
     },
     pr_err,
     uapi::signal::*,
@@ -236,10 +236,17 @@ fn signal_from_flag(flag: SignalFlags) -> Option<usize> {
 /* 默认信号处理函数 */
 /// 默认行为：进程中止
 fn sig_terminate(sig_num: usize) -> ! {
+    sig_terminate_with_status(sig_num, false);
+}
+
+fn sig_terminate_with_status(sig_num: usize, core_dumped: bool) -> ! {
     let task = current_task();
     let leader = task_group_leader(&task).unwrap_or(task);
     cleanup_process_resources_on_exit(leader.clone());
-    exit_process(leader, (128 + sig_num) as i32);
+    exit_process_with_status(leader, TaskExitStatus::Signaled {
+        signal: sig_num,
+        core_dumped,
+    });
     schedule();
     unreachable!("sig_terminate: exited task should not return");
 }
@@ -248,7 +255,7 @@ fn sig_terminate(sig_num: usize) -> ! {
 /// TODO: 实现生成 core dump 的功能
 fn sig_dump(sig_num: usize) -> ! {
     pr_err!("signal {}: generating core (stub)", sig_num);
-    sig_terminate(sig_num);
+    sig_terminate_with_status(sig_num, true);
 }
 
 /// 默认行为：停止进程

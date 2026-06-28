@@ -32,6 +32,7 @@ pub use task_struct::FsStruct;
 pub use task_struct::SharedTask;
 pub use task_struct::ShmAttachment;
 pub use task_struct::Task as TaskStruct;
+pub use task_struct::TaskExitStatus;
 pub use work_queue::*;
 
 use alloc::sync::Arc;

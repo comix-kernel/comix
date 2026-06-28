@@ -83,8 +83,8 @@
 //! ```
 
 use crate::uapi::fcntl::{OpenFlags, SeekWhence};
-use crate::vfs::{Dentry, FsError, Inode, InodeMetadata};
-use alloc::sync::Arc;
+use crate::vfs::{Dentry, DirEntry, FsError, Inode, InodeMetadata};
+use alloc::{sync::Arc, vec::Vec};
 
 /// 文件操作的统一接口
 ///
@@ -149,6 +149,11 @@ pub trait File: Send + Sync {
     /// 默认返回`FsError::NotSupported`,适用于RegFile
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotSupported)
+    }
+
+    /// 读取目录项，可由有状态 File 实现缓存目录快照。
+    fn readdir_cached(&self) -> Result<Arc<Vec<DirEntry>>, FsError> {
+        Ok(Arc::new(self.inode()?.readdir()?))
     }
 
     /// 设置文件状态标志（可选方法，用于 F_SETFL）

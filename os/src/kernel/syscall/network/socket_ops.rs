@@ -1,6 +1,36 @@
 use super::*;
 
 const TCP_LISTENER_POOL_LIMIT: usize = 16;
+const AF_INET_U16: u16 = 2;
+
+fn is_local_bind_address(addr: IpAddress) -> bool {
+    match addr {
+        IpAddress::Ipv4(addr) => {
+            addr.is_unspecified()
+                || addr.octets()[0] == 127
+                || NETWORK_INTERFACE_MANAGER
+                    .lock()
+                    .get_interfaces()
+                    .iter()
+                    .any(|iface| {
+                        iface
+                            .ip_addresses()
+                            .iter()
+                            .any(|cidr| match cidr.address() {
+                                IpAddress::Ipv4(local) => local == addr,
+                                #[cfg(feature = "proto-ipv6")]
+                                IpAddress::Ipv6(_) => false,
+                                #[cfg(not(feature = "proto-ipv6"))]
+                                _ => false,
+                            })
+                    })
+        }
+        #[cfg(feature = "proto-ipv6")]
+        IpAddress::Ipv6(addr) => addr.is_unspecified() || addr.is_loopback(),
+        #[cfg(not(feature = "proto-ipv6"))]
+        _ => false,
+    }
+}
 
 /// 创建套接字
 pub fn socket(domain: i32, socket_type: i32, _protocol: i32) -> isize {
@@ -132,24 +162,41 @@ pub fn socketpair(domain: i32, socket_type: i32, _protocol: i32, sv: *mut i32) -
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let task = current_task();
     let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
     let file = match task_lock.fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
-    if let Some(unix_socket) = file.as_any().downcast_ref::<UnixSocketFile>() {
+    drop(task_lock);
+
+    let is_unix_socket = file.as_any().is::<UnixSocketFile>();
+    if is_unix_socket {
         let unix_addr = match parse_sockaddr_un(addr, addrlen) {
             Ok(addr) => addr,
             Err(e) => return e,
         };
+        let unix_socket = match file.as_any().downcast_ref::<UnixSocketFile>() {
+            Some(socket) => socket,
+            None => return -88, // ENOTSOCK
+        };
         return unix_socket.bind(unix_addr);
+    }
+
+    let family = match read_sockaddr_family(addr, addrlen) {
+        Ok(family) => family,
+        Err(e) => return e.to_errno(),
+    };
+    if family != AF_INET_U16 {
+        return -(crate::uapi::errno::EAFNOSUPPORT as isize);
     }
 
     let endpoint = match parse_sockaddr_in(addr, addrlen) {
         Ok(e) => e,
         Err(e) => return e.to_errno(),
     };
-
-    let tid = task_lock.tid as usize;
+    if !is_local_bind_address(endpoint.addr) {
+        return -(crate::uapi::errno::EADDRNOTAVAIL as isize);
+    }
 
     pr_debug!(
         "bind: tid={}, sockfd={}, endpoint={}",
@@ -162,12 +209,6 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
-
-    let file = match task_lock.fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => return -9, // EBADF
-    };
-    drop(task_lock);
 
     // For TCP: just save the endpoint, listen() will call smoltcp's listen()
     // For UDP: bind immediately
@@ -394,6 +435,10 @@ pub fn accept(sockfd: i32, addr: *mut u8, addrlen: *mut u32) -> isize {
         Some(sf) => sf,
         None => return -88, // ENOTSOCK
     };
+
+    if matches!(socket_file.handle(), SocketHandle::Udp(_)) {
+        return -95; // EOPNOTSUPP - UDP doesn't support accept
+    }
 
     if !socket_file.is_listener() {
         return -22; // EINVAL - not a listening socket

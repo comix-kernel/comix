@@ -20,6 +20,7 @@ pub mod chrdev_major {
 
 /// MISC 设备 minor 号
 pub mod misc_minor {
+    pub const CPU_DMA_LATENCY: u32 = 123;
     pub const RTC: u32 = 135;
 }
 
@@ -87,7 +88,9 @@ pub fn get_chrdev_driver(dev: u64) -> Option<Arc<dyn Driver>> {
         }
         chrdev_major::MISC => {
             // misc 设备
-            if min == misc_minor::RTC {
+            if min == misc_minor::CPU_DMA_LATENCY {
+                None
+            } else if min == misc_minor::RTC {
                 // RTC 设备 (/dev/misc/rtc)
                 RTC_DRIVERS
                     .read()

@@ -99,6 +99,15 @@ pub fn sendto(
             )
             .ok();
         }
+        let handle = match handle {
+            SocketHandle::Udp(h) => {
+                match ensure_udp_bound_for_peer(tid, sockfd as usize, &file, h, endpoint) {
+                    Ok(h) => SocketHandle::Udp(h),
+                    Err(e) => return e.to_errno(),
+                }
+            }
+            SocketHandle::Tcp(_) => handle,
+        };
         socket_sendto(handle, &kernel_buf, endpoint)
     };
     match result {

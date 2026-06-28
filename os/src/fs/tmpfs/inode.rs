@@ -144,21 +144,6 @@ impl TmpfsInode {
         inode_no
     }
 
-    /// 检查是否有足够的空间分配新页
-    fn can_alloc_pages(&self, num_pages: usize) -> bool {
-        let stats = self.stats.lock();
-        if stats.max_pages == 0 {
-            return true; // 无限制
-        }
-        stats.allocated_pages + num_pages <= stats.max_pages
-    }
-
-    /// 增加已分配页数
-    fn inc_allocated_pages(&self, num: usize) {
-        let mut stats = self.stats.lock();
-        stats.allocated_pages += num;
-    }
-
     /// 减少已分配页数
     fn dec_allocated_pages(&self, num: usize) {
         let mut stats = self.stats.lock();
@@ -179,17 +164,68 @@ impl TmpfsInode {
         meta.ctime = now;
     }
 
-    fn reserve_page(&self) -> Result<(), FsError> {
+    fn page_range(offset: usize, len: usize) -> Option<(usize, usize)> {
+        if len == 0 {
+            return None;
+        }
+
+        let start = offset / PAGE_SIZE;
+        let end = offset.saturating_add(len).div_ceil(PAGE_SIZE);
+        Some((start, end))
+    }
+
+    fn frame_kernel_addr(frame: &FrameTracker) -> usize {
+        frame.ppn().start_addr().to_va().as_usize()
+    }
+
+    fn copy_from_page(frame: &FrameTracker, page_offset: usize, dst: &mut [u8]) {
+        let kernel_vaddr = Self::frame_kernel_addr(frame);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                (kernel_vaddr + page_offset) as *const u8,
+                dst.as_mut_ptr(),
+                dst.len(),
+            );
+        }
+    }
+
+    fn copy_to_page(frame: &FrameTracker, page_offset: usize, src: &[u8]) {
+        let kernel_vaddr = Self::frame_kernel_addr(frame);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                src.as_ptr(),
+                (kernel_vaddr + page_offset) as *mut u8,
+                src.len(),
+            );
+        }
+    }
+
+    fn zero_page_range(frame: &FrameTracker, page_offset: usize, len: usize) {
+        if len == 0 {
+            return;
+        }
+
+        let kernel_vaddr = Self::frame_kernel_addr(frame);
+        unsafe {
+            core::ptr::write_bytes((kernel_vaddr + page_offset) as *mut u8, 0, len);
+        }
+    }
+
+    fn reserve_pages(&self, num_pages: usize) -> Result<(), FsError> {
         let mut stats = self.stats.lock();
-        if stats.max_pages != 0 && stats.allocated_pages >= stats.max_pages {
+        if stats.max_pages != 0 && stats.allocated_pages + num_pages > stats.max_pages {
             return Err(FsError::NoSpace);
         }
-        stats.allocated_pages += 1;
+        stats.allocated_pages += num_pages;
         Ok(())
     }
 
-    fn cancel_page_reservation(&self) {
-        self.dec_allocated_pages(1);
+    fn cancel_page_reservations(&self, num_pages: usize) {
+        self.dec_allocated_pages(num_pages);
+    }
+
+    fn alloc_data_frame() -> Result<Arc<FrameTracker>, FsError> {
+        alloc_frame().map(Arc::new).ok_or(FsError::NoSpace)
     }
 
     fn remove_link_from_child(&self, child: &Arc<TmpfsInode>) {
@@ -288,20 +324,13 @@ impl Inode for TmpfsInode {
             let read_len = (PAGE_SIZE - page_offset).min(read_size - bytes_read);
 
             // 如果页不存在，返回 0
-            if page_index >= data.len() || data[page_index].is_none() {
-                buf[bytes_read..bytes_read + read_len].fill(0);
-            } else {
-                // 通过内核直接映射读取
-                let frame = data[page_index].as_ref().unwrap();
-                let kernel_vaddr = frame.ppn().start_addr().to_va();
-
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        (kernel_vaddr.as_usize() + page_offset) as *const u8,
-                        buf[bytes_read..].as_mut_ptr(),
-                        read_len,
-                    );
-                }
+            match data.get(page_index).and_then(Option::as_ref) {
+                Some(frame) => Self::copy_from_page(
+                    frame,
+                    page_offset,
+                    &mut buf[bytes_read..bytes_read + read_len],
+                ),
+                None => buf[bytes_read..bytes_read + read_len].fill(0),
             }
 
             bytes_read += read_len;
@@ -321,6 +350,34 @@ impl Inode for TmpfsInode {
         drop(meta);
 
         let mut data = self.data.lock();
+        if let Some((start_page, end_page)) = Self::page_range(offset, buf.len()) {
+            if end_page > data.len() {
+                data.resize(end_page, None);
+            }
+
+            let pages_needed = data[start_page..end_page]
+                .iter()
+                .filter(|page| page.is_none())
+                .count();
+            self.reserve_pages(pages_needed)?;
+
+            let mut allocated = 0;
+            for page in &mut data[start_page..end_page] {
+                if page.is_none() {
+                    match Self::alloc_data_frame() {
+                        Ok(frame) => {
+                            *page = Some(frame);
+                            allocated += 1;
+                        }
+                        Err(err) => {
+                            self.cancel_page_reservations(pages_needed - allocated);
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        }
+
         let mut bytes_written = 0;
 
         while bytes_written < buf.len() {
@@ -328,40 +385,13 @@ impl Inode for TmpfsInode {
             let page_offset = (offset + bytes_written) % PAGE_SIZE;
             let write_len = (PAGE_SIZE - page_offset).min(buf.len() - bytes_written);
 
-            // 确保 Vec 足够大
-            if page_index >= data.len() {
-                data.resize(page_index + 1, None);
-            }
-
-            // 按需分配物理帧
-            if data[page_index].is_none() {
-                if self.reserve_page().is_err() {
-                    return Err(FsError::NoSpace);
-                }
-
-                match alloc_frame() {
-                    Some(frame) => {
-                        data[page_index] = Some(Arc::new(frame));
-                    }
-                    None => {
-                        // 如果物理帧分配失败，回滚预留的页面计数
-                        self.cancel_page_reservation();
-                        return Err(FsError::NoSpace);
-                    }
-                }
-            }
-
             // 通过内核直接映射写入
             let frame = data[page_index].as_ref().unwrap();
-            let kernel_vaddr = frame.ppn().start_addr().to_va();
-
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    buf[bytes_written..].as_ptr(),
-                    (kernel_vaddr.as_usize() + page_offset) as *mut u8,
-                    write_len,
-                );
-            }
+            Self::copy_to_page(
+                frame,
+                page_offset,
+                &buf[bytes_written..bytes_written + write_len],
+            );
 
             bytes_written += write_len;
         }
@@ -625,6 +655,15 @@ impl Inode for TmpfsInode {
                 .iter()
                 .filter(|f| f.is_some())
                 .count();
+
+            if new_page_count > 0 {
+                let tail_offset = new_size % PAGE_SIZE;
+                if tail_offset != 0
+                    && let Some(frame) = data.get(new_page_count - 1).and_then(Option::as_ref)
+                {
+                    Self::zero_page_range(frame, tail_offset, PAGE_SIZE - tail_offset);
+                }
+            }
 
             data.truncate(new_page_count);
             drop(data);

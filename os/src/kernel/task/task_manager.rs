@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 
 use crate::kernel::task::SharedTask;
 use crate::kernel::task::tid_allocator::TidAllocator;
-use crate::kernel::{TaskState, exit_task, wake_up_task};
+use crate::kernel::{TaskExitStatus, TaskState, exit_task, wake_up_task};
 use crate::sync::SpinLock;
 use crate::uapi::signal::SignalFlags;
 
@@ -48,6 +48,7 @@ pub trait TaskManagerTrait {
     /// 参数:
     /// * `tid`: 需要退出的任务 ID
     fn exit_task(&mut self, task: SharedTask, code: i32);
+    fn exit_task_with_status(&mut self, task: SharedTask, status: TaskExitStatus);
 
     /// 释放一个已退出的任务
     /// 参数:
@@ -128,9 +129,13 @@ impl TaskManagerTrait for TaskManager {
     }
 
     fn exit_task(&mut self, task: SharedTask, code: i32) {
+        self.exit_task_with_status(task, TaskExitStatus::Exited(code));
+    }
+
+    fn exit_task_with_status(&mut self, task: SharedTask, status: TaskExitStatus) {
         {
             let mut task = task.lock();
-            task.exit_code = Some(code);
+            task.exit_status = Some(status);
             // Linux 语义：线程退出时应释放其对用户地址空间的引用。
             // 线程组共享的地址空间由 Arc 计数管理：最后一个线程退出时自动释放。
             task.memory_space = None;
@@ -266,7 +271,7 @@ mod tests {
         let g = exited_task.lock();
 
         // 验证任务管理器设置了返回值 (新的责任)
-        kassert!(g.exit_code == Some(EXIT_CODE));
+        kassert!(g.exit_status == Some(TaskExitStatus::Exited(EXIT_CODE)));
 
         // 验证调度器设置了状态 (调度器的责任)
         kassert!(g.state == TaskState::Zombie);

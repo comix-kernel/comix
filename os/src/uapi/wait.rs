@@ -38,6 +38,12 @@ impl WaitStatus {
         Self::new(status as c_int)
     }
 
+    /// 构造一个子进程被信号终止的状态值。
+    pub fn signaled(sig: u8, core_dumped: bool) -> Self {
+        let core = if core_dumped { __WCOREFLAG } else { 0 };
+        Self::new(((sig as u32) | core) as c_int)
+    }
+
     /// __W_STOPCODE: 构造一个子进程被停止的状态值。
     ///
     /// 结构: (Signal that stopped the child) << 8 | 0x7f
