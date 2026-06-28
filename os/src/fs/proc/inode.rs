@@ -36,6 +36,12 @@ pub trait ContentGenerator: Send + Sync {
     fn generate(&self) -> Result<Vec<u8>, FsError>;
 }
 
+/// 动态内容写入器 trait
+pub trait ContentWriter: Send + Sync {
+    /// 写入文件内容。procfs 动态文件通常忽略 offset。
+    fn write(&self, buf: &[u8]) -> Result<usize, FsError>;
+}
+
 pub struct ProcInode {
     kind: ProcInodeKind,
 
@@ -52,6 +58,12 @@ pub enum ProcInodeContent {
 
     /// 动态文件（每次读取时生成）
     Dynamic(Arc<dyn ContentGenerator>),
+
+    /// 可写动态文件（读取时生成，写入时调用回调）
+    WritableDynamic {
+        generator: Arc<dyn ContentGenerator>,
+        writer: Arc<dyn ContentWriter>,
+    },
 
     /// 目录（包含子节点）
     Directory(Mutex<BTreeMap<String, Arc<ProcInode>>>),
@@ -130,6 +142,45 @@ impl ProcInode {
                 rdev: 0,
             }),
             content: ProcInodeContent::Dynamic(generator),
+        })
+    }
+
+    /// 创建可写动态文件 inode
+    pub fn new_writable_dynamic_file(
+        _name: &str,
+        generator: Arc<dyn ContentGenerator>,
+        writer: Arc<dyn ContentWriter>,
+        mode: FileMode,
+    ) -> Arc<Self> {
+        Self::new_writable_dynamic_file_with_inode_no(generator, writer, mode, None)
+    }
+
+    fn new_writable_dynamic_file_with_inode_no(
+        generator: Arc<dyn ContentGenerator>,
+        writer: Arc<dyn ContentWriter>,
+        mode: FileMode,
+        inode_no: Option<usize>,
+    ) -> Arc<Self> {
+        let inode_no = inode_no.unwrap_or_else(|| NEXT_INODE_NO.fetch_add(1, Ordering::Relaxed));
+        let now = TimeSpec::now();
+
+        Arc::new(Self {
+            kind: ProcInodeKind::Generic,
+            metadata: SpinLock::new(InodeMetadata {
+                inode_no,
+                inode_type: InodeType::File,
+                mode,
+                uid: 0,
+                gid: 0,
+                size: 0, // proc 文件总是返回 size = 0
+                atime: now,
+                mtime: now,
+                ctime: now,
+                nlinks: 1,
+                blocks: 0,
+                rdev: 0,
+            }),
+            content: ProcInodeContent::WritableDynamic { generator, writer },
         })
     }
 
@@ -334,12 +385,24 @@ impl Inode for ProcInode {
                 buf[..to_read].copy_from_slice(&data[offset..offset + to_read]);
                 Ok(to_read)
             }
+            ProcInodeContent::WritableDynamic { generator, .. } => {
+                let data = generator.generate()?;
+                if offset >= data.len() {
+                    return Ok(0);
+                }
+                let to_read = (data.len() - offset).min(buf.len());
+                buf[..to_read].copy_from_slice(&data[offset..offset + to_read]);
+                Ok(to_read)
+            }
             _ => Err(FsError::IsDirectory),
         }
     }
 
-    fn write_at(&self, _offset: usize, _buf: &[u8]) -> Result<usize, FsError> {
-        Err(FsError::PermissionDenied)
+    fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        match &self.content {
+            ProcInodeContent::WritableDynamic { writer, .. } => writer.write(buf),
+            _ => Err(FsError::PermissionDenied),
+        }
     }
 
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>, FsError> {
@@ -457,8 +520,11 @@ impl Inode for ProcInode {
         !matches!(self.kind, ProcInodeKind::PidDir(_))
     }
 
-    fn truncate(&self, _size: usize) -> Result<(), FsError> {
-        Err(FsError::PermissionDenied)
+    fn truncate(&self, size: usize) -> Result<(), FsError> {
+        match &self.content {
+            ProcInodeContent::WritableDynamic { .. } if size == 0 => Ok(()),
+            _ => Err(FsError::PermissionDenied),
+        }
     }
 
     fn sync(&self) -> Result<(), FsError> {
