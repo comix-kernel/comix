@@ -292,7 +292,7 @@ impl ProcInode {
     fn create_process_dir(&self, pid: u32) -> Option<Arc<ProcInode>> {
         use crate::fs::proc::generators::{
             CmdlineGenerator, MapsGenerator, StatGenerator, StatusGenerator,
-            process::{OomScoreAdjGenerator, OomScoreAdjWriter},
+            process::{OomScoreAdjGenerator, OomScoreAdjWriter, OomScoreGenerator},
         };
         use crate::kernel::{TASK_MANAGER, TaskManagerTrait};
 
@@ -358,6 +358,13 @@ impl ProcInode {
             Some(proc_pid_child_inode_no(pid, 6)),
         );
         let _ = proc_dir.add_child("oom_score_adj", oom_score_adj);
+
+        let oom_score = Self::new_dynamic_file_with_inode_no(
+            Arc::new(OomScoreGenerator::new(Arc::downgrade(&task))),
+            FileMode::from_bits_truncate(0o444),
+            Some(proc_pid_child_inode_no(pid, 7)),
+        );
+        let _ = proc_dir.add_child("oom_score", oom_score);
 
         Some(proc_dir)
     }
