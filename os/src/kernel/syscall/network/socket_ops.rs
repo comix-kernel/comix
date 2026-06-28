@@ -162,17 +162,19 @@ pub fn socketpair(domain: i32, socket_type: i32, _protocol: i32, sv: *mut i32) -
 pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
     let task = current_task();
     let task_lock = task.lock();
+    let tid = task_lock.tid as usize;
     let file = match task_lock.fd_table.get(sockfd as usize) {
         Ok(f) => f,
         Err(_) => return -9, // EBADF
     };
+    drop(task_lock);
+
     let is_unix_socket = file.as_any().is::<UnixSocketFile>();
     if is_unix_socket {
         let unix_addr = match parse_sockaddr_un(addr, addrlen) {
             Ok(addr) => addr,
             Err(e) => return e,
         };
-        drop(task_lock);
         let unix_socket = match file.as_any().downcast_ref::<UnixSocketFile>() {
             Some(socket) => socket,
             None => return -88, // ENOTSOCK
@@ -196,8 +198,6 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         return -(crate::uapi::errno::EADDRNOTAVAIL as isize);
     }
 
-    let tid = task_lock.tid as usize;
-
     pr_debug!(
         "bind: tid={}, sockfd={}, endpoint={}",
         tid,
@@ -209,12 +209,6 @@ pub fn bind(sockfd: i32, addr: *const u8, addrlen: u32) -> isize {
         Some(h) => h,
         None => return -88, // ENOTSOCK
     };
-
-    let file = match task_lock.fd_table.get(sockfd as usize) {
-        Ok(f) => f,
-        Err(_) => return -9, // EBADF
-    };
-    drop(task_lock);
 
     // For TCP: just save the endpoint, listen() will call smoltcp's listen()
     // For UDP: bind immediately
