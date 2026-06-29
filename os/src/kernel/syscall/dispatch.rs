@@ -206,7 +206,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
 
         _ => {
             frame.set_ret((-ENOSYS) as usize);
-            crate::pr_debug!("Unknown syscall: {}", frame.syscall_id());
+            crate::pr_warn!("Unknown syscall: {}", frame.syscall_id());
         }
     }
     crate::pr_debug!("syscall exit, return: {}", frame.arg0() as isize);

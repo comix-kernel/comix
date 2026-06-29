@@ -57,7 +57,7 @@ LA_SMP ?= 1
 
 .PHONY: docker build_docker fmt run build clean clean-all gdb
 .PHONY: all kernel-rv kernel-la os-cargo-config
-.PHONY: run-rv run-la
+.PHONY: run-rv run-la run-rv-glibc-basic run-rv-glibc-basic-direct run-rv-glibc-basic-one
 
 docker:
 	docker run --rm -it -v ${PWD}:/mnt -w /mnt --name comix ${DOCKER_TAG} bash
@@ -155,6 +155,49 @@ run-rv: kernel-rv disk.img
 	@echo "[Run] 运行 RISC-V QEMU（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
 	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
 		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
+		-drive file=disk.img,if=none,format=raw,id=x0 \
+		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1 \
+		$(RV_TEST_DRIVE) \
+		-device virtio-net-device,netdev=net -netdev user,id=net
+
+run-rv-glibc-basic: kernel-rv disk.img
+	@if [ -z "$(TESTIMG_RV)" ]; then \
+		echo "Error: no RISC-V test image found. Set TESTIMG_RV=/path/to/sdcard-rv.img" >&2; \
+		exit 1; \
+	fi
+	@echo "[Run] 运行 RISC-V QEMU glibc basic（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
+	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
+		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
+		-append "oscomp.test=glibc-basic" \
+		-drive file=disk.img,if=none,format=raw,id=x0 \
+		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1 \
+		$(RV_TEST_DRIVE) \
+		-device virtio-net-device,netdev=net -netdev user,id=net
+
+run-rv-glibc-basic-direct: kernel-rv disk.img
+	@if [ -z "$(TESTIMG_RV)" ]; then \
+		echo "Error: no RISC-V test image found. Set TESTIMG_RV=/path/to/sdcard-rv.img" >&2; \
+		exit 1; \
+	fi
+	@echo "[Run] 运行 RISC-V QEMU glibc basic direct（内核盘：vda1 rootfs，vda2 VFAT；测试盘：vdb）"
+	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
+		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
+		-append "oscomp.test=glibc-basic-direct" \
+		-drive file=disk.img,if=none,format=raw,id=x0 \
+		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1 \
+		$(RV_TEST_DRIVE) \
+		-device virtio-net-device,netdev=net -netdev user,id=net
+
+GLIBC_CASE ?= getdents
+run-rv-glibc-basic-one: kernel-rv disk.img
+	@if [ -z "$(TESTIMG_RV)" ]; then \
+		echo "Error: no RISC-V test image found. Set TESTIMG_RV=/path/to/sdcard-rv.img" >&2; \
+		exit 1; \
+	fi
+	@echo "[Run] 运行 RISC-V QEMU glibc basic single case: $(GLIBC_CASE)"
+	qemu-system-riscv64 -machine virt -kernel kernel-rv -m $(RV_MEM) -nographic \
+		-smp $(RV_SMP) -bios default -no-reboot -rtc base=utc \
+		-append "oscomp.test=glibc-basic-one oscomp.case=$(GLIBC_CASE)" \
 		-drive file=disk.img,if=none,format=raw,id=x0 \
 		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.1 \
 		$(RV_TEST_DRIVE) \
