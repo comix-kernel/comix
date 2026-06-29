@@ -329,6 +329,11 @@ impl_syscall!(sys_munlock, munlock, (*const c_void, usize));
 impl_syscall!(sys_mlockall, mlockall, (i32));
 impl_syscall!(sys_munlockall, munlockall, ());
 impl_syscall!(sys_madvise, madvise, (*mut c_void, usize, c_int));
+impl_syscall!(
+    sys_get_mempolicy,
+    get_mempolicy,
+    (*mut i32, *mut usize, usize, *const c_void, usize)
+);
 
 // 文件系统同步 (续)
 impl_syscall!(sys_syncfs, syncfs, (usize));

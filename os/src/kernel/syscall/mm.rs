@@ -6,9 +6,10 @@ use crate::mm::address::{PageNum, VA, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
-use crate::uapi::errno::{EACCES, EAGAIN, EBADF, EEXIST, EINVAL, EIO, ENOMEM};
+use crate::uapi::errno::{EACCES, EAGAIN, EBADF, EEXIST, EFAULT, EINVAL, EIO, ENOMEM};
 use crate::uapi::mm::{MAP_FAILED, MapFlags, ProtFlags};
 use crate::uapi::resource::ResourceId;
+use crate::util::user_buffer::{validate_user_ptr_mut, write_to_user};
 use crate::{pr_err, pr_warn};
 
 /// brk - 改变数据段的结束地址（堆顶）
@@ -579,4 +580,45 @@ pub fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> isize {
         }
         _ => -EINVAL as isize,
     }
+}
+
+/// get_mempolicy - return the current NUMA memory policy.
+///
+/// CCYOS is a single-node kernel; expose Linux's default policy and node 0.
+pub fn get_mempolicy(
+    mode: *mut i32,
+    nmask: *mut usize,
+    maxnode: usize,
+    _addr: *const c_void,
+    flags: usize,
+) -> isize {
+    const MPOL_F_NODE: usize = 1 << 0;
+    const MPOL_F_ADDR: usize = 1 << 1;
+    const MPOL_F_MEMS_ALLOWED: usize = 1 << 2;
+    const MPOL_DEFAULT: i32 = 0;
+
+    if flags & !(MPOL_F_NODE | MPOL_F_ADDR | MPOL_F_MEMS_ALLOWED) != 0 {
+        return -EINVAL as isize;
+    }
+    if flags & MPOL_F_NODE != 0 && flags & MPOL_F_ADDR == 0 {
+        return -EINVAL as isize;
+    }
+    if flags & MPOL_F_MEMS_ALLOWED != 0 && flags & MPOL_F_ADDR != 0 {
+        return -EINVAL as isize;
+    }
+    if !mode.is_null() && !validate_user_ptr_mut(mode) {
+        return -EFAULT as isize;
+    }
+    if !nmask.is_null() && !validate_user_ptr_mut(nmask) {
+        return -EFAULT as isize;
+    }
+
+    if !mode.is_null() {
+        write_to_user(mode, MPOL_DEFAULT);
+    }
+    if !nmask.is_null() && maxnode != 0 {
+        write_to_user(nmask, 1usize);
+    }
+
+    0
 }

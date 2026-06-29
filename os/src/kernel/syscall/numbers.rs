@@ -160,6 +160,7 @@ pub const SYS_MUNLOCK: usize = 229;
 pub const SYS_MLOCKALL: usize = 230;
 pub const SYS_MUNLOCKALL: usize = 231;
 pub const SYS_MADVISE: usize = 233;
+pub const SYS_GET_MEMPOLICY: usize = 236;
 
 // ---- 网络 (续) ----
 pub const SYS_ACCEPT4: usize = 242;

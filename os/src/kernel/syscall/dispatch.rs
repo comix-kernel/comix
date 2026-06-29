@@ -194,6 +194,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_MLOCKALL => sys_mlockall(frame),
         crate::kernel::syscall::numbers::SYS_MUNLOCKALL => sys_munlockall(frame),
         crate::kernel::syscall::numbers::SYS_MADVISE => sys_madvise(frame),
+        crate::kernel::syscall::numbers::SYS_GET_MEMPOLICY => sys_get_mempolicy(frame),
 
         // 文件系统同步 (续)
         crate::kernel::syscall::numbers::SYS_SYNCFS => sys_syncfs(frame),
