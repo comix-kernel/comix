@@ -15,7 +15,7 @@ use crate::arch::ArchImpl;
 use crate::arch::CpuOps;
 use crate::kernel::{WaitQueue, current_task, yield_task};
 use crate::sync::SpinLock;
-use crate::sync::{raw_spin_lock::RawSpinLock, raw_spin_lock::RawSpinLockGuard};
+use crate::sync::raw_spin_lock::RawSpinLock;
 
 /// 互斥锁
 pub struct Mutex<T, CPU: CpuOps = ArchImpl> {
@@ -43,9 +43,9 @@ impl<T, CPU: CpuOps> Mutex<T, CPU> {
             let spin = self.guard.lock();
             if !self.locked.swap(true, Ordering::Acquire) {
                 let data_ref = unsafe { &mut *self.data.get() };
+                drop(spin);
                 return MutexGuard {
                     mutex: self as *const _,
-                    _spin: spin,
                     data: data_ref,
                 };
             }
@@ -59,7 +59,6 @@ impl<T, CPU: CpuOps> Mutex<T, CPU> {
 
 pub struct MutexGuard<'a, T, CPU: CpuOps = ArchImpl> {
     mutex: *const Mutex<T, CPU>,
-    _spin: RawSpinLockGuard<'a, CPU>,
     data: &'a mut T,
 }
 
@@ -79,6 +78,7 @@ impl<T, CPU: CpuOps> core::ops::DerefMut for MutexGuard<'_, T, CPU> {
 impl<T, CPU: CpuOps> Drop for MutexGuard<'_, T, CPU> {
     fn drop(&mut self) {
         let m = unsafe { &*self.mutex };
+        let _spin = m.guard.lock();
         m.locked.store(false, Ordering::Release);
         m.queue.lock().wake_up_all();
     }
