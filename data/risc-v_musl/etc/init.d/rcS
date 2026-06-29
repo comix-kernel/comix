@@ -156,6 +156,7 @@ run_musl_tests_if_present() {
         base="${src_f##*/}"
         case "$base" in
             ltp_testcode.sh|\
+            iozone_testcode.sh|\
             unixbench_testcode.sh)
                 echo "[Tests] skipping $src_f"
                 continue
