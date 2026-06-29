@@ -1,4 +1,5 @@
 use super::*;
+use crate::uapi::errno::ECHILD;
 
 /// 等待子进程状态变化（wait4）
 /// # 说明
@@ -65,15 +66,21 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         let state = ch.lock().state;
         zombie(state) || continued(state) || stopped(state)
     };
+    let has_matching_child = |children: &[SharedTask]| children.iter().any(match_pid);
 
     let task = loop {
         let mut found: Option<SharedTask> = None;
         let mut nohang = false;
+        let mut no_child = false;
 
         let slept = sleep_task_prepare(cur_task.clone(), true, |t| {
             if let Some(res) = t.check_child(cond, !opt.contains(WaitFlags::NOWAIT)) {
                 crate::pr_debug!("wait4: found child pid={}", res.lock().pid);
                 found = Some(res);
+                return true;
+            }
+            if !has_matching_child(&t.children.lock()) {
+                no_child = true;
                 return true;
             }
             if opt.contains(WaitFlags::NOHANG) {
@@ -91,6 +98,9 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
             if let Some(res) = found {
                 break res;
             }
+            if no_child {
+                return -ECHILD;
+            }
             if nohang {
                 return 0;
             }
@@ -98,16 +108,19 @@ pub fn wait4(pid: c_int, wstatus: *mut c_int, options: c_int, _rusage: *mut Rusa
         yield_task();
     };
 
-    let (tid, state, exit_code) = {
+    let (tid, state, exit_status) = {
         let t = task.lock();
-        (t.tid, t.state, t.exit_code)
+        (t.tid, t.state, t.exit_status)
     };
 
     let status = match state {
-        TaskState::Zombie => {
-            // TODO: 处理信号退出的情况
-            WaitStatus::exit_code(exit_code.expect("Zombie must set exit code.") as u8, 0)
-        }
+        TaskState::Zombie => match exit_status.expect("Zombie must set exit status.") {
+            TaskExitStatus::Exited(code) => WaitStatus::exit_code(code as u8, 0),
+            TaskExitStatus::Signaled {
+                signal,
+                core_dumped,
+            } => WaitStatus::signaled(signal as u8, core_dumped),
+        },
         TaskState::Stopped => {
             WaitStatus::stop_code(0) // TODO: 停止信号
         }

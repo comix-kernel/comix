@@ -42,6 +42,12 @@ pub const FUTEX_TRYLOCK_PI: FutexOp = 8;
 /// 等待位集操作：等待，但只对 val3（位集）中包含的比特进行等待。用于高效的条件变量。
 pub const FUTEX_WAIT_BITSET: FutexOp = 9;
 
+/// 唤醒位集操作：唤醒等待位集与 val3 相交的线程。
+pub const FUTEX_WAKE_BITSET: FutexOp = 10;
+
+/// FUTEX_WAIT_BITSET/FUTEX_WAKE_BITSET 的默认位集。
+pub const FUTEX_BITSET_MATCH_ANY: u32 = 0xffff_ffff;
+
 // --- Futex Flags ---
 // 这些标志通过位或操作（|）与操作码结合使用。
 

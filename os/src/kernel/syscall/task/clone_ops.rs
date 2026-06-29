@@ -50,6 +50,7 @@ pub fn clone(
         sched_policy,
         sched_priority,
         sched_reset_on_fork,
+        oom_score_adj,
         cpu_affinity,
         shm_attachments,
     ) = {
@@ -76,6 +77,7 @@ pub fn clone(
             task.sched_policy,
             task.sched_priority,
             task.sched_reset_on_fork,
+            task.oom_score_adj,
             task.cpu_affinity,
             if requested_flags.contains(CloneFlags::THREAD) {
                 task.shm_attachments.clone()
@@ -158,6 +160,7 @@ pub fn clone(
         child_task.sched_priority = sched_priority;
         child_task.sched_reset_on_fork = false;
     }
+    child_task.oom_score_adj = oom_score_adj;
     child_task.cpu_affinity = cpu_affinity & crate::kernel::online_cpu_mask();
     if child_task.cpu_affinity == 0 {
         child_task.cpu_affinity = crate::kernel::online_cpu_mask();

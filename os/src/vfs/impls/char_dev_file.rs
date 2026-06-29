@@ -87,7 +87,9 @@ impl CharDeviceFile {
 
         // 检查设备是否支持
         let maj = major(dev);
-        if driver.is_none() && maj != chrdev_major::MEM {
+        let is_builtin_misc =
+            maj == chrdev_major::MISC && minor(dev) == misc_minor::CPU_DMA_LATENCY;
+        if driver.is_none() && maj != chrdev_major::MEM && !is_builtin_misc {
             // 既不是内存设备，也找不到驱动
             return Err(FsError::NoDevice);
         }
@@ -168,6 +170,9 @@ impl File for CharDeviceFile {
         // 内存设备特殊处理
         if maj == chrdev_major::MEM {
             return self.mem_device_read(buf);
+        }
+        if maj == chrdev_major::MISC && minor(self.dev) == misc_minor::CPU_DMA_LATENCY {
+            return Ok(0);
         }
 
         // 其他设备：委托给驱动
@@ -252,6 +257,9 @@ impl File for CharDeviceFile {
         // 内存设备特殊处理
         if maj == chrdev_major::MEM {
             return self.mem_device_write(buf);
+        }
+        if maj == chrdev_major::MISC && minor(self.dev) == misc_minor::CPU_DMA_LATENCY {
+            return Ok(buf.len());
         }
 
         // 其他设备：委托给驱动

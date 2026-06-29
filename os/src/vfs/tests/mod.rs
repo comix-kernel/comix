@@ -55,6 +55,7 @@ pub mod devno;
 pub mod fd_table;
 pub mod file;
 pub mod mount;
+pub mod page_cache;
 pub mod path;
 pub mod pipe;
 pub mod stdio;

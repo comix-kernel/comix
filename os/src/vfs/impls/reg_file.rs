@@ -1,8 +1,10 @@
 //! 普通文件（Regular File）的 File trait 实现
 
 use crate::sync::SpinLock;
-use crate::vfs::{Dentry, File, FsError, Inode, InodeMetadata, OpenFlags, SeekWhence};
-use alloc::sync::Arc;
+use crate::vfs::{
+    Dentry, DirEntry, File, FsError, Inode, InodeMetadata, InodeType, OpenFlags, SeekWhence,
+};
+use alloc::{sync::Arc, vec::Vec};
 
 /// 普通文件的 File 实现
 ///
@@ -29,6 +31,9 @@ pub struct RegFile {
 
     /// 异步 I/O 所有者 PID (接收 SIGIO 信号的进程)
     owner: SpinLock<Option<i32>>,
+
+    /// Per-open directory snapshot used by getdents64 style iteration.
+    dir_entries: SpinLock<Option<Arc<Vec<DirEntry>>>>,
 }
 
 impl RegFile {
@@ -41,6 +46,7 @@ impl RegFile {
             offset: SpinLock::new(0),
             flags: SpinLock::new(flags),
             owner: SpinLock::new(None),
+            dir_entries: SpinLock::new(None),
         }
     }
 
@@ -138,6 +144,9 @@ impl File for RegFile {
             return Err(FsError::InvalidArgument);
         }
 
+        if whence == SeekWhence::Set && new_offset == 0 && *offset_guard != 0 {
+            *self.dir_entries.lock() = None;
+        }
         *offset_guard = new_offset as usize;
         Ok(new_offset as usize)
     }
@@ -152,6 +161,24 @@ impl File for RegFile {
 
     fn inode(&self) -> Result<Arc<dyn Inode>, FsError> {
         Ok(self.inode())
+    }
+
+    fn readdir_cached(&self) -> Result<Arc<Vec<DirEntry>>, FsError> {
+        if self.inode.metadata()?.inode_type != InodeType::Directory {
+            return Err(FsError::NotDirectory);
+        }
+
+        if let Some(entries) = self.dir_entries.lock().as_ref().cloned() {
+            return Ok(entries);
+        }
+
+        let entries = Arc::new(self.inode.readdir()?);
+        let mut guard = self.dir_entries.lock();
+        if guard.is_none() {
+            *guard = Some(entries);
+        }
+
+        Ok(guard.as_ref().unwrap().clone())
     }
 
     fn dentry(&self) -> Result<Arc<Dentry>, FsError> {

@@ -154,6 +154,10 @@ pub const SYS_BRK: usize = 214;
 pub const SYS_MUNMAP: usize = 215;
 pub const SYS_MMAP: usize = 222;
 pub const SYS_MPROTECT: usize = 226;
+pub const SYS_MLOCK: usize = 228;
+pub const SYS_MUNLOCK: usize = 229;
+pub const SYS_MLOCKALL: usize = 230;
+pub const SYS_MUNLOCKALL: usize = 231;
 
 // ---- 网络 (续) ----
 pub const SYS_ACCEPT4: usize = 242;

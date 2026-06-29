@@ -58,7 +58,7 @@ mount_official_test_image_if_present() {
 
     # Official test images are raw ext4 filesystems whose root contains
     # /musl and /glibc. Mounting one at /tests exposes /tests/musl.
-    dev="/dev/vdb"
+    dev="/dev/vda"
     [ -e "$dev" ] || return 1
 
     echo "[Tests] probing official test image on $dev"
@@ -71,8 +71,8 @@ mount_official_test_image_if_present() {
         /bin/umount /tests 2>/dev/null || true
     fi
 
-    # Old multi-device probe disabled. The run scripts attach the official
-    # input image at /dev/vdb; our own partitioned kernel disk is /dev/vda.
+    # Old multi-device probe disabled. The LoongArch judge attaches the official
+    # input image at /dev/vda; our own partitioned kernel disk is /dev/vdb.
     # for dev in \
     #     /dev/vdb \
     #     /dev/vda \
@@ -116,7 +116,7 @@ stage_musl_tests_to_tmpfs() {
                 ;;
         esac
 
-        if ! /bin/cp -a "$entry" "$dst/"; then
+        if ! /bin/cp -R "$entry" "$dst/"; then
             echo "[Tests] failed to stage $entry"
             /bin/rm -rf "$dst"
             return 1

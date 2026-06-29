@@ -218,7 +218,7 @@ stage_musl_tests_to_tmpfs() {
                 ;;
         esac
 
-        if ! /bin/cp -a "$entry" "$dst/"; then
+        if ! /bin/cp -R "$entry" "$dst/"; then
             echo "[Tests] failed to stage $entry"
             /bin/rm -rf "$dst"
             return 1
@@ -229,8 +229,8 @@ stage_musl_tests_to_tmpfs() {
 }
 
 run_musl_tests_if_present() {
-    # 官方测试镜像挂载到 /tests 后，自动扫描并运行 musl 下的全部测试脚本；
-    # glibc 分组保留在测试镜像中，后续需要时直接调整本脚本。
+    # 官方测试镜像挂载到 /tests 后，自动扫描 musl 下的全部测试脚本；
+    # 需要排除的脚本维护在 skip-list 中。
     mount_official_test_image_if_present || true
     [ -d /tests/musl ] || return 1
 
@@ -245,9 +245,9 @@ run_musl_tests_if_present() {
     echo "[Tests] detected musl test scripts; running in rcS"
 
     if [ -n "$staged_musl_dir" ]; then
-        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:$staged_musl_dir:/tests/musl"
+        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:$staged_musl_dir:/tests/musl:/tests/musl/ltp/testcases/bin"
     else
-        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl"
+        export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/musl:/tests/musl/ltp/testcases/bin"
     fi
     export TMPDIR="/tmp"
     export HOME="/"
@@ -257,8 +257,10 @@ run_musl_tests_if_present() {
 
         base="${src_f##*/}"
         case "$base" in
-            unixbench_testcode.sh|lmbench_testcode.sh|libcbench_testcode.sh|libctest_testcode.sh)
-                echo "[Tests] skipping already-validated $src_f"
+            ltp_testcode.sh|\
+            iozone_testcode.sh|\
+            unixbench_testcode.sh)
+                echo "[Tests] skipping $src_f"
                 continue
                 ;;
         esac

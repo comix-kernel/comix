@@ -160,6 +160,7 @@ pub mod file_system;
 pub mod impls;
 pub mod inode;
 pub mod mount;
+pub mod page_cache;
 pub mod path;
 
 pub use adapter::inode_type_to_d_type;

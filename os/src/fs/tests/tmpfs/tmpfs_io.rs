@@ -137,3 +137,38 @@ test_case!(test_tmpfs_cross_page_write, {
     file.read_at(4095, &mut buf).unwrap();
     kassert!(&buf[..] == data);
 });
+
+test_case!(test_tmpfs_truncate_shrink_zeroes_retained_tail, {
+    let fs = create_test_tmpfs();
+    let root = fs.root_inode();
+    let file = root
+        .create("tail-zero.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+
+    let data = vec![0xAA; 4096];
+    kassert!(file.write_at(0, &data).unwrap() == data.len());
+    kassert!(file.truncate(1024).is_ok());
+    kassert!(file.truncate(4096).is_ok());
+
+    let mut buf = vec![0xFF; 4096];
+    kassert!(file.read_at(0, &mut buf).unwrap() == 4096);
+    kassert!(buf[..1024].iter().all(|byte| *byte == 0xAA));
+    kassert!(buf[1024..].iter().all(|byte| *byte == 0));
+});
+
+test_case!(test_tmpfs_write_4095_4096_boundary, {
+    let fs = create_test_tmpfs();
+    let root = fs.root_inode();
+    let file = root
+        .create("boundary.txt", FileMode::from_bits_truncate(0o644))
+        .unwrap();
+
+    let data = [0x11, 0x22];
+    kassert!(file.write_at(4095, &data).unwrap() == data.len());
+
+    let mut buf = vec![0xFF; 4097];
+    kassert!(file.read_at(0, &mut buf).unwrap() == 4097);
+    kassert!(buf[..4095].iter().all(|byte| *byte == 0));
+    kassert!(buf[4095] == 0x11);
+    kassert!(buf[4096] == 0x22);
+});

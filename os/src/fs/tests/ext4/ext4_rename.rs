@@ -2,6 +2,7 @@
 
 use super::create_test_ext4_with_root;
 use crate::vfs::inode::FileMode;
+use alloc::vec;
 
 /// Test basic file rename in same directory
 #[test_case]
@@ -190,6 +191,130 @@ fn test_ext4_rename_overwrite_file() {
         .read_at(0, &mut buf)
         .expect("Failed to read file2");
     assert_eq!(&buf, content1);
+}
+
+/// Test rename overwrite after the target file has populated page cache.
+#[test_case]
+fn test_ext4_rename_overwrite_file_invalidates_cached_target() {
+    let (_fs, root_dentry) = create_test_ext4_with_root();
+    let root = root_dentry.inode.clone();
+
+    let file1 = root
+        .create("cache-src.txt", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create source");
+    let file2 = root
+        .create("cache-dst.txt", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create target");
+
+    file1
+        .write_at(0, b"source")
+        .expect("Failed to write source");
+    file2
+        .write_at(0, b"target")
+        .expect("Failed to write target");
+
+    let mut cached_target = [0u8; 6];
+    file2
+        .read_at(0, &mut cached_target)
+        .expect("Failed to read target");
+    assert_eq!(&cached_target, b"target");
+
+    root.rename("cache-src.txt", root.clone(), "cache-dst.txt")
+        .expect("Failed to overwrite target");
+
+    let result_file = root
+        .lookup("cache-dst.txt")
+        .expect("Failed to find overwritten target");
+    let mut buf = [0u8; 6];
+    result_file
+        .read_at(0, &mut buf)
+        .expect("Failed to read overwritten target");
+    assert_eq!(&buf, b"source");
+}
+
+/// Test rename overwrite after the target has a frame-backed cached page.
+#[test_case]
+fn test_ext4_rename_overwrite_invalidates_frame_cached_target() {
+    let (_fs, root_dentry) = create_test_ext4_with_root();
+    let root = root_dentry.inode.clone();
+
+    let file1 = root
+        .create("frame-cache-src.txt", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create source");
+    let file2 = root
+        .create("frame-cache-dst.txt", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create target");
+
+    let source = vec![b'S'; 4096 + 9];
+    let target = vec![b'T'; 4096 + 9];
+    file1.write_at(0, &source).expect("Failed to write source");
+    file2.write_at(0, &target).expect("Failed to write target");
+
+    let mut cached_target = vec![0u8; target.len()];
+    file2
+        .read_at(0, &mut cached_target)
+        .expect("Failed to read target");
+    assert_eq!(cached_target, target);
+
+    root.rename("frame-cache-src.txt", root.clone(), "frame-cache-dst.txt")
+        .expect("Failed to overwrite target");
+
+    let result_file = root
+        .lookup("frame-cache-dst.txt")
+        .expect("Failed to find overwritten target");
+    let mut buf = vec![0u8; source.len()];
+    result_file
+        .read_at(0, &mut buf)
+        .expect("Failed to read overwritten target");
+    assert_eq!(buf, source);
+}
+
+/// Test cross-directory rename replace after old target has frame-backed cache.
+#[test_case]
+fn test_ext4_cross_dir_rename_replace_invalidates_old_target_frame_cache() {
+    let (_fs, root_dentry) = create_test_ext4_with_root();
+    let root = root_dentry.inode.clone();
+
+    let dir1 = root
+        .mkdir("replace-dir1", FileMode::from_bits_truncate(0o755))
+        .expect("Failed to create dir1");
+    let dir2 = root
+        .mkdir("replace-dir2", FileMode::from_bits_truncate(0o755))
+        .expect("Failed to create dir2");
+    let source_file = dir1
+        .create("source.bin", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create source");
+    let target_file = dir2
+        .create("target.bin", FileMode::from_bits_truncate(0o644))
+        .expect("Failed to create target");
+
+    let source = vec![b'A'; 4096 + 17];
+    let target = vec![b'B'; 4096 + 17];
+    source_file
+        .write_at(0, &source)
+        .expect("Failed to write source");
+    target_file
+        .write_at(0, &target)
+        .expect("Failed to write target");
+
+    let mut cached_target = vec![0u8; target.len()];
+    target_file
+        .read_at(0, &mut cached_target)
+        .expect("Failed to read target");
+    assert_eq!(cached_target, target);
+
+    dir1.rename("source.bin", dir2.clone(), "target.bin")
+        .expect("Failed to replace target across directories");
+
+    assert!(dir1.lookup("source.bin").is_err());
+    let moved = dir2
+        .lookup("target.bin")
+        .expect("Failed to find moved source");
+    let mut buf = vec![0u8; source.len()];
+    moved
+        .read_at(0, &mut buf)
+        .expect("Failed to read moved source");
+    assert_eq!(buf, source);
 }
 
 /// Test rename with target overwrite (empty directory)

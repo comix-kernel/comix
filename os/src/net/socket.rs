@@ -362,6 +362,25 @@ impl File for SocketFile {
 const AF_INET: u16 = 2;
 const SOCKADDR_IN_SIZE: usize = 16;
 
+/// Read the sa_family field from a user sockaddr.
+pub fn read_sockaddr_family(addr: *const u8, addrlen: u32) -> Result<u16, NetworkError> {
+    if addr.is_null() || addrlen < core::mem::size_of::<u16>() as u32 {
+        return Err(NetworkError::InvalidAddress);
+    }
+
+    let mut family = [0u8; core::mem::size_of::<u16>()];
+    unsafe {
+        crate::arch::ArchImpl::copy_from_user(
+            crate::arch::address::UA::from_usize(addr as usize),
+            family.as_mut_ptr(),
+            family.len(),
+        )
+    }
+    .map_err(|_| NetworkError::BadAddress)?;
+
+    Ok(u16::from_ne_bytes(family))
+}
+
 /// Parse sockaddr_in structure from user space
 pub fn parse_sockaddr_in(addr: *const u8, addrlen: u32) -> Result<IpEndpoint, NetworkError> {
     if (addrlen as usize) < SOCKADDR_IN_SIZE {
