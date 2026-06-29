@@ -275,6 +275,8 @@ pub struct LinuxStatFs {
     pub f_spare: [i64; 4],
 }
 
+const _: () = assert!(core::mem::size_of::<LinuxStatFs>() == 120);
+
 impl LinuxStatFs {
     /// 创建零初始化的 statfs 结构
     pub const fn zeroed() -> Self {
@@ -356,6 +358,8 @@ pub struct Stat {
     pub __unused: [i32; 2],
 }
 
+const _: () = assert!(core::mem::size_of::<Stat>() == 128);
+
 /// Linux statx timestamp (与 Linux UAPI struct statx_timestamp 对齐)
 ///
 /// 参考：include/uapi/linux/stat.h
@@ -408,6 +412,8 @@ pub struct Statx {
     pub stx_dio_offset_align: u32,
     pub __spare3: [u64; 12],
 }
+
+const _: () = assert!(core::mem::size_of::<Statx>() == 256);
 
 impl Statx {
     pub const fn zeroed() -> Self {

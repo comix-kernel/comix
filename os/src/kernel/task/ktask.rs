@@ -199,6 +199,7 @@ pub fn kernel_execve(path: &str, argv: &[&str], envp: &[&str]) -> ! {
             prepared.phent,
             prepared.at_base,
             prepared.at_entry,
+            prepared.tls,
         );
     }
     // 地址空间已在 execve 之前切换

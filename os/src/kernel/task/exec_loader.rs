@@ -3,6 +3,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::arch::abi::{RelocationKind, classify_relocation, resolve_relocation_value};
+use crate::arch::task::ExecTlsTemplate;
 use crate::mm::address::{PageNum, VA, Vpn};
 use crate::mm::memory_space::MemorySpace;
 use crate::mm::memory_space::mapping_area::AreaType;
@@ -41,6 +42,7 @@ pub struct PreparedExecImage {
     pub phdr_addr: VA,
     pub phnum: usize,
     pub phent: usize,
+    pub tls: Option<ExecTlsTemplate>,
 }
 
 const ELFCLASS64: u8 = 2;
@@ -51,6 +53,7 @@ const ET_DYN: u16 = 3;
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
+const PT_TLS: u32 = 7;
 
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
@@ -82,6 +85,7 @@ struct Phdr {
     p_vaddr: u64,
     p_filesz: u64,
     p_memsz: u64,
+    p_align: u64,
 }
 
 fn le_u16(b: &[u8]) -> u16 {
@@ -166,6 +170,37 @@ fn parse_program_headers(inode: &dyn Inode, eh: &ElfHdr) -> Result<Vec<Phdr>, Ex
             p_vaddr: le_u64(&e[16..24]),
             p_filesz: le_u64(&e[32..40]),
             p_memsz: le_u64(&e[40..48]),
+            p_align: le_u64(&e[48..56]),
+        });
+    }
+    Ok(out)
+}
+
+fn find_tls_template(
+    phdrs: &[Phdr],
+    load_bias: usize,
+) -> Result<Option<ExecTlsTemplate>, ExecImageError> {
+    let mut out = None;
+    for ph in phdrs {
+        if ph.p_type != PT_TLS {
+            continue;
+        }
+        if out.is_some() || ph.p_filesz > ph.p_memsz {
+            return Err(ExecImageError::InvalidElf);
+        }
+        let align = if ph.p_align == 0 {
+            1
+        } else {
+            ph.p_align as usize
+        };
+        if !align.is_power_of_two() {
+            return Err(ExecImageError::InvalidElf);
+        }
+        out = Some(ExecTlsTemplate {
+            image: VA::from_usize(load_bias + ph.p_vaddr as usize),
+            filesz: ph.p_filesz as usize,
+            memsz: ph.p_memsz as usize,
+            align,
         });
     }
     Ok(out)
@@ -453,6 +488,7 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
         main_base_hint,
         false,
     )?;
+    let tls = find_tls_template(&phdrs, main_bias)?;
 
     // Heap starts after end of main segments
     let heap_start_vpn = Vpn::from_addr_ceil(VA::from_usize(main_max_end));
@@ -510,5 +546,6 @@ pub fn prepare_exec_image_from_path(path: &str) -> Result<PreparedExecImage, Exe
         phdr_addr: VA::from_usize(phdr_addr),
         phnum,
         phent,
+        tls,
     })
 }

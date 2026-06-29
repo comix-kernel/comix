@@ -10,6 +10,7 @@ use crate::{
     arch::{
         HwTrapFrame, TrapFrame,
         kernel::{context::Context, task::setup_exec_stack_layout},
+        task::ExecTlsTemplate,
     },
     ipc::{ShmSegment, SignalHandlerTable, SignalPending},
     kernel::{
@@ -298,6 +299,7 @@ impl Task {
         phent: usize,
         at_base: VA,
         at_entry: VA,
+        tls: Option<ExecTlsTemplate>,
     ) {
         // 1. 切换任务的地址空间对象
         self.memory_space = Some(new_memory_space);
@@ -322,7 +324,7 @@ impl Task {
                 .expect("execve: memory_space not set")
                 .lock();
             setup_exec_stack_layout(
-                &space, sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry,
+                &space, sp_high, argv, envp, phdr_addr, phnum, phent, at_base, at_entry, tls,
             )
         };
 

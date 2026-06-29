@@ -23,6 +23,8 @@ use crate::{
     util::{address::align_down, user_buffer::write_to_user},
 };
 
+const USER_STACK_GROWTH_GUARD: usize = 128;
+
 /// 信号的动作表
 /// 每个进程拥有一个独立的信号处理动作表，
 /// 用于存储每个信号的处理函数、屏蔽字和标志。
@@ -185,9 +187,19 @@ fn install_user_signal_trap_frame(
             t.blocked.to_sigset_t(),
             MContextT::from_trap_frame(tf),
         );
-        // Linux ABI: build rt_sigframe { siginfo, ucontext } on the user stack.
+        // Linux ABI: build rt_sigframe { siginfo, ucontext } on the selected user stack.
         let frame_size = core::mem::size_of::<RtSigFrame>();
-        let mut sp = align_down(<TrapFrame as HwTrapFrame>::get_sp(tf), 16);
+        let current_sp = <TrapFrame as HwTrapFrame>::get_sp(tf);
+        let sig_stack = *t.signal_stack.lock();
+        let use_altstack = sa_flags.contains(SaFlags::ONSTACK)
+            && (sig_stack.ss_flags as usize & SS_DISABLE) == 0
+            && !on_signal_stack(current_sp, sig_stack);
+        let mut sp = if use_altstack {
+            sig_stack.ss_sp.saturating_add(sig_stack.ss_size as usize)
+        } else {
+            current_sp
+        };
+        sp = align_down(sp.saturating_sub(USER_STACK_GROWTH_GUARD), 16);
         sp = align_down(sp - frame_size, 16);
 
         let sig_info_addr = sp + core::mem::offset_of!(RtSigFrame, info);
@@ -206,13 +218,15 @@ fn install_user_signal_trap_frame(
             }
         }
 
-        // Set userspace return address (restorer). Executing a kernel address in U-mode will fault.
-        let restorer = if sa_flags.contains(SaFlags::RESTORER) && !action.sa_restorer.is_null() {
-            action.sa_restorer as usize
-        } else {
-            crate::arch::sigreturn_trampoline_address()
-        };
-        <TrapFrame as HwTrapFrame>::set_ra(tf, restorer);
+        if sa_flags.contains(SaFlags::RESETHAND) {
+            t.signal_handlers
+                .lock()
+                .set_action(sig_num, SignalAction::default());
+        }
+
+        // RISC-V uses the kernel-provided user trampoline. Do not trust a userspace
+        // SA_RESTORER pointer here; a bogus restorer turns into a U-mode execute fault.
+        <TrapFrame as HwTrapFrame>::set_ra(tf, crate::arch::sigreturn_trampoline_address());
 
         // 设置用户处理器入口
         <TrapFrame as HwTrapFrame>::set_sepc(tf, entry as usize);
@@ -221,6 +235,15 @@ fn install_user_signal_trap_frame(
         <TrapFrame as HwTrapFrame>::set_a2(tf, ucontext_addr);
         <TrapFrame as HwTrapFrame>::set_sp(tf, sp);
     }
+}
+
+fn on_signal_stack(sp: usize, stack: SignalStack) -> bool {
+    if (stack.ss_flags as usize & SS_DISABLE) != 0 || stack.ss_size == 0 {
+        return false;
+    }
+    let start = stack.ss_sp;
+    let end = stack.ss_sp.saturating_add(stack.ss_size as usize);
+    sp >= start && sp < end
 }
 
 fn signal_from_flag(flag: SignalFlags) -> Option<usize> {

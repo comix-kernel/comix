@@ -1,6 +1,6 @@
 //! 系统相关系统调用实现
 
-use crate::arch::Arch;
+use crate::arch::{Arch, address::UA};
 use core::{
     ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void},
     sync::atomic::Ordering,
@@ -22,7 +22,7 @@ use crate::{
     },
     security::{BiogasPoll, EntropyPool},
     uapi::{
-        errno::{EINVAL, ENOSYS},
+        errno::{EFAULT, EINVAL, ENOSYS},
         log::SyslogAction,
         reboot::{
             REBOOT_CMD_CAD_OFF, REBOOT_CMD_CAD_ON, REBOOT_CMD_HALT, REBOOT_CMD_POWER_OFF,
@@ -464,17 +464,39 @@ pub fn syslog(type_: i32, bufp: *mut u8, len: i32) -> isize {
 /// * **成功**：返回填充的字节数
 /// * **失败**：返回负的 errno
 pub fn getrandom(buf: *mut c_void, len: SizeT, _flags: c_uint) -> c_int {
+    if len == 0 {
+        return 0;
+    }
+    if buf.is_null() {
+        return -EFAULT;
+    }
+    if len > c_int::MAX as SizeT {
+        return -EINVAL;
+    }
+
     let mut pool = BiogasPoll::new();
-    for i in 0..len {
-        let byte = match pool.try_fill(core::slice::from_mut(unsafe {
-            &mut *(buf as *mut u8).add(i as usize)
-        })) {
-            Ok(_) => unsafe { *(buf as *mut u8).add(i as usize) },
-            Err(_) => return -EINVAL,
+    let len = len as usize;
+    let mut done = 0usize;
+    let mut chunk = [0u8; 64];
+
+    while done < len {
+        let take = core::cmp::min(chunk.len(), len - done);
+        if pool.try_fill(&mut chunk[..take]).is_err() {
+            return -EINVAL;
+        }
+        let dst = match (buf as usize).checked_add(done) {
+            Some(dst) => dst,
+            None => return -EFAULT,
         };
         unsafe {
-            *(buf as *mut u8).add(i as usize) = byte;
+            if crate::arch::ArchImpl::copy_to_user(chunk.as_ptr(), UA::from_usize(dst), take)
+                .is_err()
+            {
+                return -EFAULT;
+            }
         }
+        done += take;
     }
+
     len as c_int
 }

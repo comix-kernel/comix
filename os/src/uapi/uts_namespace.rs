@@ -28,6 +28,8 @@ pub struct UtsNamespace {
     pub domainname: [u8; UTS_NAME_LEN],
 }
 
+const _: () = assert!(core::mem::size_of::<UtsNamespace>() == 390);
+
 impl Default for UtsNamespace {
     /// 创建一个默认的 UTS 命名空间实例
     ///

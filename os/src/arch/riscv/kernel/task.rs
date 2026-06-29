@@ -6,14 +6,16 @@ use alloc::vec::Vec;
 use riscv::register::sstatus;
 
 use crate::arch::constant::STACK_ALIGN_MASK;
-use crate::arch::{address::VA, task::ExecStackLayout};
-use crate::config::PAGE_SIZE;
+use crate::arch::{
+    address::VA,
+    task::{ExecStackLayout, ExecTlsTemplate},
+};
 use crate::mm::memory_space::MemorySpace;
 
 /// 为新任务设置用户栈布局，包含命令行参数和环境变量
 /// 返回新的栈指针位置，以及 argc, argv, envp 的地址
 pub fn setup_stack_layout(
-    space: &MemorySpace,
+    _space: &MemorySpace,
     sp: usize,
     argv: &[&str],
     envp: &[&str],
@@ -22,13 +24,13 @@ pub fn setup_stack_layout(
     phent: usize,
     at_base: usize,
     at_entry: usize,
+    _tls: Option<ExecTlsTemplate>,
 ) -> (usize, usize, usize, usize, usize) {
-    // Reserve the top stack page for a minimal TCB/TLS scratch area.
-    let tls_base = (sp - 1) & !(PAGE_SIZE - 1);
-    let tls_tp = (sp & !0xf).wrapping_sub(0x10);
-    write_user_usize(space, tls_tp, tls_tp);
-
-    let mut sp = tls_base;
+    // Linux leaves tp zero across execve on RISC-V. Static glibc builds the
+    // initial TLS/TCB itself from PT_TLS and auxv; pre-seeding tp here can make
+    // early pointer-guard users observe a different TCB from the final one.
+    let tls_tp = 0usize;
+    let mut sp = sp;
     let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
     let mut env_ptrs: Vec<usize> = Vec::with_capacity(envp.len());
     unsafe {
@@ -199,6 +201,7 @@ pub fn setup_exec_stack_layout(
     phent: usize,
     at_base: VA,
     at_entry: VA,
+    tls: Option<ExecTlsTemplate>,
 ) -> ExecStackLayout {
     let (sp, argc, argv, envp, tls) = setup_stack_layout(
         space,
@@ -210,6 +213,7 @@ pub fn setup_exec_stack_layout(
         phent,
         at_base.as_usize(),
         at_entry.as_usize(),
+        tls,
     );
     ExecStackLayout {
         sp: VA::from_usize(sp),

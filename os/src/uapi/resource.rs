@@ -55,6 +55,8 @@ pub struct Rusage {
     pub ru_nivcsw: c_long,
 }
 
+const _: () = assert!(core::mem::size_of::<Rusage>() == 144);
+
 /// 资源限制值相关的定义。
 pub mod rlimit_value {
     /// 资源限制值类型，对应 C 语言中的 rlim_t，通常是 usize (64位无符号长整型)。

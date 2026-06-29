@@ -106,6 +106,11 @@ pub fn user_trap(
             let stval_val = stval::read();
             let scause_val = scause.bits();
             let sscratch_val = sscratch::read();
+            let (pid, tid, exe_path) = {
+                let task = crate::kernel::current_task();
+                let t = task.lock();
+                (t.pid, t.tid, t.exe_path.clone())
+            };
 
             // 打印详细的异常信息
             emergency_println!("\n");
@@ -116,6 +121,10 @@ pub fn user_trap(
             emergency_println!("[!] Exception Type:");
             emergency_println!("   Trap: {:?}", scause.cause());
             emergency_println!("   Raw scause: {:#x}", scause_val);
+            emergency_println!("");
+            emergency_println!("[!] Current Task:");
+            emergency_println!("   pid: {}  tid: {}", pid, tid);
+            emergency_println!("   exe: {}", exe_path.as_deref().unwrap_or("<unknown>"));
             emergency_println!("");
             emergency_println!("[!] Exception Location:");
             emergency_println!("   sepc (fault PC):  {:#x}", sepc_old);
@@ -173,6 +182,26 @@ pub fn user_trap(
                 "     x18_s2: {:#x}  x19_s3: {:#x}",
                 trap_frame.x18_s2,
                 trap_frame.x19_s3
+            );
+            emergency_println!(
+                "     x20_s4: {:#x}  x21_s5: {:#x}",
+                trap_frame.x20_s4,
+                trap_frame.x21_s5
+            );
+            emergency_println!(
+                "     x22_s6: {:#x}  x23_s7: {:#x}",
+                trap_frame.x22_s6,
+                trap_frame.x23_s7
+            );
+            emergency_println!(
+                "     x24_s8: {:#x}  x25_s9: {:#x}",
+                trap_frame.x24_s8,
+                trap_frame.x25_s9
+            );
+            emergency_println!(
+                "     x26_s10: {:#x}  x27_s11: {:#x}",
+                trap_frame.x26_s10,
+                trap_frame.x27_s11
             );
             emergency_println!("");
 

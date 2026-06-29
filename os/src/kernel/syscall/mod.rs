@@ -208,7 +208,7 @@ impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
 impl_syscall!(
     sys_rt_sigaction,
     rt_sigaction,
-    (c_int, *const SignalAction, *mut SignalAction)
+    (c_int, *const SignalAction, *mut SignalAction, c_uint)
 );
 impl_syscall!(
     sys_rt_sigprocmask,
