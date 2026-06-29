@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Comix 操作系统内核阶段性设计文档</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 24mm 20mm 22mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #1f2933;
+      background: #ffffff;
+      font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
+      font-size: 10.5pt;
+      line-height: 1.78;
+    }
+
+    h1,
+    h2,
+    h3,
+    .cover-title,
+    .cover-subtitle {
+      font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+      color: #111827;
+      line-height: 1.3;
+    }
+
+    h1 {
+      margin: 0 0 14pt;
+      padding-bottom: 5pt;
+      border-bottom: 1px solid #d7dde5;
+      font-size: 20pt;
+      font-weight: 700;
+      page-break-before: always;
+    }
+
+    h2 {
+      margin: 18pt 0 7pt;
+      font-size: 14pt;
+      font-weight: 700;
+    }
+
+    h3 {
+      margin: 13pt 0 5pt;
+      font-size: 11.5pt;
+      font-weight: 700;
+    }
+
+    p {
+      margin: 0 0 7pt;
+      text-align: justify;
+    }
+
+    ul,
+    ol {
+      margin: 4pt 0 8pt 18pt;
+      padding: 0;
+    }
+
+    li {
+      margin: 2pt 0;
+    }
+
+    table {
+      width: 100%;
+      margin: 8pt 0 12pt;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      page-break-inside: avoid;
+    }
+
+    th,
+    td {
+      padding: 5pt 6pt;
+      border: 1px solid #cfd6df;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef3f8;
+      font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    code,
+    pre {
+      font-family: "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
+    }
+
+    code {
+      padding: 0 2pt;
+      border-radius: 2pt;
+      background: #f3f6f9;
+      font-size: 9pt;
+    }
+
+    pre {
+      margin: 7pt 0 11pt;
+      padding: 8pt 10pt;
+      border: 1px solid #d6dee8;
+      border-radius: 4pt;
+      background: #f8fafc;
+      color: #22313f;
+      font-size: 8.7pt;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      page-break-inside: avoid;
+    }
+
+    .cover {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+      page-break-after: always;
+    }
+
+    .cover-title {
+      margin-bottom: 14pt;
+      font-size: 28pt;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .cover-subtitle {
+      margin-bottom: 36pt;
+      font-size: 18pt;
+      font-weight: 500;
+    }
+
+    .cover-meta {
+      margin-top: 28pt;
+      color: #3b4652;
+      font-size: 12pt;
+      line-height: 2.1;
+    }
+
+    .toc {
+      page-break-after: always;
+    }
+
+    .toc h1 {
+      page-break-before: auto;
+    }
+
+    .toc ol {
+      margin-left: 0;
+      list-style-position: inside;
+      font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 11pt;
+      line-height: 1.9;
+    }
+
+    .lead {
+      color: #334155;
+      font-size: 11pt;
+    }
+
+    .note {
+      margin: 8pt 0 10pt;
+      padding: 7pt 10pt;
+      border-left: 3pt solid #5c7c9d;
+      background: #f5f8fb;
+      color: #2f3b47;
+    }
+
+    .chapter-no {
+      display: block;
+      margin-bottom: 3pt;
+      color: #5c6b7b;
+      font-size: 10pt;
+      font-weight: 500;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10pt;
+    }
+
+    .break-before {
+      page-break-before: always;
+    }
+
+    .no-break {
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div class="cover-title">操作系统内核阶段性设计文档</div>
+    <div class="cover-subtitle">Comix</div>
+    <div class="cover-meta">
+      <div>面向内核设计评审与阶段提交</div>
+      <div>2026 年 6 月</div>
+    </div>
+  </section>
+
+  <section class="toc">
+    <h1>目录</h1>
+    <ol>
+      <li>摘要</li>
+      <li>系统概述</li>
+      <li>代码结构与文档组织</li>
+      <li>架构抽象与启动流程</li>
+      <li>内存管理模块</li>
+      <li>任务与调度模块</li>
+      <li>文件系统与 VFS 模块</li>
+      <li>IPC 与信号模块</li>
+      <li>同步与并发控制</li>
+      <li>网络模块</li>
+      <li>Trap 与异常处理</li>
+      <li>系统调用边界</li>
+      <li>设备与存储路径</li>
+      <li>日志与诊断</li>
+      <li>验证情况与阶段展望</li>
+    </ol>
+  </section>
+
+  <main>
+    <h1><span class="chapter-no">第 1 章</span>摘要</h1>
+    <p class="lead">Comix 是一个使用 Rust 编写的操作系统内核。本阶段文档总结当前内核在架构抽象、启动流程、内存管理、任务调度、Trap 与系统调用、文件系统、IPC、同步、网络、设备和日志诊断上的设计状态。文档重点不是复述函数级 API，而是说明系统分层、关键流程、约束和仍需收敛的限制。</p>
+    <p>当前正式设计文档位于 <code>document/</code>。该目录采用“细项主导航 + 简洁页面”的方式组织：<code>SUMMARY.md</code> 保留可直接跳转的子系统细项，页面正文强调设计边界、生命周期和不变量；函数签名、字段含义、错误分支等实现细节则由 rustdoc 和源码注释承载。</p>
+    <p>本阶段的核心目标是让文档与最新代码同步，并形成一份可用于阶段提交的汇总材料。本文参考传统操作系统内核设计文档的封面、目录和分章方式，但内容只基于 Comix 当前文档和源码结构，不把历史方案或未接入实现写成当前能力。</p>
+
+    <h2>1.1 当前阶段重点</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>领域</th>
+          <th>阶段状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>架构支持</td>
+          <td>RISC-V64 和 LoongArch64 通过统一 <code>arch</code> 门面接入通用内核；RISC-V 已接入多核启动、IPI、定时器和外部中断路径，LoongArch64 当前以单核 bringup 和用户态运行为主。</td>
+        </tr>
+        <tr>
+          <td>内存管理</td>
+          <td>提供强类型地址抽象、物理帧分配、talc 全局堆、页表抽象和 <code>MemorySpace</code> 地址空间管理，支持 ELF 加载、mmap、fork 克隆和 SysV 共享内存映射。</td>
+        </tr>
+        <tr>
+          <td>任务系统</td>
+          <td>用统一 <code>Task</code> 模型承载进程、线程和内核线程；调度器维护运行状态与 run queue，任务管理器维护 tid、父子关系和退出状态。</td>
+        </tr>
+        <tr>
+          <td>文件系统</td>
+          <td>VFS 提供路径、dentry、inode、file 和 fd table 抽象；具体 FS 包括 ext4、VFAT/FAT、tmpfs、procfs、sysfs 和 simple_fs fallback。</td>
+        </tr>
+        <tr>
+          <td>IPC 与网络</td>
+          <td>IPC 支持 pipe、内核消息队列、SysV shared memory 和 signal；网络通过 NetDevice、接口控制面、smoltcp runtime、VFS socket 文件和 syscall 层连接。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h1><span class="chapter-no">第 2 章</span>系统概述</h1>
+    <p>Comix 采用分层内核结构。架构层负责 CPU、trap、页表和平台 hook；通用内核层负责启动、任务、调度、系统调用和 CPU 状态；基础设施层提供内存管理、同步、VFS、具体文件系统、IPC、网络与设备抽象。用户态通过系统调用进入内核，系统调用层完成 ABI 边界处理后转发到各子系统。</p>
+    <pre>用户态程序
+  -> trap 和 syscall frame
+  -> syscall dispatch
+  -> task / mm / vfs / fs / ipc / net / signal
+  -> arch / device / platform</pre>
+
+    <h2>2.1 分层原则</h2>
+    <ul>
+      <li>架构差异被限制在 <code>os/src/arch/</code>，通用内核通过 trait、类型别名和包装函数访问架构能力。</li>
+      <li>系统调用层只处理 ABI、用户指针、fd 查找和 errno 映射，不承载跨子系统共享状态。</li>
+      <li>VFS 负责统一文件命名空间和打开文件模型，具体文件系统只实现 <code>FileSystem</code> 与 <code>Inode</code> 边界。</li>
+      <li>任务生命周期、调度状态、地址空间、fd table、signal 和 shm attachment 分属不同模块，通过清晰的资源所有权约束协作。</li>
+    </ul>
+
+    <h2>2.2 当前限制</h2>
+    <p>Comix 当前不是完整 Linux 内核兼容实现。部分 syscall 为兼容测试提供最小语义；LoongArch64 的 SMP、IPI 和外部设备中断路径尚未与 RISC-V 对齐；内存管理中的 fork 深拷贝尚未收敛为完整 COW；文件系统、网络和 signal 的高级语义仍在持续完善。</p>
+
+    <h1><span class="chapter-no">第 3 章</span>代码结构与文档组织</h1>
+    <p>本阶段文档同步后，正式设计文档位于 <code>document/</code>，源码位于 <code>os/src/</code>。文档不再维护完整 API 清单，而是把设计页和 rustdoc 分工固定下来。</p>
+    <pre>comix-1/
+  document/
+    SUMMARY.md
+    book.toml
+    arch/ kernel/ mm/ sync/ vfs/ fs/ ipc/ net/ syscall/
+    reports/
+  os/src/
+    arch/ kernel/ mm/ sync/ vfs/ fs/ ipc/ net/ device/ log/</pre>
+
+    <h2>3.1 文档分层</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>层级</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>document/</code></td>
+          <td>维护设计、边界、关键流程、不变量、已知限制和源码索引。</td>
+        </tr>
+        <tr>
+          <td>rustdoc</td>
+          <td>维护公共类型、函数、错误条件、调用约束和局部示例。</td>
+        </tr>
+        <tr>
+          <td>源码注释</td>
+          <td>解释 unsafe 依据、锁顺序、架构细节和非显而易见的局部逻辑。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3.2 mdBook 与阶段 PDF</h2>
+    <p><code>document/book.toml</code> 使当前目录布局可以直接执行 <code>mdbook build document</code>。本 PDF 的源文件位于 <code>document/reports/stage-report.html</code>，使用浏览器打印引擎导出为 A4 PDF，适合阶段提交和评审传阅。</p>
+
+    <h1><span class="chapter-no">第 4 章</span>架构抽象与启动流程</h1>
+    <p>架构层的核心职责是把 CPU 和平台差异约束在 <code>arch</code> 目录内部。<code>os/src/arch/mod.rs</code> 是架构层公开门面，通用内核通过 <code>ArchImpl</code>、<code>PlatformImpl</code> 和统一 <code>TrapFrame</code> 类型访问架构能力。</p>
+
+    <h2>4.1 当前架构状态</h2>
+    <ul>
+      <li>RISC-V64：多核启动、软件中断 IPI、定时器中断和外部中断路径已经接入通用调度。</li>
+      <li>LoongArch64：当前以单核 bringup 和用户态运行为主，保留同名接口以复用通用内核代码。</li>
+      <li>Mock 架构：用于宿主测试构建核心模块。</li>
+    </ul>
+
+    <h2>4.2 公共启动流程</h2>
+    <p>启动主线已经从各架构目录收敛到 <code>os/src/kernel/boot.rs</code>。架构入口只完成本架构必须先做的 CPU 指针、CSR/FPU 等早期状态，然后调用公共启动流。</p>
+    <pre>arch::boot::main
+  -> before_clear_bss
+  -> clear_bss
+  -> mm::init
+  -> switch to kernel address space
+  -> init_boot_trap
+  -> platform::init
+  -> time::init
+  -> timer::init
+  -> create CPU0 idle task
+  -> trap::init
+  -> rest_init
+  -> enable interrupts
+  -> idle_loop</pre>
+
+    <p><code>rest_init</code> 创建 PID 1，PID 1 初始仍以内核任务形式运行，随后初始化 rootfs 和网络并通过 <code>kernel_execve("/sbin/init")</code> 进入用户态 init。RISC-V 从核通过 SBI HSM 进入 secondary 流程，LoongArch64 当前保持单核语义。</p>
+
+    <h1><span class="chapter-no">第 5 章</span>内存管理模块</h1>
+    <p>MM 子系统负责物理帧分配、内核堆、页表抽象和进程地址空间管理。架构无关策略位于 <code>os/src/mm/</code>，页表格式、TLB 刷新和地址转换位于 <code>os/src/arch/{riscv,loongarch}/mm/</code>。</p>
+
+    <h2>5.1 模块组成</h2>
+    <ul>
+      <li>地址抽象：<code>PA</code>、<code>VA</code>、<code>UA</code>、<code>Ppn</code>、<code>Vpn</code> 等强类型包装，减少地址空间误用。</li>
+      <li>物理帧分配：全局 <code>SpinLock&lt;FrameAllocator&gt;</code> 保护，已分配帧通过 RAII tracker 回收。</li>
+      <li>全局堆：使用 <code>talc::Talck&lt;RawSpinLock, ClaimOnOom&gt;</code>。</li>
+      <li>页表抽象：通用 PTE flag 由架构后端转换成实际硬件 PTE。</li>
+      <li>地址空间：<code>MemorySpace</code> 维护页表与 <code>MappingArea</code> 列表，支持 <code>brk</code>、<code>mmap</code>、<code>munmap</code>、<code>mprotect</code>、ELF 加载、fork 克隆、文件映射和 SysV shared memory 映射。</li>
+    </ul>
+
+    <h2>5.2 设计约束</h2>
+    <p>当前页表路径只启用 4K 页。用户页表包含用户私有映射和内核共享映射，通过 PTE 用户访问位隔离权限。<code>MappingArea</code> 是 VMA 级别的元数据和帧所有权边界，页表只保存硬件可见映射，不记录映射来源。</p>
+
+    <h2>5.3 已知限制</h2>
+    <ul>
+      <li><code>MemorySpace::areas</code> 仍是线性 <code>Vec</code>，区域查找和重叠检测是线性扫描。</li>
+      <li>fork 对 <code>Framed</code> 区域做深拷贝，尚不是完整 COW。</li>
+      <li>LoongArch TLB 批处理上下文当前是本地刷新占位实现。</li>
+      <li>大页映射尚未作为正式能力暴露。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 6 章</span>任务与调度模块</h1>
+    <p>任务子系统定义内核运行单元、生命周期和阻塞/唤醒边界。Comix 使用统一 <code>Task</code> 表示进程、线程和内核线程，所有任务通过 <code>SharedTask = Arc&lt;SpinLock&lt;Task&gt;&gt;</code> 在调度器、任务管理器、wait queue、信号和文件系统之间传递。</p>
+
+    <h2>6.1 任务模型</h2>
+    <ul>
+      <li>进程是 <code>pid == tid</code> 的线程组 leader，线程与 leader 共享部分资源。</li>
+      <li>内核线程没有用户地址空间，但和用户任务共用第一次调度入口 <code>forkret</code>。</li>
+      <li>每个任务具有独立内核栈、<code>TrapFrame</code> 和调度 <code>Context</code>。</li>
+      <li><code>execve</code> 替换用户地址空间，重建用户栈和 <code>TrapFrame</code>。</li>
+    </ul>
+
+    <h2>6.2 生命周期</h2>
+    <pre>create
+  -> Running and queued
+  -> scheduled on CPU
+  -> running in kernel or user mode
+  -> sleep on event
+  -> wake and queued again
+  -> exit to Zombie
+  -> parent wait or release removes global reference</pre>
+
+    <p>当前 <code>Running</code> 同时表示正在 CPU 上运行或可运行并等待队列调度。任务管理器维护全局 tid 映射、父子关系和退出状态；调度器负责运行状态转换和 run queue 维护。</p>
+
+    <h2>6.3 并发约束</h2>
+    <ul>
+      <li><code>Task</code> 内部由 <code>SpinLock</code> 保护，不应长期持有任务锁后调用可能唤醒或调度的路径。</li>
+      <li>同一任务不能被两个 CPU 同时调度运行。</li>
+      <li>多核唤醒必须幂等，已经是 <code>Running</code>、<code>Zombie</code> 或 <code>Stopped</code> 的任务不能重复入队。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 7 章</span>文件系统与 VFS 模块</h1>
+    <p>VFS 是 Comix 的统一文件命名空间和打开文件模型。它把路径、文件描述符、设备文件和具体文件系统实现分离，使 ext4、tmpfs、procfs、sysfs、VFAT 以及设备节点都能通过同一组抽象接入。</p>
+
+    <h2>7.1 VFS 核心对象</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>对象</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>File</code></td>
+          <td>打开文件会话，保存 offset、open flags 和具体读写语义。</td>
+        </tr>
+        <tr>
+          <td><code>Inode</code></td>
+          <td>文件系统对象，提供随机访问、目录操作和元数据。</td>
+        </tr>
+        <tr>
+          <td><code>Dentry</code></td>
+          <td>路径缓存节点，连接名字、父子关系和 inode。</td>
+        </tr>
+        <tr>
+          <td><code>MountTable</code></td>
+          <td>维护全局挂载点栈，路径解析自动跨越挂载边界。</td>
+        </tr>
+        <tr>
+          <td><code>FDTable</code></td>
+          <td>进程可见 fd 空间，fd 指向 <code>Arc&lt;dyn File&gt;</code>。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>7.2 当前文件系统实现</h2>
+    <ul>
+      <li>ext4：默认 rootfs 候选，支持持久化读写。</li>
+      <li>VFAT/FAT：用于 mount/umount 兼容路径和测试分区。</li>
+      <li>tmpfs：提供内存临时文件树。</li>
+      <li>procfs：生成进程和系统状态快照。</li>
+      <li>sysfs：将设备注册表映射为 <code>/sys</code> 视图。</li>
+      <li>simple_fs：编译期嵌入的只读 fallback rootfs。</li>
+    </ul>
+
+    <h2>7.3 rootfs 探测流程</h2>
+    <pre>device discovery
+  -> list block disks and partitions
+  -> sort partitions before whole disks
+  -> try ext4 open
+  -> mount temporarily at /
+  -> accept only if /bin/sh or /bin/ash exists
+  -> create common mount dirs
+  -> mount procfs, sysfs, tmpfs and create /dev nodes</pre>
+
+    <h1><span class="chapter-no">第 8 章</span>IPC 与信号模块</h1>
+    <p>IPC 子系统由一组和 VFS、Task、MemorySpace、syscall 层协作的机制组成，负责字节流、离散消息、共享页和异步事件。</p>
+
+    <h2>8.1 IPC 机制</h2>
+    <ul>
+      <li>Pipe：底层是环形字节缓冲区，对外通过 VFS <code>PipeFile</code> 暴露为 fd。</li>
+      <li>Message：内核内消息队列，以消息类型和 payload 为边界，通过等待队列提供阻塞收发。</li>
+      <li>SysV shared memory：全局 segment registry 管理 <code>shmid/key</code>，syscall 层将 segment 映射进当前 <code>MemorySpace</code>。</li>
+      <li>Signal：任务私有 pending 与线程组共享 pending 共同决定返回用户态前的投递行为。</li>
+    </ul>
+
+    <h2>8.2 生命周期约束</h2>
+    <p>IPC 对象通常由 <code>Arc</code> 持有，生命周期由 fd table、task attachment table 或全局 registry 共同决定。等待路径必须避免在持有长生命周期锁时睡眠。进程退出或 exec 时由 task 清理路径关闭 fd、分离 shm、释放地址空间。</p>
+
+    <h2>8.3 当前限制</h2>
+    <ul>
+      <li>MessageQueue 当前是内核内队列，没有完整 msgget/msgsnd/msgrcv/msgctl ABI。</li>
+      <li>Signal 尚未完整实现 <code>SA_RESTART</code> 和实时信号队列。</li>
+      <li>Pipe 的阻塞和 poll 语义主要在 VFS <code>PipeFile</code> 中体现。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 9 章</span>同步与并发控制</h1>
+    <p><code>os/src/sync</code> 提供当前内核使用的同步原语。文档只描述现行实现和设计边界，不把未接入源码的历史方案当作可用 API。当前 <code>ticket_lock.rs</code> 和 <code>sleep_lock.rs</code> 不存在于源码中，对应文档页仅作为历史状态保留。</p>
+
+    <h2>9.1 当前同步原语</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>原语</th>
+          <th>用途</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>RawSpinLock</code></td>
+          <td>AtomicBool 互斥，进入时持有 <code>IntrGuard</code>，也适配 <code>lock_api::RawMutex</code>。</td>
+        </tr>
+        <tr>
+          <td><code>SpinLock&lt;T&gt;</code></td>
+          <td>短临界区互斥，适合极短共享数据修改。</td>
+        </tr>
+        <tr>
+          <td><code>RwLock&lt;T&gt;</code></td>
+          <td>短临界区的多读单写访问，持 guard 期间禁用本 CPU 中断。</td>
+        </tr>
+        <tr>
+          <td><code>Mutex&lt;T&gt;</code></td>
+          <td>任务上下文互斥，竞争时进入 wait queue 并 yield。</td>
+        </tr>
+        <tr>
+          <td><code>IntrGuard</code></td>
+          <td>禁用和恢复本 CPU 中断，支持 per-CPU 嵌套深度。</td>
+        </tr>
+        <tr>
+          <td><code>PreemptGuard</code> / <code>PerCpu&lt;T&gt;</code></td>
+          <td>防止访问当前 CPU 数据时任务迁移。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>9.2 并发约束</h2>
+    <ul>
+      <li>自旋锁类临界区必须短，不能主动 sleep 或长期等待调度。</li>
+      <li><code>Mutex&lt;T&gt;</code> 可能调用调度相关路径，只适合任务上下文。</li>
+      <li><code>PerCpu&lt;T&gt;::get_mut()</code> 要求调用方保证访问期间不会迁移。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 10 章</span>网络模块</h1>
+    <p>网络模块连接 <code>NetDevice</code>、接口控制面、smoltcp runtime、VFS socket 文件和网络 syscall。当前仍是单 active runtime 设计，但边界已经集中到 <code>NetworkStack</code> 门面。</p>
+
+    <h2>10.1 当前能力</h2>
+    <ul>
+      <li>真实网卡通过 <code>register_net_device()</code> 注册为 <code>NetworkInterface</code>。</li>
+      <li>默认配置保证 <code>lo</code> 存在，loopback-only 场景使用 <code>127.0.0.1/8</code> 且没有默认网关。</li>
+      <li>AF_INET TCP/UDP socket 由 smoltcp 驱动，状态集中在 <code>NetworkStack</code>。</li>
+      <li>AF_UNIX socket 是内核本地 IPC transport，不进入 smoltcp 数据路径。</li>
+      <li><code>SocketFile</code> 和 <code>UnixSocketFile</code> 实现 VFS <code>File</code>，通过 fd table 暴露给用户态。</li>
+    </ul>
+
+    <h2>10.2 分层边界</h2>
+    <p>设备层只提供收发帧能力；接口层保存控制面配置；协议栈运行时由 <code>NetworkStack</code> 持有和推进；syscall 层处理用户 ABI、fd table、sockaddr 和 errno。当前非目标包括多 active interface runtime 和把 AF_UNIX 混入 smoltcp 数据路径。</p>
+
+    <h1><span class="chapter-no">第 11 章</span>Trap 与异常处理</h1>
+    <p>Trap 路径连接硬件异常、中断、系统调用和调度器。RISC-V 与 LoongArch 都提供 <code>arch::trap</code> 模块，对通用内核暴露初始化、恢复、信号 trampoline 和 <code>TrapFrame</code> 操作。架构汇编入口保存现场后进入 Rust handler，handler 分派 syscall、timer、IPI 或设备中断，最终恢复当前任务的 <code>TrapFrame</code>。</p>
+
+    <h2>11.1 通用 Trap 流程</h2>
+    <pre>hardware trap
+  -> arch trap_entry
+  -> save TrapFrame
+  -> Rust trap_handler
+  -> syscall/timer/IPI/device/exception dispatch
+  -> maybe schedule
+  -> restore current task TrapFrame
+  -> sret/ertn</pre>
+
+    <h2>11.2 架构状态</h2>
+    <ul>
+      <li>RISC-V 路径已覆盖 syscall、timer、software interrupt IPI 和 external interrupt。</li>
+      <li>LoongArch 路径已覆盖 syscall、timer、TLB refill 入口安装和基本恢复。</li>
+      <li>系统调用会调整返回 PC，然后把 <code>TrapFrame</code> 交给 syscall dispatcher。</li>
+      <li>时钟中断推进全局 ticks、timer queue 和 interval timer，必要时触发调度。</li>
+    </ul>
+
+    <h2>11.3 约束与限制</h2>
+    <ul>
+      <li>trap handler 入口时中断通常已关闭，返回必须通过架构 restore 恢复特权状态和中断状态。</li>
+      <li>trap handler 中不要执行可能阻塞或长期持锁的工作。</li>
+      <li>如果 handler 中发生任务切换，返回必须读取当前任务的 <code>trap_frame_ptr</code>。</li>
+      <li>LoongArch 外部中断和 IPI 尚未接入完整分派，用户态未知异常仍偏 bringup 诊断。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 12 章</span>系统调用边界</h1>
+    <p>Syscall 层是用户态 ABI 到内核子系统的边界。<code>dispatch_syscall()</code> 按 syscall number 分发到 <code>sys_*</code> 包装函数；<code>SyscallFrame</code> trait 抽象寄存器读取和返回值写回；<code>impl_syscall!</code> 宏负责从 frame 提取参数、调用实际实现并写回返回值。</p>
+
+    <h2>12.1 Dispatch 职责</h2>
+    <ol>
+      <li>读取 syscall id 和参数用于调试日志。</li>
+      <li>根据 <code>numbers.rs</code> 中的常量选择对应 <code>sys_*</code> wrapper。</li>
+      <li>对未知号码写回 <code>-ENOSYS</code>。</li>
+    </ol>
+    <p>dispatch 不直接读取用户内存，不操作 fd table，也不进入 VFS 或协议栈内部状态。真正实现按领域拆到 fs、io、task、mm、signal、ipc、network、sys、cred 等模块。</p>
+
+    <h2>12.2 用户指针原则</h2>
+    <ul>
+      <li>用户指针只能在 syscall 边界或明确的用户缓冲工具中解引用。</li>
+      <li>不把用户指针保存到内核对象中。</li>
+      <li>持有协议栈、VFS、MemorySpace 等关键锁时避免长时间复制用户缓冲区。</li>
+      <li>复制失败返回 <code>-EFAULT</code> 或对应子系统错误。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 13 章</span>设备与存储路径</h1>
+    <p>设备层为 Comix 提供驱动注册、设备树探测、VirtIO 传输、块设备、网络、控制台和 RTC 等基础能力。对当前阶段最关键的是存储路径：块设备和分区被枚举为 <code>vda</code>、<code>vda1</code>、<code>vda2</code> 等名字，上层 FS 再从候选中探测 rootfs 或挂载 VFAT 测试分区。</p>
+
+    <h2>13.1 驱动模型</h2>
+    <ul>
+      <li>所有驱动实现 <code>Driver</code>，并可按类型向下暴露 <code>BlockDriver</code>、<code>NetDevice</code>、<code>RtcDriver</code>、<code>SerialDriver</code>。</li>
+      <li>全局注册表包括 <code>DRIVERS</code>、<code>BLK_DRIVERS</code>、<code>RTC_DRIVERS</code> 和 <code>SERIAL_DRIVERS</code>。</li>
+      <li>设备树初始化先处理中断控制器，再处理普通设备；VirtIO MMIO 是主要设备传输路径。</li>
+      <li>sysfs 通过设备注册表构建 <code>/sys/class/*</code>，FS 初始化通过同一设备列表创建 <code>/dev</code> 节点。</li>
+    </ul>
+
+    <h2>13.2 存储关键流程</h2>
+    <pre>device_tree init
+  -> virtio mmio probe
+  -> virtio block init
+  -> BLK_DRIVERS push whole disk
+  -> sysfs device_registry list_block_devices
+  -> discover partitions
+  -> vda, vda1, vda2 ...</pre>
+    <p><code>BLK_DRIVERS</code> 只保存整盘驱动，分区设备在 <code>list_block_devices</code> 时根据分区表动态包装为逻辑块设备。rootfs 探测不依赖固定 virtio 枚举顺序，而是优先尝试分区并通过文件内容判断。</p>
+
+    <h2>13.3 已知限制</h2>
+    <ul>
+      <li>设备热插拔后 <code>/dev</code> 和 <code>/sys</code> 不是自动增量更新模型。</li>
+      <li>分区解析支持 primary MBR 和基础 GPT 条目，不覆盖所有复杂分区格式。</li>
+      <li>分区发现默认假设 512 字节扇区。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 14 章</span>日志与诊断</h1>
+    <p>Log 子系统提供内核级分级日志、固定大小环形缓冲、控制台即时输出和 <code>syslog</code> 读取接口。当前设计偏向早期可用和低依赖，确保关键诊断信息可以在不同启动阶段输出。</p>
+
+    <h2>14.1 日志路径</h2>
+    <ol>
+      <li>调用 <code>pr_info!</code> 等宏。</li>
+      <li>宏先检查 global level，被过滤的日志不进入格式化。</li>
+      <li><code>LogCore</code> 收集上下文并构造固定大小 <code>LogEntry</code>。</li>
+      <li>条目写入多生产者单消费者环形缓冲。</li>
+      <li>若级别达到 console level，直接格式化输出到控制台。</li>
+      <li>用户态通过 <code>syslog</code> 读取格式化后的日志文本。</li>
+    </ol>
+
+    <h2>14.2 设计边界</h2>
+    <ul>
+      <li>全局 <code>LogCore</code> 使用 <code>const fn</code> 静态初始化，无需运行时 init。</li>
+      <li><code>print!</code> 和 <code>println!</code> 保持控制台输出，同时以 Info 级别写入日志缓冲。</li>
+      <li>panic/trap 关键路径可使用 <code>console::emergency_print()</code> 绕开常规日志路径。</li>
+      <li>日志系统不承担持久化、审计、tracing 或结构化事件系统职责。</li>
+    </ul>
+
+    <h2>14.3 已知限制</h2>
+    <ul>
+      <li><code>syslog</code> 权限检查当前是兼容 stub。</li>
+      <li>缓冲区大小固定为编译期常量，高日志量场景会覆盖旧日志。</li>
+      <li>ANSI 颜色码会进入 syslog 格式化输出。</li>
+    </ul>
+
+    <h1><span class="chapter-no">第 15 章</span>验证情况与阶段展望</h1>
+    <p>本阶段文档更新完成后，已对正式文档和 rustdoc 进行基础验证。验证重点是目录可构建、链接可达、旧路径不再作为当前实现引用，以及 rustdoc 不因文档注释问题失败。</p>
+
+    <h2>15.1 已执行验证</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>验证项</th>
+          <th>结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>mdbook build document</code></td>
+          <td>通过，输出目录为 <code>target/mdbook-document</code>。</td>
+        </tr>
+        <tr>
+          <td><code>cargo doc --no-deps --target riscv64gc-unknown-none-elf</code></td>
+          <td>通过，仅存在已有的第三方或构建 warning。</td>
+        </tr>
+        <tr>
+          <td><code>git diff --check -- document os/src</code></td>
+          <td>通过。</td>
+        </tr>
+        <tr>
+          <td><code>SUMMARY.md</code> 链接检查</td>
+          <td>通过。</td>
+        </tr>
+        <tr>
+          <td>旧路径和过期文案检查</td>
+          <td>未发现 <code>os/src/fs/fat32</code>、<code>os/src/sync/ticket_lock.rs</code>、<code>os/src/sync/sleep_lock.rs</code> 等作为当前实现路径残留。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>15.2 阶段展望</h2>
+    <ul>
+      <li>内存管理：收敛 COW、区域索引结构和跨架构 TLB shootdown 同步策略。</li>
+      <li>任务系统：拆分调度热字段和进程资源字段，完善抢占计数与优先级模型。</li>
+      <li>架构层：推进 LoongArch64 SMP、IPI 和外部中断路径与 RISC-V 对齐。</li>
+      <li>文件系统：完善 dentry 失效、mount flags 执行语义和动态文件树一致性。</li>
+      <li>信号与 syscall：完善 <code>SA_RESTART</code>、实时信号队列和更多 Linux ABI 语义。</li>
+      <li>网络：从单 active runtime 继续向更完整的接口和 socket 语义推进。</li>
+    </ul>
+
+    <div class="note">
+      本文是阶段性设计汇总，详细子系统说明以 <code>document/</code> 下的 mdBook 文档为准，函数级行为以 rustdoc 和源码注释为准。
+    </div>
+  </main>
+</body>
+</html>
