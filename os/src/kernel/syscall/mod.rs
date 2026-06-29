@@ -239,6 +239,7 @@ impl_syscall!(sys_setpgid, set_pgid, (c_int, c_int));
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
 impl_syscall!(sys_sethostname, set_hostname, (*const c_char, usize));
 impl_syscall!(sys_getrlimit, getrlimit, (c_int, *mut Rlimit));
+impl_syscall!(sys_getrusage, getrusage, (c_int, *mut Rusage));
 impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
 impl_syscall!(sys_umask, umask, (u32));
 impl_syscall!(

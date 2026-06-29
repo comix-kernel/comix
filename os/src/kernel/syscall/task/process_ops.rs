@@ -1,4 +1,7 @@
 use super::*;
+use crate::uapi::errno::{EFAULT, EINVAL};
+use crate::uapi::resource::{RUSAGE_CHILDREN, RUSAGE_SELF, RUSAGE_THREAD, Rusage};
+use crate::util::user_buffer::validate_user_ptr_mut;
 
 /// 获取当前任务的进程 ID
 /// # 返回值:
@@ -102,6 +105,24 @@ pub fn getrlimit(resource: c_int, rlim: *mut Rlimit) -> c_int {
     }
     0
     // TODO: EPERM 和 EFAULT
+}
+
+/// 获取进程/子进程资源使用情况
+pub fn getrusage(who: c_int, usage: *mut Rusage) -> c_int {
+    match who {
+        RUSAGE_SELF | RUSAGE_CHILDREN | RUSAGE_THREAD => {
+            if usage.is_null() || !validate_user_ptr_mut(usage) {
+                return -EFAULT;
+            }
+
+            let rusage = Rusage::default();
+            unsafe {
+                write_to_user(usage, rusage);
+            }
+            0
+        }
+        _ => -EINVAL,
+    }
 }
 
 /// 设置资源限制

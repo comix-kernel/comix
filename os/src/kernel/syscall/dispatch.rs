@@ -138,6 +138,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_UNAME => sys_uname(frame),
         crate::kernel::syscall::numbers::SYS_SETHOSTNAME => sys_sethostname(frame),
         crate::kernel::syscall::numbers::SYS_GETRLIMIT => sys_getrlimit(frame),
+        crate::kernel::syscall::numbers::SYS_GETRUSAGE => sys_getrusage(frame),
         crate::kernel::syscall::numbers::SYS_SETRLIMIT => sys_setrlimit(frame),
         crate::kernel::syscall::numbers::SYS_UMASK => sys_umask(frame),
         crate::kernel::syscall::numbers::SYS_GETTIMEOFDAY => sys_gettimeofday(frame),
