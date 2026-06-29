@@ -281,6 +281,7 @@ impl TrapFrame {
             layout.argv.as_usize(),
             layout.envp.as_usize(),
         );
+        self.set_tls(layout.tls.as_usize());
     }
 
     /// 设置用户态 TLS/thread pointer。

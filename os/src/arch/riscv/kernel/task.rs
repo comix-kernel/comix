@@ -7,11 +7,13 @@ use riscv::register::sstatus;
 
 use crate::arch::constant::STACK_ALIGN_MASK;
 use crate::arch::{address::VA, task::ExecStackLayout};
+use crate::config::PAGE_SIZE;
 use crate::mm::memory_space::MemorySpace;
 
 /// 为新任务设置用户栈布局，包含命令行参数和环境变量
 /// 返回新的栈指针位置，以及 argc, argv, envp 的地址
 pub fn setup_stack_layout(
+    space: &MemorySpace,
     sp: usize,
     argv: &[&str],
     envp: &[&str],
@@ -20,8 +22,13 @@ pub fn setup_stack_layout(
     phent: usize,
     at_base: usize,
     at_entry: usize,
-) -> (usize, usize, usize, usize) {
-    let mut sp = sp;
+) -> (usize, usize, usize, usize, usize) {
+    // Reserve the top stack page for a minimal TCB/TLS scratch area.
+    let tls_base = (sp - 1) & !(PAGE_SIZE - 1);
+    let tls_tp = (sp & !0xf).wrapping_sub(0x10);
+    write_user_usize(space, tls_tp, tls_tp);
+
+    let mut sp = tls_base;
     let mut arg_ptrs: Vec<usize> = Vec::with_capacity(argv.len());
     let mut env_ptrs: Vec<usize> = Vec::with_capacity(envp.len());
     unsafe {
@@ -178,12 +185,12 @@ pub fn setup_stack_layout(
 
     // 6. 最终 sp 应该已经是 16 字节对齐的
     // sp &= !STACK_ALIGN_MASK;
-    (sp, argc, argv_vec_ptr, envp_vec_ptr)
+    (sp, argc, argv_vec_ptr, envp_vec_ptr, tls_tp)
 }
 
 /// Architecture-neutral wrapper for `execve` stack setup.
 pub fn setup_exec_stack_layout(
-    _space: &MemorySpace,
+    space: &MemorySpace,
     sp: VA,
     argv: &[&str],
     envp: &[&str],
@@ -193,7 +200,8 @@ pub fn setup_exec_stack_layout(
     at_base: VA,
     at_entry: VA,
 ) -> ExecStackLayout {
-    let (sp, argc, argv, envp) = setup_stack_layout(
+    let (sp, argc, argv, envp, tls) = setup_stack_layout(
+        space,
         sp.as_usize(),
         argv,
         envp,
@@ -208,7 +216,7 @@ pub fn setup_exec_stack_layout(
         argc,
         argv: VA::from_usize(argv),
         envp: VA::from_usize(envp),
-        tls: VA::null(),
+        tls: VA::from_usize(tls),
     }
 }
 
@@ -251,5 +259,14 @@ pub unsafe fn prepare_user_restore(
             (*tfp).x11_a1,
             (*tfp).x12_a2,
         );
+    }
+}
+
+fn write_user_usize(space: &MemorySpace, dst: usize, val: usize) {
+    let paddr = space
+        .translate(VA::from_usize(dst))
+        .expect("write_user_usize: translate failed");
+    unsafe {
+        ptr::write(crate::arch::pa_to_va(paddr).as_usize() as *mut usize, val);
     }
 }

@@ -172,14 +172,22 @@ pub fn clone(
         }
     }
 
-    if requested_flags.contains(CloneFlags::CHILD_SETTID) {
-        unsafe {
-            write_to_user(ctid, tid as c_int);
-        }
-    }
     if requested_flags.contains(CloneFlags::PARENT_SETTID) {
         unsafe {
             write_to_user(ptid, tid as c_int);
+        }
+    }
+    if requested_flags.contains(CloneFlags::CHILD_SETTID) {
+        let tid_bytes = (tid as c_int).to_ne_bytes();
+        let Some(space) = child_task.memory_space.as_ref() else {
+            return -EFAULT;
+        };
+        if space
+            .lock()
+            .write_user_bytes_at(ctid as usize, &tid_bytes)
+            .is_err()
+        {
+            return -EFAULT;
         }
     }
 
