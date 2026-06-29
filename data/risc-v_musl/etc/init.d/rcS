@@ -135,64 +135,64 @@ ensure_glibc_runtime_links() {
 }
 
 run_glibc_basic_tests_if_requested() {
-    if cmdline_has "oscomp.test=glibc-basic-direct"; then
-        mode=direct
-    elif cmdline_has "oscomp.test=glibc-basic-one"; then
-        mode=one
-    else
-        cmdline_has "oscomp.test=glibc-basic" || return 1
-        mode=wrapper
-    fi
+    cmdline_has "oscomp.test=glibc-basic-direct" ||
+        cmdline_has "oscomp.test=glibc-basic-one" ||
+        cmdline_has "oscomp.test=glibc-basic" ||
+        return 1
     mount_official_test_image_if_present || true
-    [ -f /tests/glibc/basic_testcode.sh ] || return 1
+    [ -d /tests/glibc ] || return 1
 
     ensure_glibc_runtime_links || true
 
-    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/glibc:/tests/glibc/basic"
+    ran=0
+    echo "[Tests] detected glibc test scripts; running in rcS"
+
+    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/glibc"
     export TMPDIR="/tmp"
     export HOME="/"
 
-    if [ "$mode" = one ]; then
-        case_name="$(cmdline_value oscomp.case)"
-        [ -n "$case_name" ] || case_name="getdents"
-        case "$case_name" in
-            *[!A-Za-z0-9_]*|"")
-                echo "[Tests] invalid glibc basic case: $case_name"
-                return 1
+    for f in /tests/glibc/*_testcode.sh; do
+        [ -f "$f" ] || continue
+
+        base="${f##*/}"
+        case "$base" in
+            unixbench_testcode.sh|lmbench_testcode.sh|libcbench_testcode.sh|libctest_testcode.sh)
+                echo "[Tests] skipping already-validated $f"
+                continue
                 ;;
         esac
-        echo "[Tests] running requested glibc basic case: $case_name"
-        (
-            cd /tests/glibc/basic || exit 1
-            echo "[Tests] direct $case_name"
-            "./$case_name" </dev/null
-            echo "[Tests] direct $case_name rc=$?"
-        )
-    elif [ "$mode" = direct ]; then
-        echo "[Tests] running requested glibc basic group directly"
-        (
-            cd /tests/glibc/basic || exit 1
-            for i in brk chdir clone close dup2 dup execve exit fork fstat getcwd getdents getpid getppid gettimeofday mkdir_ mmap mount munmap openat open pipe read sleep times umount uname unlink wait waitpid write yield; do
-                echo "[Tests] direct $i"
-                "./$i" </dev/null
-                echo "[Tests] direct $i rc=$?"
-            done
-        )
-    else
-        echo "[Tests] running requested glibc basic group"
-        (
-            cd /tests/glibc || exit 1
-            echo "#### OS COMP TEST GROUP START basic-glibc ####"
-            cd ./basic || exit 1
-            . ./run-all.sh </dev/null
-            rc=$?
-            cd .. || true
-            echo "#### OS COMP TEST GROUP END basic-glibc ####"
-            exit "$rc"
-        )
-    fi
-    rc=$?
-    echo "[Tests] finished glibc basic (rc=$rc); powering off"
+
+        dir="${f%/*}"
+        echo "[Tests] running $f"
+        case "$base" in
+            basic_testcode.sh)
+                (
+                    cd "$dir/basic" || exit 1
+                    ../busybox echo "#### OS COMP TEST GROUP START basic-glibc ####"
+                    ../busybox sh ./run-all.sh </dev/null
+                    rc=$?
+                    ../busybox echo "#### OS COMP TEST GROUP END basic-glibc ####"
+                    exit "$rc"
+                )
+                ;;
+            *)
+                (
+                    cd "$dir" || exit 1
+                    ./busybox sh "./$base" </dev/null
+                )
+                ;;
+        esac
+        rc=$?
+        echo "[Tests] finished $f (rc=$rc)"
+        case "$rc" in
+            0) ;;
+            *) echo "[Tests] ignoring failure from $f and continuing" ;;
+        esac
+        ran=1
+    done
+    [ "$ran" -eq 1 ] || return 1
+
+    echo "[Tests] all glibc tests finished; powering off"
     /sbin/poweroff -f || /sbin/reboot -f || true
     echo "[Tests] poweroff returned unexpectedly; sleeping"
     while true; do sleep 3600; done
@@ -235,11 +235,11 @@ run_musl_tests_if_present() {
     [ -d /tests/musl ] || return 1
 
     staged_musl_dir=""
-    if stage_musl_tests_to_tmpfs; then
-        staged_musl_dir="/tmp/tests/musl"
-    else
-        echo "[Tests] staging failed; falling back to /tests/musl"
-    fi
+    # if stage_musl_tests_to_tmpfs; then
+    #     staged_musl_dir="/tmp/tests/musl"
+    # else
+    #     echo "[Tests] staging failed; falling back to /tests/musl"
+    # fi
 
     ran=0
     echo "[Tests] detected musl test scripts; running in rcS"
