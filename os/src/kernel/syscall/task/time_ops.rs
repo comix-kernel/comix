@@ -75,15 +75,18 @@ pub fn clock_nanosleep(
     let is_abstime = (flags & TIMER_ABSTIME) != 0;
     let sleep_ticks = time_req.into_freq(clock_freq());
     let trigger = if is_abstime {
-        sleep_ticks
-    } else {
-        let now = match clk_id {
-            CLOCK_REALTIME => REALTIME.read().into_freq(clock_freq()),
-            CLOCK_MONOTONIC => get_time(),
+        match clk_id {
+            CLOCK_REALTIME => sleep_ticks,
+            CLOCK_MONOTONIC => sleep_ticks,
             CLOCK_TAI | CLOCK_BOOTTIME | CLOCK_PROCESS_CPUTIME_ID => return -ENOSYS,
             _ => return -EINVAL,
-        };
-        now.saturating_add(sleep_ticks)
+        }
+    } else {
+        match clk_id {
+            CLOCK_REALTIME | CLOCK_MONOTONIC => get_time().saturating_add(sleep_ticks),
+            CLOCK_TAI | CLOCK_BOOTTIME | CLOCK_PROCESS_CPUTIME_ID => return -ENOSYS,
+            _ => return -EINVAL,
+        }
     };
 
     let mut result = 0;
