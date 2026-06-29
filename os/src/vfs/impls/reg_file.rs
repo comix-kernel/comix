@@ -1,6 +1,6 @@
 //! 普通文件（Regular File）的 File trait 实现
 
-use crate::sync::SpinLock;
+use crate::sync::{Mutex, SpinLock};
 use crate::vfs::{
     Dentry, DirEntry, File, FsError, Inode, InodeMetadata, InodeType, OpenFlags, SeekWhence,
 };
@@ -24,7 +24,7 @@ pub struct RegFile {
     pub inode: Arc<dyn Inode>,
 
     /// 当前文件偏移量 (需要锁保护,因为多线程可能共享 fd)
-    offset: SpinLock<usize>,
+    offset: Mutex<usize>,
 
     /// 打开标志位 (需要锁保护以支持 F_SETFL)
     flags: SpinLock<OpenFlags>,
@@ -43,7 +43,7 @@ impl RegFile {
         Self {
             dentry,
             inode,
-            offset: SpinLock::new(0),
+            offset: Mutex::new(0),
             flags: SpinLock::new(flags),
             owner: SpinLock::new(None),
             dir_entries: SpinLock::new(None),
@@ -106,14 +106,13 @@ impl File for RegFile {
 
         // 获取写入偏移量
         let mut offset_guard = self.offset.lock();
-        let flags = self.flags.lock();
+        let flags = *self.flags.lock();
         let write_offset = if flags.contains(OpenFlags::O_APPEND) {
             // O_APPEND: 总是写到文件末尾
             self.inode.metadata()?.size
         } else {
             *offset_guard
         };
-        drop(flags); // 释放 flags 锁
 
         // 调用 inode 的 write_at
         let nwritten = self.inode.write_at(write_offset, buf)?;
@@ -129,9 +128,12 @@ impl File for RegFile {
     }
 
     fn lseek(&self, offset: isize, whence: SeekWhence) -> Result<usize, FsError> {
+        let file_size = match whence {
+            SeekWhence::End => self.inode.metadata()?.size as isize,
+            _ => 0,
+        };
         let mut offset_guard = self.offset.lock();
         let current = *offset_guard as isize;
-        let file_size = self.inode.metadata()?.size as isize;
 
         let new_offset = match whence {
             SeekWhence::Set => offset,
