@@ -262,13 +262,11 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             unsafe { write_to_user(termios_ptr, termios) };
 
             crate::pr_debug!(
-                "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
+                "TCGETS: returning termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}",
                 termios.c_iflag,
                 termios.c_oflag,
                 termios.c_cflag,
-                termios.c_lflag,
-                termios.c_ispeed,
-                termios.c_ospeed
+                termios.c_lflag
             );
             Ok(0)
         }
@@ -286,13 +284,11 @@ fn stdio_ioctl(request: u32, arg: usize) -> Result<isize, FsError> {
             let new_termios = unsafe { read_from_user(termios_ptr) };
 
             crate::pr_debug!(
-                "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}, ispeed={:#x}, ospeed={:#x}",
+                "TCSETS: received termios: iflag={:#x}, oflag={:#x}, cflag={:#x}, lflag={:#x}",
                 new_termios.c_iflag,
                 new_termios.c_oflag,
                 new_termios.c_cflag,
-                new_termios.c_lflag,
-                new_termios.c_ispeed,
-                new_termios.c_ospeed
+                new_termios.c_lflag
             );
 
             *STDIO_TERMIOS.lock() = new_termios;
