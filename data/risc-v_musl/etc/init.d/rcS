@@ -134,11 +134,7 @@ ensure_glibc_runtime_links() {
     done
 }
 
-run_glibc_basic_tests_if_requested() {
-    cmdline_has "oscomp.test=glibc-basic-direct" ||
-        cmdline_has "oscomp.test=glibc-basic-one" ||
-        cmdline_has "oscomp.test=glibc-basic" ||
-        return 1
+run_glibc_tests_if_present() {
     mount_official_test_image_if_present || true
     [ -d /tests/glibc ] || return 1
 
@@ -156,8 +152,10 @@ run_glibc_basic_tests_if_requested() {
 
         base="${f##*/}"
         case "$base" in
-            unixbench_testcode.sh|lmbench_testcode.sh|libcbench_testcode.sh|libctest_testcode.sh)
-                echo "[Tests] skipping already-validated $f"
+            ltp_testcode.sh|\
+            iozone_testcode.sh|\
+            unixbench_testcode.sh)
+                echo "[Tests] skipping $f"
                 continue
                 ;;
         esac
@@ -192,10 +190,8 @@ run_glibc_basic_tests_if_requested() {
     done
     [ "$ran" -eq 1 ] || return 1
 
-    echo "[Tests] all glibc tests finished; powering off"
-    /sbin/poweroff -f || /sbin/reboot -f || true
-    echo "[Tests] poweroff returned unexpectedly; sleeping"
-    while true; do sleep 3600; done
+    echo "[Tests] all glibc tests finished"
+    return 0
 }
 
 stage_musl_tests_to_tmpfs() {
@@ -286,18 +282,25 @@ run_musl_tests_if_present() {
     done
     [ "$ran" -eq 1 ] || return 1
 
+    echo "[Tests] all musl tests finished"
+    return 0
+}
+
+tests_ran=0
+
+if run_musl_tests_if_present; then
+    tests_ran=1
+fi
+
+if run_glibc_tests_if_present; then
+    tests_ran=1
+fi
+
+if [ "$tests_ran" -eq 1 ]; then
     echo "[Tests] all tests finished; powering off"
     /sbin/poweroff -f || /sbin/reboot -f || true
     echo "[Tests] poweroff returned unexpectedly; sleeping"
     while true; do sleep 3600; done
-}
-
-if run_glibc_basic_tests_if_requested; then
-    exit 0
-fi
-
-if run_musl_tests_if_present; then
-    exit 0
 fi
 
 echo "rcS finished; spawning shell on ttyS0 via inittab"
