@@ -123,9 +123,9 @@ pub fn get_free_frames() -> usize {
 /// 获取帧分配器的当前状态
 ///
 /// # 返回值
-/// - 当前分配指针的 Ppn
+/// - 近似已分配末端 Ppn
 /// - 物理帧的结束 Ppn (不包含)
-/// - 回收栈的长度
+/// - 回收栈的长度（位图实现中恒为 0）
 /// - 已分配的帧数
 /// - 空闲的帧数
 pub fn get_stats() -> (usize, usize, usize, usize, usize) {
@@ -188,9 +188,9 @@ mod frame_allocator_tests {
         let first_ppn = {
             let frame = alloc_frame().expect("分配失败");
             frame.ppn()
-        }; // frame 在此丢弃，应被回收至回收栈
+        }; // frame 在此丢弃，应被标记为空闲
 
-        // 再次分配 - 应该从回收栈中获取相同的帧
+        // 再次分配 - 应该能复用刚刚释放的帧
         let frame2 = alloc_frame().expect("分配失败");
         kassert!(frame2.ppn() == first_ppn); // 验证重用
     });

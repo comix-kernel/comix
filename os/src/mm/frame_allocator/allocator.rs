@@ -8,7 +8,11 @@ use crate::config::PAGE_SIZE;
 use crate::mm::address::{ConvertablePA, PageNum, Ppn, PpnRange, UsizeConvert};
 use crate::sync::SpinLock;
 use alloc::vec::Vec;
-use lazy_static::lazy_static;
+
+const BITS_PER_WORD: usize = u64::BITS as usize;
+const MAX_MANAGED_PHYS_BYTES: usize = 8 * 1024 * 1024 * 1024;
+const MAX_MANAGED_FRAMES: usize = MAX_MANAGED_PHYS_BYTES / PAGE_SIZE;
+const MAX_BITMAP_WORDS: usize = MAX_MANAGED_FRAMES.div_ceil(BITS_PER_WORD);
 
 /// 物理帧跟踪器。
 /// 实现了 RAII 模式：当此结构体被 drop 时，它所管理的物理页帧会被自动回收。
@@ -101,34 +105,38 @@ pub enum TrackedFrames {
     Multiple(Vec<FrameTracker>),
 }
 
-lazy_static! {
-    /// 全局物理帧分配器，由自旋锁保护。
-    pub static ref FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
-}
+/// 全局物理帧分配器，由自旋锁保护。
+pub static FRAME_ALLOCATOR: SpinLock<FrameAllocator> = SpinLock::new(FrameAllocator::new());
 
 /// 物理帧分配器。
-/// 采用简单的“延迟分配”策略，并使用回收栈来重用已释放的帧。
+/// 采用位图策略跟踪每个物理帧的分配状态。
 pub struct FrameAllocator {
     /// 物理帧的起始 Ppn。
     start: Ppn,
     /// 物理帧的结束 Ppn (不包含)。
     end: Ppn,
-    /// 下一个要分配的物理帧 Ppn（用于连续分配区域）。
-    cur: Ppn,
-    /// 回收的物理帧堆栈。
-    recycled: Vec<Ppn>,
+    /// 位图数据（每个 bit 表示一个帧：0=空闲，1=已分配）。
+    bitmap: [u64; MAX_BITMAP_WORDS],
+    /// 总帧数。
+    total_frames: usize,
+    /// 已分配帧数。
+    allocated_count: usize,
+    /// 上次分配的位置提示，用于加速单帧分配。
+    last_alloc_hint: usize,
 }
 
-/// 延迟分配 (lazy frame allocator) 的实现
+/// 位图帧分配器的实现
 impl FrameAllocator {
     /// 创建一个新的帧分配器实例。
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         FrameAllocator {
             // 使用 usize::MAX 作为初始值，表示未初始化状态
-            start: Ppn::from_usize(usize::MAX),
-            end: Ppn::from_usize(usize::MAX),
-            cur: Ppn::from_usize(usize::MAX),
-            recycled: Vec::new(),
+            start: Ppn(usize::MAX),
+            end: Ppn(usize::MAX),
+            bitmap: [0; MAX_BITMAP_WORDS],
+            total_frames: 0,
+            allocated_count: 0,
+            last_alloc_hint: 0,
         }
     }
 
@@ -136,24 +144,76 @@ impl FrameAllocator {
     pub fn init(&mut self, start: Ppn, end: Ppn) {
         self.start = start;
         self.end = end;
-        self.cur = start;
+        self.total_frames = end.as_usize() - start.as_usize();
+        assert!(
+            self.total_frames <= MAX_MANAGED_FRAMES,
+            "frame allocator range exceeds bitmap capacity"
+        );
+        self.bitmap.fill(0);
+        self.allocated_count = 0;
+        self.last_alloc_hint = 0;
+    }
+
+    #[inline]
+    fn bitmap_words(&self) -> usize {
+        self.total_frames.div_ceil(BITS_PER_WORD)
+    }
+
+    /// 检查帧是否空闲。
+    #[inline]
+    fn is_free(&self, frame_idx: usize) -> bool {
+        let word_idx = frame_idx / BITS_PER_WORD;
+        let bit_idx = frame_idx % BITS_PER_WORD;
+        (self.bitmap[word_idx] & (1u64 << bit_idx)) == 0
+    }
+
+    /// 标记帧为已分配。
+    #[inline]
+    fn mark_allocated(&mut self, frame_idx: usize) {
+        let word_idx = frame_idx / BITS_PER_WORD;
+        let bit_idx = frame_idx % BITS_PER_WORD;
+        self.bitmap[word_idx] |= 1u64 << bit_idx;
+    }
+
+    /// 标记帧为空闲。
+    #[inline]
+    fn mark_free(&mut self, frame_idx: usize) {
+        let word_idx = frame_idx / BITS_PER_WORD;
+        let bit_idx = frame_idx % BITS_PER_WORD;
+        self.bitmap[word_idx] &= !(1u64 << bit_idx);
     }
 
     /// 分配一个物理帧。
-    /// 优先从回收栈中取出，否则从连续未分配区域分配。
+    /// 从 last_alloc_hint 开始循环查找第一个空闲位。
     pub fn alloc_frame(&mut self) -> Option<FrameTracker> {
-        if let Some(ppn) = self.recycled.pop() {
-            // 从回收栈中分配
-            Some(FrameTracker::new(ppn))
-        } else if self.cur < self.end {
-            // 从连续未分配区域分配
-            let ppn = self.cur;
-            self.cur.step(); // 移动当前分配指针
-            Some(FrameTracker::new(ppn))
-        } else {
-            // 物理内存耗尽
-            None
+        let bitmap_words = self.bitmap_words();
+        if bitmap_words == 0 {
+            return None;
         }
+
+        let start_idx = self.last_alloc_hint;
+        for offset in 0..bitmap_words {
+            let idx = (start_idx + offset) % bitmap_words;
+            let word = self.bitmap[idx];
+            if word == u64::MAX {
+                continue;
+            }
+
+            let bit_pos = (!word).trailing_zeros() as usize;
+            let frame_idx = idx * BITS_PER_WORD + bit_pos;
+            if frame_idx >= self.total_frames {
+                continue;
+            }
+
+            self.mark_allocated(frame_idx);
+            self.allocated_count += 1;
+            self.last_alloc_hint = idx;
+
+            let ppn = self.start + frame_idx;
+            return Some(FrameTracker::new(ppn));
+        }
+
+        None
     }
 
     /// 分配指定数量的物理帧（不保证连续）。
@@ -173,22 +233,36 @@ impl FrameAllocator {
 
     /// 分配指定数量的**连续**物理帧。
     pub fn alloc_contig_frames(&mut self, num: usize) -> Option<FrameRangeTracker> {
-        if num == 0 {
+        if num == 0 || num > self.free_frames() {
             return None;
         }
 
-        // 检查是否有足够的连续帧
-        let required_end = self.cur + num;
-        if required_end <= self.end {
-            let start = self.cur;
-            // 移动分配指针到新的连续区域之后
-            self.cur = required_end;
-            let range = PpnRange::from_start_len(start, num);
-            Some(FrameRangeTracker::new(range))
-        } else {
-            // 物理内存不足
-            None
+        let mut run_len = 0;
+        let mut run_start = 0;
+
+        for frame_idx in 0..self.total_frames {
+            if self.is_free(frame_idx) {
+                if run_len == 0 {
+                    run_start = frame_idx;
+                }
+                run_len += 1;
+
+                if run_len == num {
+                    for i in 0..num {
+                        self.mark_allocated(run_start + i);
+                    }
+                    self.allocated_count += num;
+
+                    let start_ppn = self.start + run_start;
+                    let range = PpnRange::from_start_len(start_ppn, num);
+                    return Some(FrameRangeTracker::new(range));
+                }
+            } else {
+                run_len = 0;
+            }
         }
+
+        None
     }
 
     /// 分配指定数量的**连续**物理帧，并确保起始地址对齐到 `align_pages` 页的边界。
@@ -197,7 +271,7 @@ impl FrameAllocator {
         num: usize,
         align_pages: usize,
     ) -> Option<FrameRangeTracker> {
-        if num == 0 {
+        if num == 0 || num > self.free_frames() {
             return None;
         }
 
@@ -206,68 +280,59 @@ impl FrameAllocator {
             "Alignment must be power of 2" // 对齐必须是 2 的幂
         );
 
-        // 向上对齐当前分配指针 `self.cur`
-        let aligned_cur_val =
-            (self.cur.as_usize() + align_pages - 1).div_ceil(align_pages) * align_pages;
-        let aligned_cur = Ppn::from_usize(aligned_cur_val);
-
-        // 检查对齐后是否有足够的空间
-        let required_end = aligned_cur + num;
-        if required_end <= self.end {
-            // 将跳过的帧（self.cur 到 aligned_cur 之间）加入 recycled 栈
-            for ppn_val in self.cur.as_usize()..aligned_cur.as_usize() {
-                self.recycled.push(Ppn::from_usize(ppn_val));
+        let mut frame_idx = 0;
+        while frame_idx < self.total_frames {
+            let aligned_idx = (frame_idx + align_pages - 1) & !(align_pages - 1);
+            if aligned_idx + num > self.total_frames {
+                break;
             }
 
-            // 更新当前分配指针
-            self.cur = required_end;
-            let range = PpnRange::from_start_len(aligned_cur, num);
-            Some(FrameRangeTracker::new(range))
-        } else {
-            // 物理内存不足
-            None
+            let mut all_free = true;
+            for i in 0..num {
+                if !self.is_free(aligned_idx + i) {
+                    all_free = false;
+                    frame_idx = aligned_idx + i + 1;
+                    break;
+                }
+            }
+
+            if all_free {
+                for i in 0..num {
+                    self.mark_allocated(aligned_idx + i);
+                }
+                self.allocated_count += num;
+
+                let start_ppn = self.start + aligned_idx;
+                let range = PpnRange::from_start_len(start_ppn, num);
+                return Some(FrameRangeTracker::new(range));
+            }
         }
+
+        None
     }
 
     /// 回收一个物理帧。
-    /// 尝试将回收的帧与当前分配指针前的连续空闲区域合并。
     pub fn dealloc_frame(&mut self, frame: &FrameTracker) {
         // 检查帧是否在有效范围内
         debug_assert!(
             frame.ppn() >= self.start && frame.ppn() < self.end,
             "dealloc_frame: frame out of range" // 回收帧超出范围
         );
-        // 检查帧是否已被分配 (即在当前指针之前且不在回收栈中)
-        debug_assert!(
-            frame.ppn() < self.cur && self.recycled.iter().all(|&ppn| ppn != frame.ppn()),
-        );
 
         let ppn = frame.ppn();
-        self.recycled.push(ppn);
-        // 对回收栈进行排序，以便于连续合并检查
-        self.recycled.sort_unstable();
+        let frame_idx = ppn.as_usize() - self.start.as_usize();
 
-        if let Some(&last) = self.recycled.last() {
-            // 检查回收栈顶部的帧是否是当前分配指针前面的连续帧
-            if last + 1 == self.cur {
-                // 回收连续帧
-                let mut new_cur = last;
-                self.recycled.pop();
-                while let Some(&top) = self.recycled.last() {
-                    if top + 1 == new_cur {
-                        new_cur = top;
-                        self.recycled.pop();
-                    } else {
-                        break;
-                    }
-                }
-                self.cur = new_cur;
-            }
-        }
+        // 检查帧是否已被分配
+        debug_assert!(
+            !self.is_free(frame_idx),
+            "dealloc_frame: double free detected"
+        );
+
+        self.mark_free(frame_idx);
+        self.allocated_count -= 1;
     }
 
     /// 回收一个连续的物理帧范围。
-    /// 尝试将回收的帧与当前分配指针前的连续空闲区域合并。
     pub fn dealloc_contig_frames(&mut self, frame_range: &FrameRangeTracker) {
         let start = frame_range.start_ppn();
         let end = frame_range.end_ppn();
@@ -276,48 +341,28 @@ impl FrameAllocator {
             start >= self.start && end <= self.end,
             "dealloc_contig_frames: frame range out of range" // 回收帧范围超出范围
         );
-        // 检查范围是否已被分配 (即在当前指针之前)
-        debug_assert!(
-            end <= self.cur,
-            "dealloc_contig_frames: frame range not allocated" // 回收帧范围未被分配
-        );
 
-        // 将连续帧范围内的所有 Ppn 加入回收栈
-        for ppn in frame_range.range().into_iter() {
-            self.recycled.push(ppn);
-        }
-        // 排序以支持连续合并
-        self.recycled.sort_unstable();
+        let start_idx = start.as_usize() - self.start.as_usize();
+        let len = frame_range.len();
 
-        if let Some(&last) = self.recycled.last() {
-            // 检查回收栈顶部的帧是否是当前分配指针前面的连续帧
-            if last + 1 == self.cur {
-                // 回收连续帧
-                let mut new_cur = last;
-                self.recycled.pop();
-                while let Some(&top) = self.recycled.last() {
-                    if top + 1 == new_cur {
-                        new_cur = top;
-                        self.recycled.pop();
-                    } else {
-                        break;
-                    }
-                }
-                self.cur = new_cur;
-            }
+        for i in 0..len {
+            debug_assert!(
+                !self.is_free(start_idx + i),
+                "dealloc_contig_frames: double free detected"
+            );
+            self.mark_free(start_idx + i);
         }
+        self.allocated_count -= len;
     }
 
     /// 获取总的物理帧数
     pub fn total_frames(&self) -> usize {
-        self.end.as_usize() - self.start.as_usize()
+        self.total_frames
     }
 
     /// 获取已分配的帧数
     pub fn allocated_frames(&self) -> usize {
-        let allocated = self.cur.as_usize() - self.start.as_usize();
-        let recycled = self.recycled.len();
-        allocated - recycled
+        self.allocated_count
     }
 
     /// 获取空闲的帧数
@@ -331,16 +376,22 @@ impl FrameAllocator {
     /// # 返回值
     /// - 当前分配指针的 Ppn
     /// - 物理帧的结束 Ppn (不包含)
-    /// - 回收栈的长度
+    /// - 回收栈的长度（位图实现中恒为 0）
     /// - 已分配的帧数
     /// - 空闲的帧数
     pub fn get_stats(&self) -> (usize, usize, usize, usize, usize) {
         (
-            self.cur.as_usize(),
+            self.start.as_usize() + self.allocated_count,
             self.end.as_usize(),
-            self.recycled.len(),
+            0,
             self.allocated_frames(),
             self.free_frames(),
         )
+    }
+}
+
+impl Default for FrameAllocator {
+    fn default() -> Self {
+        Self::new()
     }
 }
