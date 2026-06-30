@@ -46,6 +46,7 @@ testsuits-for-oskernel/
 os/loongarch.log
 *.log
 # Local notes
+debugging_report.md
 os/可能的改进.md
 
 # Local agent guidance
