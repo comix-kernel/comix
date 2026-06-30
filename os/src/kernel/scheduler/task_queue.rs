@@ -65,6 +65,14 @@ impl TaskQueue {
         best.map(|(idx, _)| self.queue.remove(idx))
     }
 
+    /// 返回队列中最高 realtime 优先级。
+    pub fn highest_sched_priority(&self) -> Option<i32> {
+        self.queue
+            .iter()
+            .map(|task| task.lock().sched_priority)
+            .max()
+    }
+
     /// 检查任务是否在队列中
     pub fn contains(&self, task: &SharedTask) -> bool {
         for t in &self.queue {

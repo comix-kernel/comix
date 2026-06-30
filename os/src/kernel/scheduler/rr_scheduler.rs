@@ -12,7 +12,8 @@ use crate::{
     uapi::sched::{SCHED_BATCH, SCHED_FIFO, SCHED_IDLE, SCHED_NORMAL, SCHED_RR},
 };
 
-const DEFAULT_TIME_SLICE: usize = 1; // 默认时间片长度
+const DEFAULT_TIME_SLICE: usize = 1; // fair 类默认时间片长度
+const RT_RR_TIME_SLICE: usize = 4;
 
 /// 简单的轮转调度器实现
 /// 每个任务按顺序轮流获得 CPU 时间片
@@ -52,10 +53,19 @@ impl RRScheduler {
         self.rt_queue.is_empty() && self.fair_queue.is_empty()
     }
 
-    /// 更新当前时间片计数器
-    /// # 返回值
-    /// 如果时间片用尽，返回 true；否则返回 false
+    /// 更新当前时间片计数器。
+    ///
+    /// 返回 true 表示当前任务应该让调度器重新选择。SCHED_FIFO 不因
+    /// 普通时钟 tick 被轮转；SCHED_RR 和 fair 类任务仍使用时间片。
     pub fn update_time_slice(&mut self) -> bool {
+        if self.should_preempt_for_rt() {
+            return true;
+        }
+
+        if Self::current_task_policy() == Some(SCHED_FIFO) {
+            return false;
+        }
+
         if self.current_slice > 0 {
             self.current_slice -= 1;
         }
@@ -63,8 +73,8 @@ impl RRScheduler {
     }
 
     /// 重置时间片（在任务切换后调用）
-    fn reset_time_slice(&mut self) {
-        self.current_slice = self.time_slice;
+    fn reset_time_slice(&mut self, task: &SharedTask) {
+        self.current_slice = Self::task_time_slice(task);
     }
 
     fn is_realtime_task(task: &SharedTask) -> bool {
@@ -96,6 +106,37 @@ impl RRScheduler {
         self.rt_queue
             .pop_highest_priority_task()
             .or_else(|| self.fair_queue.pop_task())
+    }
+
+    fn should_preempt_for_rt(&self) -> bool {
+        let Some(best_rt_priority) = self.rt_queue.highest_sched_priority() else {
+            return false;
+        };
+        let current_task = current_cpu().current_task.as_ref().cloned();
+        let Some(current_task) = current_task else {
+            return true;
+        };
+        let current_task = current_task.lock();
+        if !matches!(current_task.sched_policy, SCHED_FIFO | SCHED_RR)
+            || current_task.sched_priority <= 0
+        {
+            return true;
+        }
+        best_rt_priority > current_task.sched_priority
+    }
+
+    fn current_task_policy() -> Option<i32> {
+        current_cpu()
+            .current_task
+            .as_ref()
+            .map(|task| task.lock().sched_policy)
+    }
+
+    fn task_time_slice(task: &SharedTask) -> usize {
+        match task.lock().sched_policy {
+            SCHED_RR => RT_RR_TIME_SLICE,
+            _ => DEFAULT_TIME_SLICE,
+        }
     }
 }
 
@@ -197,7 +238,7 @@ impl Scheduler for RRScheduler {
             let cpu_id = crate::arch::cpu_id();
             next_task.lock().on_cpu = Some(cpu_id);
         }
-        self.reset_time_slice();
+        self.reset_time_slice(&next_task);
 
         Some(SwitchPlan {
             old: old_ctx_ptr,
