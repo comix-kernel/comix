@@ -2,6 +2,8 @@
 
 本 README 面向 OS 大赛评测环境（GitLab 仓库展示 / 评测机构建约束），与 GitHub 上的开发版说明不同。
 
+pdf文档（百度网盘）：https://pan.baidu.com/s/1mcvoxzVNsN9s4WP9X7IQ-g
+
 ## 上游仓库（主要开发在 GitHub）
 
 本项目主要在 GitHub 上开发与维护：
