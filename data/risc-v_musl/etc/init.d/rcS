@@ -247,15 +247,16 @@ run_musl_tests_if_present() {
     export TMPDIR="/tmp"
     export HOME="/"
 
-    for src_f in /tests/musl/*_testcode.sh; do
-        [ -f "$src_f" ] || continue
+    run_musl_test_script() {
+        src_f="$1"
+        [ -f "$src_f" ] || return 1
 
         base="${src_f##*/}"
         case "$base" in
             iozone_testcode.sh|\
             unixbench_testcode.sh)
                 echo "[Tests] skipping $src_f"
-                continue
+                return 1
                 ;;
         esac
 
@@ -276,8 +277,29 @@ run_musl_tests_if_present() {
             0) ;;
             *) echo "[Tests] ignoring failure from $f and continuing" ;;
         esac
+        return 0
+    }
+
+    ltp_src_f=""
+    for src_f in /tests/musl/*_testcode.sh; do
+        [ -f "$src_f" ] || continue
+
+        base="${src_f##*/}"
+        case "$base" in
+            ltp_testcode.sh)
+                ltp_src_f="$src_f"
+                continue
+                ;;
+        esac
+
+        run_musl_test_script "$src_f" || continue
         ran=1
     done
+
+    if [ -n "$ltp_src_f" ]; then
+        run_musl_test_script "$ltp_src_f" && ran=1
+    fi
+
     [ "$ran" -eq 1 ] || return 1
 
     echo "[Tests] all musl tests finished"
