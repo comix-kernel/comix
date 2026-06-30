@@ -11,7 +11,7 @@ use crate::vfs::{FsError, Inode};
 
 /// 构建输入设备 sysfs 树
 ///
-/// 在 /sys/class/input/ 下创建指向 /sys/devices/platform/<device>/ 的符号链接
+/// 在 `/sys/class/input/` 下创建指向 `/sys/devices/platform/<device>/` 的符号链接
 pub fn build_input_devices(root: &Arc<SysfsInode>) -> Result<(), FsError> {
     let class_inode = root.lookup("class")?;
     let class = class_inode

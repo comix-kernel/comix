@@ -1,37 +1,48 @@
-# 自旋锁 (`SpinLock`)
+# SpinLock
 
-`SpinLock<T>` 是一个基于原子操作和中断屏蔽的互斥锁，用于保护在多核和抢占环境下被并发访问的共享数据。
+`SpinLock<T>` 是带数据的短临界区互斥锁.它把 `RawSpinLock` 和 `UnsafeCell<T>` 组合起来, 通过 guard 提供 `Deref`/`DerefMut` 访问.
 
-**源码链接**: [`os/src/sync/spin_lock.rs`](/os/src/sync/spin_lock.rs)
+## 当前状态
 
-## 1. 工作原理
+- 内部锁是 `RawSpinLock`.
+- 成功加锁后返回 `SpinLockGuard`.
+- guard 生命周期内可访问被保护数据.
+- `try_lock()` 在竞争时返回 `None`.
 
-`SpinLock` 的核心机制结合了中断屏蔽和原子自旋，以应对两种并发来源：
+## 目标
 
-1.  **本地核心中断**: 在获取锁之前，`SpinLock` 会**禁用当前CPU核心的中断**。这可以防止在持有锁时，被一个中断处理程序打断，从而避免了当前任务与中断处理程序之间的竞争。
-2.  **多核并发**: `SpinLock` 内部使用一个 `RawSpinLock`，它依赖CPU的原子指令（如 `amoswap`）来实现互斥。如果另一个CPU核心已经持有了该锁，当前核心将在一个循环中“自旋”，不断尝试获取锁，直到成功为止。
+- 保护极短的共享数据修改.
+- 同时处理跨 CPU 竞争和本 CPU 中断重入.
+- 作为全局状态和内核基础设施的简单锁.
 
-当锁被释放时（通过 `SpinLockGuard` 的 `drop`），它会先释放原子锁，然后**恢复之前的中断状态**。
+## 非目标
 
-## 2. 核心接口
+- 不提供公平性.
+- 不适合可能 sleep, yield 或长时间等待的代码.
+- 不可重入.
 
-- `pub fn new(data: T) -> Self`: 创建一个新的 `SpinLock`，包裹需要保护的数据 `data`。
-- `pub fn lock(&self) -> SpinLockGuard<T>`: 获取锁。此方法会阻塞（自旋），直到成功获取锁为止，并返回一个锁守卫 `SpinLockGuard`。
+## 关键流程
 
-## 3. 锁守卫 (`SpinLockGuard`)
+1. `SpinLock::lock()` 进入 `RawSpinLock::lock()`.
+2. `RawSpinLock` 禁用本 CPU 中断并自旋获取原子锁.
+3. `SpinLockGuard` 保存 raw guard 和 `&mut T`.
+4. guard drop 时 raw guard 释放锁并恢复中断状态.
 
-`SpinLockGuard` 是 `SpinLock` 安全性的关键。
+## 并发约束
 
-- 它通过实现 `Deref` 和 `DerefMut` Trait，使得用户可以像直接访问裸指针一样方便地访问被保护的数据。
-- 当 `SpinLockGuard` 离开作用域时，其 `Drop` 实现会自动调用 `unlock()`，释放锁并恢复中断，从而避免了忘记解锁导致的死锁。
+- 持锁代码必须短小.
+- 持锁期间不要调用可能调度的路径, 包括会等待任务队列的 `Mutex<T>`.
+- 在中断上下文中只能使用不会睡眠的路径.
+- 多把锁嵌套时必须遵守全局锁顺序, 避免死锁.
 
-## 4. 适用场景
+## 已知限制
 
-**优点**:
-- 实现简单，开销小，获取锁和释放锁的速度非常快（如果锁未被争用）。
+- 高竞争下会消耗 CPU 周期.
+- 没有所有者记录, 不能检测当前 CPU 是否重复加锁.
 
-**缺点**:
-- 持锁等待期间会占用CPU时间进行空转（自旋），浪费CPU资源。
-- **严禁在持有 `SpinLock` 的情况下进行任何可能导致任务睡眠或调度的操作**（如申请内存、等待I/O、获取 `SleepLock`），否则可能导致整个系统死锁。
+## 源码索引
 
-**结论**: `SpinLock` **只适用于保护那些访问时间极短的临界区**。如果临界区内的操作耗时较长，应使用 `SleepLock`。
+- `os/src/sync/spin_lock.rs:30` - `SpinLock<T>`.
+- `os/src/sync/spin_lock.rs:53` - `lock()`.
+- `os/src/sync/spin_lock.rs:62` - `try_lock()`.
+- `os/src/sync/spin_lock.rs:77` - `SpinLockGuard`.

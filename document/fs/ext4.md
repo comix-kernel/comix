@@ -1,136 +1,79 @@
-# Ext4 - Linux Ext4文件系统支持
+# Ext4
 
-## 概述
+Ext4 是当前默认 rootfs 的持久化文件系统候选. FS 初始化会在已发现块设备和分区中寻找可打开的 ext4, 并以 `/bin/sh` 或 `/bin/ash` 判断它是否是可启动 rootfs.
 
-Ext4 文件系统支持允许 comix 内核访问 Linux Ext4 格式的文件系统，支持完整的读写操作。
+## 当前状态
 
-**主要特点**:
-- ✅ 完整读写：支持文件读写、创建、删除、重命名
-- ✅ 目录操作：支持mkdir、rmdir、readdir
-- ✅ 链接操作：支持symlink、link、readlink
-- ✅ 元数据：支持chmod、chown、set_times
-- ✅ 块设备适配：通过BlockDriver接口访问
-- ✅ 标准格式：兼容Linux ext4
-- ⚠️ 部分特性：mknod未实现
+- 源码位于 `os/src/fs/ext4/`.
+- 使用 `ext4_rs` 作为底层 ext4 操作库.
+- `BlockDeviceAdapter` 把内核 `BlockDriver` 适配成 ext4_rs 可读写的块设备.
+- `Ext4FileSystem` 实现挂载级 `FileSystem`.
+- `Ext4Inode` 实现 VFS `Inode`, 并通过 weak dentry 反向引用按需取得路径.
 
-## 架构设计
+## 目标
 
-```mermaid
-graph TB
-    A[Ext4FileSystem] -->|适配| B[BlockDeviceAdapter]
-    B -->|访问| C[BlockDriver]
-    C -->|硬件| D[VirtIO Block]
-    
-    A -->|实现| E[Inode trait]
-    A -->|实现| F[FileSystem trait]
-    
-    style A fill:#FFA07A
-    style B fill:#FFD700
-    style C fill:#87CEEB
+- 作为默认 rootfs 的主要格式.
+- 支持普通文件, 目录, symlink, hard link, rename 和基础元数据操作.
+- 支持分区块设备, 让 rootfs 不依赖整盘设备顺序.
+- 为 `/dev` 上的块设备节点和 VFAT 测试分区共存提供基础.
+
+## 非目标
+
+- 不在文档中复述 ext4_rs 内部结构.
+- 不承诺完整 journaling 语义.
+- 不把旧的 `init_ext4_from_block_device` 描述为默认运行路径; 它只是内部/测试兼容入口.
+
+## 模块边界
+
+- `mod.rs`: `Ext4FileSystem::open`, superblock 预检, statfs/sync.
+- `adpaters.rs`: `BlockDriver` 到 ext4_rs block interface 的适配.
+- `inode.rs`: VFS inode 操作到 ext4_rs 的映射和 inode cache.
+- `fs/mod.rs`: rootfs 探测和临时挂载策略.
+
+## 关键流程
+
+### rootfs probe
+
+```text
+list block devices
+  -> prefer partition names
+  -> Ext4FileSystem open
+  -> mount at /
+  -> vfs_lookup /bin/sh or /bin/ash
+  -> accept or rollback
 ```
 
-### BlockDeviceAdapter
+这个流程避免把 `vda1` 写死为 rootfs. 如果 QEMU 或设备注册顺序变化, 只要某个分区包含可用 shell, 仍可被选中.
 
-```rust
-pub struct BlockDeviceAdapter {
-    driver: Arc<dyn BlockDriver>,
-    block_size: usize,
-    offset: usize,  // 分区偏移（扇区）
-}
+### block access
 
-impl BlockDeviceAdapter {
-    /// 读取块（以ext4块为单位，通常4KB）
-    pub fn read_block(&self, block_id: usize, buf: &mut [u8]) 
-        -> Result<(), FsError> {
-        // 将ext4块转换为设备扇区
-        let sector_size = 512;
-        let sectors_per_block = self.block_size / sector_size;
-        let start_sector = block_id * sectors_per_block + self.offset;
-        
-        // 读取扇区
-        for i in 0..sectors_per_block {
-            let sector_buf = &mut buf[i * sector_size..(i + 1) * sector_size];
-            self.driver.read_block(start_sector + i, sector_buf)?;
-        }
-        
-        Ok(())
-    }
-}
+```text
+Ext4Inode
+  -> ext4_rs
+  -> BlockDeviceAdapter
+  -> BlockDriver
+  -> virtio block or partition device
 ```
 
-## 挂载Ext4
+分区设备由 `PartitionBlockDevice` 包装整盘设备, ext4 层看到的是从分区起点开始的逻辑块空间.
 
-### 从块设备挂载
+## 并发和生命周期约束
 
-```rust
-use crate::fs::init_ext4_from_block_device;
+- ext4_rs 对象由内核锁保护.
+- ext4 inode 和 VFS dentry 之间不能形成强引用环.
+- `sync` 下推到底层块设备 flush.
+- rootfs probe 的失败候选必须卸载并清理 dentry cache, 否则后续候选会看到旧根路径.
 
-// 自动检测并挂载第一个块设备上的ext4
-init_ext4_from_block_device()?;
-```
+## 已知限制
 
-### 配置参数
+- 高级 ext4 特性和崩溃恢复不是当前文档承诺范围.
+- superblock 预检只用于避免明显坏镜像进入 ext4_rs.
+- rootfs 判定只检查 `/bin/sh` 或 `/bin/ash`, 不验证完整用户态环境.
 
-```rust
-// config.rs
-pub const EXT4_BLOCK_SIZE: usize = 4096;  // 必须与mkfs.ext4 -b 匹配
-pub const FS_IMAGE_SIZE: usize = 128 * 1024 * 1024;  // 128MB
-```
+## 源码索引
 
-## 使用示例
-
-```rust
-// 读取ext4文件系统中的文件
-let content = vfs_load_file("/bin/ls")?;
-
-// 列出目录
-let bin = vfs_lookup("/bin")?;
-let entries = bin.inode.readdir()?;
-for entry in entries {
-    pr_info!("File: {}", entry.name);
-}
-```
-
-## 创建Ext4镜像
-
-```bash
-# 创建128MB镜像
-dd if=/dev/zero of=fs.img bs=1M count=128
-
-# 格式化为ext4（块大小4KB）
-mkfs.ext4 -b 4096 fs.img
-
-# 挂载并复制文件
-sudo mount -o loop fs.img /mnt
-sudo cp -r myfiles/* /mnt/
-sudo umount /mnt
-```
-
-## 限制与注意事项
-
-### 当前限制
-
-1. **mknod**: 不支持创建设备文件
-2. **块大小**: 必须是4096字节
-3. **崩溃安全**: 非日志模式，系统崩溃可能导致不一致
-
-### 块大小对齐
-
-```rust
-// ⚠️ 重要：确保块大小匹配
-// mkfs.ext4 -b 4096 fs.img
-pub const EXT4_BLOCK_SIZE: usize = 4096;  // 必须匹配mkfs参数
-```
-
-## 性能考虑
-
-- **块缓存**: 实现块缓存可显著提升性能
-- **预读**: 顺序读取时启用预读
-- **DMA对齐**: 确保缓冲区对齐以使用DMA
-
-## 相关资源
-
-- **源代码**: `os/src/fs/ext4/`
-- **适配器**: `os/src/fs/ext4/adapters.rs`
-- [Ext4 Disk Layout](https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout)
-- [FS模块概览](README.md)
+- `os/src/fs/ext4/mod.rs`: 文件系统打开, superblock 预检, statfs/sync.
+- `os/src/fs/ext4/adpaters.rs`: 块设备适配层.
+- `os/src/fs/ext4/inode.rs`: ext4 inode 到 VFS inode 的映射.
+- `os/src/fs/mod.rs`: `init_rootfs_from_discovered_block_devices`.
+- `os/src/device/block/partition.rs`: 分区块设备包装.

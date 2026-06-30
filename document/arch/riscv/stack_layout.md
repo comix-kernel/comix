@@ -1,106 +1,66 @@
-# 用户程序栈布局（Stack Layout）
+# 用户 exec 栈布局
 
-本文档说明内核在为用户程序构造初始用户栈（execve / spawn）时的内存布局、不变量和实现注意点。将原来散落在代码中的长注释集中到文档，便于维护与校验。
+本文位于 RISC-V 文档目录是历史原因.当前设计通过 `arch::task::ExecStackLayout` 抽象为跨架构接口, RISC-V 和 LoongArch 分别实现自己的用户栈和 TLS 细节.
 
-## 概览（栈增长方向）
-- RISC‑V / 本项目栈向下增长：栈顶为低地址，栈底为高地址。
-- 内核在构造用户栈时从高地址向低地址压入字符串、指针数组和 argc，然后把最终对齐的栈指针写入 TrapFrame.x2_sp（用户 sp）。
-- main 的调用约定（由内核在 TrapFrame 中设置）：
-  - a0 = argc
-  - a1 = argv（指向指针数组的首地址）
-  - a2 = envp（指向指针数组的首地址）
+## 当前状态
 
-## 典型布局（高地址 → 低地址）
-（注：示例中 argv.len() == 4, envp.len() == 3）
+`Task::execve` 调用架构 `setup_exec_stack_layout`, 得到初始用户栈指针,`argc`,`argv`,`envp` 和可选 TLS/thread pointer.随后通过 `HwTrapFrame::set_exec_trap_frame_from_layout` 写入架构 `TrapFrame`.
 
-（高地址 — 栈底）
-+-----------------------+
-| ...                   |
-+-----------------------+
-| "USER=john"           |  <-- envp[2] 指向这里
-+-----------------------+
-| "HOME=/home/john"     |  <-- envp[1] 指向这里
-+-----------------------+
-| "SHELL=/bin/bash"     |  <-- envp[0] 指向这里
-+-----------------------+
-| "hello world"         |  <-- argv[3] 指向这里
-+-----------------------+
-| "arg2"                |  <-- argv[2] 指向这里
-+-----------------------+
-| "arg1"                |  <-- argv[1] 指向这里
-+-----------------------+
-| "./prog"              |  <-- argv[0] 指向这里
-+-----------------------+  <-- 字符串存储区域开始
-| ...                   |
-+-----------------------+  <-- 进入 main 时的栈指针 (sp) 附近
-| char* envp[3] (NULL)  |
-+-----------------------+
-| char* envp[2]         | --> 指向上面的 "USER=john"
-| char* envp[1]         | --> 指向上面的 "HOME=/home/john"
-| char* envp[0]         | --> 指向上面的 "SHELL=/bin/bash"
-+-----------------------+
-| char* argv[4] (NULL)  |
-+-----------------------+
-| char* argv[3]         | --> 指向上面的 "hello world"
-| char* argv[2]         | --> 指向上面的 "arg2"
-| char* argv[1]         | --> 指向上面的 "arg1"
-| char* argv[0]         | --> 指向上面的 "./prog"
-+-----------------------+
-| int argc              |  // 在本内核实现中通常通过寄存器 a0 传递
-+-----------------------+
-| Return Address        |
-+-----------------------+  <-- main 的栈帧开始
-（低地址 — 栈顶）
+共同语义:
 
-## 要求与不变量
-- 指针与整数按机器字（usize）对齐；最终用户 sp 必须满足 ABI 要求（本项目要求 16 字节对齐）。
-- argv 与 envp 指针数组必须以 NULL 结尾：`argv[argc] == NULL`，`envp[n] == NULL`。
-- 所有字符串必须以 NUL (0) 结尾。
-- 内核写入用户栈时须确保用户地址可写：
-  - 要么在写之前已激活用户页表并临时允许 SUM（sstatus.SUM = 1），
-  - 要么通过封装的 copy_to_user 接口（推荐），将页面错误映射为 -EFAULT。
-- 在写字符串或指针前，必须保证目标页已被映射（MemorySpace::from_elf 应已完成映射），否则会触发页故障（Load/Store Page Fault）。
+- 用户栈向低地址增长.
+- `argv` 和 `envp` 字符串以 NUL 结尾.
+- 指针数组以 NULL 结尾.
+- 最终栈指针满足 ABI 对齐要求.
+- auxv 至少提供动态链接器和 libc 启动所需的基本条目.
 
-## 实现顺序建议（从高地址向低地址）
-1. 将 current_sp 设为用户栈的“高地址”（stack_top）。
-2. 先按 reverse order 将 env 字符串写入（每个字符串后写 NUL），记录字符串地址到 env_ptrs。
-3. 再按 reverse order 将 argv 字符串写入，记录地址到 arg_ptrs。
-4. 按机器字对 current_sp 做对齐（word 对齐）。
-5. 写入 envp 的 NULL 终止器（写入 0）。
-6. 逆序写入 env_ptrs，使 envp[0] 在最低地址；记录 envp_vec_ptr。
-7. 写入 argv 的 NULL 终止器（写入 0）。
-8. 逆序写入 arg_ptrs，使 argv[0] 在最低地址；记录 argv_vec_ptr。
-9. 写入 argc（如果非寄存器传递）。
-10. 对最终 current_sp 做 ABI 对齐（16 字节），并将其作为用户 sp 写入 TrapFrame.x2_sp。
-11. 在 TrapFrame 中设置 sepc（入口 PC）、sstatus（SPP=U, SPIE=1）、kernel_sp、a0/a1/a2 等寄存器，并清零 ra（避免从用户态返回到内核）。
+RISC-V 当前不设置 TLS 值, LoongArch 会在用户栈顶部预留 TLS/TCB 区域并设置 `$tp`.
 
-## 常见陷阱
-- 未对齐 pointer 数组或最终 sp：会导致 libc / 程序行为异常或非法指令错误。
-- 在尚未切换到用户页表或没有开启 SUM 的情况下直接向用户地址写入，会在 trap_entry 或 execve 过程中触发页面错误（Store/Load Page Fault）。解决办法：先 activate(new_space.root_ppn())，再 write；或使用 copy_to_user。
-- 将字符串或指针写到错误的地址（off-by-one）会破坏栈布局并难以调试。建议在测试中验证 argv/envp 指针能正确 deref。
-- 在构造堆栈时务必记录并使用写入时的实际虚拟地址（不要使用临时计算出的物理地址）。
+## 目标和非目标
 
-## 安全建议与封装
-- 不要在多个位置散写 SUM 的设置/清除；把用户内存访问集中到 `user_mem::copy_to_user` / `copy_from_user`：
-  - 该函数负责开启 SUM、逐页写入并在失败时返回 Err(UserCopyError::Fault)。
-- 在 execve 路径中：
-  - 先构造 MemorySpace 并完成段映射（包含用户栈页）。
-  - activate(new_space.root_ppn()) 切换页表（使内核可以通过 SUM 访问 U 页）。
-  - 再执行栈构造与 TrapFrame 写入流程。
+目标:
 
-## 验证与测试
-- 单元测试中可提供 helper：`new_dummy_memory_space_with_stack()` 返回一个可写的 MemorySpace，便于验证栈布局写入后的读取正确性。
-- 在集成/仿真测试中：
-  - 验证用户入口处的指令字节非零；
-  - 在用户程序中读取 argv/envp 并打印，确认内核构造无误。
+- 为 `/sbin/init`,busybox 和动态链接器提供足够的 Linux ABI 启动栈.
+- 把 RISC-V 和 LoongArch 的寄存器差异限制在各自 `kernel/task.rs` 和 `trap_frame.rs` 中.
+- 让通用 exec 路径只处理 `ExecStackLayout`, 不解释架构寄存器.
 
-## 参考示例（伪代码）
-```rust
-// 假设 new_space 已激活
-let mut sp = stack_top;
-for s in envp.iter().rev() { sp -= s.len()+1; write_user(sp, s); env_ptrs.push(sp); }
-for s in argv.iter().rev() { sp -= s.len()+1; write_user(sp, s); arg_ptrs.push(sp); }
-sp &= !(usize::BITS as usize/8 - 1); // word-align
-// 写 envp NULL 与指针数组...
-// 最终 sp 对齐到 16 字节后写入 TrapFrame.x2_sp
+非目标:
+
+- 不在文档中维护 auxv 条目大全.
+- 不为每种 libc 变体记录特例.
+- 不在正式文档中保留长伪代码.
+
+## 关键流程
+
+```text
+exec loader builds MemorySpace
+  -> activate or otherwise make user stack writable
+  -> arch setup_exec_stack_layout
+  -> Task::execve stores new MemorySpace
+  -> HwTrapFrame::set_exec_trap_frame_from_layout
+  -> forkret_restore returns to user entry
 ```
+
+栈内容从高地址向低地址写入.实现通常先写字符串和少量平台数据, 再写 auxv,envp,argv 和 argc 区域.通用代码只依赖返回的 `ExecStackLayout`, 不依赖实际排布顺序.
+
+## 并发和生命周期约束
+
+- 写用户栈前必须确保目标用户页已映射且内核可以访问.
+- RISC-V 直接写用户栈时需要临时开启 SUM; LoongArch 通过地址空间翻译后写入.
+- `argv`,`envp`,auxv 指针必须全部指向新地址空间内的用户地址.
+- `TrapFrame` 写入必须在任务私有保存区内完成, 不能复用旧用户现场.
+
+## 已知限制
+
+- auxv 内容是 Linux ABI 子集, 不是完整内核实现.
+- RISC-V TLS 仍为空值, 后续线程 TLS 支持需要补齐.
+- LoongArch TLS 布局是满足当前 libc 启动的最小实现, 后续可与更完整 ABI 文档对齐.
+
+## 源码索引
+
+- `os/src/arch/task.rs`: `ExecStackLayout` 跨架构返回结构.
+- `os/src/kernel/task/task_struct.rs`: `Task::execve` 调用栈布局并写入 `TrapFrame`.
+- `os/src/arch/riscv/kernel/task.rs`: RISC-V 用户栈布局.
+- `os/src/arch/loongarch/kernel/task.rs`: LoongArch 用户栈和 TLS 布局.
+- `os/src/arch/riscv/trap/trap_frame.rs`: RISC-V exec `TrapFrame` 写入.
+- `os/src/arch/loongarch/trap/trap_frame.rs`: LoongArch exec `TrapFrame` 写入.

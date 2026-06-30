@@ -5,7 +5,7 @@
 //! # 组件
 //!
 //! - [`TmpFs`] - 文件系统结构，实现 `FileSystem` trait
-//! - [`TmpfsInode`] - Inode 实现，管理文件/目录数据
+//! - [`TmpfsInode`](inode::TmpfsInode) - Inode 实现，管理文件/目录数据
 //!
 //! # 设计概览
 //!

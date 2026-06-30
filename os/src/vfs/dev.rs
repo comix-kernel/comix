@@ -41,7 +41,7 @@ pub const fn decode_linux_dev(dev: u64) -> u64 {
     makedev(major as u32, minor as u32)
 }
 
-/// ext2/3/4 旧格式设备号编码，保存在 inode 的 i_block[0]。
+/// ext2/3/4 旧格式设备号编码，保存在 inode 的 `i_block[0]`。
 #[inline]
 pub const fn encode_ext4_old_dev(dev: u64) -> u32 {
     let major = major(dev);
@@ -49,7 +49,7 @@ pub const fn encode_ext4_old_dev(dev: u64) -> u32 {
     ((major & 0xff) << 8) | (minor & 0xff)
 }
 
-/// ext2/3/4 新格式设备号编码，保存在 inode 的 i_block[1]。
+/// ext2/3/4 新格式设备号编码，保存在 inode 的 `i_block[1]`。
 #[inline]
 pub const fn encode_ext4_new_dev(dev: u64) -> u32 {
     let major = major(dev);

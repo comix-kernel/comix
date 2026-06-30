@@ -78,7 +78,7 @@
 //!
 //! - [`RegFile`]: 普通文件 - 基于 Inode，支持 seek
 //! - [`PipeFile`]: 管道文件 - 环形缓冲区，流式设备
-//! - [`StdinFile`]/[`StdoutFile`]/[`StderrFile`]: 标准 I/O 文件
+//! - `StdinFile`/`StdoutFile`/`StderrFile`: 标准 I/O 文件
 //! - `CharDevFile`: 字符设备文件（串口、终端等）
 //! - `BlkDevFile`: 块设备文件（磁盘等）
 //!

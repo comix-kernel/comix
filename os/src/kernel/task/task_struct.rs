@@ -99,7 +99,7 @@ pub struct Task {
     /// 任务的所属进程id
     /// NOTE: 由于采用了统一的任务模型，一个任务组内任务的 pid 是相同的，等于父任务的 pid 而父任务的 pid 等于自己的 tid
     pub pid: u32,
-    /// 当前正在执行的可执行文件路径（用于 /proc/[pid]/exe 等）
+    /// 当前正在执行的可执行文件路径（用于 `/proc/[pid]/exe` 等）
     ///
     /// 由 execve/kernel_execve 在切换到新程序前更新。
     pub exe_path: Option<String>,

@@ -10,7 +10,7 @@ use crate::{
     vfs::FsError,
 };
 
-/// /proc/[pid]/maps (simplified): list user VMAs and their sizes.
+/// `/proc/[pid]/maps` (simplified): list user VMAs and their sizes.
 pub struct MapsGenerator {
     task: Weak<SpinLock<TaskStruct>>,
 }

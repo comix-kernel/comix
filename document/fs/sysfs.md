@@ -1,82 +1,68 @@
-# SysFS - 系统设备文件系统
+# SysFS
 
-## 概述
+SysFS 把设备注册表和内核属性暴露为 `/sys`. 它是冷插拔构建的伪文件系统, 当前主要用于设备发现和调试.
 
-SysFS 是一个虚拟文件系统，用于导出内核中的设备信息和状态。它提供了一个层次化的设备树视图。
+## 当前状态
 
-**主要特点**:
-- 设备层次结构：反映设备的物理和逻辑关系
-- 属性导出：每个设备可导出多个属性文件
-- Builder模式：使用Builder构建设备树
-- 只读：当前实现仅支持读取
+- 源码位于 `os/src/fs/sysfs/`.
+- `SysFS::init_tree` 创建 `/sys/class`, `/sys/devices`, `/sys/kernel` 等目录.
+- `/sys/class/block` 根据块设备和分区列表创建符号链接.
+- `/sys/block` 是指向 `class/block` 的兼容 symlink.
+- `device_registry.rs` 复用设备层全局注册表, 不创建另一套设备来源.
 
-## 架构设计
+## 目标
 
-```mermaid
-graph TB
-    A[SysFS] -->|root| B[SysfsInode /sys]
-    B --> C[/sys/class]
-    B --> D[/sys/devices]
-    B --> E[/sys/bus]
-    
-    C --> F[/sys/class/block]
-    F --> G[/sys/class/block/vda]
-    G --> H[dev属性文件]
-    
-    style A fill:#DDA0DD
-    style B fill:#87CEEB
-    style H fill:#90EE90
+- 为用户态和内核调试提供统一设备视图.
+- 让块设备, 网络设备, tty, input, rtc 等类别能被枚举.
+- 为 FS rootfs 探测和 `/dev` 创建提供设备列表来源.
+
+## 非目标
+
+- 不实现完整 Linux sysfs 属性写入模型.
+- 不承诺设备热插拔后自动增量更新 sysfs 树.
+- 不在文档中复制所有 builder 生成的节点.
+
+## 模块边界
+
+- `sysfs.rs`: 文件系统实例, 根目录结构, builder 调度.
+- `inode.rs`: 目录, 属性文件和 symlink inode.
+- `device_registry.rs`: 从 `DRIVERS`, `BLK_DRIVERS`, `RTC_DRIVERS` 等全局表生成设备信息.
+- `builders/`: 各类 `/sys` 子树构建器.
+
+## 关键流程
+
+### cold build
+
+```text
+SysFS new
+  -> create base directories
+  -> build platform devices
+  -> build class symlinks
+  -> mount at /sys
 ```
 
-### 设备注册表
+设备应先在 device 层完成注册, sysfs 初始化再读取注册表构建树.
 
-```rust
-pub struct DeviceRegistry {
-    /// 块设备列表:  名称 -> (major, minor)
-    block_devices: BTreeMap<String, (u32, u32)>,
-    
-    /// 字符设备列表: 名称 -> (major, minor)
-    char_devices: BTreeMap<String, (u32, u32)>,
-}
-```
+### block devices
 
-## 目录结构
+`list_block_devices` 会为每个 virtio block 设备生成 `vda`, `vdb` 等整盘名称, 并解析 MBR/GPT 分区生成 `vda1`, `vda2` 等逻辑分区设备. 这些名字会同时影响 `/sys/class/block` 和 `/dev` 节点创建.
 
-| 路径 | 内容 | 说明 |
-|------|------|------|
-| `/sys/class` | 设备类别 | 按功能分类的设备 |
-| `/sys/class/block` | 块设备 | vda, vdb等 |
-| `/sys/class/net` | 网络设备 | eth0, lo等 |
-| `/sys/devices` | 设备树 | 物理设备层次 |
-| `/sys/bus` | 总线 | pci, usb等 |
+## 并发和生命周期约束
 
-## 使用示例
+- 当前 sysfs 树按初始化时设备注册表冷构建.
+- 属性文件读取应从设备或内核状态生成当前值.
+- 分区设备是包装整盘块设备的 `Arc<dyn BlockDriver>`, 生命周期依赖底层驱动全局注册表.
 
-```rust
-// 查询块设备号
-let dev_str = vfs_load_file("/sys/class/block/vda/dev")?;
-pr_info!("vda device number: {}", String::from_utf8_lossy(&dev_str));
+## 已知限制
 
-// 列出所有块设备
-let block_dir = vfs_lookup("/sys/class/block")?;
-let entries = block_dir.inode.readdir()?;
-for entry in entries {
-    pr_info!("Block device: {}", entry.name);
-}
-```
+- 写属性和热插拔更新能力有限.
+- sysfs 结构只覆盖当前内核已有设备类别.
+- 分区解析依赖块大小和分区表可读性.
 
-## 添加设备
+## 源码索引
 
-```rust
-// 注册块设备到sysfs
-pub fn register_block_device(name: &str, major: u32, minor: u32) {
-    let registry = DEVICE_REGISTRY.write();
-    registry.add_block_device(name, major, minor);
-}
-```
-
-## 相关资源
-
-- **源代码**: `os/src/fs/sysfs/`
-- **Builders**: `os/src/fs/sysfs/builders/`
-- [FS模块概览](README.md)
+- `os/src/fs/sysfs/sysfs.rs`: `SysFS` 初始化和树构建流程.
+- `os/src/fs/sysfs/inode.rs`: sysfs inode 类型.
+- `os/src/fs/sysfs/device_registry.rs`: 设备列表和分区枚举.
+- `os/src/fs/sysfs/builders/`: class/devices/kernel 子树构建器.
+- `os/src/device/block/partition.rs`: MBR/GPT 分区解析.

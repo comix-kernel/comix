@@ -1,29 +1,60 @@
-# 信号（Signal）
+# 信号
 
-信号为异步事件通知机制，用于控制流管理、唤醒可中断睡眠、传达错误（如 `SIGPIPE`）。
+信号是任务异步事件机制。当前实现把"产生信号"和"处理信号"分离: 发送路径只把信号放入 pending 集合, 返回用户态前的检查点再决定忽略, 默认处理或安装用户态 handler。
 
-- 源码：`os/src/ipc/signal.rs`
-- 相关：调度器/等待队列、任务管理
+## 当前状态
 
-## 概念与目标
-- 异步：可在目标任务不主动配合的情况下投递“待处理事件”。
-- 可中断：中断阻塞型系统调用/等待，返回中断错误码，交由上层恢复或重试。
-- 默认动作：对部分信号可定义缺省行为（忽略、终止等，具体以实现为准）。
+- 每个任务有私有 pending, 线程组共享 pending 和 blocked mask。
+- 信号动作表保存默认, 忽略或用户 handler 配置。
+- `check_signal()` 在安全点选择第一个未屏蔽 pending 信号处理。
+- 默认动作覆盖终止, core dump stub, stop, continue 和 ignore。
+- 用户 handler 通过构造 `rt_sigframe` 并修改 trap frame 进入用户态。
+- `rt_sigreturn` 从用户栈恢复被信号打断前的上下文。
 
-## 关键组成
-- 待处理队列/位图：每个任务维护“待处理信号”集合。
-- 屏蔽/处理：任务可设置屏蔽集与（可选的）处理方式；未处理时采用默认动作。
-- 派发点：陷入返回（trap return）或显式检查点派发并执行处理逻辑。
+## 目标
 
-## 常见语义
-- 投递：根据目标（任务/进程）查找对象，将信号标记为待处理并尝试唤醒。
-- 唤醒：若目标处于“可中断睡眠”，立即从等待队列移出并返回中断错误。
-- SIGPIPE：对无读者管道写入时由管道模块触发。
-- 不可屏蔽/强制：如 `SIGKILL` 之类（若实现）绕过屏蔽直接生效。
+- 让信号成为阻塞 syscall 和任务控制的统一异步事件来源。
+- 把用户态 ABI, 如 sigaction/sigprocmask/sigreturn, 放在 syscall 层。
+- 把具体架构寄存器恢复封装在 trap frame 抽象之后。
 
-## 与调度/等待队列
-- 可中断睡眠通过 `WaitQueue` 实现，中断路径在唤醒后返回特定错误码，由上层重启或终止操作。
+## 非目标
 
-## 使用建议
-- 将信号用于控制流与唤醒；不要在信号处理上下文做复杂/阻塞操作。
-- 对可重启的阻塞调用，收到中断错误后按需重试。
+- 当前不实现完整实时信号队列。
+- 当前不完整实现 SA_RESTART, 因此部分阻塞 syscall 会直接向用户态暴露 `EINTR`。
+- 不在文档列出所有信号编号和默认动作分支。
+
+## 模块边界
+
+- `os/src/ipc/signal.rs`: pending 选择, 默认动作, 用户 handler 栈帧安装。
+- `os/src/kernel/syscall/signal.rs`: sigaction, sigprocmask, sigpending, sigtimedwait, sigsuspend, sigreturn。
+- `os/src/kernel/task/`: 任务状态, 线程组, exit/stop/continue。
+- `os/src/arch/*/trap/`: 返回用户态前的检查点和 trap frame 恢复。
+
+## 关键流程
+
+1. syscall 或内核事件向目标任务/线程组标记 pending。
+2. 阻塞等待路径用 `signal_interrupts_syscall()` 判断是否应返回 `EINTR`。
+3. 返回用户态前调用 `check_signal()`。
+4. 内核从私有 pending 或共享 pending 中找第一个未屏蔽信号。
+5. 默认/忽略动作在内核完成, 用户 handler 动作通过修改用户 trap frame 完成投递。
+6. 用户 handler 结束后调用 `rt_sigreturn`, 内核恢复保存的上下文和 blocked mask。
+
+## 并发和生命周期约束
+
+- pending 和动作表受 task 内部锁保护。
+- 选择可投递信号时会同时考虑 private pending, shared pending 和 blocked mask。
+- 安装用户 handler 时必须写用户栈, 失败路径需要谨慎处理, 避免破坏原 trap frame。
+- `SIGKILL` 和 `SIGSTOP` 这类不可屏蔽语义不能被普通 mask 延迟。
+
+## 已知限制
+
+- `siginfo_t` 字段只填充基础信息。
+- core dump 仍是 stub。
+- `SIGCHLD` 等默认忽略信号在 syscall 中断判断上有兼容性特判, 但不是完整 SA_RESTART。
+
+## 源码索引
+
+- `os/src/ipc/signal.rs`: signal pending, 投递, 默认动作。
+- `os/src/kernel/syscall/signal.rs`: 信号 syscall。
+- `os/src/uapi/signal.rs`: 用户态 ABI 数据结构和常量。
+- `os/src/arch/*/trap/`: 信号检查点和 trap frame 恢复。

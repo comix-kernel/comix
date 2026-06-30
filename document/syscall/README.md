@@ -1,135 +1,123 @@
-# Syscall 概览
+# Syscall 子系统设计
 
-本文档收录了两百个左右Linux x86_64 的主干 syscall 接口，用于在实现系统调用时速查。
+Syscall 层是用户态 ABI 到内核子系统的边界。当前文档只描述 Comix 当前实现的分发, frame 抽象, 用户指针和子系统入口, 不维护庞大的 Linux syscall 清单。
 
-说明：作用按领域分组；参数一般遵循 (int fd, const char *buf, size_t len)、(const struct TimeSpec *req, struct TimeSpec *rem)、(int pid, int sig)、(void *addr, size_t len, int prot, int flags, int fd, off_t off) 等常见模式。下面按类别简述关键功能与典型参数。未逐条展开，保持速览。
+## 当前状态
 
-1. 基础文件与 IO
-- read/write/pread/pwrite/readv/writev: (fd, buf/vec, count, offset)
-- open/openat/close/creat: (path/dirfd, flags, mode)
-- lseek: (fd, offset, whence)
-- fstat/stat/lstat/newfstatat: (path/fd, statbuf)
-- fsync/fdatasync/fallocate/truncate/ftruncate: (fd, len)
-- getdents/getdents64: (fd, dirent_buf, size)
-- access/faccessat/faccessat2: (path/dirfd, mode, flags)
-- chmod/fchmod/fchmodat/fchmodat2: (path/fd, mode)
-- chown/fchown/lchown/fchownat: (path/fd, uid, gid)
-- link/symlink/unlink/[at]、readlink[at]: (old, new)/(path, buf, size)
-- rename/renameat/renameat2: (old,new[,flags])
-- mkdir/mkdirat/rmdir/mknod/mknodat: (path[,mode,type])
-- utime/utimensat/utimes: (path, times)
-- statx: (dirfd, path, flags, mask, statxbuf)
+- `dispatch_syscall()` 按 syscall number 分发到 `sys_*` 包装函数。
+- `SyscallFrame` trait 抽象寄存器读取和返回值写回, 让分发逻辑不绑定具体架构。
+- `impl_syscall!` 宏负责从 frame 提取最多 6 个参数, 转换为 Rust 函数签名, 并把返回值写回 frame。
+- 真正实现按领域拆到 `fs`, `io`, `task`, `mm`, `signal`, `ipc`, `network`, `sys`, `cred` 等模块。
+- 未识别 syscall 返回 `-ENOSYS`。
 
-2. 进程与线程
-- fork/vfork/clone/clone3: (flags, stack, parent_tid, child_tid, tls)
-- execve/execveat: (path, argv, envp[,flags])
-- exit/exit_group: (code)
-- wait4/waitid: (pid, status, options, rusage)
-- getpid/getppid/gettid: 无参或返回当前 ID
-- setuid/setgid/setreuid/...： (uid/gid 组合)
-- setpgid/getsid/setsid/getpgid: (pid, pgid)
-- prctl/personality: (option, arg1..)
-- sched_yield: 无参；sched_set/getparam/scheduler/affinity/attr： (pid, param/attr/mask)
-- set_tid_address: (tidptr) 线程退出清理
-- restart_syscall: 内核透明重启阻塞的调用
+## 目标
 
-3. 内存管理
-- mmap/mmap2/mremap/munmap: (addr, len, prot, flags, fd, off)
-- mprotect: (addr, len, prot)
-- brk: (addr)
-- madvise/mincore: (addr, len, advice)/查询驻留
-- mlock/mlockall/munlock/munlockall: (addr, len)
-- memfd_create: (name, flags)
-- mlock2/pkey_alloc/pkey_free/pkey_mprotect: 内存保护键
-- process_madvise: (pidfd, iov, advice)
-- map_shadow_stack/mseal: 安全栈/内存封印
-- set_mempolicy/get_mempolicy/mbind: NUMA 策略
-- migrate_pages/move_pages: (pid, list)
+- 让架构相关 trap frame 和通用 syscall 实现解耦。
+- 让 syscall 层承担 ABI 边界职责: 参数解码, 用户指针复制, fd 查找, errno 映射。
+- 让具体业务逻辑留在对应内核子系统, syscall 模块只做薄适配。
 
-4. 信号与计时
-- rt_sigaction/rt_sigprocmask/rt_sigpending/rt_sigsuspend/rt_sigqueueinfo/rt_tgsigqueueinfo: (signum, act, mask, size)
-- kill/tgkill/tkill: (pid[/tgid], tid, sig)
-- rt_sigreturn: 用户态返回栈恢复
-- timer_create/timer_settime/timer_gettime/timerfd_*: POSIX/FD 定时器
-- nanosleep/clock_nanosleep: (req, rem[, clock, flags])
-- getitimer/setitimer/alarm: 定时器
-- gettimeofday/clock_gettime/clock_settime/clock_getres/adjtimex: 时间与校时
-- times: (tmsbuf)
-- getrusage: (who, rusage)
-- sched_rr_get_interval: (pid, TimeSpec)
+## 非目标
 
-5. IPC
-- pipe/pipe2: (fds[2])
-- socket/socketpair/bind/listen/accept/accept4/connect: 套接字基本
-- sendto/recvfrom/sendmsg/recvmsg/sendmmsg/recvmmsg/shutdown: 数据收发 (fd, buf/msg, len, flags, addr)
-- setsockopt/getsockopt: (fd, level, optname, optval)
-- epoll_create/epoll_wait/epoll_ctl/epoll_pwait/epoll_create1/poll/ppoll/select/pselect: 事件复用
-- eventfd/eventfd2/signalfd/signalfd4/timerfd_create/inotify_*： 各类 FD 通知
-- futex/futex_waitv/futex_wake/futex_wait/futex_requeue: (uaddr, op, val, timeout, uaddr2, val3)
-- msgget/msgsnd/msgrcv/msgctl: System V 消息队列
-- semget/semop/semctl/semtimedop: System V 信号量
-- shmget/shmat/shmdt/shmctl: 共享内存
-- memfd_secret: 私密匿名内存
-- mq_open/mq_timedsend/mq_timedreceive/mq_getsetattr/mq_unlink/mq_notify: POSIX 消息队列
-- add_key/request_key/keyctl: Key 管理
-- process_vm_readv/writev: 跨进程内存访问
-- pidfd_open/pidfd_getfd/pidfd_send_signal: 稳定 PID 引用
+- 不在文档维护完整 syscall 号码表。号码以 `numbers.rs` 为准。
+- 不在文档列出每个 syscall 的参数和错误分支。细节以源码和 rustdoc 为准。
+- 不把 syscall 层当作跨子系统共享状态的宿主。
 
-6. 文件系统与挂载
-- mount/umount2/move_mount/open_tree/openat2/fsopen/fsconfig/fsmount/fspick/quotactl/quotactl_fd: 挂载与文件系统管理
-- statfs/fstatfs: 文件系统状态
-- sync/syncfs: 刷写
-- renameat2: 原子重命名
-- open_tree_attr/file_getattr/file_setattr: 树与属性
+## Dispatch 边界
 
-7. 安全与权限
-- capget/capset: 进程能力
-- seccomp: 沙箱过滤
-- bpf: 加载 BPF 程序
-- setns: 进入命名空间
-- setxattr/getxattr/listxattr/removexattr 及 *at 变体：扩展属性
-- chroot: 改根
-- ptrace: (request, pid, addr, data)
-- landlock_*： Landlock 安全沙箱
-- lsm_*: LSM 自省接口
-- process_mrelease: 释放僵尸进程资源
+系统调用入口在架构 trap handler 中取得当前 trap frame 后调用 `dispatch_syscall(frame)`。dispatch 只做三件事:
 
-8. 性能与异步 IO
-- readahead/fadvise64: 预读与访问提示
-- io_setup/io_submit/io_getevents/io_destroy/io_cancel/io_pgetevents： AIO
-- splice/tee/vmsplice: 零拷贝管道操作
-- copy_file_range: 零拷贝文件段传输
-- perf_event_open: 性能监控
+1. 读取 syscall id 和参数用于调试日志。
+2. 根据 `numbers.rs` 中的常量选择对应 `sys_*` wrapper。
+3. 对未知号码写回 `-ENOSYS`。
 
-9. 资源与限制
-- getrlimit/setrlimit/prlimit64: 资源限制
-- getpriority/setpriority/nice: 调度优先级
-- rlimit 相关参数： (which, rlimit struct)
+dispatch 不直接读取用户内存, 不操作 fd table, 不进入 VFS 或协议栈内部状态。
 
-10. 进程凭据与组
-- getuid/geteuid/getgid/getegid/getgroups/setgroups/setresuid/getresuid/setresgid/getresgid/setfsuid/setfsgid： 用户/组 ID 操作
+## SyscallFrame 抽象
 
-11. 其它杂项
-- uname: (utsname)
-- sysinfo: (info)
-- reboot: (magic, magic2, cmd, arg)
-- adjtimex: (timex)
-- kexec_load/kexec_file_load: 内核热重启
-- rseq: (rseq_area, len, flags, sig)
-- cachestat: 文件缓存统计
-- statmount/listmount: 挂载枚举
-- map_shadow_stack: 安全栈映射
+`SyscallFrame` 是架构无关寄存器接口:
 
-参数模式速记
-- 路径相关：dirfd + path + flags + mode
-- IO 向量：iovec 数组 + count（readv/writev/preadv/pwritev）
-- 时间：TimeSpec/timeval + 可选剩余/精度结构
-- 结构读写：用户指针传入，内核填充（stat, rusage, utsname）
-- 标志位：按 OR 组合（O_*、MAP_*、EPOLL*、SOCK_*）
+- `syscall_id()` 读取 syscall number。
+- `arg0()` 到 `arg5()` 读取 ABI 参数寄存器。
+- `set_ret()` 写回返回值。
 
-获取详细参数/返回值
-- man 2 <name>
-- 内核源码：include/uapi/asm-generic/ 或 arch/x86/include/asm/
-- 返回值约定：负 errno 放入 -Exxx，用户态转换为 errno。
+RISC-V, LoongArch 等架构只需要把自己的 trap frame 适配到这个 trait, 通用 syscall 模块就可以复用同一套分发和 wrapper。
 
-如需具体某组 syscall 详细参数/错误码，再指定名称列表。
+## impl_syscall wrapper
+
+`impl_syscall!` 生成 `sys_*` 函数。生成代码负责:
+
+- 从 frame 取原始 `usize` 参数。
+- 按声明转换为指针, 整数或 ABI 结构指针。
+- 调用实际内核实现函数。
+- 对普通返回 syscall 写回 `isize` 返回值。
+- 对 `noreturn` syscall 直接转入不返回路径, 如 `exit_group` 或 `rt_sigreturn`。
+
+这层不做深度验证。验证必须在具体实现函数中完成, 因为只有实现函数知道参数含义和所需锁顺序。
+
+## Errno 和返回值
+
+当前约定是内核实现返回 `isize` 或 `c_int`, 成功返回非负结果, 失败返回负 errno。常见来源:
+
+- VFS 错误通过 `FsError::to_errno()` 转换。
+- 网络错误通过 `NetworkError::to_errno()` 或具体 syscall 映射。
+- UAPI errno 常量来自 `uapi::errno`。
+- `brk` 这类 Linux 兼容接口按自身 ABI 返回当前 brk, 而不是负 errno。
+
+新增 syscall 时应优先使用已有错误类型转换, 避免在多个模块散落私有错误码。
+
+## 用户指针边界
+
+用户指针只能在 syscall 边界或明确的用户缓冲工具中解引用。当前主要路径:
+
+- 字符串路径: `util::get_path_safe()` 和 `copy_str_from_user()`。
+- argv/envp: `get_args_safe()`。
+- I/O 缓冲: `kernel/syscall/io.rs` 中先复制到内核 `Vec`, 再调用 `File`。
+- sockaddr: `kernel/syscall/network/*` 负责解析和写回。
+- shm/stat/signal/syslog: 各自 syscall 模块用 `read_from_user`, `write_to_user` 或架构 copy helper。
+
+设计要求:
+
+- 不把用户指针保存到内核对象中。
+- 持有协议栈, VFS, MemorySpace 等关键锁时避免长时间复制用户缓冲区。
+- 复制失败返回 `-EFAULT` 或对应子系统错误。
+
+## 子系统入口
+
+- FS: `fs/**`, `fcntl.rs`, `ioctl.rs` 处理路径, fd, mount, stat, rename 等。
+- IO: `io.rs` 处理 read/write/readv/writev/poll/ppoll/pselect 等通用 fd I/O。
+- Task: `task/**` 处理 clone, exec, exit, wait, futex, sched, time。
+- MM: `mm.rs` 处理 brk, mmap, munmap, mprotect。
+- Signal: `signal.rs` 处理 rt_sigaction, rt_sigprocmask, sigtimedwait, sigreturn 等。
+- IPC: `ipc.rs` 处理 pipe2, dup, SysV shm。
+- Network: `network/**` 处理 socket, bind, connect, accept, send/recv, sockopt, ifaddrs。
+- System/log: `sys.rs` 处理 uname, sysinfo, syslog, reboot 等系统级接口。
+- Credentials: `cred.rs` 处理 uid/gid 相关接口。
+
+## 并发和生命周期约束
+
+- syscall wrapper 不持有锁跨越实际实现调用。
+- fd 操作必须考虑 close/dup/fork/exec 的共享表语义。
+- exec 会先执行 close-on-exec, detach SysV shm, 再切换地址空间和 trap frame。
+- exit_group 走进程级资源清理, 包括 fd, socket fd mapping, shm attachment 和地址空间。
+- poll/select waiters 和网络 poll 通过 `io.rs` 与 `net::socket` 协作, 避免在硬中断中推进 smoltcp。
+
+## 已知限制
+
+- syscall 支持范围由 `numbers.rs` 和 `dispatch.rs` 的匹配分支决定, 并不等价于完整 Linux ABI。
+- 部分 syscall 为兼容测试提供最小语义, 不代表完整内核实现。
+- `SA_RESTART` 等高级 syscall restart 语义尚不完整, 阻塞调用可能返回 `EINTR`。
+
+## 源码索引
+
+- `os/src/kernel/syscall/mod.rs`: 模块组织和 `impl_syscall!` 注册。
+- `os/src/kernel/syscall/dispatch.rs`: 架构无关分发和 wrapper 宏。
+- `os/src/kernel/syscall/syscall_frame.rs`: `SyscallFrame` trait。
+- `os/src/kernel/syscall/numbers.rs`: 当前处理的 syscall number。
+- `os/src/kernel/syscall/util.rs`: 路径, argv/envp, syslog 参数辅助。
+- `os/src/kernel/syscall/fs/`: 文件系统 syscall。
+- `os/src/kernel/syscall/io.rs`: 通用 fd I/O 和 poll。
+- `os/src/kernel/syscall/network/`: socket syscall。
+- `os/src/kernel/syscall/task/`: 任务和进程 syscall。
+- `os/src/kernel/syscall/mm.rs`: 内存 syscall。
+- `os/src/kernel/syscall/signal.rs`: 信号 syscall。
+- `os/src/kernel/syscall/ipc.rs`: pipe 和 SysV shm。

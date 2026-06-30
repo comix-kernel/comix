@@ -1,79 +1,109 @@
-# 同步与锁 (Synchronization & Locking)
+# 同步与锁
 
-本文档概述了 `comix` 内核中用于处理并发和防止竞争条件的同步原语。
+`os/src/sync` 提供 Comix 内核当前使用的同步原语. 本文档只描述现行实现和设计边界, 不把未接入源码的历史方案当作可用 API.
 
-## 1. 简介
+## 当前状态
 
-在多核或可抢占的内核中，当多个执行流（如不同核上的任务，或中断处理程序与被中断的任务）同时访问共享数据时，若不加协调，就会产生竞争条件（Race Condition），导致数据损坏和系统崩溃。
+当前导出的核心原语:
 
-`sync` 模块提供了一系列同步原语（Synchronization Primitives），通过确保在任何时刻只有一个执行流能够访问临界区（Critical Section），来保证共享数据的完整性。
+- `RawSpinLock`
+- `SpinLock<T>`
+- `RwLock<T>`
+- `Mutex<T>`
+- `IntrGuard`
+- `PreemptGuard`
+- `PerCpu<T>`
 
-### 导航
+当前 `os/src/sync` 中没有 `ticket_lock.rs` 或 `sleep_lock.rs`. 对应文档页仅用于说明历史或未实现状态, 不进入主导航.
 
-- **[自旋锁 (`SpinLock`)](./spin_lock.md)**: 用于保护短临界区的互斥锁。
-- **[读写锁 (`RwLock`)](./rwlock.md)**: 允许多个读者并发访问或单个写者独占访问。
-- **[票号锁 (`TicketLock`)](./ticket_lock.md)**: 提供公平性保证的自旋锁，按 FIFO 顺序获取。
-- **[睡眠锁 (`SleepLock`)](./sleep_lock.md)**: 用于保护长临界区，会使等待者任务睡眠。
-- **[中断屏蔽 (`IntrGuard`)](./intr_guard.md)**: 用于在单核上实现临界区的底层机制。
-- **[Per-CPU 变量 (`PerCpu`)](./per_cpu.md)**: 每个 CPU 维护独立数据副本，避免锁竞争。
-- **[抢占控制 (`PreemptGuard`)](./preempt.md)**: 防止任务在访问 Per-CPU 数据期间被迁移。
-- **[锁顺序与死锁预防](./deadlock.md)**: 内核中必须遵守的锁获取规则。
-- **[SMP内核的中断与并发问题](./smp_interrupts.md)**: SMP系统中的中断和并发挑战。
+## 设计目标
 
-## 2. 核心概念
+- 用 RAII guard 绑定锁生命周期, 避免遗漏释放.
+- 在短临界区内同时处理跨 CPU 竞争和本 CPU 中断重入.
+- 为较长临界区提供会让出 CPU 的 `Mutex<T>`.
+- 为 per-CPU 数据提供抢占保护约束.
+- 让底层锁可以作为 `lock_api::RawMutex` 服务第三方组件, 例如 talc allocator.
 
-本内核主要采用三种策略来解决并发问题：
+## 非目标
 
-1.  **中断屏蔽 (Interrupt Disabling)**: 在单核处理器上，禁用中断可以防止当前代码被中断处理程序打断，从而避免了任务代码与中断代码之间的竞争。这是实现其他更复杂锁的底层基础。
-2.  **原子操作与自旋 (Atomic Operations & Spinning)**: 在多核处理器上，仅屏蔽本地核心的中断是不够的，因为其他核心仍然可以访问共享数据。自旋锁利用CPU提供的原子操作（如 `amoswap`）来循环检查并获取锁。如果锁已被占用，它会"自旋"（在一个紧凑循环中等待），直到锁被释放。
-3.  **Per-CPU 数据与抢占控制 (Per-CPU Data & Preemption Control)**: 为每个 CPU 核心维护独立的数据副本，完全避免锁竞争。通过禁用抢占防止任务在访问期间被迁移到其他核心，确保数据一致性。
+- 不提供严格 FIFO 公平锁.
+- 不提供独立的无数据 `SleepLock`.
+- 不提供用户态同步 ABI.
+- 不保证所有锁可在中断上下文使用. 会调度或睡眠的路径不能在中断上下文使用.
 
-## 3. 同步原语概览
+## 原语分层
 
-`comix` 提供了多种同步原语，适用于不同的场景：
+```text
+IntrGuard
+  - 禁用和恢复本 CPU 中断
+  - 支持 per-CPU 嵌套深度
 
-| 原语             | 源码链接                                                                              | 核心机制                                       | 适用场景                                                                 |
-|------------------|---------------------------------------------------------------------------------------|------------------------------------------------|--------------------------------------------------------------------------|
-| **`SpinLock<T>`**| [`os/src/sync/spin_lock.rs`](/os/src/sync/spin_lock.rs)                | 屏蔽中断 + 原子操作自旋                        | 保护访问耗时**极短**的共享数据，例如修改一个计数器或链表指针。             |
-| **`RwLock<T>`**  | [`os/src/sync/rwlock.rs`](/os/src/sync/rwlock.rs)                      | 原子操作 + 读写分离                            | 读多写少场景，允许多个读者并发访问。                                     |
-| **`TicketLock<T>`**| [`os/src/sync/ticket_lock.rs`](/os/src/sync/ticket_lock.rs)          | 原子操作 + 票号机制                            | 需要严格公平性的场景，防止饥饿。                                         |
-| **`SleepLock`**  | [`os/src/sync/sleep_lock.rs`](/os/src/sync/sleep_lock.rs)              | 原子操作 + 任务睡眠 (`WaitQueue`)              | 保护访问耗时**较长**的共享数据，例如执行I/O操作或复杂的计算。            |
-| **`IntrGuard`**  | [`os/src/sync/intr_guard.rs`](/os/src/sync/intr_guard.rs)              | 屏蔽/恢复中断 (RAII)                           | 作为其他锁的底层实现，或在确定为单核且无需锁的场景下临时屏蔽中断。       |
-| **`PerCpu<T>`**  | [`os/src/sync/per_cpu.rs`](/os/src/sync/per_cpu.rs)                    | 每核独立数据副本 + 抢占控制                    | 频繁访问的统计计数器、Per-CPU 运行队列、对象缓存等无锁场景。            |
-| **`PreemptGuard`**| [`os/src/sync/preempt.rs`](/os/src/sync/preempt.rs)                   | 禁用抢占 (RAII)                                | 访问 Per-CPU 变量时防止任务迁移，保护短临界区。                         |
-| `RawSpinLock`    | [`os/src/sync/raw_spin_lock.rs`](/os/src/sync/raw_spin_lock.rs)        | 纯粹的原子操作自旋                             | `SpinLock` 和 `SleepLock` 的内部构件，不推荐直接使用。                   |
+RawSpinLock
+  - AtomicBool 互斥
+  - 进入时持有 IntrGuard
+  - 也实现 lock_api::RawMutex
 
-## 4. 设计哲学：RAII 与锁守卫
+SpinLock<T>
+  - RawSpinLock + UnsafeCell<T>
+  - 短临界区互斥
 
-为了防止因忘记释放锁而导致的死锁，本模块广泛采用了 **RAII (Resource Acquisition Is Initialization)** 设计模式。
+RwLock<T>
+  - AtomicUsize 状态
+  - 多读或单写
+  - 持 guard 期间禁用本 CPU 中断
 
-- 当调用 `lock()` 方法时，会返回一个**锁守卫 (Lock Guard)** 对象（例如 `SpinLockGuard`）。
-- 这个守卫对象在其生命周期内持有锁，并提供对受保护数据的安全访问（通过 `Deref` 和 `DerefMut`）。
-- 当守卫对象离开其作用域时，它的 `drop()` 方法会自动被调用，从而**自动释放锁**。
+Mutex<T>
+  - AtomicBool + RawSpinLock + WaitQueue
+  - 竞争时入队并 yield
 
-这种设计极大地提升了锁使用的安全性。
-
-```rust
-// 示例：
-let data = SpinLock::new(0);
-
-// lock() 返回一个守卫对象 guard
-let mut guard = data.lock();
-
-// 通过 guard 安全地访问被保护的数据
-*guard += 1;
-
-// 当 guard 离开作用域时，锁会自动释放，无需手动调用 unlock()
+PreemptGuard + PerCpu<T>
+  - 防止访问当前 CPU 数据时任务迁移
 ```
 
-## 5. 注意事项：死锁
+## 选择建议
 
-使用锁时必须警惕**死锁 (Deadlock)**。一个常见的死锁场景是锁顺序反转：
+| 场景 | 当前原语 |
+| --- | --- |
+| 极短共享数据修改 | `SpinLock<T>` |
+| 读多写少且临界区短 | `RwLock<T>` |
+| allocator 或底层锁适配 | `RawSpinLock` |
+| 可能等待较久的任务上下文互斥 | `Mutex<T>` |
+| 单 CPU 中断重入屏蔽 | `IntrGuard` |
+| 访问当前 CPU 本地数据 | `PreemptGuard` + `PerCpu<T>` |
 
-- 任务A: `lock(L1); lock(L2);`
-- 任务B: `lock(L2); lock(L1);`
+## 并发约束
 
-如果任务A持有L1并等待L2，而任务B持有L2并等待L1，两个任务将永远等待下去。
+- `SpinLock`, `RawSpinLock`, `RwLock` 都会屏蔽本 CPU 中断, 但仍依赖原子操作处理跨 CPU 竞争.
+- 自旋锁类临界区必须短, 不能主动 sleep 或长期等待调度.
+- `Mutex<T>` 可能调用调度相关路径, 只适合任务上下文.
+- `PerCpu<T>::get_mut()` 从共享引用返回当前 CPU 的可变引用, 调用方必须用 `PreemptGuard` 或等价机制保证期间不会迁移.
 
-**规则**: 在整个内核中，如果需要同时获取多个锁，必须始终**按照相同的顺序**获取它们。
-详见[锁顺序与死锁预防](./deadlock.md)
+## 文档导航
+
+当前设计页:
+
+- [RawSpinLock](raw_spin_lock.md)
+- [SpinLock](spin_lock.md)
+- [RwLock](rwlock.md)
+- [Mutex](mutex.md)
+- [IntrGuard](intr_guard.md)
+- [PreemptGuard](preempt.md)
+- [PerCpu](per_cpu.md)
+- [死锁预防](deadlock.md)
+- [SMP 中断与并发](smp_interrupts.md)
+
+历史状态页:
+
+- [TicketLock 状态](ticket_lock.md)
+- [SleepLock 状态](sleep_lock.md)
+
+## 源码索引
+
+- `os/src/sync/mod.rs:5` - 当前模块列表和导出集合.
+- `os/src/sync/raw_spin_lock.rs:20` - `RawSpinLock`.
+- `os/src/sync/spin_lock.rs:30` - `SpinLock<T>`.
+- `os/src/sync/rwlock.rs:24` - `RwLock<T>`.
+- `os/src/sync/mutex.rs:21` - `Mutex<T>`.
+- `os/src/sync/intr_guard.rs:44` - `IntrGuard`.
+- `os/src/sync/preempt.rs:95` - `PreemptGuard`.
+- `os/src/sync/per_cpu.rs:36` - `PerCpu<T>`.

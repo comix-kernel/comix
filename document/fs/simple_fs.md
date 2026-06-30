@@ -1,165 +1,59 @@
-# SimpleFS - 简单测试文件系统
+# SimpleFS
 
-## 概述
+SimpleFS 是编译期嵌入的只读测试文件系统. 当前它作为 rootfs 探测失败时的 fallback, 也用于不依赖外部磁盘镜像的测试路径.
 
-SimpleFS 是一个轻量级的只读文件系统，用于测试和调试。文件系统镜像在编译时嵌入到内核中，启动时加载到RamDisk。
+## 当前状态
 
-**主要特点**:
-- 编译时嵌入：镜像作为静态数据包含在内核中
-- 快速启动：无需外部文件系统
-- 测试友好：提供一致的测试环境
-- 只读：不支持修改
+- 源码位于 `os/src/fs/simple_fs.rs`.
+- 镜像由构建阶段生成并通过 `include_bytes!` 嵌入内核.
+- 启动时镜像被放入 `RamDisk`, 再解析成 `SimpleFsInode` 树.
+- 支持多级路径, 普通文件和目录.
+- 运行时只读.
 
-## 镜像格式
+## 目标
 
-### 镜像结构
+- 在没有可用 ext4 rootfs 时保持系统可启动或可测试.
+- 提供稳定, 小型, 可嵌入的测试文件树.
+- 避免早期启动完全依赖 virtio block 或分区盘.
 
-```
-+------------------+
-| Header (512B)    |
-| - Magic: RAMDISK |
-| - File count     |
-+------------------+
-| File Entry 1     |
-| - Header (32B)   |
-| - Name (aligned) |
-| - Data (aligned) |
-+------------------+
-| File Entry 2     |
-| ...              |
-+------------------+
-```
+## 非目标
 
-### 文件条目格式
+- 不作为正式持久化 rootfs 格式.
+- 不支持运行时写入.
+- 不复刻 ext4 或 FAT 的磁盘结构.
 
-```rust
-struct FileEntry {
-    magic: u32,           // 0x46494C45 ("FILE")
-    name_len: u32,        // 文件名长度
-    data_len: u32,        // 数据长度
-    file_type: u32,       // 0=文件, 1=目录
-    mode: u32,            // 权限位
-    // 之后是name（4字节对齐）
-    // 之后是data（512字节对齐）
-}
+## 模块边界
+
+- `simple_fs.rs`: 镜像解析, inode 树, `FileSystem` 实现.
+- `fs/mod.rs`: `init_simple_fs` fallback 入口.
+- `device/block/ram_disk.rs`: 嵌入镜像的块设备承载.
+- build 脚本: 生成 `SIMPLE_FS_IMAGE`.
+
+## 关键流程
+
+```text
+include bytes image
+  -> RamDisk
+  -> SimpleFs from_ramdisk
+  -> mount at /
 ```
 
-## 构建流程
+默认优先尝试分区盘 ext4 rootfs. SimpleFS 只在 rootfs 探测失败时作为回退路径.
 
-### build.rs 脚本
+## 并发和生命周期约束
 
-```rust
-// build.rs
-fn build_simple_fs() {
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let image_path = format!("{}/simple_fs.img", out_dir);
-    
-    // 创建镜像
-    create_ramdisk_image(&image_path, "user")?;
-    
-    // 设置环境变量供include_bytes!使用
-    println!("cargo:rustc-env=SIMPLE_FS_IMAGE={}", image_path);
-}
-```
+- 文件内容驻留内存, 无同步到磁盘路径.
+- 只读语义应在 inode 操作中保持一致.
+- 镜像大小和内容由构建产物决定, 不是运行时配置.
 
-### 嵌入到内核
+## 已知限制
 
-```rust
-// fs/mod.rs
-static SIMPLE_FS_IMAGE: &[u8] = include_bytes!(env!("SIMPLE_FS_IMAGE"));
+- 只读.
+- 文件系统格式只服务内核测试和 fallback.
+- 元数据语义较简单.
 
-pub fn init_simple_fs() -> Result<(), FsError> {
-    // 从静态数据创建RamDisk
-    let ramdisk = RamDisk::from_bytes(
-        SIMPLE_FS_IMAGE.to_vec(),
-        512,  // 块大小
-        0     // 偏移
-    );
-    
-    // 加载SimpleFS
-    let simplefs = SimpleFs::from_ramdisk(ramdisk)?;
-    
-    // 挂载为根文件系统
-    MOUNT_TABLE.mount(
-        Arc::new(simplefs),
-        "/",
-        MountFlags::empty(),
-        Some(String::from("ramdisk0")),
-    )?;
-    
-    Ok(())
-}
-```
+## 源码索引
 
-## 使用场景
-
-### 测试环境
-
-```rust
-#[test]
-fn test_with_simplefs() {
-    init_simple_fs().unwrap();
-    
-    // 测试文件系统操作
-    let content = vfs_load_file("/bin/hello").unwrap();
-    assert_eq!(content, b"Hello, World!");
-}
-```
-
-### 预加载用户程序
-
-```bash
-# 将用户程序添加到镜像
-cp user/target/riscv64gc-unknown-none-elf/release/init user/
-cp user/target/riscv64gc-unknown-none-elf/release/sh user/bin/
-
-# 重新构建内核（会自动重建镜像）
-make build
-```
-
-## 添加文件到镜像
-
-### 方式1：修改构建脚本
-
-```rust
-// build.rs
-let files = vec![
-    ("bin/init", "user/target/.../init"),
-    ("bin/sh", "user/target/.../sh"),
-    ("etc/rc", "scripts/rc"),
-];
-
-for (dest, src) in files {
-    add_file_to_image(&mut image, src, dest)?;
-}
-```
-
-### 方式2：使用目录
-
-```rust
-// build.rs
-// 将整个目录添加到镜像
-add_directory_to_image(&mut image, "user", "/")?;
-```
-
-## 限制
-
-1. **只读**: 运行时无法修改
-2. **大小限制**: 镜像过大会增加内核体积
-3. **重启丢失**: 运行时的修改不会保存
-
-## 对比：SimpleFS vs Ext4
-
-| 特性 | SimpleFS | Ext4 |
-|------|----------|------|
-| 持久化 | ❌ | ✅ |
-| 修改支持 | ❌ | ✅（读写） |
-| 启动速度 | 快 | 慢（需块设备） |
-| 镜像大小 | 小 | 大 |
-| 用途 | 测试 | 生产 |
-
-## 相关资源
-
-- **源代码**: `os/src/fs/simple_fs.rs`
-- **构建脚本**: `os/build.rs`
-- [FS模块概览](README.md)
+- `os/src/fs/simple_fs.rs`: SimpleFS 实现.
+- `os/src/fs/mod.rs`: `init_simple_fs`.
+- `os/src/device/block/ram_disk.rs`: RamDisk.
