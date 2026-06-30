@@ -18,15 +18,24 @@ use crate::{
     uapi::{
         errno::{EAGAIN, EINTR, EINVAL, ENOMEM, ENOSYS, ESRCH},
         signal::{
-            MINSIGSTKSZ, NSIG, RtSigFrame, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, SIGSET_SIZE,
-            SS_AUTODISARM, SS_DISABLE, SS_ONSTACK, SaFlags, SigInfoT, SignalAction, SignalFlags,
-            UContextT,
+            MINSIGSTKSZ, NSIG, NUM_SIGKILL, NUM_SIGSTOP, RtSigFrame, SIG_BLOCK, SIG_SETMASK,
+            SIG_UNBLOCK, SIGSET_SIZE, SS_AUTODISARM, SS_DISABLE, SaFlags, SigInfoT, SignalAction,
+            SignalFlags, UContextT,
         },
         time::TimeSpec,
         types::{SigSetT, StackT},
     },
     util::user_buffer::{read_from_user, write_to_user},
 };
+
+fn unblockable_signals() -> SignalFlags {
+    SignalFlags::from_signal_num(NUM_SIGKILL).unwrap()
+        | SignalFlags::from_signal_num(NUM_SIGSTOP).unwrap()
+}
+
+fn normalize_signal_mask(mask: SigSetT) -> SignalFlags {
+    SignalFlags::from_sigset_t(mask) & !unblockable_signals()
+}
 
 /// 修改当前任务的信号屏蔽字
 /// # 参数：
@@ -57,11 +66,7 @@ pub fn rt_sigprocmask(
 
     if !set.is_null() {
         let new_set = unsafe { read_from_user(set) };
-        let new_flags = if let Some(flag) = SignalFlags::from_bits(new_set as usize) {
-            flag
-        } else {
-            return -EINVAL;
-        };
+        let new_flags = normalize_signal_mask(new_set);
         match how {
             SIG_BLOCK => {
                 t.blocked |= new_flags;
@@ -103,7 +108,15 @@ pub fn rt_sigpending(uset: *mut SigSetT, sigsetsize: c_uint) -> c_int {
 /// # 返回值：
 /// * 成功时返回 0
 /// * 失败时返回负的错误码
-pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut SignalAction) -> c_int {
+pub fn rt_sigaction(
+    signum: c_int,
+    act: *const SignalAction,
+    oldact: *mut SignalAction,
+    sigsetsize: c_uint,
+) -> c_int {
+    if sigsetsize as usize != SIGSET_SIZE {
+        return -EINVAL;
+    }
     if signum <= 0 || signum as usize > NSIG {
         return -EINVAL;
     }
@@ -120,6 +133,9 @@ pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut Signal
 
     if !act.is_null() {
         let mut new_action = unsafe { read_from_user(act) };
+        if signum as usize == NUM_SIGKILL || signum as usize == NUM_SIGSTOP {
+            return -EINVAL;
+        }
         // Linux ABI compatibility:
         // - libc may pass SA_RESTORER and/or reserved bits.
         // - Rejecting unknown bits causes musl netperf to fail with EINVAL.
@@ -129,6 +145,7 @@ pub fn rt_sigaction(signum: c_int, act: *const SignalAction, oldact: *mut Signal
             return -ENOSYS;
         }
         new_action.sa_flags = flag.bits() as c_ulong;
+        new_action.sa_mask = normalize_signal_mask(new_action.sa_mask).to_sigset_t();
         t.signal_handlers
             .lock()
             .set_action(signum as usize, new_action);
@@ -199,11 +216,7 @@ pub fn rt_sigsuspend(unewset: *const SigSetT, sigsetsize: c_uint) -> c_int {
         return -EINVAL;
     }
     let new_set_bits = unsafe { read_from_user(unewset) };
-    let new_set = if let Some(flags) = SignalFlags::from_bits(new_set_bits as usize) {
-        flags
-    } else {
-        return -EINVAL;
-    };
+    let new_set = normalize_signal_mask(new_set_bits);
     let task = current_task();
     let mut old_set = SignalFlags::empty();
     sleep_task_prepare(task.clone(), true, |t| {
@@ -235,7 +248,7 @@ pub fn rt_sigreturn() -> ! {
     {
         let task = current_task();
         let mut t = task.lock();
-        t.blocked = SignalFlags::from_bits_truncate(ucontext.uc_sigmask as usize);
+        t.blocked = normalize_signal_mask(ucontext.uc_sigmask);
     }
 
     <TrapFrame as HwTrapFrame>::restore_from_mcontext(tf, &ucontext.uc_mcontext);
@@ -263,11 +276,12 @@ pub fn signal_stack(uss: *const StackT, uoss: *mut StackT) -> c_int {
 
     if !uss.is_null() {
         let new_ss = unsafe { read_from_user(uss) };
-        if new_ss.ss_size < MINSIGSTKSZ as u64 {
-            return -ENOMEM;
-        }
-        if new_ss.ss_flags as usize & SS_AUTODISARM & SS_DISABLE & SS_ONSTACK != 0 {
+        let flags = new_ss.ss_flags as usize;
+        if flags & !(SS_DISABLE | SS_AUTODISARM) != 0 {
             return -EINVAL;
+        }
+        if flags & SS_DISABLE == 0 && new_ss.ss_size < MINSIGSTKSZ as u64 {
+            return -ENOMEM;
         }
         t.signal_stack = Arc::new(SpinLock::new(new_ss));
     }
@@ -403,13 +417,8 @@ fn wait_for_signal(
             if t.pending.has_deliverable_signal(signal)
                 || t.shared_pending.lock().has_deliverable_signal(signal)
             {
-                let flag = t
-                    .pending
-                    .first_deliverable_signal(signal)
-                    .or_else(|| t.shared_pending.lock().first_deliverable_signal(signal))
-                    .unwrap();
+                let flag = take_first_deliverable(&mut t, signal).unwrap();
                 let sig_num = flag.to_signal_number();
-                t.pending.signals.remove(flag);
                 Ok((sig_num, create_siginfo_for_signal(flag)))
             } else {
                 Err(-EAGAIN)
@@ -436,13 +445,8 @@ fn wait_for_signal(
                 if !slept {
                     TIMER_QUEUE.lock().remove_task(&task);
                     let mut t = task.lock();
-                    let flag = t
-                        .pending
-                        .first_deliverable_signal(signal)
-                        .or_else(|| t.shared_pending.lock().first_deliverable_signal(signal))
-                        .unwrap();
+                    let flag = take_first_deliverable(&mut t, signal).unwrap();
                     let sig_num = flag.to_signal_number();
-                    t.pending.signals.remove(flag);
                     return Ok((sig_num, create_siginfo_for_signal(flag)));
                 }
                 yield_task();
@@ -459,16 +463,39 @@ fn wait_for_signal(
             });
             if !slept {
                 let mut t = task.lock();
-                let flag = t
-                    .pending
-                    .first_target_signal(signal)
-                    .or_else(|| t.shared_pending.lock().first_target_signal(signal))
-                    .unwrap();
+                let flag = take_first_target(&mut t, signal).unwrap();
                 let sig_num = flag.to_signal_number();
-                t.pending.signals.remove(flag);
                 return Ok((sig_num, create_siginfo_for_signal(flag)));
             }
             yield_task();
         }
     }
+}
+
+fn take_first_deliverable(
+    t: &mut crate::kernel::task::TaskStruct,
+    signal: SignalFlags,
+) -> Option<SignalFlags> {
+    if let Some(flag) = t.pending.first_deliverable_signal(signal) {
+        t.pending.signals.remove(flag);
+        return Some(flag);
+    }
+    let mut shared = t.shared_pending.lock();
+    let flag = shared.first_deliverable_signal(signal)?;
+    shared.signals.remove(flag);
+    Some(flag)
+}
+
+fn take_first_target(
+    t: &mut crate::kernel::task::TaskStruct,
+    signal: SignalFlags,
+) -> Option<SignalFlags> {
+    if let Some(flag) = t.pending.first_target_signal(signal) {
+        t.pending.signals.remove(flag);
+        return Some(flag);
+    }
+    let mut shared = t.shared_pending.lock();
+    let flag = shared.first_target_signal(signal)?;
+    shared.signals.remove(flag);
+    Some(flag)
 }

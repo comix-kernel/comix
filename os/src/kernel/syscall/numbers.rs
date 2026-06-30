@@ -113,6 +113,7 @@ pub const SYS_UNAME: usize = 160;
 pub const SYS_SETHOSTNAME: usize = 161;
 pub const SYS_GETRLIMIT: usize = 163;
 pub const SYS_SETRLIMIT: usize = 164;
+pub const SYS_GETRUSAGE: usize = 165;
 pub const SYS_UMASK: usize = 166;
 pub const SYS_GETTIMEOFDAY: usize = 169;
 pub const SYS_GETPID: usize = 172;
@@ -158,6 +159,8 @@ pub const SYS_MLOCK: usize = 228;
 pub const SYS_MUNLOCK: usize = 229;
 pub const SYS_MLOCKALL: usize = 230;
 pub const SYS_MUNLOCKALL: usize = 231;
+pub const SYS_MADVISE: usize = 233;
+pub const SYS_GET_MEMPOLICY: usize = 236;
 
 // ---- 网络 (续) ----
 pub const SYS_ACCEPT4: usize = 242;

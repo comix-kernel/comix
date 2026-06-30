@@ -23,15 +23,17 @@ pub struct SysInfo {
     pub freeswap: c_ulong,
     /// 当前进程数
     pub procs: u16,
+    /// 显式补齐到后续 unsigned long 字段的 ABI 对齐。
+    pub pad: u16,
     /// 高端内存总大小，单位为字节
     pub totalhigh: c_ulong,
     /// 高端可用内存大小，单位为字节
     pub freehigh: c_ulong,
     /// 内存单位大小，单位为字节
     pub mem_unit: c_uint,
-    /// 保留字段，供未来使用
-    pub _reserved: [u8; 256],
 }
+
+const _: () = assert!(core::mem::size_of::<SysInfo>() == 112);
 
 impl SysInfo {
     /// 创建一个新的 SysInfo 实例，所有字段初始化为零
@@ -46,10 +48,10 @@ impl SysInfo {
             totalswap: 0,
             freeswap: 0,
             procs: 0,
+            pad: 0,
             totalhigh: 0,
             freehigh: 0,
             mem_unit: 0,
-            _reserved: [0; 256],
         }
     }
 }

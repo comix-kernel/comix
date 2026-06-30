@@ -52,6 +52,27 @@ echo "Mounting file systems via fstab..."
 
 echo "System initialization finished."
 
+cmdline_has() {
+    [ -r /proc/cmdline ] || return 1
+    case " $(/bin/cat /proc/cmdline) " in
+        *" $1 "*|*" $1"*) return 0 ;;
+    esac
+    return 1
+}
+
+cmdline_value() {
+    [ -r /proc/cmdline ] || return 1
+    for arg in $(/bin/cat /proc/cmdline); do
+        case "$arg" in
+            "$1="*)
+                echo "${arg#*=}"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 mount_official_test_image_if_present() {
     [ -d /tests ] || mkdir -p /tests
     [ -d /tests/musl ] && return 0
@@ -96,6 +117,83 @@ mount_official_test_image_if_present() {
     return 1
 }
 
+ensure_glibc_runtime_links() {
+    [ -d /tests/glibc/lib ] || return 1
+    [ -d /lib ] || /bin/mkdir -p /lib
+
+    for f in /tests/glibc/lib/ld-linux-*.so.*; do
+        [ -f "$f" ] || continue
+        base="${f##*/}"
+        [ -e "/lib/$base" ] || /bin/ln -s "$f" "/lib/$base"
+    done
+
+    for base in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2; do
+        if [ -f "/tests/glibc/lib/$base" ] && [ ! -e "/lib/$base" ]; then
+            /bin/ln -s "/tests/glibc/lib/$base" "/lib/$base"
+        fi
+    done
+}
+
+run_glibc_tests_if_present() {
+    mount_official_test_image_if_present || true
+    [ -d /tests/glibc ] || return 1
+
+    ensure_glibc_runtime_links || true
+
+    ran=0
+    echo "[Tests] detected glibc test scripts; running in rcS"
+
+    export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/tests/glibc"
+    export TMPDIR="/tmp"
+    export HOME="/"
+
+    for f in /tests/glibc/*_testcode.sh; do
+        [ -f "$f" ] || continue
+
+        base="${f##*/}"
+        case "$base" in
+            ltp_testcode.sh|\
+            iozone_testcode.sh|\
+            unixbench_testcode.sh)
+                echo "[Tests] skipping $f"
+                continue
+                ;;
+        esac
+
+        dir="${f%/*}"
+        echo "[Tests] running $f"
+        case "$base" in
+            basic_testcode.sh)
+                (
+                    cd "$dir/basic" || exit 1
+                    ../busybox echo "#### OS COMP TEST GROUP START basic-glibc ####"
+                    ../busybox sh ./run-all.sh </dev/null
+                    rc=$?
+                    ../busybox echo "#### OS COMP TEST GROUP END basic-glibc ####"
+                    exit "$rc"
+                )
+                ;;
+            *)
+                (
+                    cd "$dir" || exit 1
+                    ./busybox sh "./$base" </dev/null
+                )
+                ;;
+        esac
+        rc=$?
+        echo "[Tests] finished $f (rc=$rc)"
+        case "$rc" in
+            0) ;;
+            *) echo "[Tests] ignoring failure from $f and continuing" ;;
+        esac
+        ran=1
+    done
+    [ "$ran" -eq 1 ] || return 1
+
+    echo "[Tests] all glibc tests finished"
+    return 0
+}
+
 stage_musl_tests_to_tmpfs() {
     src="/tests/musl"
     dst="/tmp/tests/musl"
@@ -133,11 +231,11 @@ run_musl_tests_if_present() {
     [ -d /tests/musl ] || return 1
 
     staged_musl_dir=""
-    if stage_musl_tests_to_tmpfs; then
-        staged_musl_dir="/tmp/tests/musl"
-    else
-        echo "[Tests] staging failed; falling back to /tests/musl"
-    fi
+    # if stage_musl_tests_to_tmpfs; then
+    #     staged_musl_dir="/tmp/tests/musl"
+    # else
+    #     echo "[Tests] staging failed; falling back to /tests/musl"
+    # fi
 
     ran=0
     echo "[Tests] detected musl test scripts; running in rcS"
@@ -184,14 +282,25 @@ run_musl_tests_if_present() {
     done
     [ "$ran" -eq 1 ] || return 1
 
+    echo "[Tests] all musl tests finished"
+    return 0
+}
+
+tests_ran=0
+
+if run_musl_tests_if_present; then
+    tests_ran=1
+fi
+
+if run_glibc_tests_if_present; then
+    tests_ran=1
+fi
+
+if [ "$tests_ran" -eq 1 ]; then
     echo "[Tests] all tests finished; powering off"
     /sbin/poweroff -f || /sbin/reboot -f || true
     echo "[Tests] poweroff returned unexpectedly; sleeping"
     while true; do sleep 3600; done
-}
-
-if run_musl_tests_if_present; then
-    exit 0
 fi
 
 echo "rcS finished; spawning shell on ttyS0 via inittab"

@@ -1,4 +1,4 @@
-use core::ffi::c_void;
+use core::ffi::{c_int, c_void};
 
 use crate::config::PAGE_SIZE;
 use crate::kernel::{current_memory_space, current_task};
@@ -6,9 +6,10 @@ use crate::mm::address::{PageNum, VA, Vpn, VpnRange};
 use crate::mm::memory_space::MmapFile;
 use crate::mm::memory_space::mapping_area::AreaType;
 use crate::mm::page_table::UniversalPTEFlag;
-use crate::uapi::errno::{EACCES, EAGAIN, EBADF, EEXIST, EINVAL, EIO, ENOMEM};
+use crate::uapi::errno::{EACCES, EAGAIN, EBADF, EEXIST, EFAULT, EINVAL, EIO, ENOMEM};
 use crate::uapi::mm::{MAP_FAILED, MapFlags, ProtFlags};
 use crate::uapi::resource::ResourceId;
+use crate::util::user_buffer::{validate_user_ptr_mut, write_to_user};
 use crate::{pr_err, pr_warn};
 
 /// brk - 改变数据段的结束地址（堆顶）
@@ -532,5 +533,92 @@ pub fn mlockall(flags: i32) -> isize {
 
 /// munlockall - unlock all user mappings.
 pub fn munlockall() -> isize {
+    0
+}
+
+/// madvise - provide memory usage advice.
+///
+/// CCYOS currently has no reclaim/readahead policy state attached to VMAs, so
+/// recognized Linux advice values are accepted as a no-op for libc probes.
+pub fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> isize {
+    const MADV_NORMAL: c_int = 0;
+    const MADV_RANDOM: c_int = 1;
+    const MADV_SEQUENTIAL: c_int = 2;
+    const MADV_WILLNEED: c_int = 3;
+    const MADV_DONTNEED: c_int = 4;
+    const MADV_FREE: c_int = 8;
+    const MADV_REMOVE: c_int = 9;
+    const MADV_DONTFORK: c_int = 10;
+    const MADV_DOFORK: c_int = 11;
+    const MADV_MERGEABLE: c_int = 12;
+    const MADV_UNMERGEABLE: c_int = 13;
+    const MADV_HUGEPAGE: c_int = 14;
+    const MADV_NOHUGEPAGE: c_int = 15;
+    const MADV_DONTDUMP: c_int = 16;
+    const MADV_DODUMP: c_int = 17;
+    const MADV_WIPEONFORK: c_int = 18;
+    const MADV_KEEPONFORK: c_int = 19;
+    const MADV_COLD: c_int = 20;
+    const MADV_PAGEOUT: c_int = 21;
+    const MADV_POPULATE_READ: c_int = 22;
+    const MADV_POPULATE_WRITE: c_int = 23;
+
+    if len == 0 {
+        return 0;
+    }
+    let start = addr as usize;
+    if start & (PAGE_SIZE - 1) != 0 || start.checked_add(len).is_none() {
+        return -EINVAL as isize;
+    }
+
+    match advice {
+        MADV_NORMAL | MADV_RANDOM | MADV_SEQUENTIAL | MADV_WILLNEED | MADV_DONTNEED | MADV_FREE
+        | MADV_REMOVE | MADV_DONTFORK | MADV_DOFORK | MADV_MERGEABLE | MADV_UNMERGEABLE
+        | MADV_HUGEPAGE | MADV_NOHUGEPAGE | MADV_DONTDUMP | MADV_DODUMP | MADV_WIPEONFORK
+        | MADV_KEEPONFORK | MADV_COLD | MADV_PAGEOUT | MADV_POPULATE_READ | MADV_POPULATE_WRITE => {
+            0
+        }
+        _ => -EINVAL as isize,
+    }
+}
+
+/// get_mempolicy - return the current NUMA memory policy.
+///
+/// CCYOS is a single-node kernel; expose Linux's default policy and node 0.
+pub fn get_mempolicy(
+    mode: *mut i32,
+    nmask: *mut usize,
+    maxnode: usize,
+    _addr: *const c_void,
+    flags: usize,
+) -> isize {
+    const MPOL_F_NODE: usize = 1 << 0;
+    const MPOL_F_ADDR: usize = 1 << 1;
+    const MPOL_F_MEMS_ALLOWED: usize = 1 << 2;
+    const MPOL_DEFAULT: i32 = 0;
+
+    if flags & !(MPOL_F_NODE | MPOL_F_ADDR | MPOL_F_MEMS_ALLOWED) != 0 {
+        return -EINVAL as isize;
+    }
+    if flags & MPOL_F_NODE != 0 && flags & MPOL_F_ADDR == 0 {
+        return -EINVAL as isize;
+    }
+    if flags & MPOL_F_MEMS_ALLOWED != 0 && flags & MPOL_F_ADDR != 0 {
+        return -EINVAL as isize;
+    }
+    if !mode.is_null() && !validate_user_ptr_mut(mode) {
+        return -EFAULT as isize;
+    }
+    if !nmask.is_null() && !validate_user_ptr_mut(nmask) {
+        return -EFAULT as isize;
+    }
+
+    if !mode.is_null() {
+        write_to_user(mode, MPOL_DEFAULT);
+    }
+    if !nmask.is_null() && maxnode != 0 {
+        write_to_user(nmask, 1usize);
+    }
+
     0
 }

@@ -17,7 +17,7 @@ use crate::{
 
 /// 用于指定秒和纳秒精度的时间
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct TimeSpec {
     /// 秒 (seconds)
     pub tv_sec: c_long,
@@ -190,7 +190,7 @@ impl Add for TimeSpec {
 
 /// 用于指定秒和微秒精度的时间。
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct timeval {
     /// 秒 (seconds)
     pub tv_sec: c_long,

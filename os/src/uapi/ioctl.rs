@@ -96,6 +96,10 @@ pub const TCGETS: u32 = 0x5401;
 pub const TCSETS: u32 = 0x5402;
 pub const TCSETSW: u32 = 0x5403;
 pub const TCSETSF: u32 = 0x5404;
+pub const TCGETS2: u32 = _IOR('T' as u32, 0x2A, core::mem::size_of::<Termios2>() as u32);
+pub const TCSETS2: u32 = _IOW('T' as u32, 0x2B, core::mem::size_of::<Termios2>() as u32);
+pub const TCSETSW2: u32 = _IOW('T' as u32, 0x2C, core::mem::size_of::<Termios2>() as u32);
+pub const TCSETSF2: u32 = _IOW('T' as u32, 0x2D, core::mem::size_of::<Termios2>() as u32);
 
 /// 获取终端窗口大小（struct winsize）
 pub const TIOCGWINSZ: u32 = 0x5413;
@@ -238,16 +242,15 @@ pub const NCCS: usize = 19;
 
 /// 终端属性结构（用于 TCGETS/TCSETS）
 ///
-/// 这是 Linux asm-generic/termbits.h 中定义的标准 termios 结构。
-/// RISC-V 架构使用 asm-generic 定义，NCCS=19。
+/// 这是 Linux asm-generic/termbits.h 中定义的 struct termios。
+/// RISC-V 架构使用 asm-generic 定义，NCCS=19，TCGETS 只传输
+/// 这个 36 字节结构。输入/输出速度字段属于 struct termios2。
 ///
 /// 内存布局：
 /// - offset 0-15:  c_iflag, c_oflag, c_cflag, c_lflag (4 * u32 = 16 bytes)
 /// - offset 16:    c_line (u8 = 1 byte)
 /// - offset 17-35: c_cc\[19\] (19 * u8 = 19 bytes)
-/// - offset 36-39: c_ispeed (u32 = 4 bytes, 对齐到4字节边界)
-/// - offset 40-43: c_ospeed (u32 = 4 bytes)
-///   总大小：44字节
+///   总大小：36字节
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Termios {
@@ -263,11 +266,24 @@ pub struct Termios {
     pub c_line: u8,
     /// 特殊控制字符 [NCCS=19]
     pub c_cc: [u8; NCCS],
-    /// 输入波特率（注意：musl 在此之前有3字节padding使其对齐到4字节边界）
+}
+
+const _: () = assert!(core::mem::size_of::<Termios>() == 36);
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Termios2 {
+    pub c_iflag: u32,
+    pub c_oflag: u32,
+    pub c_cflag: u32,
+    pub c_lflag: u32,
+    pub c_line: u8,
+    pub c_cc: [u8; NCCS],
     pub c_ispeed: u32,
-    /// 输出波特率
     pub c_ospeed: u32,
 }
+
+const _: () = assert!(core::mem::size_of::<Termios2>() == 44);
 
 impl Termios {
     /// 默认终端配置常量
@@ -278,8 +294,8 @@ impl Termios {
         c_iflag: 0x0100,
         // 输出模式：OPOST | ONLCR (启用输出处理，将 NL 转换为 CR-NL)
         c_oflag: 0x0001 | 0x0004,
-        // 控制模式：CS8 | CREAD (8位字符，允许接收)
-        c_cflag: 0x0030 | 0x0080,
+        // 控制模式：B38400 | CS8 | CREAD
+        c_cflag: 0x000f | 0x0030 | 0x0080,
         // 本地模式：ISIG | ICANON | ECHO | ECHOE
         c_lflag: 0x0001 | 0x0002 | 0x0008 | 0x0010,
         // 行规程：0 (N_TTY)
@@ -309,9 +325,6 @@ impl Termios {
             0,   // 17: 保留
             0,   // 18: 保留
         ],
-        // 波特率：38400 (B38400 = 0x0000000f)
-        c_ispeed: 0x0000000f,
-        c_ospeed: 0x0000000f,
     };
 }
 

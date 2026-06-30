@@ -161,6 +161,35 @@ impl MemorySpace {
         Ok(())
     }
 
+    /// Write bytes to a userspace address only if each target page is user-writable.
+    pub fn write_user_bytes_at(&mut self, va: usize, bytes: &[u8]) -> Result<(), PagingError> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        let mut written = 0usize;
+        while written < bytes.len() {
+            let cur_va = va.checked_add(written).ok_or(PagingError::InvalidAddress)?;
+            let vpn = Vpn::from_addr_floor(VA::from_usize(cur_va));
+            let (ppn, _page_size, flags) = self.page_table.walk(vpn)?;
+            if !flags.contains(UniversalPTEFlag::USER_ACCESSIBLE)
+                || !flags.contains(UniversalPTEFlag::WRITEABLE)
+            {
+                return Err(PagingError::PermissionDenied);
+            }
+
+            let page_off = cur_va & (PAGE_SIZE - 1);
+            let take = core::cmp::min(bytes.len() - written, PAGE_SIZE - page_off);
+            let dst = (crate::arch::pa_to_va(ppn.start_addr()).as_usize() + page_off) as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(bytes[written..].as_ptr(), dst, take);
+            }
+            written += take;
+        }
+
+        Ok(())
+    }
+
     /// 从指定虚拟地址读取字节序列（跨页安全）。
     pub fn read_bytes_at(&self, va: usize, out: &mut [u8]) -> Result<(), PagingError> {
         if out.is_empty() {

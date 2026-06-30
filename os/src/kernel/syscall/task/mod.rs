@@ -19,7 +19,7 @@ use crate::{
         TaskManagerTrait, TaskState, TaskStruct, TimerEntry, current_cpu, current_task,
         exit_process, schedule, sleep_task, sleep_task_prepare,
         syscall::util::{get_args_safe, get_path_safe},
-        time::{REALTIME, realtime_now},
+        time::realtime_now,
         yield_task,
     },
     mm::{

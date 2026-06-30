@@ -6,8 +6,9 @@
 
 - 全局分配器是 `FRAME_ALLOCATOR: SpinLock<FrameAllocator>`.
 - 初始化范围来自 `mm::init()` 计算出的 `[start_ppn, end_ppn)`.
-- 单页分配优先使用回收栈, 回收栈为空时从水位线 `cur` 向上分配.
-- 连续页分配只从水位线之后的连续区域分配, 不在回收栈中做复杂拼接.
+- 分配器使用位图记录每个物理页帧状态: bit 为 0 表示空闲, bit 为 1 表示已分配.
+- 单页分配从 `last_alloc_hint` 附近开始扫描位图, 找到第一个空闲页后置位.
+- 连续页分配扫描位图中的连续空闲区间, 因此释放后的连续空洞可以再次被复用.
 - `FrameTracker` 和 `FrameRangeTracker` 在创建时清零物理页, 在 drop 时自动归还.
 
 ## 目标
@@ -33,18 +34,18 @@
 
 ### 单页分配
 
-1. 先从 `recycled` 弹出被归还的页.
-2. 如果没有可回收页, 且 `cur < end`, 使用 `cur` 并前移水位线.
+1. 从 `last_alloc_hint` 指向的 bitmap word 开始循环扫描.
+2. 跳过全满 word, 对非满 word 找第一个 0 bit.
 3. 新 tracker 创建时清零整页.
 4. 无页可用时返回 `None`.
 
-### 回收与合并
+### 回收
 
-归还页会被加入 `recycled` 并排序.如果回收栈末尾正好贴近 `cur`, 分配器会把连续尾部并回水位线, 让未来连续分配重新利用这段空间.
+归还页会清除 bitmap 中对应 bit.调试构建下会检查页号范围和 double free.
 
 ### 连续分配
 
-连续分配只检查当前水位线之后是否有足够页.带对齐的连续分配会把水位线向上对齐, 中间跳过的页加入回收栈.
+连续分配从 bitmap 起点扫描连续 0 bit.带对齐的连续分配只接受起始页号满足 `align_pages` 对齐的连续空闲区间.
 
 ## 并发与生命周期约束
 
@@ -55,8 +56,8 @@
 
 ## 已知限制
 
-- 回收栈排序是简单实现, 在大量回收时成本会升高.
-- 连续分配不从回收栈组合碎片, 长时间运行后连续大块可能更难获得.
+- 位图容量目前按 8GiB 可管理物理内存静态预留, 避免帧分配器初始化早于堆初始化时依赖 `Vec`.
+- 连续分配仍需线性扫描位图; 大内存和高碎片场景下成本高于伙伴系统.
 - 调试检查依赖 `debug_assert!`, release 构建下不会阻止错误归还.
 
 ## 源码索引
@@ -64,8 +65,4 @@
 - `os/src/mm/frame_allocator/mod.rs:15` - 公共分配入口.
 - `os/src/mm/frame_allocator/allocator.rs:14` - `FrameTracker`.
 - `os/src/mm/frame_allocator/allocator.rs:45` - `FrameRangeTracker`.
-- `os/src/mm/frame_allocator/allocator.rs:96` - 全局 `FRAME_ALLOCATOR`.
-- `os/src/mm/frame_allocator/allocator.rs:100` - `FrameAllocator` 状态.
-- `os/src/mm/frame_allocator/allocator.rs:124` - 单页分配策略.
-- `os/src/mm/frame_allocator/allocator.rs:163` - 连续帧分配.
-- `os/src/mm/frame_allocator/allocator.rs:222` - 回收与尾部合并.
+- `os/src/mm/frame_allocator/allocator.rs` - tracker 类型, 全局 `FRAME_ALLOCATOR`, bitmap 状态和分配/回收策略.

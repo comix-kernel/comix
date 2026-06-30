@@ -1,4 +1,5 @@
 use super::*;
+use crate::arch::task::ExecTlsTemplate;
 
 /// 执行一个新程序（execve）
 /// # 参数
@@ -99,7 +100,7 @@ pub fn execve(
     };
 
     // 解析 ELF 并准备新的地址空间（但不切换）
-    let (space, initial_pc, sp, phdr_addr, phnum, phent, at_base, at_entry) =
+    let (space, initial_pc, sp, phdr_addr, phnum, phent, at_base, at_entry, tls) =
         match do_execve_prepare(&exec_path_str) {
             Ok(res) => res,
             Err(e) => return e,
@@ -120,6 +121,7 @@ pub fn execve(
         phent,
         at_base,
         at_entry,
+        tls,
     )
 }
 
@@ -183,7 +185,20 @@ fn exec_non_file_errno(_inode_type: crate::vfs::InodeType) -> c_int {
 /// 执行一个新程序（execve）的准备阶段：解析 ELF 并创建新的地址空间
 fn do_execve_prepare(
     path: &str,
-) -> Result<(Arc<SpinLock<MemorySpace>>, VA, VA, VA, usize, usize, VA, VA), c_int> {
+) -> Result<
+    (
+        Arc<SpinLock<MemorySpace>>,
+        VA,
+        VA,
+        VA,
+        usize,
+        usize,
+        VA,
+        VA,
+        Option<ExecTlsTemplate>,
+    ),
+    c_int,
+> {
     let prepared = match crate::kernel::task::prepare_exec_image_from_path(path) {
         Ok(p) => p,
         Err(crate::kernel::task::ExecImageError::Fs(FsError::NotFound)) => return Err(-ENOENT),
@@ -208,6 +223,7 @@ fn do_execve_prepare(
         prepared.phent,
         prepared.at_base,
         prepared.at_entry,
+        prepared.tls,
     ))
 }
 
@@ -225,6 +241,7 @@ fn do_execve_switch(
     phent: usize,
     at_base: VA,
     at_entry: VA,
+    tls: Option<ExecTlsTemplate>,
 ) -> c_int {
     let task = current_task();
 
@@ -257,6 +274,7 @@ fn do_execve_switch(
             phent,
             at_base,
             at_entry,
+            tls,
         );
     } // argv_refs/envp_refs dropped here, ending borrow of argv/envp
 

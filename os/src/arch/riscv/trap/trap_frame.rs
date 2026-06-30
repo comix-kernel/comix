@@ -258,10 +258,13 @@ impl TrapFrame {
         self.kernel_sp = kernel_sp;
         self.x2_sp = user_sp;
 
-        // Set arguments
-        self.x10_a0 = argc;
-        self.x11_a1 = argv;
-        self.x12_a2 = envp;
+        // Linux RISC-V exec enters the ELF entry with argc/argv/envp on the
+        // user stack.  Static glibc uses the incoming a0 as rtld_fini, so it
+        // must be zero for a normal kernel exec.
+        let _ = (argc, argv, envp);
+        self.x10_a0 = 0;
+        self.x11_a1 = 0;
+        self.x12_a2 = 0;
 
         // x1_ra is 0
     }
@@ -281,6 +284,7 @@ impl TrapFrame {
             layout.argv.as_usize(),
             layout.envp.as_usize(),
         );
+        self.set_tls(layout.tls.as_usize());
     }
 
     /// 设置用户态 TLS/thread pointer。

@@ -1,3 +1,4 @@
+pub mod cmdline;
 pub mod cpuinfo;
 pub mod meminfo;
 pub mod mounts;
@@ -5,6 +6,7 @@ pub mod process;
 pub mod psmem;
 pub mod uptime;
 
+pub use cmdline::KernelCmdlineGenerator;
 pub use cpuinfo::CpuinfoGenerator;
 pub use meminfo::MeminfoGenerator;
 pub use mounts::MountsGenerator;

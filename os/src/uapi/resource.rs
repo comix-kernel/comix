@@ -3,7 +3,7 @@
 use core::ffi::c_long;
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 /// 进程或其子进程的资源使用统计。
 pub struct Rusage {
     /// ru_utime: 用户模式下消耗的 CPU 时间。
@@ -55,6 +55,8 @@ pub struct Rusage {
     pub ru_nivcsw: c_long,
 }
 
+const _: () = assert!(core::mem::size_of::<Rusage>() == 144);
+
 /// 资源限制值相关的定义。
 pub mod rlimit_value {
     /// 资源限制值类型，对应 C 语言中的 rlim_t，通常是 usize (64位无符号长整型)。
@@ -79,6 +81,13 @@ pub mod rlimit_value {
 use rlimit_value::*;
 
 use crate::uapi::time::timeval;
+
+/// 当前进程的资源使用统计。
+pub const RUSAGE_SELF: i32 = 0;
+/// 已等待回收子进程的资源使用统计。
+pub const RUSAGE_CHILDREN: i32 = -1;
+/// 当前线程的资源使用统计。
+pub const RUSAGE_THREAD: i32 = 1;
 
 /// 资源限制 ID (Resource limit IDs)
 /// 使用枚举封装 RLIMIT_* 宏，强制类型安全。

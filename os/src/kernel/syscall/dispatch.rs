@@ -138,6 +138,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_UNAME => sys_uname(frame),
         crate::kernel::syscall::numbers::SYS_SETHOSTNAME => sys_sethostname(frame),
         crate::kernel::syscall::numbers::SYS_GETRLIMIT => sys_getrlimit(frame),
+        crate::kernel::syscall::numbers::SYS_GETRUSAGE => sys_getrusage(frame),
         crate::kernel::syscall::numbers::SYS_SETRLIMIT => sys_setrlimit(frame),
         crate::kernel::syscall::numbers::SYS_UMASK => sys_umask(frame),
         crate::kernel::syscall::numbers::SYS_GETTIMEOFDAY => sys_gettimeofday(frame),
@@ -192,6 +193,8 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
         crate::kernel::syscall::numbers::SYS_MUNLOCK => sys_munlock(frame),
         crate::kernel::syscall::numbers::SYS_MLOCKALL => sys_mlockall(frame),
         crate::kernel::syscall::numbers::SYS_MUNLOCKALL => sys_munlockall(frame),
+        crate::kernel::syscall::numbers::SYS_MADVISE => sys_madvise(frame),
+        crate::kernel::syscall::numbers::SYS_GET_MEMPOLICY => sys_get_mempolicy(frame),
 
         // 文件系统同步 (续)
         crate::kernel::syscall::numbers::SYS_SYNCFS => sys_syncfs(frame),
@@ -210,7 +213,7 @@ pub fn dispatch_syscall(frame: &mut impl SyscallFrame) {
 
         _ => {
             frame.set_ret((-ENOSYS) as usize);
-            crate::pr_debug!("Unknown syscall: {}", frame.syscall_id());
+            crate::pr_warn!("Unknown syscall: {}", frame.syscall_id());
         }
     }
     crate::pr_debug!("syscall exit, return: {}", frame.arg0() as isize);

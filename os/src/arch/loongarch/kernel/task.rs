@@ -5,7 +5,11 @@ use core::{mem::size_of, ptr};
 
 use super::context::TaskContext;
 use crate::{
-    arch::{address::VA, constant::STACK_ALIGN_MASK, task::ExecStackLayout},
+    arch::{
+        address::VA,
+        constant::STACK_ALIGN_MASK,
+        task::{ExecStackLayout, ExecTlsTemplate},
+    },
     config::PAGE_SIZE,
     mm::{frame_allocator::FrameTracker, memory_space::MemorySpace},
 };
@@ -201,6 +205,7 @@ pub fn setup_exec_stack_layout(
     phent: usize,
     at_base: VA,
     at_entry: VA,
+    _tls: Option<ExecTlsTemplate>,
 ) -> ExecStackLayout {
     let (sp, argc, argv, envp, tls) = setup_stack_layout(
         space,

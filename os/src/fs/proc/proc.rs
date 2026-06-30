@@ -22,11 +22,20 @@ impl ProcFS {
     /// 初始化 proc 文件系统树结构
     pub fn init_tree(self: &Arc<Self>) -> Result<(), FsError> {
         use crate::fs::proc::generators::{
-            CpuinfoGenerator, MeminfoGenerator, MountsGenerator, UptimeGenerator,
+            CpuinfoGenerator, KernelCmdlineGenerator, MeminfoGenerator, MountsGenerator,
+            UptimeGenerator,
         };
         use crate::kernel::current_task;
 
         let root = &self.root_inode;
+
+        // 创建 /proc/cmdline
+        let cmdline = ProcInode::new_dynamic_file(
+            "cmdline",
+            alloc::sync::Arc::new(KernelCmdlineGenerator),
+            FileMode::from_bits_truncate(0o444),
+        );
+        root.add_child("cmdline", cmdline)?;
 
         // 创建 /proc/meminfo
         let meminfo = ProcInode::new_dynamic_file(

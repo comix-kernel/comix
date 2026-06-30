@@ -9,9 +9,15 @@ use crate::{
         scheduler::{Scheduler, SwitchPlan, TaskQueue},
         task::SharedTask,
     },
+    uapi::sched::{SCHED_BATCH, SCHED_FIFO, SCHED_IDLE, SCHED_NORMAL, SCHED_RR},
 };
 
-const DEFAULT_TIME_SLICE: usize = 1; // 默认时间片长度
+const DEFAULT_TIME_SLICE: usize = 1; // fair 类默认时间片长度
+const RT_RR_TIME_SLICE: usize = 4;
+const FAIR_TARGET_LATENCY: usize = 8;
+const FAIR_MIN_GRANULARITY: usize = 2;
+const FAIR_BATCH_GRANULARITY: usize = 4;
+const FAIR_IDLE_GRANULARITY: usize = 8;
 
 /// 简单的轮转调度器实现
 /// 每个任务按顺序轮流获得 CPU 时间片
@@ -19,8 +25,10 @@ const DEFAULT_TIME_SLICE: usize = 1; // 默认时间片长度
 /// 1. 要求开始调度后任何时刻，至少有一个任务处于运行状态
 // XXX: 现在的实现是单核的。且没有支持内核抢占。
 pub struct RRScheduler {
-    // 运行队列
-    run_queue: TaskQueue,
+    // realtime 运行队列：SCHED_FIFO / SCHED_RR
+    rt_queue: TaskQueue,
+    // fair 运行队列：SCHED_NORMAL / SCHED_BATCH / SCHED_IDLE
+    fair_queue: TaskQueue,
     // 时间片长度（以时钟中断滴答数为单位）
     time_slice: usize,
     // 当前时间片剩余时间
@@ -32,7 +40,8 @@ impl RRScheduler {
     /// 用于静态数组初始化
     pub const fn empty() -> Self {
         RRScheduler {
-            run_queue: TaskQueue::empty(),
+            rt_queue: TaskQueue::empty(),
+            fair_queue: TaskQueue::empty(),
             time_slice: DEFAULT_TIME_SLICE,
             current_slice: DEFAULT_TIME_SLICE,
         }
@@ -40,18 +49,29 @@ impl RRScheduler {
 
     /// 获取调度器中的任务数量
     pub fn task_count(&self) -> usize {
-        self.run_queue.len()
+        self.rt_queue.len() + self.fair_queue.len()
     }
 
     /// 检查调度器是否为空
     pub fn is_empty(&self) -> bool {
-        self.run_queue.is_empty()
+        self.rt_queue.is_empty() && self.fair_queue.is_empty()
     }
 
-    /// 更新当前时间片计数器
-    /// # 返回值
-    /// 如果时间片用尽，返回 true；否则返回 false
+    /// 更新当前时间片计数器。
+    ///
+    /// 返回 true 表示当前任务应该让调度器重新选择。SCHED_FIFO 不因
+    /// 普通时钟 tick 被轮转；SCHED_RR 和 fair 类任务仍使用时间片。
     pub fn update_time_slice(&mut self) -> bool {
+        Self::charge_current_fair_task();
+
+        if self.should_preempt_for_rt() {
+            return true;
+        }
+
+        if Self::current_task_policy() == Some(SCHED_FIFO) {
+            return false;
+        }
+
         if self.current_slice > 0 {
             self.current_slice -= 1;
         }
@@ -59,15 +79,115 @@ impl RRScheduler {
     }
 
     /// 重置时间片（在任务切换后调用）
-    fn reset_time_slice(&mut self) {
-        self.current_slice = self.time_slice;
+    fn reset_time_slice(&mut self, task: &SharedTask) {
+        self.current_slice = self.task_time_slice(task);
+    }
+
+    fn is_realtime_task(task: &SharedTask) -> bool {
+        let task = task.lock();
+        matches!(task.sched_policy, SCHED_FIFO | SCHED_RR) && task.sched_priority > 0
+    }
+
+    fn enqueue_task(&mut self, task: SharedTask) {
+        let policy = { task.lock().sched_policy };
+        match policy {
+            SCHED_FIFO | SCHED_RR if Self::is_realtime_task(&task) => self.rt_queue.add_task(task),
+            SCHED_NORMAL | SCHED_BATCH | SCHED_IDLE | SCHED_FIFO | SCHED_RR => {
+                self.clamp_fair_vruntime(&task);
+                self.fair_queue.add_task(task)
+            }
+            _ => {
+                self.clamp_fair_vruntime(&task);
+                self.fair_queue.add_task(task)
+            }
+        }
+    }
+
+    fn remove_queued_task(&mut self, task: &SharedTask) {
+        self.rt_queue.remove_task(task);
+        self.fair_queue.remove_task(task);
+    }
+
+    fn contains_queued_task(&self, task: &SharedTask) -> bool {
+        self.rt_queue.contains(task) || self.fair_queue.contains(task)
+    }
+
+    fn pop_next_queued_task(&mut self) -> Option<SharedTask> {
+        self.rt_queue
+            .pop_highest_priority_task()
+            .or_else(|| self.fair_queue.pop_min_vruntime_task())
+    }
+
+    fn should_preempt_for_rt(&self) -> bool {
+        let Some(best_rt_priority) = self.rt_queue.highest_sched_priority() else {
+            return false;
+        };
+        let current_task = current_cpu().current_task.as_ref().cloned();
+        let Some(current_task) = current_task else {
+            return true;
+        };
+        let current_task = current_task.lock();
+        if !matches!(current_task.sched_policy, SCHED_FIFO | SCHED_RR)
+            || current_task.sched_priority <= 0
+        {
+            return true;
+        }
+        best_rt_priority > current_task.sched_priority
+    }
+
+    fn current_task_policy() -> Option<i32> {
+        current_cpu()
+            .current_task
+            .as_ref()
+            .map(|task| task.lock().sched_policy)
+    }
+
+    fn task_time_slice(&self, task: &SharedTask) -> usize {
+        match task.lock().sched_policy {
+            SCHED_RR => RT_RR_TIME_SLICE,
+            SCHED_NORMAL => self.fair_time_slice(FAIR_MIN_GRANULARITY),
+            SCHED_BATCH => self.fair_time_slice(FAIR_BATCH_GRANULARITY),
+            SCHED_IDLE => self.fair_time_slice(FAIR_IDLE_GRANULARITY),
+            _ => DEFAULT_TIME_SLICE,
+        }
+    }
+
+    fn fair_time_slice(&self, min_granularity: usize) -> usize {
+        let runnable = (self.fair_queue.len() + 1).max(1);
+        let slice = FAIR_TARGET_LATENCY / runnable;
+        slice.max(min_granularity)
+    }
+
+    fn clamp_fair_vruntime(&self, task: &SharedTask) {
+        let Some(min_vruntime) = self.fair_queue.min_vruntime() else {
+            return;
+        };
+        let mut task = task.lock();
+        if task.vruntime < min_vruntime {
+            task.vruntime = min_vruntime;
+        }
+    }
+
+    fn charge_current_fair_task() {
+        let Some(current_task) = current_cpu().current_task.as_ref().cloned() else {
+            return;
+        };
+        let mut task = current_task.lock();
+        let vruntime_delta = match task.sched_policy {
+            SCHED_NORMAL | SCHED_BATCH => 1,
+            SCHED_IDLE => 8,
+            _ => 0,
+        };
+        task.exec_ticks = task.exec_ticks.saturating_add(1);
+        task.vruntime = task.vruntime.saturating_add(vruntime_delta);
     }
 }
 
 impl Scheduler for RRScheduler {
     fn new() -> Self {
         RRScheduler {
-            run_queue: TaskQueue::new(),
+            rt_queue: TaskQueue::new(),
+            fair_queue: TaskQueue::new(),
             time_slice: DEFAULT_TIME_SLICE,
             current_slice: DEFAULT_TIME_SLICE,
         }
@@ -80,11 +200,11 @@ impl Scheduler for RRScheduler {
         crate::pr_debug!(
             "[Scheduler] CPU {} next_task called, queue size: {}",
             cpu_id,
-            self.run_queue.len()
+            self.task_count()
         );
 
         // 选择下一个可运行任务
-        let next_task = match self.run_queue.pop_highest_priority_task() {
+        let next_task = match self.pop_next_queued_task() {
             Some(t) => t,
             None => {
                 // 没有可运行任务：
@@ -152,7 +272,7 @@ impl Scheduler for RRScheduler {
         {
             let still_running = { prev_task.lock().state == TaskState::Running };
             if still_running {
-                self.run_queue.add_task(prev_task.clone());
+                self.enqueue_task(prev_task.clone());
             }
         }
 
@@ -161,7 +281,7 @@ impl Scheduler for RRScheduler {
             let cpu_id = crate::arch::cpu_id();
             next_task.lock().on_cpu = Some(cpu_id);
         }
-        self.reset_time_slice();
+        self.reset_time_slice(&next_task);
 
         Some(SwitchPlan {
             old: old_ctx_ptr,
@@ -176,11 +296,11 @@ impl Scheduler for RRScheduler {
         };
         match state {
             TaskState::Running => {
-                self.run_queue.add_task(task);
+                self.enqueue_task(task);
                 crate::pr_debug!(
                     "[Scheduler] Task {} added to run queue, new size: {}",
                     tid,
-                    self.run_queue.len()
+                    self.task_count()
                 );
             }
             _ => {
@@ -198,7 +318,7 @@ impl Scheduler for RRScheduler {
             };
         }
 
-        self.run_queue.remove_task(&task);
+        self.remove_queued_task(&task);
     }
 
     fn wake_up(&mut self, task: SharedTask) {
@@ -206,8 +326,8 @@ impl Scheduler for RRScheduler {
             task.lock().state = TaskState::Running;
         }
 
-        if !self.run_queue.contains(&task) {
-            self.run_queue.add_task(task);
+        if !self.contains_queued_task(&task) {
+            self.enqueue_task(task);
         }
     }
 
@@ -216,7 +336,7 @@ impl Scheduler for RRScheduler {
             task.lock().state = TaskState::Zombie;
         }
 
-        self.run_queue.remove_task(&task);
+        self.remove_queued_task(&task);
     }
 
     fn sleep_task_prepare(
@@ -234,7 +354,7 @@ impl Scheduler for RRScheduler {
         } else {
             TaskState::Uninterruptible
         };
-        self.run_queue.remove_task(&task);
+        self.remove_queued_task(&task);
         true // 已进入睡眠
     }
 }
@@ -325,7 +445,7 @@ mod tests {
             let g = t.lock();
             kassert!(matches!(g.state, TaskState::Uninterruptible));
         }
-        kassert!(!rr.run_queue.contains(&t));
+        kassert!(!rr.contains_queued_task(&t));
 
         // 唤醒
         rr.wake_up(t.clone());
@@ -333,7 +453,7 @@ mod tests {
             let g = t.lock();
             kassert!(matches!(g.state, TaskState::Running));
         }
-        kassert!(rr.run_queue.contains(&t));
+        kassert!(rr.contains_queued_task(&t));
     });
 
     // 任务退出：应设置状态为 Zombie，并从队列移除
@@ -352,7 +472,7 @@ mod tests {
             let g = t.lock();
             kassert!(matches!(g.state, TaskState::Zombie));
         }
-        kassert!(!rr.run_queue.contains(&t));
+        kassert!(!rr.contains_queued_task(&t));
     });
 
     // 时间片更新：手动将 current_slice 置 1，update 后应递减到 0 并报告到期。

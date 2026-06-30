@@ -208,7 +208,7 @@ impl_syscall!(sys_rt_sigsuspend, rt_sigsuspend, (*const SigSetT, c_uint));
 impl_syscall!(
     sys_rt_sigaction,
     rt_sigaction,
-    (c_int, *const SignalAction, *mut SignalAction)
+    (c_int, *const SignalAction, *mut SignalAction, c_uint)
 );
 impl_syscall!(
     sys_rt_sigprocmask,
@@ -239,6 +239,7 @@ impl_syscall!(sys_setpgid, set_pgid, (c_int, c_int));
 impl_syscall!(sys_uname, uname, (*mut UtsNamespace));
 impl_syscall!(sys_sethostname, set_hostname, (*const c_char, usize));
 impl_syscall!(sys_getrlimit, getrlimit, (c_int, *mut Rlimit));
+impl_syscall!(sys_getrusage, getrusage, (c_int, *mut Rusage));
 impl_syscall!(sys_setrlimit, setrlimit, (c_int, *const Rlimit));
 impl_syscall!(sys_umask, umask, (u32));
 impl_syscall!(
@@ -327,6 +328,12 @@ impl_syscall!(sys_mlock, mlock, (*const c_void, usize));
 impl_syscall!(sys_munlock, munlock, (*const c_void, usize));
 impl_syscall!(sys_mlockall, mlockall, (i32));
 impl_syscall!(sys_munlockall, munlockall, ());
+impl_syscall!(sys_madvise, madvise, (*mut c_void, usize, c_int));
+impl_syscall!(
+    sys_get_mempolicy,
+    get_mempolicy,
+    (*mut i32, *mut usize, usize, *const c_void, usize)
+);
 
 // 文件系统同步 (续)
 impl_syscall!(sys_syncfs, syncfs, (usize));
