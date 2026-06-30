@@ -14,6 +14,10 @@ use crate::{
 
 const DEFAULT_TIME_SLICE: usize = 1; // fair 类默认时间片长度
 const RT_RR_TIME_SLICE: usize = 4;
+const FAIR_TARGET_LATENCY: usize = 8;
+const FAIR_MIN_GRANULARITY: usize = 2;
+const FAIR_BATCH_GRANULARITY: usize = 4;
+const FAIR_IDLE_GRANULARITY: usize = 8;
 
 /// 简单的轮转调度器实现
 /// 每个任务按顺序轮流获得 CPU 时间片
@@ -76,7 +80,7 @@ impl RRScheduler {
 
     /// 重置时间片（在任务切换后调用）
     fn reset_time_slice(&mut self, task: &SharedTask) {
-        self.current_slice = Self::task_time_slice(task);
+        self.current_slice = self.task_time_slice(task);
     }
 
     fn is_realtime_task(task: &SharedTask) -> bool {
@@ -138,11 +142,20 @@ impl RRScheduler {
             .map(|task| task.lock().sched_policy)
     }
 
-    fn task_time_slice(task: &SharedTask) -> usize {
+    fn task_time_slice(&self, task: &SharedTask) -> usize {
         match task.lock().sched_policy {
             SCHED_RR => RT_RR_TIME_SLICE,
+            SCHED_NORMAL => self.fair_time_slice(FAIR_MIN_GRANULARITY),
+            SCHED_BATCH => self.fair_time_slice(FAIR_BATCH_GRANULARITY),
+            SCHED_IDLE => self.fair_time_slice(FAIR_IDLE_GRANULARITY),
             _ => DEFAULT_TIME_SLICE,
         }
+    }
+
+    fn fair_time_slice(&self, min_granularity: usize) -> usize {
+        let runnable = (self.fair_queue.len() + 1).max(1);
+        let slice = FAIR_TARGET_LATENCY / runnable;
+        slice.max(min_granularity)
     }
 
     fn clamp_fair_vruntime(&self, task: &SharedTask) {
