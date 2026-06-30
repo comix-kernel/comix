@@ -91,6 +91,10 @@ pub struct Task {
     pub sched_priority: i32,
     /// fork/clone 时是否将子任务调度属性重置为普通策略。
     pub sched_reset_on_fork: bool,
+    /// fair 调度类的虚拟运行时间。数值越小越应该被调度。
+    pub vruntime: u64,
+    /// 累计运行 tick，用于调度统计与调试。
+    pub exec_ticks: u64,
     /// Linux-ish OOM badness adjustment exposed through /proc/[pid]/oom_score_adj.
     pub oom_score_adj: i32,
     /// 任务当前的状态
@@ -433,6 +437,8 @@ impl Task {
             sched_policy: SCHED_NORMAL,
             sched_priority: 0,
             sched_reset_on_fork: false,
+            vruntime: 0,
+            exec_ticks: 0,
             oom_score_adj: 0,
             state: TaskState::Running,
             tid,

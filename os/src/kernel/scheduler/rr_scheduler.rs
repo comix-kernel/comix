@@ -58,6 +58,8 @@ impl RRScheduler {
     /// 返回 true 表示当前任务应该让调度器重新选择。SCHED_FIFO 不因
     /// 普通时钟 tick 被轮转；SCHED_RR 和 fair 类任务仍使用时间片。
     pub fn update_time_slice(&mut self) -> bool {
+        Self::charge_current_fair_task();
+
         if self.should_preempt_for_rt() {
             return true;
         }
@@ -87,9 +89,13 @@ impl RRScheduler {
         match policy {
             SCHED_FIFO | SCHED_RR if Self::is_realtime_task(&task) => self.rt_queue.add_task(task),
             SCHED_NORMAL | SCHED_BATCH | SCHED_IDLE | SCHED_FIFO | SCHED_RR => {
+                self.clamp_fair_vruntime(&task);
                 self.fair_queue.add_task(task)
             }
-            _ => self.fair_queue.add_task(task),
+            _ => {
+                self.clamp_fair_vruntime(&task);
+                self.fair_queue.add_task(task)
+            }
         }
     }
 
@@ -105,7 +111,7 @@ impl RRScheduler {
     fn pop_next_queued_task(&mut self) -> Option<SharedTask> {
         self.rt_queue
             .pop_highest_priority_task()
-            .or_else(|| self.fair_queue.pop_task())
+            .or_else(|| self.fair_queue.pop_min_vruntime_task())
     }
 
     fn should_preempt_for_rt(&self) -> bool {
@@ -137,6 +143,30 @@ impl RRScheduler {
             SCHED_RR => RT_RR_TIME_SLICE,
             _ => DEFAULT_TIME_SLICE,
         }
+    }
+
+    fn clamp_fair_vruntime(&self, task: &SharedTask) {
+        let Some(min_vruntime) = self.fair_queue.min_vruntime() else {
+            return;
+        };
+        let mut task = task.lock();
+        if task.vruntime < min_vruntime {
+            task.vruntime = min_vruntime;
+        }
+    }
+
+    fn charge_current_fair_task() {
+        let Some(current_task) = current_cpu().current_task.as_ref().cloned() else {
+            return;
+        };
+        let mut task = current_task.lock();
+        let vruntime_delta = match task.sched_policy {
+            SCHED_NORMAL | SCHED_BATCH => 1,
+            SCHED_IDLE => 8,
+            _ => 0,
+        };
+        task.exec_ticks = task.exec_ticks.saturating_add(1);
+        task.vruntime = task.vruntime.saturating_add(vruntime_delta);
     }
 }
 

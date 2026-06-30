@@ -48,6 +48,28 @@ impl TaskQueue {
         }
     }
 
+    /// 弹出 vruntime 最小的任务；同 vruntime 保持 FIFO。
+    pub fn pop_min_vruntime_task(&mut self) -> Option<SharedTask> {
+        let mut best: Option<(usize, u64)> = None;
+
+        for (idx, task) in self.queue.iter().enumerate() {
+            let vruntime = task.lock().vruntime;
+            if match best {
+                Some((_, best_vruntime)) => vruntime < best_vruntime,
+                None => true,
+            } {
+                best = Some((idx, vruntime));
+            }
+        }
+
+        best.map(|(idx, _)| self.queue.remove(idx))
+    }
+
+    /// 返回队列中最小 vruntime。
+    pub fn min_vruntime(&self) -> Option<u64> {
+        self.queue.iter().map(|task| task.lock().vruntime).min()
+    }
+
     /// 弹出最高 realtime 优先级任务；同优先级保持 FIFO。
     pub fn pop_highest_priority_task(&mut self) -> Option<SharedTask> {
         let mut best: Option<(usize, i32)> = None;
