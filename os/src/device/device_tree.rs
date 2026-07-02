@@ -3,7 +3,10 @@
 use crate::{
     device::{CMDLINE, irq::IntcDriver},
     kernel::{clock_freq, num_cpu, set_clock_freq, set_num_cpu},
-    mm::address::{ConvertablePA, PA},
+    mm::{
+        address::{ConvertablePA, PA, PageNum, Ppn, UsizeConvert},
+        frame_allocator::{FrameRegion, MAX_FRAME_REGIONS},
+    },
     pr_info, pr_warn,
     sync::SpinLock,
 };
@@ -135,7 +138,7 @@ pub fn dram_info() -> Option<(usize, usize)> {
     let mut end = 0usize;
 
     for region in FDT.memory().regions() {
-        let s = region.starting_address as usize;
+        let s = normalize_dram_addr(region.starting_address as usize);
         let size = region.size.unwrap_or(0);
         let e = s.saturating_add(size);
         if size == 0 {
@@ -154,4 +157,108 @@ pub fn dram_info() -> Option<(usize, usize)> {
     } else {
         None
     }
+}
+
+pub fn dram_regions() -> ([FrameRegion; MAX_FRAME_REGIONS], usize) {
+    let mut regions = [FrameRegion::new(Ppn::from_usize(0), 0); MAX_FRAME_REGIONS];
+    let mut count = 0;
+
+    for region in FDT.memory().regions() {
+        let raw_start = region.starting_address as usize;
+        let size = region.size.unwrap_or(0);
+        if size == 0 {
+            continue;
+        }
+        let start = normalize_dram_addr(raw_start);
+        let end = start.saturating_add(size);
+        let start_ppn = Ppn::from_addr_ceil(PA::from_usize(start));
+        let end_ppn = Ppn::from_addr_floor(PA::from_usize(end));
+        if start_ppn >= end_ppn {
+            continue;
+        }
+        push_dram_region(
+            &mut regions,
+            &mut count,
+            FrameRegion::new(start_ppn, end_ppn.as_usize() - start_ppn.as_usize()),
+            raw_start,
+            start,
+        );
+    }
+
+    (regions, count)
+}
+
+fn push_dram_region(
+    regions: &mut [FrameRegion; MAX_FRAME_REGIONS],
+    count: &mut usize,
+    region: FrameRegion,
+    raw_start: usize,
+    normalized_start: usize,
+) {
+    for idx in 0..*count {
+        if region.start() <= regions[idx].end() && region.end() >= regions[idx].start() {
+            let start = region.start().min(regions[idx].start());
+            let end = region.end().max(regions[idx].end());
+            regions[idx] = FrameRegion::new(start, end.as_usize() - start.as_usize());
+            coalesce_dram_regions(regions, count);
+            return;
+        }
+    }
+
+    if *count >= MAX_FRAME_REGIONS {
+        pr_warn!(
+            "[Device] ignoring extra DRAM region at {:#x} (normalized {:#x}), frame allocator capacity is {}",
+            raw_start,
+            normalized_start,
+            MAX_FRAME_REGIONS
+        );
+        return;
+    }
+
+    let mut idx = *count;
+    while idx > 0 && region.start() < regions[idx - 1].start() {
+        regions[idx] = regions[idx - 1];
+        idx -= 1;
+    }
+    regions[idx] = region;
+    *count += 1;
+    coalesce_dram_regions(regions, count);
+}
+
+fn coalesce_dram_regions(regions: &mut [FrameRegion; MAX_FRAME_REGIONS], count: &mut usize) {
+    let mut out = 0;
+    for idx in 0..*count {
+        let region = regions[idx];
+        if region.is_empty() {
+            continue;
+        }
+        if out > 0 && region.start() <= regions[out - 1].end() {
+            let start = regions[out - 1].start();
+            let end = regions[out - 1].end().max(region.end());
+            regions[out - 1] = FrameRegion::new(start, end.as_usize() - start.as_usize());
+        } else {
+            regions[out] = region;
+            out += 1;
+        }
+    }
+
+    for region in &mut regions[out..*count] {
+        *region = FrameRegion::new(Ppn::from_usize(0), 0);
+    }
+    *count = out;
+}
+
+fn normalize_dram_addr(addr: usize) -> usize {
+    #[cfg(target_arch = "loongarch64")]
+    {
+        let window = addr & 0xf000_0000_0000_0000;
+        if window == crate::arch::constant::DMW0_BASE
+            || window == crate::arch::constant::KERNEL_BASE
+        {
+            return unsafe { crate::arch::va_to_pa(crate::arch::address::VA::from_usize(addr)) }
+                .as_usize();
+        }
+    }
+
+    addr
 }

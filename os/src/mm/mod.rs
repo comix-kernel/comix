@@ -17,16 +17,22 @@ pub mod global_allocator;
 pub mod memory_space;
 pub mod page_table;
 
-pub use frame_allocator::init_frame_allocator;
+pub use frame_allocator::{FrameRegion, init_frame_allocator_regions};
 #[cfg(feature = "alloc")]
 pub use global_allocator::init_heap;
 
 use crate::arch::platform::MEMORY_END;
 use crate::config::PAGE_SIZE;
 use crate::mm::address::PA;
-use crate::mm::address::{Ppn, UsizeConvert};
+use crate::mm::address::{PageNum, Ppn, UsizeConvert};
 use crate::sync::SpinLock;
 use alloc::sync::Arc;
+
+/// 早期 4K 页 direct-map/allocator 管理窗口上限。
+///
+/// 在支持 huge page 之前，按 DTB 把 4G RAM 全量建 4K 页映射会让 RISC-V 启动极慢。
+/// 这里先限制启动期直接管理窗口，DTB 等窗口外对象由专门映射兜底覆盖。
+pub const MAX_EARLY_USABLE_PHYS_BYTES: usize = 1024 * 1024 * 1024; // 1GiB
 
 unsafe extern "C" {
     // 链接器脚本中定义的内核结束地址
@@ -53,49 +59,62 @@ pub fn init() -> alloc::sync::Arc<crate::sync::SpinLock<memory_space::MemorySpac
     // 分配器将管理 [start, end) 范围内的内存。
     let start = PA::from_usize(ekernel_paddr.as_usize().div_ceil(PAGE_SIZE) * PAGE_SIZE); // 页对齐
 
-    // 物理内存末端：优先采用设备树报告的真实 DRAM 范围，否则回退到编译期 MEMORY_END。
-    //
-    // 评测机通常给 1–2GB（本地复现甚至 -m 4G），QEMU 把 DTB 放在 RAM 顶端。若帧分配器只
-    // 覆盖 128MB（MEMORY_END），既无法管理评测所需的大内存，DTB 也会落在可映射范围之外。
-    // 必须与 kernel_space 的物理内存直映射上限保持一致（见 map_kernel_space）。
-    let dram_end = match crate::device::device_tree::dram_info() {
-        Some((dram_start, dram_size)) => {
-            let e = dram_start.saturating_add(dram_size);
-            crate::println!(
-                "[MM] DRAM from device tree: {:#x} - {:#x} (size {:#x})",
-                dram_start,
-                e,
-                dram_size
-            );
-            e
-        }
-        None => {
-            crate::println!(
-                "[MM] DRAM info unavailable, using MEMORY_END {:#x}",
-                MEMORY_END
-            );
-            MEMORY_END
-        }
-    };
+    let mut regions = [FrameRegion::new(Ppn::from_usize(0), 0); frame_allocator::MAX_FRAME_REGIONS];
+    let mut region_count = 0;
 
-    // LoongArch virt 在 DTB 中报告超大 RAM 窗口，且 LoongArch 通过 DMW 硬件直映射访问物理
-    // 内存（不经页表）；用 4K 页映射多 GB 既极慢又无意义。把帧分配器范围 cap 在 1GiB，
-    // 与 map_kernel_space 的直映射上限一致。RISC-V 不设上限，覆盖全部 DRAM。
-    let end_usize = {
-        #[cfg(target_arch = "loongarch64")]
-        {
-            const MAX_USABLE_PHYS_BYTES: usize = 1024 * 1024 * 1024; // 1GiB
-            dram_end.min(start.as_usize().saturating_add(MAX_USABLE_PHYS_BYTES))
-        }
-        #[cfg(not(target_arch = "loongarch64"))]
-        {
-            dram_end
-        }
-    };
-    let end = PA::from_usize(end_usize);
+    let cap_end = { start.as_usize().saturating_add(MAX_EARLY_USABLE_PHYS_BYTES) };
 
-    // 初始化物理帧分配器
-    init_frame_allocator(start, end);
+    let (dt_regions, dt_region_count) = crate::device::device_tree::dram_regions();
+    if dt_region_count != 0 {
+        for region in &dt_regions[..dt_region_count] {
+            let region_start = region.start().as_usize().saturating_mul(PAGE_SIZE);
+            let region_end = region.end().as_usize().saturating_mul(PAGE_SIZE);
+            let clipped_start = region_start.max(start.as_usize());
+            let clipped_end = region_end.min(cap_end);
+            if clipped_start >= clipped_end {
+                continue;
+            }
+            let start_ppn = Ppn::from_addr_ceil(PA::from_usize(clipped_start));
+            let end_ppn = Ppn::from_addr_floor(PA::from_usize(clipped_end));
+            if start_ppn >= end_ppn {
+                continue;
+            }
+            regions[region_count] =
+                FrameRegion::new(start_ppn, end_ppn.as_usize() - start_ppn.as_usize());
+            region_count += 1;
+        }
+    }
+
+    if region_count == 0 {
+        let fallback_end = MEMORY_END.min(cap_end);
+        assert!(
+            start.as_usize() < fallback_end,
+            "no usable DRAM regions after kernel image"
+        );
+        let start_ppn = Ppn::from_addr_ceil(start);
+        let end_ppn = Ppn::from_addr_floor(PA::from_usize(fallback_end));
+        assert!(
+            start_ppn < end_ppn,
+            "no usable DRAM regions after kernel image"
+        );
+        regions[0] = FrameRegion::new(start_ppn, end_ppn.as_usize() - start_ppn.as_usize());
+        region_count = 1;
+        crate::println!(
+            "[MM] no usable DTB DRAM region after kernel image, using fallback {:#x} - {:#x}",
+            start.as_usize(),
+            fallback_end
+        );
+    }
+
+    for region in &regions[..region_count] {
+        crate::println!(
+            "[MM] Usable DRAM region: {:#x} - {:#x} ({} pages)",
+            region.start().as_usize() * PAGE_SIZE,
+            region.end().as_usize() * PAGE_SIZE,
+            region.len()
+        );
+    }
+    init_frame_allocator_regions(&regions[..region_count]);
 
     // 2. 初始化堆分配器
     #[cfg(feature = "alloc")]

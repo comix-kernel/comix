@@ -95,46 +95,71 @@ impl MemorySpace {
             UniversalPTEFlag::kernel_rw(),
         )?;
 
-        // 5. 映射物理内存（从 ekernel 到物理内存末端的直接映射）
-        //
-        // 评测机可能使用较大的 -m（如 1G/4G），QEMU 把 DTB 放在 RAM 顶端（-m 4G 时约
-        // 0xbfe0_0000）。若只映射到编译期 MEMORY_END（128MB），切换页表后解引用 DTB 会缺页，
-        // 且帧分配器也无法管理评测所需的大内存。改用设备树报告的真实 DRAM 末端，并与帧分配器
-        // 范围保持一致（见 mm::init）。
+        // 5. 映射物理内存（按 DTB memory regions 逐段直接映射）。
         let ekernel_paddr = unsafe { crate::arch::va_to_pa(VA::from_usize(ekernel as usize)) };
+        let (dt_regions, dt_region_count) = crate::device::device_tree::dram_regions();
+        let cap_end = ekernel_paddr
+            .as_usize()
+            .saturating_add(crate::mm::MAX_EARLY_USABLE_PHYS_BYTES);
 
-        let phys_mem_end_paddr = match crate::device::device_tree::dram_info() {
-            Some((dram_start, dram_size)) => dram_start.saturating_add(dram_size),
-            None => MEMORY_END,
-        };
+        let mut mapped_any_dram = false;
+        if dt_region_count == 0 {
+            let fallback_end = MEMORY_END.min(cap_end);
+            let fallback_start = ekernel_paddr.as_usize().div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            if fallback_start < fallback_end {
+                mapped_any_dram = true;
+                Self::map_kernel_section(
+                    self,
+                    crate::arch::pa_to_va(PA::from_usize(fallback_start)).as_usize(),
+                    crate::arch::pa_to_va(PA::from_usize(fallback_end)).as_usize(),
+                    AreaType::KernelHeap,
+                    UniversalPTEFlag::kernel_rw(),
+                )?;
+            }
+        } else {
+            for region in &dt_regions[..dt_region_count] {
+                let region_start = region.start().as_usize().saturating_mul(PAGE_SIZE);
+                let region_end = region.end().as_usize().saturating_mul(PAGE_SIZE);
+                let clipped_start = region_start.max(ekernel_paddr.as_usize());
+                let clipped_end = region_end.min(cap_end);
+                if clipped_start >= clipped_end {
+                    continue;
+                }
 
-        // LoongArch virt 报告超大 RAM 窗口，用 4K 页映射多 GB 极慢；且 LoongArch 经 DMW 硬件
-        // 直映射访问物理内存（不经页表）。把直映射窗口 cap 在 1GiB，与帧分配器一致。RISC-V 不
-        // 设上限，覆盖全部 DRAM（确保 DTB 也在范围内）。
-        #[cfg(target_arch = "loongarch64")]
-        let phys_mem_end_paddr = {
-            const MAX_KERNEL_DIRECT_MAP_BYTES: usize = 1024 * 1024 * 1024; // 1GiB
-            let cap_end = ekernel_paddr
-                .as_usize()
-                .saturating_add(MAX_KERNEL_DIRECT_MAP_BYTES);
-            phys_mem_end_paddr.min(cap_end)
-        };
+                let phys_mem_start =
+                    Vpn::from_addr_ceil(crate::arch::pa_to_va(PA::from_usize(clipped_start)));
+                let phys_mem_end =
+                    Vpn::from_addr_floor(crate::arch::pa_to_va(PA::from_usize(clipped_end)));
+                if phys_mem_start >= phys_mem_end {
+                    continue;
+                }
 
-        let phys_mem_start_vaddr = crate::arch::pa_to_va(ekernel_paddr);
-        let phys_mem_end_vaddr = crate::arch::pa_to_va(PA::from_usize(phys_mem_end_paddr));
+                mapped_any_dram = true;
+                let mut phys_mem_area = MappingArea::new(
+                    VpnRange::new(phys_mem_start, phys_mem_end),
+                    AreaType::KernelHeap,
+                    MapType::Direct,
+                    UniversalPTEFlag::kernel_rw(),
+                    None,
+                );
+                phys_mem_area.map(&mut self.page_table)?;
+                self.areas.push(phys_mem_area);
+            }
+        }
 
-        let phys_mem_start = Vpn::from_addr_ceil(phys_mem_start_vaddr);
-        let phys_mem_end = Vpn::from_addr_floor(phys_mem_end_vaddr);
-        let mut phys_mem_area = MappingArea::new(
-            VpnRange::new(phys_mem_start, phys_mem_end),
-            AreaType::KernelHeap,
-            MapType::Direct,
-            UniversalPTEFlag::kernel_rw(),
-            None, // 内核直接映射，无文件
-        );
-
-        phys_mem_area.map(&mut self.page_table)?;
-        self.areas.push(phys_mem_area);
+        if !mapped_any_dram {
+            let fallback_end = MEMORY_END.min(cap_end);
+            let fallback_start = ekernel_paddr.as_usize().div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            if fallback_start < fallback_end {
+                Self::map_kernel_section(
+                    self,
+                    crate::arch::pa_to_va(PA::from_usize(fallback_start)).as_usize(),
+                    crate::arch::pa_to_va(PA::from_usize(fallback_end)).as_usize(),
+                    AreaType::KernelHeap,
+                    UniversalPTEFlag::kernel_rw(),
+                )?;
+            }
+        }
 
         // 确保 DTB 被映射（即使在上面 cap 了物理内存直映射窗口之后）。
         //
@@ -146,14 +171,11 @@ impl MemorySpace {
                 crate::device::device_tree::DTP.load(core::sync::atomic::Ordering::Acquire);
             if dtb_paddr != 0 {
                 let dtb_start = dtb_paddr & !(PAGE_SIZE - 1);
-                // 仅当 DTB 不在（可能被 cap 的）物理内存直映射窗口内时才单独映射。
-                if dtb_start < ekernel_paddr.as_usize() || dtb_start >= phys_mem_end_paddr {
-                    let dtb_vaddr = crate::arch::pa_to_va(PA::from_usize(dtb_start));
-                    let vpn = Vpn::from_addr_floor(dtb_vaddr);
-                    if self.find_area(vpn).is_none() {
-                        // 2MiB 足够覆盖 DTB（通常 < 1MiB），且对齐简单。
-                        self.map_mmio_region(dtb_vaddr, 2 * 1024 * 1024)?;
-                    }
+                let dtb_vaddr = crate::arch::pa_to_va(PA::from_usize(dtb_start));
+                let vpn = Vpn::from_addr_floor(dtb_vaddr);
+                if self.find_area(vpn).is_none() {
+                    // 2MiB 足够覆盖 DTB（通常 < 1MiB），且对齐简单。
+                    self.map_mmio_region(dtb_vaddr, 2 * 1024 * 1024)?;
                 }
             }
         }

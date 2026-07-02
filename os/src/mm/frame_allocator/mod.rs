@@ -15,7 +15,9 @@
 mod allocator;
 
 use alloc::vec::Vec;
-pub use allocator::{FrameRangeTracker, FrameTracker, TrackedFrames};
+pub use allocator::{
+    FrameRangeTracker, FrameRegion, FrameTracker, MAX_FRAME_REGIONS, TrackedFrames,
+};
 
 use crate::mm::address::{PA, PageNum, Ppn};
 use allocator::FRAME_ALLOCATOR;
@@ -34,6 +36,10 @@ pub fn init_frame_allocator(start_addr: PA, end_addr: PA) {
 
     let mut allocator = FRAME_ALLOCATOR.lock();
     allocator.init(start_ppn, end_ppn);
+}
+
+pub fn init_frame_allocator_regions(regions: &[FrameRegion]) {
+    FRAME_ALLOCATOR.lock().init_regions(regions);
 }
 
 /// 分配一个物理帧。
