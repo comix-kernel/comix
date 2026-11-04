@@ -10,6 +10,7 @@
 - 默认动作覆盖终止, core dump stub, stop, continue 和 ignore。
 - 用户 handler 通过构造 `rt_sigframe` 并修改 trap frame 进入用户态。
 - `rt_sigreturn` 从用户栈恢复被信号打断前的上下文。
+- RISC-V `ucontext` 在 `uc_sigmask` 和 `uc_mcontext` 之间按 Linux ABI 凑满 128 字节的信号掩码区域。musl 的线程取消处理按这个偏移读取 `REG_PC`。
 
 ## 目标
 

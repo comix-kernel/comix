@@ -8,6 +8,8 @@ LoongArch64 已接入公共启动流,用户态 exec 栈构造,trap 保存恢复,
 
 当前仍是单核架构路径.IPI 接口保留为 no-op 兼容层, 让通用调度代码不需要为 LoongArch 特判.
 
+用户态 `rcS` 在发现官方测试镜像后会运行其中的 musl 与 glibc 脚本。评测环境把官方输入镜像挂成 `/dev/vda`, 本仓库分区盘是 `/dev/vdb`; `data/loongarch_musl/etc/init.d/rcS` 只探测 `/dev/vda`。内核仍按内容选择含 `/bin/sh` 或 `/bin/ash` 的分区作为 rootfs, 不把 rootfs 写死成 `vda1`。
+
 ## 目标和非目标
 
 目标:

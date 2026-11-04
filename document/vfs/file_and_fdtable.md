@@ -7,6 +7,7 @@
 - `FDTable` 内部保存 fd 到 `Arc<dyn File>` 的映射, 并为每个 fd 保存 fd flags.
 - `File` trait 由普通文件, 管道, stdio, 字符设备文件和块设备文件实现.
 - 普通文件 `RegFile` 持有 `Dentry`, 通过 dentry 的 inode 读写.
+- 文件偏移放在 `Mutex<usize>` 里. `read`/`write` 可以在持有这把睡眠锁时进入 inode I/O, 不会因此持有自旋锁. 打开标志仍用 `SpinLock`, 写路径在进入 inode 前把标志复制出来.
 - `dup` 系列复制 fd slot, 但共享同一个 `Arc<dyn File>`.
 - `O_CLOEXEC` 会转换为 fd flag, exec 前由 fd table 清理.
 

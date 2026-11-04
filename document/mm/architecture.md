@@ -57,12 +57,13 @@ RISC-V 不接受没有 R/W/X 的普通叶子 PTE 作为可访问映射.当前设
 
 ## 初始化顺序
 
-1. `mm::init()` 计算可用物理内存范围.
-2. 初始化全局帧分配器.
-3. 初始化 talc 堆.
-4. 创建最终内核 `MemorySpace`.
-5. 保存全局内核空间句柄.
-6. 调用方在合适阶段激活根页表.
+1. `mm::init()` 把 `ekernel` 换成页对齐物理地址.
+2. 收集设备树中的 DRAM 区间, 裁到内核镜像之后, 并限制在起点后 1GiB 内. 没有可用区间时回退到 `MEMORY_END`.
+3. 用这些互不重叠的区间初始化全局帧分配器. 位图只覆盖可用帧, 不覆盖区间之间的物理空洞.
+4. 初始化 talc 堆.
+5. 创建最终内核 `MemorySpace`.
+6. 保存全局内核空间句柄.
+7. 调用方在合适阶段激活根页表.
 
 这个顺序保证页表创建所需的物理帧已可分配, 堆分配器可服务后续动态结构, 多 CPU 最终共享 CPU0 建好的内核映射.
 
@@ -91,19 +92,20 @@ RISC-V 不接受没有 R/W/X 的普通叶子 PTE 作为可访问映射.当前设
 - 线性 VMA 列表实现简单, 但大量映射下查找成本高.
 - fork 深拷贝简单可靠, 但比 COW 更耗时和耗内存.
 - RISC-V TLB 批处理减少 IPI 数量, LoongArch64 仍是较保守的本地刷新.
-- 连续物理帧分配不做复杂碎片整理, 保持实现简单.
+- 连续物理帧分配只在单个 DRAM 区间内线性找空洞, 不做跨区间搬运或复杂碎片整理.
 
 ## 已知限制
 
 - 大页, COW, VMA 树, per-CPU frame cache 和可增长内核堆都不是当前正式能力.
 - LoongArch64 和 RISC-V 的 TLB shootdown 能力不完全对齐.
-- 设备树 DRAM 信息缺失时仍会回退到编译期 `MEMORY_END`.
+- 设备树 DRAM 信息缺失或裁剪后没有可用页时, 仍会回退到编译期 `MEMORY_END`.
+- 可用物理内存目前封顶为内核镜像结束后的 1GiB, 即使设备树报告了更大的 DRAM.
 
 ## 源码索引
 
-- `os/src/mm/mod.rs:36` - 初始化编排.
+- `os/src/mm/mod.rs` - `init` 收集 DRAM 区间并初始化帧分配器.
 - `os/src/mm/address/` - 地址与页号类型系统.
-- `os/src/mm/frame_allocator/allocator.rs:100` - 帧分配器状态.
+- `os/src/mm/frame_allocator/allocator.rs` - `FrameAllocator` 的多段位图状态.
 - `os/src/mm/global_allocator/talc_alloc.rs:22` - talc 堆.
 - `os/src/mm/page_table/inner.rs:8` - 页表 trait 边界.
 - `os/src/mm/memory_space/mapping_area/mod.rs:52` - VMA 所有权边界.

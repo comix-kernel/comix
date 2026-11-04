@@ -6,7 +6,7 @@ SimpleFS 镜像打包工具
 
 将用户程序和目录打包成 SimpleFS 块设备镜像格式，用于 RamDisk 和 SimpleFS 文件系统。
 
-**位置**：`/workspaces/comix/scripts/make_init_simple_fs.py`
+**位置**：`scripts/make_init_simple_fs.py`
 
 ## 主要功能
 
@@ -83,9 +83,11 @@ python3 scripts/make_init_simple_fs.py --inspect os/simple_fs.img
 
 此脚本已集成到项目的构建流程中：
 
-### 自动调用
-- 在执行 `cargo build` 或 `cargo run` 时，由 `os/build.rs` 自动调用
-- 构建内核时会自动打包 `user/bin` 目录
+### 不会被内核构建自动调用
+
+`os/build.rs` 只生成空的 SimpleFS 占位镜像，并把它嵌进内核。它不调用本脚本，也不读取 `user/bin`。
+
+需要调试镜像时手动执行 `make build-user` 和 `make pack-simple-fs`。生成的 `os/simple_fs.img` 与内核嵌入的那份空镜像不是同一个文件。
 
 ### 手动调用
 ```bash

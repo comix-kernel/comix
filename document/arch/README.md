@@ -6,7 +6,7 @@
 
 Comix 目前支持 RISC-V64,LoongArch64 和宿主测试用 mock 架构.`os/src/arch/mod.rs` 是架构层唯一公开门面: 目标架构由条件编译选择, 内核其余模块通过 `crate::arch::*`,`ArchImpl`,`PlatformImpl` 和统一的 `TrapFrame` 类型访问架构能力.
 
-RISC-V64 的多核启动,软件中断 IPI,定时器中断和外部中断路径已经接入通用调度.LoongArch64 当前以单核 bringup 和用户态运行为主, 提供同名接口保持通用内核代码可复用, 但 IPI 和外部中断处理仍是后续工作.
+RISC-V64 的多核启动,软件中断 IPI,定时器中断和外部中断路径已经接入通用调度.LoongArch64 当前以单核 bringup 和用户态运行为主, 提供同名接口保持通用内核代码可复用, 但 IPI 和外部中断处理仍是后续工作.两个架构都能进入 `/sbin/init`, 并在官方测试镜像存在时由各自 rootfs 里的 `rcS` 运行 musl 与 glibc 脚本.
 
 ## 目标和非目标
 

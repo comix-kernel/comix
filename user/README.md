@@ -1,6 +1,6 @@
 # 用户态程序源码目录 (user)
 
-该目录包含可被内核嵌入并通过 `execve` 运行的 RISC-V 64 用户程序与支持库。
+该目录包含可选的 RISC-V 64 `no_std` 示例程序和一层很薄的系统调用库。评测 rootfs 不从这里生成，`make build` / `make all` 也不会编译这里的 crate。
 
 ## 目录结构
 - `lib/`：通用用户态支持库（系统调用封装等）
@@ -19,29 +19,19 @@ cargo build --release --target riscv64gc-unknown-none-elf
 产物：`target/riscv64gc-unknown-none-elf/release/hello` (ELF)
 
 ## 与内核集成
-目前内核通过 `include_bytes!` 方式嵌入生成的 ELF（已使用 `repr(align(8))` 保证 64 位 ELF 头 8 字节对齐）。添加新程序步骤：
-1. 在此目录新增 `<prog>/` crate（`cargo new --bin <prog>`）
-2. 构建生成 ELF
-3. 在内核 `smfs.rs` 中新增静态对齐包装：
-   ```rust
-   #[repr(align(8))]
-   struct Align8<const N: usize>([u8; N]);
-   static PROG: Align8<{ include_bytes!("../../../user/<prog>/target/riscv64gc-unknown-none-elf/release/<prog>").len() }> =
-       Align8(*include_bytes!("../../../user/<prog>/target/riscv64gc-unknown-none-elf/release/<prog>"));
-   ```
-4. 加入文件表 `STATIC_FILES`：
-   ```rust
-   FileEntry { name: "<prog>", data: &PROG.0, size: PROG.0.len() }
-   ```
-5. 内核中调用：`kernel_execve("<prog>", &["<prog>"], &[])`
+
+仓库根执行 `make build-user` 会在本目录运行 `make`，并把可执行文件移到 `user/bin/`。`make pack-simple-fs` 再用 `scripts/make_init_simple_fs.py` 生成 `os/simple_fs.img`。
+
+内核构建本身不读取 `user/bin`。`os/build.rs` 明确跳过用户程序编译，并嵌入一份空的 SimpleFS 占位镜像。`os/src/fs/smfs.rs` 里的 `STATIC_FILES` 也是空表。
+
+添加示例程序：在本目录新增 crate，然后重新执行 `make build-user`。若要放进 SimpleFS 调试镜像，再执行 `make pack-simple-fs`。这不会把它放进 ext4 rootfs。
 
 ## 约定 / ABI
-- 入口符号 `_start` 由编译产物生成（Rust 默认运行时已裁剪），内核设置 `sepc` 至 ELF 入口。
-- `main(argc, argv, envp)` 参数寄存器：
-  - a0 = argc
-  - a1 = argv 指针数组基址
-  - a2 = envp 指针数组基址
+
+- 入口符号 `_start` 由编译产物生成。内核把 `sepc` 设为 ELF 入口。
+- RISC-V `execve` 遵循 Linux 约定：`argc`、`argv`、`envp` 在用户栈上，进入用户态时 `a0`/`a1`/`a2` 为 0。`a0` 留给静态 glibc 当作 `rtld_fini`。
 - 栈 16 字节对齐，`argv[]` / `envp[]` 以 NULL 终止，字符串以 `\0` 结束。
+- 本目录的 `Makefile` 只构建 `riscv64gc-unknown-none-elf`。
 
 ## 系统调用
 库中汇编通过：

@@ -5,7 +5,8 @@ SimpleFS 是编译期嵌入的只读测试文件系统. 当前它作为 rootfs �
 ## 当前状态
 
 - 源码位于 `os/src/fs/simple_fs.rs`.
-- 镜像由构建阶段生成并通过 `include_bytes!` 嵌入内核.
+- `os/build.rs` 生成一份空的 SimpleFS 镜像，并通过 `include_bytes!` 嵌入内核。它不打包 `user/bin`。
+- `make pack-simple-fs` 可以另行生成 `os/simple_fs.img`，那是调试产物，不会替换内核里嵌入的空镜像。
 - 启动时镜像被放入 `RamDisk`, 再解析成 `SimpleFsInode` 树.
 - 支持多级路径, 普通文件和目录.
 - 运行时只读.

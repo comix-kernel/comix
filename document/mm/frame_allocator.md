@@ -5,10 +5,10 @@
 ## 当前状态
 
 - 全局分配器是 `FRAME_ALLOCATOR: SpinLock<FrameAllocator>`.
-- 初始化范围来自 `mm::init()` 计算出的 `[start_ppn, end_ppn)`.
-- 分配器使用位图记录每个物理页帧状态: bit 为 0 表示空闲, bit 为 1 表示已分配.
+- `mm::init()` 可以交给分配器最多 8 段已排序、互不重叠的 `FrameRegion`. 设备树里不连续的 DRAM 会保留成多段, 中间的洞不进入位图.
+- 位图按下标记录可用帧, 不按物理地址跨度记录. bit 为 0 表示空闲, bit 为 1 表示已分配. 下标通过区域表换回真实 `Ppn`.
 - 单页分配从 `last_alloc_hint` 附近开始扫描位图, 找到第一个空闲页后置位.
-- 连续页分配扫描位图中的连续空闲区间, 因此释放后的连续空洞可以再次被复用.
+- 连续页分配只在同一段 `FrameRegion` 内扫描连续空闲下标, 因此释放后的连续空洞可以再次被复用, 但不会把两段 DRAM 之间的物理空洞当成连续内存.
 - `FrameTracker` 和 `FrameRangeTracker` 在创建时清零物理页, 在 drop 时自动归还.
 
 ## 目标
@@ -27,10 +27,11 @@
 
 ### 初始化
 
-`init_frame_allocator(start_addr, end_addr)` 把物理地址转换成页号范围:
+`init_frame_allocator_regions` 接收一组 `FrameRegion`. 单区间入口 `init_frame_allocator(start_addr, end_addr)` 只是把它包成一段后再走同一条路径.
 
-- 起点用 ceil, 避免分配覆盖内核镜像尾部的非完整页.
-- 终点用 floor, 避免分配超出可用物理内存尾部的非完整页.
+`mm::init()` 先把 `ekernel` 换成页对齐物理地址, 再把设备树 DRAM 裁到这个起点之后、且不超过起点后 1GiB. 没有任何可用区间时, 回退到编译期 `MEMORY_END` 与同一上限之间的单段. 每段起点用 ceil, 终点用 floor, 避免吃进不完整页.
+
+区域必须按起始页号排序且不重叠. 位图长度是各段页数之和, 上限对应 8GiB 可管理帧, 避免帧分配器初始化早于堆时依赖 `Vec`.
 
 ### 单页分配
 
@@ -45,7 +46,7 @@
 
 ### 连续分配
 
-连续分配从 bitmap 起点扫描连续 0 bit.带对齐的连续分配只接受起始页号满足 `align_pages` 对齐的连续空闲区间.
+连续分配从 bitmap 起点扫描连续 0 bit, 并且扫描不能越过当前 `FrameRegion` 的结束下标. 一段的末尾即使紧挨着下一段的起始下标, 也不视为物理连续. 带对齐的连续分配只接受起始页号满足 `align_pages` 对齐、并且整段都落在同一区域里的空闲区间.
 
 ## 并发与生命周期约束
 
@@ -56,13 +57,13 @@
 
 ## 已知限制
 
-- 位图容量目前按 8GiB 可管理物理内存静态预留, 避免帧分配器初始化早于堆初始化时依赖 `Vec`.
+- 早期可用内存另外被限制在内核镜像结束后的 1GiB 内. 8GiB 是位图能记录的帧数上限, 不是当前一定会交给分配器的物理跨度.
 - 连续分配仍需线性扫描位图; 大内存和高碎片场景下成本高于伙伴系统.
+- 区域之间的物理空洞不能用于连续 DMA 或大块连续分配.
 - 调试检查依赖 `debug_assert!`, release 构建下不会阻止错误归还.
 
 ## 源码索引
 
-- `os/src/mm/frame_allocator/mod.rs:15` - 公共分配入口.
-- `os/src/mm/frame_allocator/allocator.rs:14` - `FrameTracker`.
-- `os/src/mm/frame_allocator/allocator.rs:45` - `FrameRangeTracker`.
-- `os/src/mm/frame_allocator/allocator.rs` - tracker 类型, 全局 `FRAME_ALLOCATOR`, bitmap 状态和分配/回收策略.
+- `os/src/mm/mod.rs` - 从设备树裁剪 DRAM 区间并调用区域初始化.
+- `os/src/mm/frame_allocator/mod.rs` - `init_frame_allocator` 与 `init_frame_allocator_regions`.
+- `os/src/mm/frame_allocator/allocator.rs` - `FrameRegion`, `FrameTracker`, `FrameRangeTracker` 和位图分配.

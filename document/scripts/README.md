@@ -15,7 +15,7 @@
 ### 构建相关
 
 ```bash
-# 打包 SimpleFS 镜像（通常由构建系统自动调用）
+# 手动打包 SimpleFS 调试镜像。内核构建不会自动调用它
 python3 scripts/make_init_simple_fs.py user/bin os/simple_fs.img
 
 # 检查镜像内容
@@ -40,7 +40,7 @@ python3 scripts/rewrite_links.py document/
 
 这三个脚本在项目中各司其职：
 
-- **make_init_simple_fs.py**：负责构建时的文件系统打包，将用户程序集成到内核镜像中
+- **make_init_simple_fs.py**：手动把 `user/bin` 打进 SimpleFS 调试镜像。评测用的 ext4 rootfs 不走这条路径
 - **rewrite_links.py**：负责文档发布时的链接处理，确保在线文档的可用性
 - **style-check.sh**：负责本地代码质量检查，确保代码符合项目规范，减少 CI 失败
 
@@ -49,7 +49,7 @@ python3 scripts/rewrite_links.py document/
 ## 常见问题
 
 ### Q: 如何添加新的用户程序到镜像？
-A: 将程序放入 `user/bin` 目录，然后重新构建内核（`make run` 或 `cargo build`），脚本会自动打包。
+A: 执行 `make build-user`，再执行 `make pack-simple-fs`。产物是 `os/simple_fs.img`。重新构建内核不会把 `user/bin` 打进 ext4 rootfs，`build.rs` 嵌入的 SimpleFS 镜像也保持为空占位。
 
 ### Q: 如何验证镜像内容？
 A: 使用 `make inspect-simple-fs` 或直接运行 `python3 scripts/make_init_simple_fs.py --inspect os/simple_fs.img`
