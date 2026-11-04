@@ -14,7 +14,11 @@
 - 最终栈指针满足 ABI 对齐要求.
 - auxv 至少提供动态链接器和 libc 启动所需的基本条目.
 
-RISC-V 当前不设置 TLS 值, LoongArch 会在用户栈顶部预留 TLS/TCB 区域并设置 `$tp`.
+`exec_loader` 会从 `PT_TLS` 取出模板并传给架构栈布局。RISC-V 故意忽略这份模板, `execve` 返回用户态时 `tp` 为 0。静态 glibc 根据 `PT_TLS` 和 auxv 自己建立初始 TCB; 内核提前写入 `tp` 会让早期 pointer guard 看到另一份 TCB。LoongArch 仍在用户栈顶部预留 TLS/TCB, 并在进入用户态前设置 `$tp`。
+
+`clone` 带 `CLONE_SETTLS` 时是另一条路径: 架构 `set_tls` 把用户传入的指针写入子任务 `tp`。RISC-V 写 `x4`, LoongArch 写线程指针寄存器。
+
+RISC-V `execve` 的 `TrapFrame` 把 `a0`/`a1`/`a2` 置 0。`argc`/`argv`/`envp` 只放在用户栈上。静态 glibc 把进入时的 `a0` 当作 `rtld_fini`, 非零值会被当成结束函数。
 
 ## 目标和非目标
 
@@ -53,7 +57,7 @@ exec loader builds MemorySpace
 ## 已知限制
 
 - auxv 内容是 Linux ABI 子集, 不是完整内核实现.
-- RISC-V TLS 仍为空值, 后续线程 TLS 支持需要补齐.
+- RISC-V `execve` 不建立初始 TCB, 只保证 `tp` 为 0, 让 glibc 自己完成。内核没有通用的线程 TLS 分配器。
 - LoongArch TLS 布局是满足当前 libc 启动的最小实现, 后续可与更完整 ABI 文档对齐.
 
 ## 源码索引

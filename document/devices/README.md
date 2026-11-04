@@ -10,6 +10,7 @@
 - VirtIO MMIO 是主要设备传输路径, PCI 也有部分驱动入口.
 - 块设备支持整盘和 MBR/GPT 分区包装.
 - sysfs 通过设备注册表构建 `/sys/class/*`, FS 初始化通过同一设备列表创建 `/dev` 节点.
+- 终端 `TCGETS`/`TCSETS` 使用 Linux asm-generic 的 36 字节 `termios`: 四个 `u32` 标志, 一个 `c_line`, 以及 19 字节 `c_cc`. 输入输出速度属于 `termios2`, 不放进这个结构.
 
 ## 目标
 

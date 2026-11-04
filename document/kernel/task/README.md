@@ -26,7 +26,7 @@ Comix 使用统一的 `Task` 表示进程,线程和内核线程.进程是 `pid =
 非目标:
 
 - 不在文档中维护 `Task` 字段大全.
-- 不把 Linux 完整调度策略或完整线程组语义放进当前模型.
+- 不在任务模型文档里展开调度策略. 实时队列和 fair `vruntime` 见调度器文档.
 - 不在任务模块直接实现具体架构的 trap 保存格式.
 
 ## 模块边界
@@ -78,7 +78,7 @@ create
 ## 文档导航
 
 - [任务结构](task.md): `Task` 模型, 身份关系和资源引用边界.
-- [调度器](scheduler.md): per-CPU RR 调度器, CPU 选择和唤醒幂等性.
+- [调度器](scheduler.md): per-CPU 实时队列与 fair 队列, CPU 选择和唤醒幂等性.
 - [上下文切换](context.md): `Context` 与架构切换边界.
 - [内存空间](memory_space.md): 任务和 `MemorySpace` 的生命周期关系.
 - [等待队列](wait_queue.md): sleep/wake 约束和阻塞路径.

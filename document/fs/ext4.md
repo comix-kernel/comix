@@ -5,7 +5,7 @@ Ext4 是当前默认 rootfs 的持久化文件系统候选. FS 初始化会在�
 ## 当前状态
 
 - 源码位于 `os/src/fs/ext4/`.
-- 使用 `ext4_rs` 作为底层 ext4 操作库.
+- 使用 `third_party/ext4_rs` 作为底层 ext4 操作库. 仓库不再内嵌一份未使用的 `vendor/ext4_rs` 副本.
 - `BlockDeviceAdapter` 把内核 `BlockDriver` 适配成 ext4_rs 可读写的块设备.
 - `Ext4FileSystem` 实现挂载级 `FileSystem`.
 - `Ext4Inode` 实现 VFS `Inode`, 并通过 weak dentry 反向引用按需取得路径.

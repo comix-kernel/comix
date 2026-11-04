@@ -25,17 +25,17 @@
 ## 关键流程
 
 1. 获取内部 `RawSpinLock`.
-2. 如果 `locked` 原来为 false, 设置为 true 并返回 `MutexGuard`.
+2. 如果 `locked` 原来为 false, 设置为 true, 立刻释放 raw lock, 再返回 `MutexGuard`.
 3. 如果锁已占用, 获取当前任务, 把任务放入等待队列.
 4. 释放内部 raw lock, 调用 `yield_task()` 让出 CPU.
 5. 被唤醒后重新尝试.
-6. guard drop 时把 `locked` 置 false 并唤醒等待队列.
+6. guard drop 时重新获取 raw lock, 把 `locked` 置 false, 唤醒等待队列, 然后释放 raw lock.
 
 ## 并发与生命周期约束
 
 - `Mutex<T>` 依赖调度器和 `WaitQueue`, 只能在有当前任务的上下文使用.
 - 不要在持有 `SpinLock` 或禁用中断的长路径中等待 `Mutex<T>`.
-- guard 当前保存了内部 raw lock guard, 因此持有 mutex 数据期间也会保持 raw lock 的中断保护语义.调用方仍应避免长时间关中断的工作.
+- `MutexGuard` 不持有内部 `RawSpinLock`. raw lock 只覆盖 `locked` 的检查或清除, 以及等待队列入队. 持有 mutex 数据期间可以做会睡眠的工作, 例如普通文件读写.
 - 唤醒使用 `wake_up_all()`, 被唤醒任务会重新竞争 `locked`.
 
 ## 已知限制

@@ -86,7 +86,8 @@ RISC-V, LoongArch 等架构只需要把自己的 trap frame 适配到这个 trai
 - FS: `fs/**`, `fcntl.rs`, `ioctl.rs` 处理路径, fd, mount, stat, rename 等。
 - IO: `io.rs` 处理 read/write/readv/writev/poll/ppoll/pselect 等通用 fd I/O。
 - Task: `task/**` 处理 clone, exec, exit, wait, futex, sched, time。
-- MM: `mm.rs` 处理 brk, mmap, munmap, mprotect。
+- MM: `mm.rs` 处理 brk, mmap, munmap, mprotect, 以及 `madvise` 和 `get_mempolicy`。
+- 资源: `getrusage` 在 `task/process_ops.rs` 中提供兼容返回值。
 - Signal: `signal.rs` 处理 rt_sigaction, rt_sigprocmask, sigtimedwait, sigreturn 等。
 - IPC: `ipc.rs` 处理 pipe2, dup, SysV shm。
 - Network: `network/**` 处理 socket, bind, connect, accept, send/recv, sockopt, ifaddrs。
@@ -101,11 +102,26 @@ RISC-V, LoongArch 等架构只需要把自己的 trap frame 适配到这个 trai
 - exit_group 走进程级资源清理, 包括 fd, socket fd mapping, shm attachment 和地址空间。
 - poll/select waiters 和网络 poll 通过 `io.rs` 与 `net::socket` 协作, 避免在硬中断中推进 smoltcp。
 
+## 时间与睡眠
+
+相对时间的 `nanosleep` 和 `clock_nanosleep` 用硬件单调计数 `get_time()` 计算唤醒点。`CLOCK_REALTIME` 的相对睡眠也走这条单调时间线, 不把墙上时钟偏移加进睡眠长度, 因此 `settimeofday` 不会缩短或拉长已经开始的相对睡眠。
+
+`TIMER_ABSTIME` 下, `CLOCK_REALTIME` 和 `CLOCK_MONOTONIC` 直接把用户给出的时间换成同一套硬件计数后再比较。`CLOCK_TAI`, `CLOCK_BOOTTIME` 和 `CLOCK_PROCESS_CPUTIME_ID` 返回 `-ENOSYS`。
+
+## 兼容桩
+
+这些入口是为了让 glibc 探测能够继续, 不代表对应子系统已经实现:
+
+- `getrusage` 接受 `RUSAGE_SELF`, `RUSAGE_CHILDREN` 和 `RUSAGE_THREAD`, 向用户缓冲区写入全零的 `rusage`。它不统计 CPU 时间或缺页。
+- `madvise` 检查地址对齐和长度, 并接受一组 Linux advice 值, 然后返回成功。内核没有按 advice 改变回收、预读或 fork 行为。
+- `get_mempolicy` 把机器视为单节点。它写出默认策略, 并在需要节点掩码时只置上 node 0。没有 NUMA 策略对象。
+
 ## 已知限制
 
 - syscall 支持范围由 `numbers.rs` 和 `dispatch.rs` 的匹配分支决定, 并不等价于完整 Linux ABI。
 - 部分 syscall 为兼容测试提供最小语义, 不代表完整内核实现。
 - `SA_RESTART` 等高级 syscall restart 语义尚不完整, 阻塞调用可能返回 `EINTR`。
+- 绝对时钟睡眠目前让 realtime 和 monotonic 共用硬件计数比较, 不是两套独立的绝对时钟。
 
 ## 源码索引
 
